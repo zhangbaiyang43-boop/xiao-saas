@@ -18,6 +18,7 @@ from app.services.customer_service import CustomerService
 from app.services.entrance_code_service import EntranceCodeService
 from app.services.membership_service import MembershipService
 from app.services.tenant_service import TenantService
+from app.services.wechat_service import WechatService
 
 router = APIRouter(prefix="/api/v1/member", tags=["顾客端"])
 
@@ -129,9 +130,9 @@ async def login_or_create(
         import json
         raw_data = json.loads(body)
         tenant_id = str(raw_data.get('tenant_id', ''))
-        phone = raw_data.get('phone')
+        phone = raw_data.get('phone')  # 仅作为新建客户的展示信息，不用于身份匹配
         name = raw_data.get('name')
-        openid = raw_data.get('openid')
+        code = raw_data.get('code')  # 微信 wx.login() 返回的 code，用于换取经微信校验的 openid
         entrance_scene = raw_data.get('entrance_scene')
     except Exception as e:
         return error_response(code=400, msg="请求体解析失败")
@@ -166,76 +167,50 @@ async def login_or_create(
     customer_service = CustomerService(db)
     identity_service = CustomerIdentityService(db)
 
-    if not openid and not phone:
-        return error_response(code=400, msg="请提供手机号或 openid")
+    if not code:
+        return error_response(code=400, msg="请提供微信登录 code")
+
+    # P0 安全修复：openid 必须经微信 code2session 校验，不能直接信任客户端传入的
+    # openid/手机号——否则任何人只要知道受害者手机号，或者随便编一个 openid，
+    # 就能顶替/接管已有会员账户（余额、积分、优惠券、订单历史）。
+    wechat_result = await WechatService().code2session(code)
+    openid = wechat_result.get("openid")
+    if not openid:
+        return error_response(code=400, msg="微信登录校验失败，请重试")
 
     customer = None
     is_new_customer = False
 
-    # 入会逻辑：手机号决定客户档案，openid 决定微信身份
-
-    # 1. 如果有 openid，先用 openid 查身份（同一个微信用户在同一个商家下只能绑定一次）
-    if openid:
-        identity = await identity_service.get_by_identity(CHANNEL_MINIAPP, openid)
-        if identity:
-            # openid 已绑定过，返回已有客户（复用，不重复建）
-            customer = await customer_service.get_customer(identity.customer_id)
-            if customer:
-                # 更新客户信息（如昵称、手机号）
-                update_data = {}
-                if name:
-                    update_data["name"] = name
-                if phone and not customer.phone:
-                    update_data["phone"] = phone
-                if update_data:
-                    customer = await customer_service.update_customer(customer.id, **update_data)
-
-    # 2. 如果没找到客户，用手机号查客户（同一个商家下，同一个手机号只能对应一个客户）
-    if not customer and phone:
-        customer = await customer_service.get_customer_by_phone(phone, tenant_id)
+    # 入会逻辑：身份完全由经微信校验的 openid 决定；手机号只作为新建客户时的
+    # 展示信息保存，不再用于匹配/复用已有客户——避免仅凭手机号顶替他人账户。
+    # 手机号如需真正校验绑定，走已有的 /send-verify-code + /bind-phone 流程。
+    identity = await identity_service.get_by_identity(CHANNEL_MINIAPP, openid)
+    if identity:
+        customer = await customer_service.get_customer(identity.customer_id)
         if customer:
-            # 手机号已存在，复用该客户
-            # 如果有 openid 但还没绑定过，绑定 openid 到这个客户
-            if openid:
-                await identity_service.bind_identity(
-                    customer_id=customer.id,
-                    channel=CHANNEL_MINIAPP,
-                    channel_user_id=openid,
-                    phone=phone,
-                )
-            # 更新客户信息
             update_data = {}
-            if name and not customer.name:
+            if name:
                 update_data["name"] = name
+            if phone and not customer.phone:
+                update_data["phone"] = phone
             if update_data:
                 customer = await customer_service.update_customer(customer.id, **update_data)
 
-    # 3. 如果仍然没找到客户，建新客户
     if not customer:
         customer = await customer_service.create_customer(
             tenant_id=tenant_id,
-            openid=openid or f"phone:{phone}" if phone else None,
+            openid=openid,
             name=name or "会员",
             phone=phone,
             tags=["小程序会员"],
         )
         is_new_customer = True
-
-        # 绑定身份
-        if openid:
-            await identity_service.bind_identity(
-                customer_id=customer.id,
-                channel=CHANNEL_MINIAPP,
-                channel_user_id=openid,
-                phone=phone,
-            )
-        elif phone:
-            await identity_service.bind_identity(
-                customer_id=customer.id,
-                channel=CHANNEL_PHONE,
-                channel_user_id=phone,
-                phone=phone,
-            )
+        await identity_service.bind_identity(
+            customer_id=customer.id,
+            channel=CHANNEL_MINIAPP,
+            channel_user_id=openid,
+            phone=phone,
+        )
 
     # 确保用户有会员账户
     account = await MembershipService(db).ensure_account(customer)
@@ -518,10 +493,13 @@ async def recharge(request: Request, db: AsyncSession = Depends(get_db)):
     """储值充值入口。当前为模拟支付，仅限测试环境。生产环境需替换为真实微信支付回调。"""
     from decimal import Decimal as D
     from app.config import settings
+    from app.models.member_account import MemberAccount
 
-    # P0 安全锁：生产环境禁止直接充值，必须走真实支付回调
-    if not getattr(settings, "DEBUG", True):
-        return error_response(code=403, msg="请通过正支付渠道完成充值")
+    # P0 安全锁：这里没有接真实支付，不能只靠 settings.DEBUG 拦截——这个项目
+    # 实际部署环境里 DEBUG=true，不能拿来当"是否生产环境"的依据。必须显式开启
+    # 一个专用开关才放行，默认关闭，防止任何登录用户凭空刷出真实可消费余额。
+    if not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
+        return error_response(code=403, msg="储值充值功能暂未开放，敬请期待")
 
     tenant_id, customer_id, error = current_customer(request)
     if error:
@@ -535,7 +513,14 @@ async def recharge(request: Request, db: AsyncSession = Depends(get_db)):
     if amount < 1 or amount > 5000:
         return error_response(code=400, msg="充值金额需在 1 ~ 5000 元之间")
     membership_svc = MembershipService(db)
-    account = await membership_svc.get_or_create_account(customer_id)
+    account_result = await db.execute(
+        select(MemberAccount).where(
+            MemberAccount.tenant_id == tenant_id, MemberAccount.customer_id == customer_id
+        ).with_for_update()
+    )
+    account = account_result.scalar_one_or_none()
+    if not account:
+        account = await membership_svc.get_or_create_account(customer_id)
     if not account:
         return error_response(code=404, msg="会员账户不存在")
     account.balance = D(str(float(account.balance or 0) + amount)).quantize(D("0.01"))

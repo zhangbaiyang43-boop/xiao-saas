@@ -73,7 +73,8 @@ class MerchantTemplateRule(BaseModel):
     rule_code = Column(String(32), nullable=False, comment="则编码")
     rule_name = Column(String(64), nullable=False, comment="则名称")
     trigger_type = Column(String(32), nullable=False, comment="触发类型")
-    coupon_id = Column(BigInteger, ForeignKey('coupon.id'), comment="绑定的优惠券")
+    coupon_id = Column(BigInteger, ForeignKey('coupon.id'), comment="历史遗留字段，未使用")
+    coupon_template_id = Column(BigInteger, ForeignKey('coupon_template.id'), comment="绑定的优惠券模板")
     trigger_delay_days = Column(Integer, default=0, comment="触发延迟天数")
     status = Column(Integer, nullable=False, default=1, comment="状态：1启用 0停用")
 

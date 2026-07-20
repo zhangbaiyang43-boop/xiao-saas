@@ -282,20 +282,21 @@ class CustomerService(BaseService):
         from app.models.customer import Customer
         from app.models.customer_identity import CustomerIdentity
 
+        # P0 安全修复：必须限定在发起请求的商家自己的租户内，否则商家 A 的管理员
+        # 只要猜到商家 B 的两个客户 ID，就能合并/破坏另一个商家的客户数据。
+        tenant_id = self.require_tenant_id()
+
         source = await self.db.execute(
-            select(Customer).filter(Customer.id == source_customer_id)
+            select(Customer).filter(Customer.id == source_customer_id, Customer.tenant_id == tenant_id)
         )
         source = source.scalars().first()
 
         target = await self.db.execute(
-            select(Customer).filter(Customer.id == target_customer_id)
+            select(Customer).filter(Customer.id == target_customer_id, Customer.tenant_id == tenant_id)
         )
         target = target.scalars().first()
 
         if not source or not target:
-            return None
-
-        if str(source.tenant_id) != str(target.tenant_id):
             return None
 
         await self.db.execute(
@@ -551,9 +552,11 @@ class CustomerService(BaseService):
     async def get_customer_timeline(self, customer_id):
         from sqlalchemy.future import select
         from app.models.consumption import Consumption
+        tenant_id = self.require_tenant_id()
         result = await self.db.execute(
             select(Consumption).filter(
                 Consumption.customer_id == customer_id,
+                Consumption.tenant_id == tenant_id,
                 Consumption.status == 1
             ).order_by(Consumption.created_at.desc())
         )

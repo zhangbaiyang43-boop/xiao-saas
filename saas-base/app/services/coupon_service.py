@@ -4,11 +4,13 @@ from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.config import settings
 from app.models.coupon import Coupon
 from app.models.coupon_template import CouponTemplate
 from app.services.anti_fraud_service import AntiFraudService
 from app.utils.id_generator import generate_coupon_code, generate_snowflake_id
 from app.core.logger import logger
+from app.core.lock import try_acquire_lock
 
 from app.services.base_service import BaseService
 
@@ -547,6 +549,25 @@ class CouponService(BaseService):
             except (ValueError, TypeError):
                 pass
         requested_customer_ids = list(dict.fromkeys(requested_customer_ids))
+
+        # P0 幂等修复：同一批发放请求（同一租户+模板+客户名单）短时间内只允许
+        # 真正执行一次，防止商家后台网络重试或手抖双击导致重复发券、重复扣库存。
+        # 锁在窗口内自然过期即可，不需要提前释放。Redis 不可用时不阻断发放
+        # （这种情况下项目里其它同样依赖 Redis 的功能，如短信验证码，本来就已经
+        # 不可用了），只是这一层幂等保护暂时失效。
+        if settings.REDIS_ENABLED:
+            dedup_key = "coupon_send:" + tenant_id + ":" + str(template_id) + ":" + ",".join(
+                str(cid) for cid in requested_customer_ids
+            )
+            locked = await try_acquire_lock(dedup_key, timeout=10, max_retries=1)
+            if not locked:
+                return self.build_send_result(
+                    requested_customer_ids,
+                    [],
+                    [{"customer_id": item, "reason": "请求重复提交，请稍后重试"} for item in requested_customer_ids],
+                    0,
+                    "重复提交，请勿短时间内重复发放",
+                )
 
         result = await self.db.execute(
             select(CouponTemplate)

@@ -104,23 +104,23 @@ class MarketingTemplateService(BaseService):
         self.db.add(merchant_template)
         await self.db.flush()
 
-        # 4. 建优惠券并绑定则
+        # 4. 建优惠券模板并绑定则
+        from app.services.coupon_service import CouponService
+        coupon_service = CouponService(self.db)
+        coupon_service.set_tenant_id(tenant_id)
+
         for rule in rules:
-            # 建优惠券模
-            from app.services.coupon_service import CouponService
-            coupon_service = CouponService(self.db)
-            
-            # 建优惠券
+            # 每条规则对应一个可复用的优惠券模板，实际发放时从这个模板发出具体的券
             end_time = datetime.now() + timedelta(days=rule.valid_days)
-            coupon = await coupon_service.create_coupon(
-                tenant_id=tenant_id,
+            coupon_template = await coupon_service.create_template(
                 name=rule.rule_name,
-                type='discount',
+                type='FIXED',
                 value=rule.discount_amount,
                 min_amount=rule.threshold_amount,
+                total_stock=10 ** 8,  # 营销模板券不做库存限制，发放次数由规则触发条件控制
                 start_time=datetime.now(),
                 end_time=end_time,
-                status=1
+                status=1,
             )
 
             # 建商家模则
@@ -131,7 +131,7 @@ class MarketingTemplateService(BaseService):
                 rule_code=rule.rule_code,
                 rule_name=rule.rule_name,
                 trigger_type=rule.trigger_type,
-                coupon_id=coupon.id,
+                coupon_template_id=coupon_template.id,
                 trigger_delay_days=rule.trigger_delay_days,
                 status=1
             )
@@ -210,9 +210,9 @@ class MarketingTemplateService(BaseService):
             .filter(and_(
                 Coupon.tenant_id == tenant_id,
                 Coupon.customer_id == customer_id,
-                Coupon.template_id == rule.coupon_id,
-                Coupon.status == 1,
-                Coupon.end_time > datetime.now()
+                Coupon.template_id == rule.coupon_template_id,
+                Coupon.status == "UNUSED",
+                Coupon.expire_time > datetime.now()
             ))
         )
         return result.scalars().first() is not None
@@ -241,34 +241,21 @@ class MarketingTemplateService(BaseService):
         if await self.check_coupon_already_issued(tenant_id, customer_id, rule_code):
             raise BusinessException("该优惠券已发放")
 
-        # 建优惠券给用户
+        # 从规则绑定的优惠券模板真正发一张券给这个用户
         from app.services.coupon_service import CouponService
         coupon_service = CouponService(self.db)
-        
-        # 获取优惠券模信息
-        result = await self.db.execute(
-            select(Coupon).filter(Coupon.id == rule.coupon_id)
-        )
-        coupon_template = result.scalars().first()
-        
+        coupon_service.set_tenant_id(tenant_id)
+
+        coupon_template = await coupon_service.get_template(rule.coupon_template_id)
         if not coupon_template:
-            raise BusinessException("优惠券不存在")
+            raise BusinessException("优惠券模板不存在")
 
-        end_time = datetime.now() + timedelta(days=coupon_template.valid_days) if hasattr(coupon_template, 'valid_days') else coupon_template.end_time
-        
-        coupon = await coupon_service.create_coupon(
-            tenant_id=tenant_id,
-            customer_id=customer_id,
-            name=coupon_template.name,
-            type=coupon_template.type,
-            value=coupon_template.value,
-            min_amount=coupon_template.min_amount,
-            start_time=datetime.now(),
-            end_time=end_time,
-            status=1
+        send_result = await coupon_service.send_coupons_with_result(
+            coupon_template.id, [customer_id], source=f"marketing_template:{rule_code}"
         )
-
-        return coupon
+        if send_result.get("success_count", 0) < 1:
+            raise BusinessException(send_result.get("reason") or "优惠券发放失败")
+        return send_result
 
     async def process_recall_rules(self):
         """处理召回则（定时任务）"""

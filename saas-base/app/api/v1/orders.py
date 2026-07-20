@@ -869,9 +869,11 @@ async def mock_pay_order(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Mock payment for development only. Never reachable in production (DEBUG=False)."""
+    """Mock payment for development only."""
     import traceback
-    if not settings.DEBUG:
+    # 不用 settings.DEBUG 判断：这个项目实际部署环境里 DEBUG=true，不能拿来当
+    # "是否生产环境"的依据，必须用一个默认关闭、需要显式开启的独立开关。
+    if not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
         return error_response(code=403, msg="mock pay is only available in debug mode")
     try:
         customer_id = getattr(request.state, "customer_id", None)

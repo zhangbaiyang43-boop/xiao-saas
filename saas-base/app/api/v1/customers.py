@@ -378,5 +378,10 @@ async def get_customer_identities(customer_id: int, db: AsyncSession = Depends(g
 @router.get("/{customer_id}/timeline", response_model=RespVo)
 async def get_customer_timeline(customer_id: int, db: AsyncSession = Depends(get_db)):
     service = CustomerService(db)
+    # P0 安全修复：跟其它 /customers/{id}/* 接口一样，先确认这个客户属于当前商家，
+    # 否则随便猜一个客户 ID 就能拉到别的商家客户的完整消费记录。
+    customer = await service.get_customer_any_status(customer_id)
+    if not customer:
+        return error_response(code=404, msg="会员不存在")
     timeline = await service.get_customer_timeline(customer_id)
     return success_response(data=timeline, msg="ok")

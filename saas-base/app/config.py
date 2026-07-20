@@ -59,7 +59,11 @@ class Settings(BaseSettings):
     WEWORK_TENANT_: str = ""
     
     DEBUG: bool = False
-    
+    # 独立于 DEBUG 的开关：只有显式设为 true 才允许模拟充值/模拟支付这类会
+    # 凭空产生真实余额的测试接口生效。不跟 DEBUG 绑定，因为 DEBUG 在这个项目
+    # 的实际部署环境里被发现是 true，不能作为"是否在生产环境"的可靠判断依据。
+    ALLOW_MOCK_MONEY_ENDPOINTS: bool = False
+
     RATE_LIMIT_LOGIN: str = "5/minute"
     RATE_LIMIT_PUBLIC: str = "60/minute"
     RATE_LIMIT_TENANT: str = "300/minute"

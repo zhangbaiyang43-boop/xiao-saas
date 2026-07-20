@@ -98,7 +98,7 @@ class MarketingSchedulerService:
             .filter(and_(
                 Coupon.tenant_id == tenant_id,
                 Coupon.customer_id == customer_id,
-                Coupon.template_id == rule.coupon_id,
+                Coupon.template_id == rule.coupon_template_id,
                 Coupon.status == 'UNUSED',
                 Coupon.expire_time > datetime.now()
             ))
@@ -109,31 +109,16 @@ class MarketingSchedulerService:
         """发放召回券"""
         try:
             from app.services.coupon_service import CouponService
-            from app.models.coupon import Coupon as CouponModel
-            
+
             coupon_service = CouponService(self.db)
-            
-            # 获取优惠券模信息
-            result = await self.db.execute(
-                select(CouponModel).filter(CouponModel.id == rule.coupon_id)
-            )
-            coupon_template = result.scalars().first()
-            
+            coupon_service.set_tenant_id(tenant_id)
+
+            coupon_template = await coupon_service.get_template(rule.coupon_template_id)
             if not coupon_template:
                 return
 
-            end_time = datetime.now() + timedelta(days=coupon_template.valid_days) if hasattr(coupon_template, 'valid_days') else coupon_template.end_time
-            
-            await coupon_service.create_coupon(
-                tenant_id=tenant_id,
-                customer_id=customer_id,
-                name=coupon_template.name,
-                type=coupon_template.type,
-                value=coupon_template.value,
-                min_amount=coupon_template.min_amount,
-                start_time=datetime.now(),
-                end_time=end_time,
-                status=1
+            await coupon_service.send_coupons_with_result(
+                coupon_template.id, [customer_id], source=f"marketing_recall:{rule.rule_code}"
             )
         except Exception as e:
             from app.core.logger import logger

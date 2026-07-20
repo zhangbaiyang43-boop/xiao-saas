@@ -74,7 +74,12 @@ class MembershipService(BaseService):
                 level = item
 
         if created_at and now - created_at <= timedelta(days=7) and yearly_amount >= Decimal("299"):
-            level = next(item for item in LEVELS if item["code"] == "LV2")
+            quick_level = next(item for item in LEVELS if item["code"] == "LV2")
+            # P0 修复：快速升级规则只能当"至少给到 LV2"的下限用，不能覆盖掉按
+            # 消费额已经算出来的更高等级——原来的写法会把新客户第一周消费满
+            # 999（本该是 LV3）的人强行降级成 LV2，少享受权益、少算积分倍率。
+            if LEVELS.index(quick_level) > LEVELS.index(level):
+                level = quick_level
 
         return level
 
@@ -117,7 +122,14 @@ class MembershipService(BaseService):
         remark: str = None,
     ) -> PointLedger:
         tenant_id = self.require_tenant_id()
-        account.points_balance = int(account.points_balance or 0) + int(points)
+        # P0 修复：原来是在内存里读出 points_balance 再加再存回去（丢失更新）。
+        # 同一个顾客两笔订单几乎同时支付成功时，后提交的一次会覆盖掉前一次的
+        # 积分变动。改成数据库原子自增，跟 apply_consumption 里
+        # total_consumption/yearly_consumption 的做法保持一致，不依赖内存旧值。
+        account.points_balance = MemberAccount.points_balance + int(points)
+        await self.db.flush()
+        await self.db.refresh(account)
+
         expire_at = datetime.utcnow() + timedelta(days=POINT_RULES.get(event_type, {}).get("expire_days", 365))
         ledger = PointLedger(
             tenant_id=tenant_id,
