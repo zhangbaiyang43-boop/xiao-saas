@@ -1,0 +1,49 @@
+{
+  "code": "coupon",
+  "name": "优惠券",
+  "version": "0.1.0",
+  "description": "优惠券模、发放、扫码核销和核销记录能力",
+  "entry": "plugin.py",
+  "category": "member",
+  "enabled_by_default": false,
+  "dependencies": [],
+  "routes": [
+    "/api/v1/coupon-templates",
+    "/api/v1/coupons",
+    "/api/v1/verify"
+  ],
+  "permissions": [
+    "coupon:read",
+    "coupon:write",
+    "coupon:verify"
+  ],
+  "admin_menu": {
+    "title": "优惠券插件",
+    "path": "/plugin/coupon",
+    "icon": "Ticket"
+  },
+  "config_schema": [
+    {
+      "key": "auto_expire",
+      "label": "自动过期检查",
+      "type": "boolean",
+      "default": true
+    },
+    {
+      "key": "verify_revoke_enabled",
+      "label": "允许撤销核销",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "frontend_pages": [
+    {
+      "path": "subpkg-member/pages/coupons",
+      "title": "我的优惠券"
+    },
+    {
+      "path": "subpkg-member/pages/coupon-detail",
+      "title": "优惠券详情"
+    }
+  ]
+}

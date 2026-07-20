@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "description": "SaaS 插件注册表。插件以 app/plugins/<code>/plugin.json 为准，本文件只记录平台推荐插件清单。",
+  "plugins": [
+    "coupon",
+    "crm",
+    "bargain",
+    "points"
+  ]
+}

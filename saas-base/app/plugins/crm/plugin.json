@@ -1,0 +1,28 @@
+{
+  "code": "crm",
+  "name": "客户 CRM",
+  "version": "0.1.0",
+  "description": "客户分层、客户标签、客户跟进记录等 CRM 扩展能力",
+  "entry": "plugin.py",
+  "category": "customer",
+  "enabled_by_default": false,
+  "dependencies": [],
+  "routes": [],
+  "permissions": [
+    "crm:read",
+    "crm:write"
+  ],
+  "admin_menu": {
+    "title": "CRM 插件",
+    "path": "/plugin/crm",
+    "icon": "User"
+  },
+  "config_schema": [
+    {
+      "key": "follow_up_enabled",
+      "label": "启用客户跟进",
+      "type": "boolean",
+      "default": true
+    }
+  ]
+}

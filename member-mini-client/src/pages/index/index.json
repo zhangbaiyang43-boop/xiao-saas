@@ -1,0 +1,14 @@
+{
+  "usingComponents": {
+    "van-button": "/wxcomponents/@vant/weapp/button/index",
+    "van-cell": "/wxcomponents/@vant/weapp/cell/index",
+    "van-cell-group": "/wxcomponents/@vant/weapp/cell-group/index",
+    "van-grid": "/wxcomponents/@vant/weapp/grid/index",
+    "van-grid-item": "/wxcomponents/@vant/weapp/grid-item/index",
+    "van-tag": "/wxcomponents/@vant/weapp/tag/index",
+    "van-icon": "/wxcomponents/@vant/weapp/icon/index",
+    "van-empty": "/wxcomponents/@vant/weapp/empty/index",
+    "van-loading": "/wxcomponents/@vant/weapp/loading/index",
+    "van-popup": "/wxcomponents/@vant/weapp/popup/index"
+  }
+}

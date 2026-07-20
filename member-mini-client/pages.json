@@ -1,0 +1,74 @@
+﻿{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "开心点单",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "usingComponents": {
+          "van-button": "/wxcomponents/@vant/weapp/button/index",
+          "van-cell": "/wxcomponents/@vant/weapp/cell/index",
+          "van-cell-group": "/wxcomponents/@vant/weapp/cell-group/index",
+          "van-grid": "/wxcomponents/@vant/weapp/grid/index",
+          "van-grid-item": "/wxcomponents/@vant/weapp/grid-item/index",
+          "van-tag": "/wxcomponents/@vant/weapp/tag/index",
+          "van-icon": "/wxcomponents/@vant/weapp/icon/index",
+          "van-empty": "/wxcomponents/@vant/weapp/empty/index",
+          "van-loading": "/wxcomponents/@vant/weapp/loading/index",
+          "van-popup": "/wxcomponents/@vant/weapp/popup/index"
+        }
+      }
+    },
+    { "path": "pages/entry/index", "style": { "navigationBarTitleText": "扫码入会" } },
+    { "path": "pages/mine/mine", "style": { "navigationBarTitleText": "我的" } },
+    { "path": "pages/queue/index", "style": { "navigationBarTitleText": "排位状态", "enablePullDownRefresh": true } },
+    { "path": "pages/queue/take", "style": { "navigationBarTitleText": "排队取号" } },
+    { "path": "pages/queue/result", "style": { "navigationBarTitleText": "取号成功" } }
+  ],
+  "subPackages": [
+    {
+      "root": "subpkg-member",
+      "pages": [
+        { "path": "pages/card", "style": { "navigationBarTitleText": "会员卡" } },
+        { "path": "pages/consumptions", "style": { "navigationBarTitleText": "消费记录" } },
+        { "path": "pages/consumption-detail", "style": { "navigationBarTitleText": "消费详情" } },
+        { "path": "pages/profile-edit", "style": { "navigationBarTitleText": "编辑资料" } },
+        { "path": "pages/invite", "style": { "navigationBarTitleText": "我的邀请" } }
+      ]
+    },
+    {
+      "root": "subpkg-coupon",
+      "pages": [
+        { "path": "pages/list", "style": { "navigationBarTitleText": "我的优惠券" } },
+        { "path": "pages/detail", "style": { "navigationBarTitleText": "优惠券详情" } }
+      ]
+    },
+    {
+      "root": "subpkg-common",
+      "pages": [
+        { "path": "pages/verify-qr", "style": { "navigationBarTitleText": "核销码" } }
+      ]
+    },
+    {
+      "root": "subpkg-plugins",
+      "pages": [
+        { "path": "pages/crm-placeholder", "style": { "navigationBarTitleText": "会员活动" } },
+        { "path": "pages/bargain-placeholder", "style": { "navigationBarTitleText": "活动" } },
+        { "path": "pages/points-placeholder", "style": { "navigationBarTitleText": "积分" } }
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/index/index": {
+      "network": "all",
+      "packages": ["subpkg-member", "subpkg-coupon", "subpkg-common"]
+    }
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "开心点单",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f5f7fb"
+  }
+}

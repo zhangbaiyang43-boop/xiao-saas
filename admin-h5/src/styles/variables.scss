@@ -1,0 +1,49 @@
+$spacing-xs: 4px !default;
+$spacing-sm: 8px !default;
+$spacing-md: 12px !default;
+$spacing-lg: 16px !default;
+$spacing-xl: 24px !default;
+
+$color-primary: #6366f1 !default;
+$color-primary-light: #818cf8 !default;
+$color-success: #10b981 !default;
+$color-warning: #f59e0b !default;
+$color-danger: #ef4444 !default;
+
+$text-primary: #1f2937 !default;
+$text-secondary: #6b7280 !default;
+$text-muted: #9ca3af !default;
+
+$bg-primary: #ffffff !default;
+$bg-secondary: #f3f4f6 !default;
+$bg-tertiary: #f9fafb !default;
+
+$font-size-xs: 12px !default;
+$font-size-sm: 14px !default;
+$font-size-base: 16px !default;
+$font-size-lg: 18px !default;
+$font-size-xl: 20px !default;
+$font-size-xxl: 24px !default;
+$font-size-title: 28px !default;
+
+$bg-gray: #f5f5f5 !default;
+$bg-card: #ffffff !default;
+
+$card-radius: 12px !default;
+$card-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !default;
+$card-transition: all 0.3s ease !default;
+$card-hover-translate: -2px !default;
+
+$primary-color: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !default;
+
+$radius-full: 9999px !default;
+
+$spacing-base: 16px !default;
+
+$transition-base: all 0.3s ease !default;
+
+$text-tertiary: #9ca3af !default;
+
+$tabbar-height: 56px !default;
+$navbar-height: 44px !default;
+$primary-main: #6366f1 !default;

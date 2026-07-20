@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\" -Recurse -Directory)",
+      "Bash(Select-Object -First 20 FullName)",
+      "WebFetch(domain:tdesign.tencent.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh api *)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(node -e \"const s=require\\('fs'\\).readFileSync\\('C:/Users/15936/Desktop/xiao/member-mini-client/dist/build/mp-weixin/pages/index/index.js','utf8'\\); const m=s.match\\(/showRuleModal\\\\?\\(\\\\{[^}]+\\\\}\\)/\\); console.log\\(m?m[1]:'not found'\\)\")",
+      "Bash(npm install *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\\\\member-mini-client\" -Recurse -File | Where-Object { $_.Extension -in '.wxml','.wxss','.js','.json' } | Select-Object FullName | Sort-Object FullName)",
+      "Bash(npm run *)",
+      "Bash(Select-String -Path \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\\\\member-mini-client\\\\dist\\\\build\\\\mp-weixin\\\\subpkg-common\\\\pages\\\\verify-qr.wxml\" -Pattern \"canvas|qr-box|qr-canvas\")",
+      "Bash(Select-Object -First 10)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(python3 -)",
+      "Bash(Select-Object Name)",
+      "Bash(dir \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\\\\member-mini-client\\\\src\" /b /s)",
+      "Bash(dir \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\\\\member-mini-client\\\\src\\\\pages\\\\index\" /b)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['version']\\)\")",
+      "Bash(node scripts/copy-vant.mjs)",
+      "Bash(npx cross-env *)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(powershell -Command \"\\(Get-Content Login.vue\\) -replace 'background: linear-gradient\\\\\\(135deg, #1a1a2e 0%, #ff6b00 100%\\\\\\);', 'background: var\\(--hero-gradient\\);' | Set-Content Login.vue\")",
+      "Bash(powershell -Command \"\\(Get-Content MerchantSettings.vue\\) -replace 'background: linear-gradient\\\\\\(135deg, #1a1a2e, #ff6b00\\\\\\);', 'background: var\\(--hero-gradient\\);' | Set-Content MerchantSettings.vue\")",
+      "Bash(dir \"C:\\\\Users\\\\15936\\\\Desktop\\\\xiao\")",
+      "Bash(find / -name \"alembic.ini\" 2>/dev/null | grep -v proc | head -10)",
+      "WebFetch(domain:developers.weixin.qq.com)",
+      "Bash(xargs grep -l \"coupon\")",
+      "Bash(curl -s \"http://localhost:9898/api/v1/menu/items\" -H \"Authorization: Bearer test\")",
+      "Bash(grep -n \"stock\" /www/wwwroot/saas-base/app/api/v1/menu.py 2>&1)",
+      "Bash(find /www/wwwroot/saas-base -name \"menu.py\" 2>&1)"
+    ]
+  }
+}

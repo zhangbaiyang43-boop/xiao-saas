@@ -1,0 +1,30 @@
+{
+  "code": "bargain",
+  "name": "砍价营销",
+  "version": "0.1.0",
+  "description": "裂砍价活动、参与记录和营销则扩展能力",
+  "entry": "plugin.py",
+  "category": "marketing",
+  "enabled_by_default": false,
+  "dependencies": [
+    "coupon"
+  ],
+  "routes": [],
+  "permissions": [
+    "bargain:read",
+    "bargain:write"
+  ],
+  "admin_menu": {
+    "title": "砍价营销",
+    "path": "/plugin/bargain",
+    "icon": "Promotion"
+  },
+  "config_schema": [
+    {
+      "key": "max_participants",
+      "label": "单活动参与人数上限",
+      "type": "number",
+      "default": 100
+    }
+  ]
+}

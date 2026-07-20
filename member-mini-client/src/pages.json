@@ -1,0 +1,168 @@
+﻿﻿﻿﻿{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "开心点单",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "usingComponents": {
+          "van-button": "@vant/weapp/button/index",
+          "van-cell": "@vant/weapp/cell/index",
+          "van-cell-group": "@vant/weapp/cell-group/index",
+          "van-grid": "@vant/weapp/grid/index",
+          "van-grid-item": "@vant/weapp/grid-item/index",
+          "van-tag": "@vant/weapp/tag/index",
+          "van-icon": "@vant/weapp/icon/index",
+          "van-empty": "@vant/weapp/empty/index",
+          "van-loading": "@vant/weapp/loading/index",
+          "van-popup": "@vant/weapp/popup/index"
+        }
+      }
+    },
+    {
+      "path": "pages/entry/index",
+      "style": {
+        "navigationBarTitleText": "扫码入会"
+      }
+    },
+    {
+      "path": "pages/mine/mine",
+      "style": {
+        "navigationBarTitleText": "我的"
+      }
+    }
+  ],
+  "subPackages": [
+    {
+      "root": "subpkg-order",
+      "pages": [
+        {
+          "path": "pages/menu",
+          "style": {
+            "navigationBarTitleText": "点餐",
+            "navigationBarBackgroundColor": "#07C160",
+            "navigationBarTextStyle": "white"
+          }
+        }
+      ]
+    },
+    {
+      "root": "subpkg-member",
+      "pages": [
+        {
+          "path": "pages/card",
+          "style": {
+            "navigationBarTitleText": "会员卡"
+          }
+        },
+        {
+          "path": "pages/consumptions",
+          "style": {
+            "navigationBarTitleText": "消费记录"
+          }
+        },
+        {
+          "path": "pages/consumption-detail",
+          "style": {
+            "navigationBarTitleText": "消费详情"
+          }
+        },
+        {
+          "path": "pages/profile-edit",
+          "style": {
+            "navigationBarTitleText": "编辑资料"
+          }
+        },
+        {
+          "path": "pages/invite",
+          "style": {
+            "navigationBarTitleText": "我的邀请"
+          }
+        },
+        {
+          "path": "pages/points",
+          "style": {
+            "navigationBarTitleText": "我的积分"
+          }
+        },
+        {
+          "path": "pages/recharge",
+          "style": {
+            "navigationBarTitleText": "储值充值"
+          }
+        },
+        {
+          "path": "pages/agreement",
+          "style": {
+            "navigationBarTitleText": "用户协议"
+          }
+        }
+      ]
+    },
+    {
+      "root": "subpkg-coupon",
+      "pages": [
+        {
+          "path": "pages/list",
+          "style": {
+            "navigationBarTitleText": "我的优惠券"
+          }
+        },
+        {
+          "path": "pages/detail",
+          "style": {
+            "navigationBarTitleText": "优惠券详情"
+          }
+        }
+      ]
+    },
+    {
+      "root": "subpkg-common",
+      "pages": [
+        {
+          "path": "pages/verify-qr",
+          "style": {
+            "navigationBarTitleText": "核销码"
+          }
+        }
+      ]
+    },
+    {
+      "root": "subpkg-plugins",
+      "pages": [
+        {
+          "path": "pages/crm-placeholder",
+          "style": {
+            "navigationBarTitleText": "会员活动"
+          }
+        },
+        {
+          "path": "pages/bargain-placeholder",
+          "style": {
+            "navigationBarTitleText": "活动"
+          }
+        },
+        {
+          "path": "pages/points-placeholder",
+          "style": {
+            "navigationBarTitleText": "积分"
+          }
+        }
+      ]
+    }
+  ],
+  "preloadRule": {
+    "pages/index/index": {
+      "network": "all",
+      "packages": ["subpkg-member", "subpkg-coupon", "subpkg-common"]
+    }
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "开心点单",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f5f7fb"
+  }
+}
+

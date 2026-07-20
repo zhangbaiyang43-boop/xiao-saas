@@ -1,0 +1,34 @@
+{
+  "code": "points",
+  "name": "积分体系",
+  "version": "0.1.0",
+  "description": "会员积分、积分流水和积分兑换扩展能力",
+  "entry": "plugin.py",
+  "category": "member",
+  "enabled_by_default": false,
+  "dependencies": [],
+  "routes": [],
+  "permissions": [
+    "points:read",
+    "points:write"
+  ],
+  "admin_menu": {
+    "title": "积分插件",
+    "path": "/plugin/points",
+    "icon": "Medal"
+  },
+  "config_schema": [
+    {
+      "key": "points_per_yuan",
+      "label": "每消费 1 元获得积分",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "expire_days",
+      "label": "积分有效天数",
+      "type": "number",
+      "default": 365
+    }
+  ]
+}

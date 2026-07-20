@@ -1,0 +1,162 @@
+// ─── Design tokens ────────────────────────────────────────────
+:root {
+  --brand:           #07C160;
+  --brand-dark:      #059952;   /* 深一档，用于 hover / success 区分 */
+  --brand-light:     #e8f9f0;
+  --brand-mid:       #9de8c4;
+  --text-1:          #111827;
+  --text-2:          #4b5563;
+  --text-3:          #9ca3af;
+  --bg-page:         #f5f6fa;
+  --bg-card:         #ffffff;
+  --border:          #f0f0f0;
+  --radius-card:     12px;
+  --success:         #059952;   /* 与 brand 区分，避免撞色 */
+  --danger:          #ef4444;
+  --warning:         #f59e0b;
+  --hero-bg:         #07C160;   /* 扁平主色头部 */
+  --hero-dark:       #1a1a2e;   /* 深色头部（会员卡等） */
+}
+
+// ─── Reset ────────────────────────────────────────────────────
+html, body { height: 100%; overflow-x: hidden; }
+#app { height: 100%; }
+* { -webkit-tap-highlight-color: transparent; }
+.ant-btn { touch-action: manipulation; }
+
+// ─── Page scaffold ────────────────────────────────────────────
+.page-wrap {
+  min-height: 100vh;
+  background: var(--bg-page);
+  // 底部留给 TabBar，并计入安全区
+  padding-bottom: calc(56px + env(safe-area-inset-bottom) + 12px);
+}
+
+.sub-page {
+  min-height: 100vh;
+  background: var(--bg-page);
+  padding-bottom: calc(32px + env(safe-area-inset-bottom));
+}
+
+.page-body { padding: 12px 16px 0; }
+
+// ─── Section title (More页 / 分组标题) ───────────────────────
+.section-label,
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  padding: 16px 16px 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+// ─── Hero header (主页渐变头部) ───────────────────────────────
+.hero-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 52px 20px 20px;
+  background: var(--hero-bg);
+}
+.hero-date { font-size: 12px; color: rgba(255,255,255,.7); margin-bottom: 4px; }
+.hero-name { font-size: 22px; font-weight: 900; color: #fff; }
+
+// ─── Card defaults (Ant Design override) ──────────────────────
+.ant-card { border-radius: var(--radius-card) !important; }
+.ant-card-head {
+  min-height: 44px !important;
+  padding: 0 16px !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+}
+.ant-card-head-title { padding: 10px 0 !important; }
+.ant-card-body { padding: 16px !important; }
+
+// ─── Status tags ──────────────────────────────────────────────
+.tag-pending   { color: #ef4444 !important; background: #fef2f2 !important; border-color: #fecaca !important; }
+.tag-preparing { color: #2563eb !important; background: #eff6ff !important; border-color: #bfdbfe !important; }
+.tag-done      { color: #16a34a !important; background: #f0fdf4 !important; border-color: #bbf7d0 !important; }
+.tag-settled   { color: #6b7280 !important; background: #f9fafb !important; border-color: #e5e7eb !important; }
+
+// ─── Ant Design tag 最小字号保证 ──────────────────────────────
+.ant-tag { font-size: 12px !important; padding: 2px 8px !important; }
+
+// ─── Bottom TabBar ────────────────────────────────────────────
+.bottom-tabbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  // 高度含安全区
+  height: calc(56px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: #fff;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  z-index: 100;
+  box-shadow: 0 -2px 8px rgba(0,0,0,.06);
+}
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 10px;
+  transition: color .2s;
+  padding: 8px 0 4px;
+  position: relative;
+  .tab-icon { font-size: 22px; line-height: 1; }
+  &.active { color: var(--brand); }
+}
+
+// ─── Common info row ──────────────────────────────────────────
+.info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  &:last-child { border-bottom: none; }
+  .info-label { color: var(--text-2); }
+  .info-value { font-weight: 600; color: var(--text-1); word-break: break-all; text-align: right; max-width: 65%; }
+}
+
+// ─── Stat grid ────────────────────────────────────────────────
+.stat-grid {
+  display: flex;
+  .stat-cell {
+    flex: 1;
+    text-align: center;
+    padding: 12px 4px;
+    // 数字列对齐，避免位数变化时抖动
+    .stat-num {
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--text-1);
+      display: block;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.5px;
+    }
+    .stat-label { font-size: 11px; color: var(--text-3); margin-top: 2px; display: block; }
+  }
+}
+
+// ─── 统一空状态 padding ───────────────────────────────────────
+.ant-empty { padding: 48px 0 !important; }
+
+// ─── 错误/重试状态 ────────────────────────────────────────────
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 16px;
+  color: var(--text-2);
+  font-size: 14px;
+  text-align: center;
+}
