@@ -16,10 +16,10 @@ from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem
 from app.services.coupon_service import CouponService
 
-router = APIRouter(prefix="/api/v1", tags=["璁㈠崟"])
+router = APIRouter(prefix="/api/v1", tags=["订单"])
 
 
-PENDING_PAYMENT_TIMEOUT_MINUTES = 15  # 寰呮敮浠樿鍗曡秴鏃舵椂闂?
+PENDING_PAYMENT_TIMEOUT_MINUTES = 15  # 待支付订单超时时长（分钟）
 PRINT_META_MARKER = "\n__PRINT_META__="
 MAX_PRINT_RETRY_ATTEMPTS = 3
 
@@ -53,7 +53,7 @@ class OrderItemSpecIn(PydanticBase):
 class OrderItemIn(PydanticBase):
     dish_id: Optional[int] = None
     name: str
-    price: float  # 浠呯敤浜庢棤 dish_id 鐨勮嚜瀹氫箟鑿滃搧
+    price: float  # 仅用于无 dish_id 的自定义菜品
     qty: int = 1
     specifications: Optional[List[OrderItemSpecIn]] = None  # 单选规格（如辣度/份量），按商家配置的 price_delta 计费
     extras: Optional[List[str]] = None  # 多选附加项（如加料），按商家配置的 price_delta 计费
@@ -64,7 +64,7 @@ class OrderCreate(PydanticBase):
     table: Optional[str] = ""
     phone: Optional[str] = None
     items: List[OrderItemIn]
-    total: float  # 鍓嶇浼犲叆浠呯敤浜庢樉绀哄弬鑰冿紝鍚庣閲嶆柊鎸?DB 璁＄畻
+    total: float  # 前端传入仅用于显示参考，后端重新从 DB 计算
     remark: Optional[str] = None
     coupon_id: Optional[int] = None
     use_balance: bool = False
@@ -189,7 +189,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
 
     tenant_id = body.shop
     if not tenant_id:
-        return error_response(code=400, msg="缂哄皯shop鍙傛暟")
+        return error_response(code=400, msg="缺少shop参数")
     TenantContext.set_tenant_id(tenant_id)
 
     customer_id = getattr(request.state, "customer_id", None)
@@ -227,7 +227,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         elif body.client_id:
             participant_filters.append(DiningParticipant.client_id == body.client_id)
         else:
-            return error_response(code=400, msg="缂哄皯鏈韬唤锛岃閲嶆柊鎵爜")
+            return error_response(code=400, msg="缺少本桌身份，请重新扫码")
 
         participant_result = await db.execute(select(DiningParticipant).where(*participant_filters))
         participant = participant_result.scalar_one_or_none()
@@ -256,7 +256,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     applied_coupon_id = None
     coupon_discount = Decimal("0")
 
-    # BUG-4: 澶勭悊瓒呮椂寰呮敮浠樿鍗曪紝鎭㈠浼樻儬鍒?
+    # BUG-4: 处理超时待支付订单，恢复优惠券
     timeout_threshold = _dt.utcnow() - timedelta(minutes=PENDING_PAYMENT_TIMEOUT_MINUTES)
     stale_result = await db.execute(
         select(Order).where(
@@ -278,9 +278,9 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     if stale_orders:
         await db.flush()
 
-    # 浠?DB 閲嶆柊璁＄畻浠锋牸銆佹鏌ョ鎴峰綊灞?涓嬫灦鐘舵€併€佹鏌ュ苟鎵ｅ噺搴撳瓨锛坵ith_for_update 闃茶秴鍗栵級
+    # 从 DB 重新计算价格、检查客户归属/下架状态，检查并扣减库存（with_for_update 防超卖）
     if not body.items:
-        return error_response(code=400, msg="璁㈠崟鍟嗗搧涓嶈兘涓虹┖")
+        return error_response(code=400, msg="订单商品不能为空")
 
     specs_map = await load_menu_specs(db, tenant_id)
 
@@ -328,7 +328,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     stock_deductions = []  # [(dish, qty)]
     for item_in in body.items:
         if item_in.qty <= 0:
-            return error_response(code=400, msg=f"鍟嗗搧鏁伴噺蹇呴』澶т簬0:{item_in.name}")
+            return error_response(code=400, msg=f"商品数量必须大于0:{item_in.name}")
 
         if item_in.dish_id:
             dish_result = await db.execute(
@@ -356,18 +356,18 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             if dish.stock is not None:
                 stock_deductions.append((dish, item_in.qty))
         else:
-            return error_response(code=400, msg=f"缂哄皯鑿滃搧ID:{item_in.name}")
+            return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}")
         real_total += unit_price * item_in.qty
         order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty))
 
-    # 鎵ｅ噺搴撳瓨
+    # 扣减库存
     for dish, qty in stock_deductions:
         dish.stock = max(0, dish.stock - qty)
 
-    # BUG-2: 寤鸿鍗曟椂浠呴獙璇佷紭鎯犲埜锛屼笉鏍囪 USED锛屾敼涓?LOCKED锛堟敮浠樻椂鍐嶆牳閿€锛?
+    # BUG-2: 建单时仅验证优惠券，不标记 USED，改为 LOCKED（支付时再核销）
     if body.coupon_id:
         if not customer_id:
-            return error_response(code=401, msg="璇峰厛鐧诲綍鍚庝娇鐢ㄤ紭鎯犲埜")
+            return error_response(code=401, msg="请先登录后使用优惠券")
         coupon_result = await db.execute(
             select(Coupon).where(
                 Coupon.id == body.coupon_id,
@@ -379,15 +379,15 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         )
         coupon = coupon_result.scalar_one_or_none()
         if not coupon:
-            return error_response(code=400, msg="浼樻儬鍒镐笉鍙敤鎴栧凡澶辨晥")
+            return error_response(code=400, msg="优惠券不可用或已失效")
 
         tpl = await db.get(CouponTemplate, coupon.template_id)
         if not tpl:
-            return error_response(code=400, msg="浼樻儬鍒歌鍒欎笉瀛樺湪")
+            return error_response(code=400, msg="优惠券规则不存在")
 
         min_amount = float(tpl.min_amount or 0)
         if real_total < min_amount:
-            return error_response(code=400, msg="鏈揪鍒颁紭鎯犲埜浣跨敤闂ㄦ")
+            return error_response(code=400, msg="未达到优惠券使用门槛")
 
         coupon_discount = Decimal(str(tpl.value or 0))
         coupon.status = "LOCKED"
@@ -430,7 +430,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     await db.commit()
     await db.refresh(order)
 
-    # 浣欓鍙敤鏁帮紙浠呮樉绀猴紝瀹為檯鎵ｉ櫎鍦ㄦ敮浠樻帴鍙ｏ級
+    # 余额可用数（仅显示，实际扣除在支付接口）
     balance_available = 0.0
     if customer_id and body.use_balance:
         from app.models.member_account import MemberAccount
@@ -723,7 +723,7 @@ async def _on_payment_success(
         order.coupon_id = None
         order.discount_amount = None
 
-    # 浣欓鎶垫墸
+    # 余额抵扣
     balance_deducted = 0.0
     if use_balance and customer_id:
         from app.models.member_account import MemberAccount
@@ -743,7 +743,7 @@ async def _on_payment_success(
     # 支付成功后，这个字段从"计划抵扣多少余额"改为"实际抵扣了多少余额"，供退款时准确拆分微信/余额两部分。
     order.balance_deduct_requested = balance_deducted if balance_deducted > 0 else None
 
-    # 鏍囪鏀粯鎴愬姛
+    # 标记支付成功
     effective_method = "balance" if balance_deducted >= float(order.total) else payment_method
     order.payment_status = "paid"
     order.payment_method = effective_method
@@ -880,7 +880,7 @@ async def mock_pay_order(
         if not order:
             return error_response(code=404, msg="order not found")
         if order.status != "pending_payment":
-            return error_response(code=400, msg="璇ヨ鍗曞凡鏀粯鎴栧凡鍙栨秷")
+            return error_response(code=400, msg="该订单已支付或已取消")
         if order.customer_id and (not customer_id or int(customer_id) != int(order.customer_id)):
             return error_response(code=403, msg="forbidden")
 
@@ -895,11 +895,11 @@ async def mock_pay_order(
 
         return success_response(
             data={**serialize_order(order, order_items), "coupon": coupon_data, "balance_deducted": balance_deducted},
-            msg="鏀粯鎴愬姛",
+            msg="支付成功",
         )
     except Exception as e:
         logger.error(f"mock_pay_order error: {e}\n{traceback.format_exc()}")
-        return error_response(code=500, msg=f"鏀粯澶勭悊澶辫触: {str(e)}")
+        return error_response(code=500, msg=f"支付处理失败: {str(e)}")
 
 
 class WxPayBody(PydanticBase):
@@ -929,7 +929,7 @@ async def create_wxpay_order(
         if not order:
             raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
         if order.status != "pending_payment":
-            raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "璇ヨ鍗曞凡鏀粯鎴栧凡鍙栨秷"})
+            raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
         if customer_id and order.customer_id and int(customer_id) != int(order.customer_id):
             raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
 
@@ -939,7 +939,7 @@ async def create_wxpay_order(
 
         pay_amount = float(order.total)
 
-        # 灏濊瘯浣欓鎶垫墸锛氳嫢鍏ㄩ瑕嗙洊锛岀洿鎺ヨ蛋 mock 娴佺▼
+        # 尝试余额抵扣：若全额覆盖，直接走 mock 流程
         balance_cover = False
         partial_balance_amount = 0.0
         if body.use_balance and customer_id:
@@ -963,7 +963,7 @@ async def create_wxpay_order(
                 raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
             if order.status != "pending_payment":
                 logger.warning("[PAYMENT_IDEMPOTENCY_BALANCE_ALREADY_HANDLED] order_id=%s status=%s", order_id, order.status)
-                raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "璇ヨ鍗曞凡鏀粯鎴栧凡鍙栨秷"})
+                raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
             coupon_data, balance_deducted = await _on_payment_success(
                 order, db, use_balance=True, payment_method="balance"
             )
@@ -978,7 +978,7 @@ async def create_wxpay_order(
                     "coupon": coupon_data,
                     "balance_deducted": balance_deducted,
                 },
-                msg="浣欓鏀粯鎴愬姛",
+                msg="余额支付成功",
             )
 
         if partial_balance_amount > 0:
@@ -1012,7 +1012,7 @@ async def create_wxpay_order(
                 msg="订单已完成，无需支付",
             )
 
-        # 鍟嗗閰嶇疆鑷繁鐨勫井淇℃敮浠?
+        # 商家配置自己的微信支付
         svc = WxPayService(tenant) if tenant else None
         if svc and svc.enabled:
             locked_order_result = await db.execute(
@@ -1029,14 +1029,14 @@ async def create_wxpay_order(
                 wechat_result = await WechatService().code2session(body.js_code)
                 openid = wechat_result.get("openid")
             if not openid:
-                raise HTTPException(status_code=400, detail={"success": False, "code": "NEED_WECHAT_CODE", "message": "缂哄皯寰俊鏀粯韬唤锛岃閲嶆柊鍙戣捣鏀粯"})
+                raise HTTPException(status_code=400, detail={"success": False, "code": "NEED_WECHAT_CODE", "message": "缺少微信支付身份，请重新发起支付"})
             amount_fen = max(1, round(pay_amount * 100))
             notify_url = f"{settings.H5_ORDER_BASE_URL}/api/v1/orders/wxpay-notify"
             pay_params = await svc.create_jsapi_order(
                 openid=openid,
                 out_trade_no=str(order.id),
                 amount_fen=amount_fen,
-                description=f"{tenant.name}-鐐归璁㈠崟",
+                description=f"{tenant.name}-点餐订单",
                 notify_url=notify_url,
             )
             required_fields = ["timeStamp", "nonceStr", "package", "signType", "paySign"]
@@ -1046,7 +1046,7 @@ async def create_wxpay_order(
                     "[WXPAY_PARAMS_INVALID] order_id=%s tenant_id=%s pay_params_type=%s missing_fields=%s pay_params=%s",
                     order.id, order.tenant_id, type(pay_params).__name__, missing_fields, str(pay_params)[:500] if pay_params else None,
                 )
-                raise HTTPException(status_code=502, detail={"success": False, "code": "WXPAY_PARAMS_INVALID", "message": "寰俊鏀粯鍙傛暟鐢熸垚澶辫触"})
+                raise HTTPException(status_code=502, detail={"success": False, "code": "WXPAY_PARAMS_INVALID", "message": "微信支付参数生成失败"})
             return success_response(
                 data={"pay_params": pay_params, "free": False, "order_id": str(order.id)},
                 msg="please request WeChat payment",
@@ -1072,7 +1072,7 @@ async def create_wxpay_order(
         raise
     except Exception as e:
         logger.error(f"create_wxpay_order error: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail={"success": False, "code": "PAYMENT_INTERNAL_ERROR", "message": "鏀粯鏈嶅姟寮傚父锛岃绋嶅悗閲嶈瘯"})
+        raise HTTPException(status_code=500, detail={"success": False, "code": "PAYMENT_INTERNAL_ERROR", "message": "支付服务异常，请稍后重试"})
 
 
 @router.post("/orders/wxpay-notify")
@@ -1119,7 +1119,7 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
                     break
         if not resource:
             logger.warning("wxpay notify verify failed: no matched merchant cert")
-            return {"code": "FAIL", "message": "楠岃瘉澶辫触"}
+            return {"code": "FAIL", "message": "验证失败"}
 
         out_trade_no = resource.get("out_trade_no", "")
         trade_state = resource.get("trade_state", "")
@@ -1141,7 +1141,7 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         use_balance_flag = bool(_pending_balance and float(_pending_balance) > 0)
         await _on_payment_success(order, db, use_balance=use_balance_flag, payment_method="wxpay")
         await db.commit()
-        logger.info(f"寰俊鏀粯鍥炶皟鎴愬姛: order_id={out_trade_no}")
+        logger.info(f"微信支付回调成功: order_id={out_trade_no}")
         return {"code": "SUCCESS", "message": "ok"}
 
     except Exception as e:
@@ -1163,7 +1163,7 @@ async def update_order_status(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="鐠囧嘲鍘涢惂璇茬秿")
+        return error_response(code=401, msg="请先登录")
     if body.status not in ORDER_MERCHANT_TARGET_STATUSES:
         return error_response(code=400, msg="invalid status")
     TenantContext.set_tenant_id(tenant_id)
@@ -1178,7 +1178,7 @@ async def update_order_status(
     if current_status == body.status:
         return success_response(
             data={"id": str(order.id), "status": order.status, "idempotent": True},
-            msg="閻樿埖鈧焦婀崣妯哄",
+            msg="状态未变化",
         )
     if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
         return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
@@ -1196,7 +1196,7 @@ async def update_order_status(
         order.completed_at = datetime.utcnow()
     await db.commit()
     await db.refresh(order)
-    return success_response(data={"id": str(order.id), "status": order.status}, msg="閻樿埖鈧礁鍑￠弴瀛樻煀")
+    return success_response(data={"id": str(order.id), "status": order.status}, msg="状态已更新")
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
 TABLE_CLOSE_DONE_STATUSES = {"done", "settled", "cancelled", "rejected"}
@@ -1212,10 +1212,10 @@ async def settle_table(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="璇峰厛鐧诲綍")
+        return error_response(code=401, msg="请先登录")
     table_no = (body.get("table_no") or "").strip()
     if not table_no:
-        return error_response(code=400, msg="缂哄皯妗屽彿")
+        return error_response(code=400, msg="缺少桌号")
     TenantContext.set_tenant_id(tenant_id)
 
     from app.models.dining import DiningSession
@@ -1229,7 +1229,7 @@ async def settle_table(
     )
     active_session = session_result.scalar_one_or_none()
     if not active_session:
-        return error_response(code=404, msg="鏈娌℃湁杩涜涓殑浼氳瘽")
+        return error_response(code=404, msg="本桌没有进行中的会话")
 
     result = await db.execute(
         select(Order).where(
@@ -1278,7 +1278,7 @@ async def settle_table(
             "closed": True,
             "total": total,
         },
-        msg="缁撴鎴愬姛",
+        msg="结桌成功",
     )
 class MerchantNoteUpdate(PydanticBase):
     note: str = ""
@@ -1295,7 +1295,7 @@ async def update_merchant_note(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="璇峰厛鐧诲綍")
+        return error_response(code=401, msg="请先登录")
     result = await db.execute(
         select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
     )
@@ -1318,7 +1318,7 @@ async def reprint_order_ticket(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="璇峰厛鐧诲綍")
+        return error_response(code=401, msg="请先登录")
     result = await db.execute(
         select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
     )
@@ -1350,14 +1350,14 @@ async def cancel_order(order_id: str, request: Request, db: AsyncSession = Depen
     if order.customer_id and (not customer_id or int(customer_id) != int(order.customer_id)):
         return error_response(code=403, msg="forbidden")
     if order.status not in ("pending_payment", "pending"):
-        return error_response(code=400, msg="璁㈠崟宸叉敮浠樻垨宸插畬鎴愶紝鏃犳硶鍙栨秷")
+        return error_response(code=400, msg="订单已支付或已完成，无法取消")
     if getattr(order, "payment_status", None) == "paid":
         refund_result = await _refund_order_payment(order, db, reason="customer_cancel")
         if not refund_result["success"]:
             await db.rollback()
             return error_response(code=502, msg=f"取消失败，退款处理异常，请稍后重试或联系客服：{refund_result['error']}")
     order.status = "cancelled"
-    # P0 淇锛氭仮澶嶈 LOCKED 鐨勪紭鎯犲埜
+    # P0 修复：恢复被 LOCKED 的优惠券
     if order.coupon_id:
         coupon = await db.get(_Coupon, order.coupon_id)
         if coupon and coupon.status == "LOCKED":
@@ -1397,7 +1397,7 @@ async def list_orders(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="璇峰厛鐧诲綍")
+        return error_response(code=401, msg="请先登录")
     TenantContext.set_tenant_id(tenant_id)
 
     query = select(Order).where(Order.tenant_id == tenant_id)
@@ -1554,7 +1554,7 @@ async def list_reviews(
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
-        return error_response(code=401, msg="璇峰厛鐧诲綍")
+        return error_response(code=401, msg="请先登录")
     from app.models.order_review import OrderReview
 
     TenantContext.set_tenant_id(tenant_id)
