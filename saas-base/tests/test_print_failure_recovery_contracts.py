@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import importlib.util
 import pathlib
 import sys
@@ -168,8 +168,8 @@ class KuaimaiStub:
             "table_no": order.table_no,
             "total_amount": "15.00",
             "pay_amount": "15.00",
-            "pay_type": "寰俊鏀粯",
-            "items": [{"goods_name": order_items[0].name, "quantity": order_items[0].qty, "quantity_text": "脳1", "item_amount": "15.00", "item_amount_text": "15.00"}],
+            "pay_type": "微信支付",
+            "items": [{"goods_name": order_items[0].name, "quantity": order_items[0].qty, "quantity_text": "×1", "item_amount": "15.00", "item_amount_text": "15.00"}],
         }
 
     @classmethod

@@ -157,7 +157,7 @@
           <div style="display:flex;gap:8px">
             <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
             <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">鎷</a-button>
-            <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">鍑洪屾垚</a-button>
+            <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
           </div>
           <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
             <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
