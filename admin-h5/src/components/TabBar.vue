@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿<template>
+<template>
   <div class="bottom-tabbar">
     <div
       v-for="tab in tabs"

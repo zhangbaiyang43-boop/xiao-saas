@@ -1,0 +1,21 @@
+#!/bin/sh
+# Blocks commits that introduce BOM or mojibake (private-use-area) characters.
+# Installed via: scripts/install-hooks.sh (or copy this file to .git/hooks/pre-commit)
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PY="$(command -v python || command -v py || command -v python3)"
+
+if [ -z "$PY" ]; then
+    echo "pre-commit: no python interpreter found on PATH, skipping encoding check" >&2
+    exit 0
+fi
+
+"$PY" "$REPO_ROOT/scripts/check_encoding.py" --staged
+STATUS=$?
+
+if [ $STATUS -ne 0 ]; then
+    echo ""
+    echo "commit blocked: fix the files above (or run 'python scripts/check_encoding.py' for the full picture) before committing." >&2
+fi
+
+exit $STATUS

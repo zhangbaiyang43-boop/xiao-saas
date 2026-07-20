@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <view class="mine-page">
     <view v-if="loading" class="state-card">
       <view class="spinner"></view>

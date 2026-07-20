@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sub-page payment-page">
     <PageHeader title="微信支付" />
     <div class="page-body">

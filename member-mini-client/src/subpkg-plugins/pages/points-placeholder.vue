@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view class="card">
       <text class="title">积分暂未开放</text>

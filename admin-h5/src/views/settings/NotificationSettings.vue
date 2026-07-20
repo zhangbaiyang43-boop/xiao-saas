@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sub-page notify-page">
     <PageHeader title="通知提醒" />
     <div class="page-body">

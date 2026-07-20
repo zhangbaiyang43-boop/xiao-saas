@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view class="card">
       <text class="title">活动暂未开放</text>

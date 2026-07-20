@@ -1,4 +1,4 @@
-﻿"""Add order print idempotency fields
+"""Add order print idempotency fields
 
 Revision ID: 20260718_0001
 Revises: 20260715_0001

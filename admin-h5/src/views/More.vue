@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="page-wrap">
     <div class="page-header">
       <span class="page-title">更多</span>

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view class="result-card">
       <text class="label">您的排位号</text>

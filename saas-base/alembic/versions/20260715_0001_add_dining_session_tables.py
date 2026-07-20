@@ -1,4 +1,4 @@
-﻿"""Add dining session and participant tables
+"""Add dining session and participant tables
 
 Revision ID: 20260715_0001
 Revises: 20260711_0007

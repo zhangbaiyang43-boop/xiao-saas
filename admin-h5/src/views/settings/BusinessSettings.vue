@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sub-page settings-detail">
     <PageHeader title="经营设置" />
     <div class="page-body">

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <view class="entry-page">
     <view v-if="error" class="entry-card">
       <view class="entry-error">!</view>

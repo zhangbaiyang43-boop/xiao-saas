@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <view class="page">
 
     <!-- 顶部绿色区 -->

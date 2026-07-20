@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="queue-status-page">
     <main class="status-shell">
       <section v-if="loading && !ticket" class="state-card">

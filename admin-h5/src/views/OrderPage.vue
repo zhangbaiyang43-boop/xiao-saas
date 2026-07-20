@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="order-page">
     <!-- 店铺头部 -->
     <header class="shop-header">

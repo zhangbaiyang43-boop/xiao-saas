@@ -1,4 +1,4 @@
-﻿// src/utils/request.js
+// src/utils/request.js
 
 // 开发环境：本地 H5 可用 localhost
 // 真机/微信开发者工具建议改成你的电脑局域网 IP，例如：http://192.168.1.10:9898

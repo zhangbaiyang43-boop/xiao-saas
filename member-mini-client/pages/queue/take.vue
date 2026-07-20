@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view class="card hero-card">
       <text class="eyebrow">饭店排位</text>

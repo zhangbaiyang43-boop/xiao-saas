@@ -1,4 +1,4 @@
-﻿import request from './request'
+import request from './request'
 
 export const createQueueTicket = (data) => request({ url: '/queue/tickets', method: 'POST', data })
 export const getQueueTickets = (params) => request({ url: '/queue/tickets', method: 'GET', data: params })

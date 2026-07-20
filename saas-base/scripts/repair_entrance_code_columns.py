@@ -1,4 +1,4 @@
-﻿"""One-time manual repair for missing entrance_code columns.
+"""One-time manual repair for missing entrance_code columns.
 
 This script is intentionally not imported by application startup code.
 Run manually on production only after a full saas_base backup has been verified.

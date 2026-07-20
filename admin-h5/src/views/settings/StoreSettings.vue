@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sub-page store-page">
     <PageHeader title="店铺资料" />
     <div class="page-body">

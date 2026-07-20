@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sub-page device-page">
     <PageHeader title="设备与收银" />
     <div class="page-body">

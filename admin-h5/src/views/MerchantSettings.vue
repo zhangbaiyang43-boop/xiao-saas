@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿<template>
+<template>
   <div class="settings-home sub-page">
     <PageHeader title="设置" no-back>
       <a-button type="text" danger size="small" @click="handleLogout">退出</a-button>

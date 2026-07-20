@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="h5-wrap">
     <!-- 顶栏 -->
     <div class="top-bar">

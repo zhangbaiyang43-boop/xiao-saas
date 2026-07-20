@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <view class="page">
     <view v-if="!ticket.id" class="empty-card">
       <text class="empty-title">还没有排位号</text>

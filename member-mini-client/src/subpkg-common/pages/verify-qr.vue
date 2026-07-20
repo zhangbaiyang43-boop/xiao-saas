@@ -1,4 +1,4 @@
-﻿﻿﻿﻿<template>
+<template>
   <view class="page">
 
     <!-- ① Skeleton -->
