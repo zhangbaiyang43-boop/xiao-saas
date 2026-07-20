@@ -1,7 +1,7 @@
 <template>
   <view class="order-page">
 
-    <!-- 闂傚倸鍊风粈浣革耿闁秴鍌ㄧ憸鏃堝箖濞差亜惟闁崇懓绨遍崑鎾诲礃閳哄啰鐦堥梺鎼炲劀閸滀礁鏅ラ梻鍌欑婢瑰﹪鎮￠崼銉ョ；闁告洦鍘介浠嬫煟閹邦喖鍔嬮柣鎾寸懅缁辨挻鎷呴棃娑氫患闂佸搫顑嗛惄顖炲蓟?-->
+    
     <view class="shop-header">
       <view class="shop-title-main">
         <text class="shop-name">{{ shopName }}</text>
@@ -14,10 +14,10 @@
       </view>
     </view>
 
-    <!-- 闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍏橀崑鎾剁箔濞戞ɑ鍣归柛銊︾箞閹﹢鎮欓崹顐ｇ彧闂佸搫妫寸粻鎾诲蓟閿濆妫橀柟绋垮閸犳劙姊哄畷鍥╁笡婵☆偄鍟撮獮鍐喆閸曨剙顎撻梺鍛婄缚閸庤崵妲愰悙鐢电＝?-->
+    
     <view class="menu-body" v-show="activeTab === 'order'">
 
-      <!-- 闂傚倷娴囬褎顨ラ崫銉х濠电姴鍋嗛悞浠嬫煠婵劕鈧澹曢懞銉﹀弿婵☆垱瀵х涵楣冩煟閵堝鐣洪柡灞剧洴椤㈡洟鏁愰崱娆樻К缂傚倷璁查崑鎾绘煕閳╁啰鈯曢柣鎾存礋閺屽秹鍩℃担鍛婃闂佺懓鍟垮Λ娆撳Φ閸曨垼鏁冩い鎺戝€婚弳銈夋⒑鐠団€虫灍妞ゃ劌妫濋獮蹇涘川閺夋垹顦ㄥ銈庡幗閸ㄥ爼藟瀹ュ鈷?-->
+      
       <scroll-view class="category-nav" scroll-y scroll-with-animation :scroll-top="categoryScrollTop">
         <view
           v-for="(cat, catIdx) in categories"
@@ -31,7 +31,7 @@
         </view>
       </scroll-view>
 
-      <!-- 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧顦弲娑㈠磼閵娾晜鐓涚€广儱楠搁獮鏍煟閵堝鐣洪柡灞剧洴椤㈡洟鏁愰崱娆樻О闂備焦鎮堕崐鏍哄Ο鍏煎床婵犻潧娲ㄧ弧鈧梺绋挎湰绾板秴鈻撻弻銉︹拺閻犲洠鈧磭浠╅梺绋匡工濞尖€愁嚕鐠囨祴妲堥柕蹇曞Х椤斿﹪姊洪悷鎵虎闁哥噥鍨堕幃鐐鐎ｎ偀鎷?-->
+      
       <scroll-view
         class="dish-scroll"
         scroll-y
@@ -39,7 +39,7 @@
         scroll-with-animation
         @scroll="onDishScroll"
       >
-        <!-- #I 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鑼槷闂佸搫娲ㄦ慨鐑芥儗閹剧粯鈷掗柛顐ゅ枍缁堕亶鏌ｉ幒宥囩煓闁哄本鐩垾锕傚箣濠靛懐鏁栭梻浣哥－缁垰螞閸愵喖钃熺€广儱鐗滃銊╂⒑閸涘﹥灏甸柛鐘查叄閹箖鎮滈懞銉︽闂佺粯蓱瑜板啫鐣甸崱娑欌拺缂備焦蓱閻撱儲銇勯幋鐐插鐎规洩缍佸畷姗€鈥﹂幋婵囶吙-->
+        
         <view v-if="lastOrderItems.length" class="reorder-bar">
           <text class="reorder-label">鍐嶆潵涓€鍗</text>
           <scroll-view scroll-x class="reorder-scroll">
@@ -61,9 +61,9 @@
         </view>
 
         <view v-if="!allDishes.length" class="empty-menu">
-          <text class="empty-title">鏆傛棤鑿滃搧</text>
-          <text class="empty-desc">鑿滃崟鍔犺浇澶辫触</text>
-          <view class="empty-retry" @click="loadMenu"><text>閲嶆柊鍔犺浇</text></view>
+          <text class="empty-title">暂无菜品</text>
+          <text class="empty-desc">菜单加载失败</text>
+          <view class="empty-retry" @click="loadMenu"><text>重新加载</text></view>
         </view>
         <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
           <view class="cat-divider"><view class="cat-divider-line"></view><text class="cat-divider-text">{{ cat }}</text><view class="cat-divider-line"></view></view>
@@ -105,7 +105,7 @@
               </view>
               <view class="dish-meta">
                 <text v-if="dishCardDesc(dish)" class="dish-desc">{{ dishCardDesc(dish) }}</text>
-                <text v-if="showDishSales(dish)" class="dish-sales">鏈堝敭{{ dish.sales_count }}</text>
+                <text v-if="showDishSales(dish)" class="dish-sales">月售{{ dish.sales_count }}</text>
               </view>
               <view class="dish-bottom-row">
                 <view class="dish-price-wrap">
@@ -120,7 +120,7 @@
                       <text>{{ optionCountText(dish.id) }}</text>
                     </view>
                     <view class="choose-option-btn" @click.stop="openSpecSheet(dish)">
-                      <text>閫夎鏍</text>
+                      <text>选规格</text>
                     </view>
                   </template>
                   <template v-else>
@@ -141,7 +141,7 @@
 
     </view>
 
-    <!-- 婵犵數濮烽。钘壩ｉ崨鏉戠；闁规崘娉涚欢銈呂旈敐鍛殲闁稿顑夐弻锝呂熷▎鎯ф閺?Tab -->
+    
     <scroll-view v-show="activeTab === 'home'" class="tab-scroll" scroll-y>
       <view class="home-tab">
         <view class="ht-status-card">
@@ -155,8 +155,8 @@
         </view>
 
         <view class="ht-order-card" :class="{ 'ht-order-card--disabled': !canStartOrdering }" @click="handleHomeStartOrder">
-          <text class="ht-order-kicker">浠婃棩鎺ㄨ崘</text>
-          <text class="ht-order-title">绔嬪嵆鐐归</text>
+          <text class="ht-order-kicker">今日推荐</text>
+          <text class="ht-order-title">立即点餐</text>
           <text class="ht-order-desc">{{ homeStatusDesc }}</text>
           <text v-if="homeCouponHint" class="ht-order-coupon">{{ homeCouponHint }}</text>
           <view class="ht-order-btn" :class="{ 'ht-order-btn--disabled': !canStartOrdering }" @click.stop="handleHomeStartOrder">
@@ -166,7 +166,7 @@
 
         <view v-if="featuredDish" class="ht-section">
           <view class="ht-section-head">
-            <text class="ht-section-title">搴楅暱鎺ㄨ崘</text>
+            <text class="ht-section-title">店长推荐</text>
             <text class="ht-section-sub">绮鹃€夋嫑鐗岃彍鍝</text>
           </view>
           <view class="ht-feature-card" @click="openProductDetail(featuredDish)">
@@ -228,7 +228,7 @@
       </view>
     </scroll-view>
 
-    <!-- 婵犵數濮烽弫鎼佸磻閻愬樊鐒芥繛鍡樻尭鐟欙箓鎮楅敐搴℃灍闁搞倕鑻灃闁挎繂鎳庨弳娆戠磼閻橀潧鏋涢柡宀€鍠栭獮鍡涙偋閸偅顥夌紓浣鸿檸閸樻悂宕?Tab -->
+    
     <scroll-view v-show="activeTab === 'card'" class="tab-scroll" scroll-y>
       <view v-if="bannerInfo" class="card-tab member-center">
         <view class="member-identity-card">
@@ -247,14 +247,14 @@
         <view class="member-assets-card">
           <view class="member-asset-item" @click="goBalanceDetail">
             <text class="member-asset-value">楼{{ bannerInfo.balance.toFixed(2) }}</text>
-            <text class="member-asset-label">浣欓</text>
-            <text class="member-asset-hint">鍙敤浜庝笅鍗曟敮浠</text>
+            <text class="member-asset-label">余额</text>
+            <text class="member-asset-hint">可用于下单支付</text>
           </view>
           <view class="member-asset-divider"></view>
           <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
             <text class="member-asset-value">{{ bannerInfo.points || 0 }}</text>
-            <text class="member-asset-label">绉垎</text>
-            <text class="member-asset-hint">娑堣垂1鍏冨緱1绉垎</text>
+            <text class="member-asset-label">积分</text>
+            <text class="member-asset-hint">消费1元得1积分</text>
           </view>
           <view class="member-asset-divider"></view>
           <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
@@ -265,13 +265,13 @@
         </view>
 
         <view class="member-main-action-card">
-          <text class="member-action-title">鎮ㄦ湁{{ bannerInfo.couponCount }}寮犱紭鎯犲埜鍙敤</text>
-          <text class="member-action-desc">鏌ョ湅浼氬憳鏉冪泭浜彈鏇村浼樻儬</text>
+          <text class="member-action-title">您有{{ bannerInfo.couponCount }}张优惠券可用</text>
+          <text class="member-action-desc">查看会员权益享受更多优惠</text>
           <view class="member-action-btn" @click="goOrderFromMember"><text>鍘荤偣椁</text></view>
         </view>
 
         <view v-if="usableMemberCoupons.length" class="member-section">
-          <text class="member-section-title">鍙敤浼樻儬鍒</text>
+          <text class="member-section-title">可用优惠券</text>
           <view class="member-coupon-list">
             <view v-for="coupon in usableMemberCoupons" :key="coupon.id || coupon.coupon_id || coupon.name" class="member-coupon-card" @click="useMemberCoupon(coupon)">
               <view class="member-coupon-value">
@@ -282,17 +282,17 @@
                 <text class="member-coupon-condition">{{ couponConditionText(coupon) }}</text>
                 <text class="member-coupon-time">{{ couponValidityText(coupon) }}</text>
               </view>
-              <view class="member-coupon-use"><text>绔嬪嵆浣跨敤</text></view>
+              <view class="member-coupon-use"><text>立即使用</text></view>
             </view>
           </view>
         </view>
 
         <view class="member-service-card">
           <view class="member-service-row" @click="goBalanceDetail">
-            <text>浣欓鏄庣粏</text><text class="member-service-arrow">鈥</text>
+            <text>余额明细</text><text class="member-service-arrow">鈥</text>
           </view>
           <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
-            <text>绉垎鏄庣粏</text><text class="member-service-arrow">鈥</text>
+            <text>积分明细</text><text class="member-service-arrow">鈥</text>
           </view>
           <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
             <text>浼樻儬鍒</text><text class="member-service-arrow">鈥</text>
@@ -300,15 +300,15 @@
         </view>
       </view>
       <view v-else-if="hasCustomerIdentity" class="card-tab-empty">
-        <text class="cte-title">浼氬憳涓績</text>
-        <text class="cte-desc">鏅€氫細鍛</text>
+        <text class="cte-title">会员中心</text>
+        <text class="cte-desc">普通会员</text>
         <view class="cte-btn cte-btn-plain" @click="loadMemberStatus">
           <text>{{ memberLoading ? '\u52a0\u8f7d\u4e2d...' : '\u91cd\u65b0\u52a0\u8f7d' }}</text>
         </view>
         <text class="cte-secondary" @click="goOrderFromMember">鍘荤偣椁</text>
       </view>
       <view v-else class="card-tab-empty">
-        <text class="cte-title">浼氬憳涓績</text>
+        <text class="cte-title">会员中心</text>
         <text class="cte-desc">鐧诲綍鍚庝韩鍙椾細鍛樹紭鎯</text>
         <button
           class="cte-btn"
@@ -322,24 +322,24 @@
       </view>
     </scroll-view>
 
-    <!-- 闂傚倸鍊搁崐鐑芥嚄閸洖绠犻柟鍓х帛閸嬨倝鏌曟繛鐐珔闁搞劌鍊块弻锝夋偄缁嬫妫庨梺?Tab -->
+    <!-- 闂傚倸鍊烽懗鍫曞箠閹剧粯鍋ら柕濞炬櫅閸ㄥ倿鏌ｉ悢绋款棎闁?Tab -->
     <view v-show="activeTab === 'mine'" class="tab-scroll tab-mine-redirect">
     </view>
 
     <view v-if="activeTab === 'order' && myOrders.length" class="order-status-entry" @click="viewOrderDetail">
       <view class="order-status-entry-dot"></view>
       <view class="order-status-entry-copy">
-        <text class="order-status-entry-title">鏌ョ湅鏈璁㈠崟</text>
+        <text class="order-status-entry-title">查看本桌订单</text>
         <text class="order-status-entry-desc">{{ tableOrderStatusTitle }}</text>
       </view>
       <text v-if="pendingOrderCount > 0" class="order-status-entry-count">{{ pendingOrderCount }}</text>
       <text class="order-status-entry-arrow">鈥</text>
     </view>
 
-    <!-- 闂傚倸鍊风粈浣革耿闁秴鍌ㄧ憸鏃堝箖濞差亜惟闁靛鍟浠嬪箖閵忋倖鍋傞幖杈剧秶缁辩敻姊虹拠鏌ュ弰婵炰匠鍥х疅闁挎稑瀚ч崑鎾愁潩鏉堚晛绗￠梺闈涙搐鐎氫即鐛Ο鍏煎磯闁烩晜甯囬崹浠嬪蓟瀹ュ鐓ラ悗锝庡墮閳峰矂鎮楀▓鍨灈闁绘牕銈搁獮鍐煥閸繄鍊炲銈嗗笂缁讹繝鍩€椤掆偓缁夌懓顫忛搹鍦＜婵☆垳鍘чˉ鍫ユ⒑闂堚晝绉剁紓宥勭椤曪綁顢曢姀鈺佹倯婵犮垼娉涢敃顏堝船鐠鸿　鏀介柣妯款嚋瀹搞儵鏌熼搹顐㈠闁诡噯绻濆畷鎺楁倷缁瀚肩紓鍌氬€烽悞锕傛晪婵犳鍠栭ˇ鐢稿蓟閻斿吋鎯炴い鎰剁到绾板秹姊?tab 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢妶鍌氫壕婵鍘ф晶顖炴煛閸涙澘鐓愮紒鍌涘笧閳ь剨缍嗛埀顒夊弿闂勫嫰骞堥妸銉庣喖宕归鎯у缚闂-->
+    
     <view v-show="activeTab === 'order'" class="cart-bar" :class="{ 'has-items': totalCount > 0 }">
       <view class="cart-main" @click="totalCount > 0 ? openCart() : null">
-        <!-- 闂傚倸鍊峰ù鍥х暦閸偅鍙忛柣銏㈩焾缁€澶愭煥閺囩偛鈧悂宕掗妸鈺傜厽闁逛即娼ф晶顖涚箾閸涱垰鈻堥柡宀€鍠撶划娆撳垂椤曞懎濡峰┑鐘愁問閸犳鍒掗幘璇茶摕闁靛ň鏅涢崡铏繆閵堝倸浜炬繛瀛樼矋閸庢娊鍩為幋锔藉€烽柤纰卞墯閹插ジ姊洪幐搴㈢８闁搞劌缍婇、-->
+        
         <view class="cart-icon-wrap" :class="{ 'cart-icon-wrap--pulse': cartIconPulse }">
           <view class="cart-icon-svg"></view>
           <view v-if="totalCount > 0" class="cart-badge" :class="{ 'cart-badge--pulse': cartBadgePulse }">
@@ -347,19 +347,19 @@
           </view>
         </view>
 
-        <!-- 闂傚倸鍊搁崐鐑芥嚄閸撲礁鍨濇い鏍亹閳ь剨绠撳畷濂稿Ψ閵夛附袣闂備礁鎼粙渚€宕㈡總鍛婂€块柛顭戝亖娴滄粓鏌熸潏鍓хɑ缁绢叀鍩栭妵鍕晜閼测晝鏆ら梺?-->
+        
         <view class="cart-info">
           <template v-if="totalCount > 0">
             <text class="cart-price" :class="{ 'cart-price--highlight': amountPulse }">楼{{ formatPrice(totalPrice) }}</text>
             <text class="cart-tip">鍏眥{ totalCount }}浠</text>
           </template>
           <template v-else>
-            <text class="cart-empty">鏈€夋嫨鍟嗗搧</text>
+            <text class="cart-empty">未选择商品</text>
           </template>
         </view>
       </view>
 
-      <!-- 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧顦弲娑㈠磼閵娾晜鐓涚€广儱楠搁獮鏍煟閵堝鐣洪柡灞剧洴椤㈡洟鏁愰崱娆樻К缂傚倷鑳舵慨闈涱熆濮椻偓閳ワ箓宕稿Δ浣告疂闂傚倸鐗婄粙鎴︼綖瀹ュ鐓熼煫鍥ㄦ崌閻涙粎绱掗悩铏磳鐎-->
+      
       <view class="cart-right">
         <view
           class="checkout-btn"
@@ -371,25 +371,25 @@
       </view>
     </view>
 
-    <!-- 闂傚倸鍊风粈浣革耿闁秴鍌ㄧ憸鏃堝箖濞差亜惟闁靛鍟浠嬪箖閵忋倖鍋傞幖杈剧秶缁辩敻姊虹拠鍙夋崳闁轰礁鎽滃☉鐢稿醇閺囩偟锛涢梺瑙勫劤閻°劍鍒婇幘顔界厱闁规壆鏁搁崢娑欎繆椤愩垻澧︽慨濠呮閸栨牠寮撮悢鍝ュ絽闂備胶顢婂▍鏇㈡晪濡-->
+    
     <view class="bottom-nav">
       <view :class="['bn-item', { active: activeTab === 'home' }]" @click="activeTab = 'home'">
-        <text class="bn-label">棣栭〉</text>
+        <text class="bn-label">首页</text>
       </view>
       <view :class="['bn-item', { active: activeTab === 'order' }]" @click="activeTab = 'order'">
-        <text class="bn-label">鐐归</text>
+        <text class="bn-label">点餐</text>
         <view v-if="totalCount > 0 && activeTab !== 'order'" class="bn-dot"></view>
       </view>
       <view :class="['bn-item', { active: activeTab === 'card' }]" @click="switchToCard">
-        <text class="bn-label">浼氬憳</text>
+        <text class="bn-label">会员</text>
         <view v-if="bannerInfo && bannerInfo.couponCount > 0 && activeTab !== 'card'" class="bn-dot"></view>
       </view>
       <view :class="['bn-item', { active: activeTab === 'mine' }]" @click="goMine">
-        <text class="bn-label">鎴戠殑</text>
+        <text class="bn-label">我的</text>
       </view>
     </view>
 
-    <!-- 闂傚倸鍊峰ù鍥х暦閸偅鍙忛柣銏㈩焾缁€澶愭煥閺囩偛鈧悂宕掗妸鈺傜厽闁逛即娼ф晶顖涚箾閸涱垰鈻堥柡宀€鍠撶划娆撳垂椤曞懎濡峰┑鐘愁問閸犳鍒掗幘璇茶摕闁靛ň鏅涢崡铏繆閵堝倸浜炬繛瀛樼矒缁犳牕顫忓ú顏勭闁稿繗鍋愮粙鍥⒑閹稿孩绌块梻鍕缁-->
+    
     <!-- Order confirmation sheet -->
     <view v-if="showCart" class="mask" @click="closeOrderConfirm">
       <view class="cart-sheet order-confirm-sheet" @click.stop>
@@ -564,7 +564,7 @@
     <view v-if="showOrders" class="mask" @click="showOrders = false">
       <view class="orders-sheet" @click.stop>
         <view class="orders-sheet-head">
-          <text class="orders-sheet-title">鏈璁㈠崟</text>
+          <text class="orders-sheet-title">本桌订单</text>
           <text class="orders-sheet-close" @click="showOrders = false">脳</text>
         </view>
 
@@ -572,9 +572,9 @@
           <view class="table-status-card">
             <view>
               <view class="table-status-mode">
-                <text>鍫傞</text>
+                <text>堂食</text>
               </view>
-              <text class="table-status-no">妗屽彿: {{ tableNo || orderModeText.unknownTable }}</text>
+              <text class="table-status-no">桌号: {{ tableNo || orderModeText.unknownTable }}</text>
             </view>
             <view class="table-status-copy">
               <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
@@ -595,7 +595,7 @@
           <view v-if="currentTableOrder" class="current-order-card">
             <view class="current-order-head">
               <view>
-                <text class="current-order-title">褰撳墠璁㈠崟</text>
+                <text class="current-order-title">当前订单</text>
                 <text class="current-order-no">#{{ currentTableOrder.orderNo }}</text>
               </view>
               <text class="current-order-total">楼{{ Number(currentTableOrder.total || 0).toFixed(2) }}</text>
@@ -621,7 +621,7 @@
 
           <view v-if="historyTableOrders.length" class="history-orders-card">
             <view class="history-orders-head" @click="showAllOrders = !showAllOrders">
-              <text>鍘嗗彶璁㈠崟</text>
+              <text>历史订单</text>
               <text>{{ showAllOrders ? '\u6536\u8d77' : '\u67e5\u770b\u5168\u90e8 ' + historyTableOrders.length }}</text>
             </view>
             <view v-if="showAllOrders">
@@ -643,7 +643,7 @@
 
         <view class="orders-actions">
           <view class="orders-primary-btn" @click="showOrders = false">
-            <text>鍏抽棴</text>
+            <text>关闭</text>
           </view>
           <view class="orders-secondary-btn" @click="showAllOrders = !showAllOrders">
             <text>{{ showAllOrders ? '\u6536\u8d77\u5386\u53f2\u8ba2\u5355' : '\u67e5\u770b\u5168\u90e8\u8ba2\u5355' }}</text>
@@ -651,7 +651,7 @@
         </view>
       </view>
     </view>
-    <!-- 闂傚倸鍊峰ù鍥х暦閻㈢绐楅柟鎵閸嬶繝鏌曟竟顖楀亾闁稿鎸搁～婵嬫偂鎼达紕鐫勯梻浣筋嚃閸燁偊宕惰椤旀劖绻涙潏鍓у埌婵犫偓闁秴绀夐柛顭戝亞缁♀偓闂侀潧楠忕徊鍓ф兜閻愵兙浜滈柟瀛樼箖閸ゅ洦銇勯姀鈩冾棃濠碉紕鏌夐ˇ顕€鏌涚€ｎ偅灏柍缁樻崌瀹曞綊顢欓悾灞煎闂傚倷鑳堕、濠傗枍閺囥垹绠查柛銉墮缁?-->
+    
     <view v-if="showSpecSheet" class="mask" @click="cancelSpec">
       <view class="spec-sheet option-sheet" @click.stop>
         <view class="spec-detail-hero">
@@ -720,23 +720,23 @@
       </view>
     </view>
 
-    <!-- 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鍨鹃幇浣圭稁缂傚倷鐒﹁摫闁告瑥绻橀弻鐔碱敍閿濆洣姹楅悷婊呭鐢帡鎮欐繝鍥ㄧ厪濠电偛鐏濋崝銈囩磼閹邦喖浠遍柡灞稿墲瀵板嫭绻濋崟顐熸嫛闂備胶顭堥鍛此囬幎閾?-->
+    
     <view v-if="loadError && !loading" class="loading-mask">
-      <text class="loading-text">鑿滃崟鍔犺浇澶辫触</text>
-      <view class="retry-btn" @click="loadMenu"><text>閲嶆柊鍔犺浇</text></view>
+      <text class="loading-text">菜单加载失败</text>
+      <view class="retry-btn" @click="loadMenu"><text>重新加载</text></view>
     </view>
 
-    <!-- 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鍨鹃幇浣圭稁缂傚倷鐒﹁摫闁告瑥绻橀弻鐔碱敍閿濆洣姹楅悷婊呭鐢帡鎮欐繝鍥ㄧ厪濠电倯鈧崑鎾绘煛-->
+    
     <view v-if="loading" class="loading-mask">
       <view class="loading-ring" />
       <text class="loading-text">鑿滃崟鍔犺浇涓?..</text>
     </view>
 
-    <!-- 闂傚倸鍊峰ù鍥х暦閸偅鍙忛柡澶嬪殮濞差亜围闁搞儻绲芥禍鐐叏濮椻偓濡潡鏌囬鐐寸厵妞ゆ棁妫勯埢鏇熴亜閵忥紕鈽夋い顐ｇ箞閹剝鎯旈姀鈺佹偑闂傚倸鍊风欢姘焽閼姐倐鍋撻棃娑氱劯鐎规洏鍨介獮鍡氼槾闁?-->
+    
     <view v-if="showReview" class="mask review-mask" @click.self="closeReview">
       <view class="review-card">
-        <text class="review-title">鐢ㄩ璇勪环</text>
-        <text class="review-sub">鎮ㄧ殑璇勪环瀵规垜浠緢閲嶈</text>
+        <text class="review-title">用餐评价</text>
+        <text class="review-sub">您的评价对我们很重要</text>
         <view class="review-stars">
           <text
             v-for="n in 5"
@@ -757,8 +757,8 @@
           auto-height
         />
         <view class="review-actions">
-          <view class="review-btn-skip" @click="closeReview"><text>璺宠繃</text></view>
-          <view class="review-btn-submit" :class="reviewRating === 0 ? 'review-btn-submit--disabled' : ''" @click="doSubmitReview"><text>鎻愪氦璇勪环</text></view>
+          <view class="review-btn-skip" @click="closeReview"><text>跳过</text></view>
+          <view class="review-btn-submit" :class="reviewRating === 0 ? 'review-btn-submit--disabled' : ''" @click="doSubmitReview"><text>提交评价</text></view>
         </view>
       </view>
     </view>
@@ -954,10 +954,10 @@ export default {
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
     const payAmount = ref(0)
-    const pendingOrderId = ref('')   // 寰呮敮浠樿鍗旾D
-    const useBalance = ref(false)    // 鏄惁浣跨敤浣欓
-    const balanceAvailable = ref(0)  // 鍙敤浣欓
-    const balanceDeducted = ref(0)   // 宸叉墸浣欓
+    const pendingOrderId = ref('')   // 待支付订单ID
+    const useBalance = ref(false)    // 是否使用余额
+    const balanceAvailable = ref(0)  // 可用余额
+    const balanceDeducted = ref(0)   // 已扣余额
     const actualPayAmount = computed(() =>
       useBalance.value ? Math.max(payAmount.value - balanceAvailable.value, 0) : payAmount.value
     )
@@ -971,7 +971,7 @@ export default {
     })
     let statusPollTimer = null
 
-    const myOrders = ref([]) // 鎴戠殑璁㈠崟
+    const myOrders = ref([]) // 我的订单
     const showOrders = ref(false)
     const showAllOrders = ref(false)
     const storeClosed = ref(false)
@@ -1527,7 +1527,7 @@ export default {
       stopStatusPoll()
       const baseUrl = uni.getStorageSync('api_base_url') || 'https://api.zhangbaiyang.com/api'
       statusPollTimer = setInterval(() => {
-        // 杞璁㈠崟鐘舵€?
+刷新订单状态
         uni.request({
           url: baseUrl + '/v1/orders/my',
           method: 'GET',
@@ -1547,7 +1547,7 @@ export default {
               if (['settled', 'cancelled', 'rejected'].includes(newStatus)) stopStatusPoll()
             }
           },
-          fail: () => { /* 蹇界暐杞澶辫触 */ }
+          fail: () => { /* 忽略轮询失败 */ }
         })
       }, 15000)
     }
@@ -1723,12 +1723,12 @@ export default {
     const dishImage = (dish) => dish.image_url || dish.image || dish.cover_image || ''
 
     const dishTags = (dish) => {
-      // 鑾峰彇鑿滃搧鏍囩
+      // 获取菜品标签
       if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
       if (typeof dish.tags === 'string' && dish.tags.trim()) {
         return dish.tags.split(/[,锛孿s]+/).map(t => t.trim()).filter(Boolean).slice(0, 3)
       }
-      // 榛樿杩斿洖绌烘暟缁?
+默认返回空数组
       return []
     }
 
@@ -1848,7 +1848,7 @@ export default {
       uni.showToast({ title: '没有可重新加入的菜品', icon: 'none', duration: 1200 })
     }
 
-    // 鑾峰彇鏈€杩戣鍗曞晢鍝?
+获取最近订单商品
     const lastOrderItems = computed(() => {
       const last = myOrders.value.find(o => !['cancelled', 'rejected'].includes(o.status))
       if (!last || !last.items) return []
@@ -2042,7 +2042,7 @@ export default {
     )
     const cartBadgeText = computed(() => totalCount.value > 99 ? '99+' : String(totalCount.value))
 
-    // 浼氬憳鑺傜渷閲戦
+    // 会员节省金额
     const memberSavings = computed(() => {
       return cartItems.value.reduce((s, item) => {
         const dish = allDishes.value.find(d => d.id === item.id)
@@ -2054,7 +2054,7 @@ export default {
     })
 
     // 婊氬姩鐩稿叧鐘舵€?
-    const dishScrollTopVal = ref(0)  // 鑿滃搧鍒楄〃婊氬姩浣嶇疆
+    const dishScrollTopVal = ref(0)  // 菜品列表滚动位置
     const categoryScrollTarget = ref('')
     const categoryScrollTop = ref(0)
     const categoryItemHeight = 96
@@ -2070,9 +2070,9 @@ export default {
     }
     let currentScrollTop = 0
     let ignoreScroll = false
-    let sectionTops = []             // 鍒嗙被鍖哄煙椤堕儴浣嶇疆
+    let sectionTops = []             // 分类区域顶部位置
 
-    // 缂撳瓨鍒嗙被鍖哄煙浣嶇疆
+    // 缓存分类区域位置
     const cacheSectionPositions = (retry = 0) => {
       const cats = categories.value
       if (!cats.length) return
@@ -2089,26 +2089,26 @@ export default {
           cat,
           top: Math.max(0, (res[i + 1]?.top ?? 0) - svTop + currentScrollTop),
         }))
-        // 婊氬姩鍒伴《閮ㄦ椂婵€娲荤涓€涓垎绫?
+滚动到顶部时激活第一个分类
         if (currentScrollTop < 10 && cats.length) {
           activeCategory.value = cats[0]
         }
       })
     }
 
-    // 鍒囨崲鍒嗙被
+    // 切换分类
     const switchCategory = (cat) => {
       activeCategory.value = cat
       ignoreScroll = true
       setTimeout(() => { ignoreScroll = false }, 600)
       const idx = categories.value.indexOf(cat)
       syncCategoryVisible(cat)
-      // 婊氬姩鍒板搴斿垎绫诲尯鍩?
+滚动到对应分类区域
       scrollTarget.value = ''
       nextTick(() => { scrollTarget.value = 'cat-sec-' + idx })
     }
 
-    // 闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鍐蹭画闂侀潧顦弲娑㈠磼閵娾晜鐓涚€广儱楠搁獮鏍煟閵堝鐣洪柟顔款潐濞碱亪骞忓畝濠傚Τ闂備胶绮幐鍫曞磿閺屻儱绠為柕濞垮労濞笺劑鏌涢埄鍐炬當妞ゎ偀鏅犻幃璺侯潩閸楃偞鐏堝┑顔硷攻濡炶棄鐣烽锕€绀嬫い鎰剁稻椤斿姊绘担渚劸濡ょ姵鎮傚畷銉р偓锝庡墰閻鏌熼悜姗嗘當闂佸崬娲弻鏇熷緞閸繂濮㈠銈忓瘜閸ｏ絽顫忓ú顏咁棃婵炴垼浜崝鎼佹⒑缁嬪灝顒㈠鐟版閸掓帗绻濆鍏兼櫖濠殿喗菧閸庮噣宕戦幘璇茬闁规惌鍘介崓鐢告⒑闁偛鑻晶瀵糕偓瑙勬礀閻栧ジ宕洪埄鍐╁闁兼亽鍎遍鈺佲攽?
+    
     let scrollThrottleTimer = null
     const onDishScroll = (e) => {
       currentScrollTop = e.detail.scrollTop
@@ -2503,7 +2503,7 @@ export default {
         allDishes.value = []
       } finally {
         loading.value = false
-        // 鑿滃崟鍔犺浇瀹屾垚鍚庨噸缃粴鍔ㄧ姸鎬?
+菜单加载完成后重置滚动状态
         currentScrollTop = 0
         if (categories.value.length) activeCategory.value = categories.value[0]
         // DOM 鏇存柊鍚庣紦瀛樺垎绫讳綅缃?
@@ -2586,7 +2586,7 @@ export default {
   onUnload: function () {
     this.stopStatusPoll()
     if (this.setupCategoryObserver) {
-      // observers 闂?setupCategoryObserver 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳顭烽弻娑㈠焺閸愵亖妲堥梺绋胯閸旀垿寮婚妶鍚ゅ湱鈧綆鍋呭鎺楁⒑缁嬫鍎愰柟鐟版搐閻ｇ柉銇愰幒婵囨櫇濡炪倖甯掗崯鐘诲磻閹捐閿ゆ俊銈勮兌閸樻悂鏌ｈ箛鏇炰粶闁逞屽墰閸犲酣顢旈銏♀拺濞村吋鐟х粙鑽ょ磼鐠囨彃顏柛鈹惧亾濡炪倖甯掗敃锔剧矓閻㈠憡鐓曢柟鎯ь嚟濞叉挳鎸婂┑鍥ヤ簻闁哄啠鍋撻柛銊︾箘閹广垽宕卞☉娆戝幗闂佽婢橀崥鈧紒銊ヮ煼閺屽秷顧侀柛鎾村哺閵嗗啯绻濋崒銈呮濡炪倖鍔戦崐鏍偓姘皑閳ь剛鎳撴竟濠囧窗濮樿泛绀夐梺鍨儑缁犻箖鎮楅悽娈跨劸閻㈩垰鐖奸弻锝嗗箠闁告梹鍨块獮鍐晸閻樺弬銊╂煃閸濆嫬鈧宕㈤幘缁樺仭婵犲﹤瀚惌鎺斺偓瑙勬礃缁矂鍩㈡惔銊ョ婵犻潧娲﹂惁鐐测攽閻樺灚鏆╅柛瀣█楠炴捇顢旈崱娆戭槸闂侀€炲苯澧柕鍥у椤㈡洟濮€閳哄倵鏋呴梺鑺ド戠换鍕箟閹间礁妫樻繛鍡欏亾缂?GC 婵犵數濮烽弫鍛婃叏閻戣棄鏋侀柟闂寸绾惧鏌ｉ幇顒佹儓缂佺姳鍗抽弻鐔兼⒒鐎靛壊妲紓浣哄Х婵炩偓闁哄瞼鍠栭幃褔宕奸悢鍝勫殥缂?
+      
     }
   },
 }
@@ -2679,7 +2679,7 @@ export default {
 .activity-text,
 .shop-meta { display: none; }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍏橀崑鎾剁箔濞戞ɑ鍣归柛銊︾箞閹﹢鎮欓崹顐ｇ彧闂佸搫妫寸粻鎾诲蓟閿濆妫橀柟绋垮閸犳劙姊哄畷鍥╁笡婵☆偄鍟撮獮鍐喆閸曨剙顎撻梺鍛婄缚閸庤崵妲愰悙鐢电＝?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮?*/
+
 .menu-body {
   display: flex;
   flex: 1;
@@ -2827,7 +2827,7 @@ export default {
 .dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: #fff; font-size: 24rpx; font-weight: 700; }
 .dish-emoji-wrap, .dish-emoji, .dish-initial, .dish-badge-top { display: none; }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐椋庣矆娓氣偓楠炲鏁撻悩鑼槷闂佸搫娲ㄦ慨鐑芥儗閹剧粯鈷掗柛顐ゅ枍缁堕亶鏌ｉ幒宥囩煓闁哄本鐩垾锕傚箣濠靛懐鏁栭梻浣哥－缁垰螞閸愵喖钃熺€广儱鐗滃銊╂⒑閸涘﹥灏甸柛鐘查叄閹箖鎮滈懞銉︽闂佺粯蓱瑜板啫鐣甸崱娑欌拺缂備焦蓱閻撱儲銇勯幋鐐插鐎规洩缍佸畷姗€鈥﹂幋婵囶吙闂備胶顭堥敃锕傚窗閹剧粯鍋柍褜鍓欓埞鎴︽倷閺夋垹浠稿銈庡幖濞差厼鐣烽姀銈呯妞ゆ棁袙閹锋椽姊绘笟鍥т簽闁稿鐩幊鐔碱敍濞戞瑦鐝烽梺鍦檸閸犳鎮￠弴銏＄厓闁告繂瀚弳娆徝归悩璁虫喚闁哄本鐩崺鐐哄箚瑜屾竟鏇炩攽閿涘嫬浜奸柛濠冪墱閺侇噣骞掗弬鍝勪壕婵鍘ф晶鎾煙椤斿厜鍋撻幇浣瑰缓闂侀€炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€?*/
+
 .reorder-bar {
   display: flex;
   align-items: center;
@@ -2895,7 +2895,7 @@ export default {
   white-space: nowrap;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鎼佸磹閻戣姤鍊块柨鏇楀亾妞ゎ亜鍟撮獮鎰償閿濆孩閿ゆ繝鐢靛仜濡瑩宕归崷顓濈剨闁汇垻顣介崑鎾荤嵁閸喖濮庡?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偞鐗犻、鏇㈠Χ閸モ晝鍘犻梻浣告惈椤︿即宕靛顑炴椽顢旈崟搴樻櫊閺屽秹宕崟鑸垫暰闂?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣?*/
+
 .dish-save-badge {
   font-size: 18rpx;
   color: #fff;
@@ -2906,7 +2906,7 @@ export default {
   margin-left: 4rpx;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?缂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌ｉ幋锝呅撻柛濠傛健閺屻劑寮撮悙娴嬪亾閸濄儳涓嶉柡澶庮嚦閺冨牊鏅查柛娑卞幗濞堟煡姊虹粙娆惧剬闁哄懏绻勫Σ鎰板箻鐎涙ê顎撴俊銈囧О閸斿秶鍒掑鍥╃焿鐎广儱鎷嬮悡銉╂煕椤愩倕鏋旈柛姗€浜跺Λ鍛搭敃閵忊€愁槱闂佸湱顭堥…鐑界嵁婢舵劕浼犻柕澹拑绱查梻浣哥秺閸嬪﹪宕ｆ惔鈾€鏋旀繝濠傜墛閻撴盯鎮橀悙鎻掆挃闁宠棄顦甸弻宥夋寠婢舵ɑ笑闂佸疇顕х粔褰掋€佸Ο娆炬Ш缂備降鍔忔慨銈嗙┍婵犲洤鐭楀璺猴工椤帡姊虹化鏇熸珨缂佺粯绻傞悾宄邦潨閳ь剟寮幇鏉垮窛妞ゆ巻鍋撴い?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞?*/
+
 .member-hint-bar {
   margin: 8rpx 0 0;
   background: linear-gradient(90deg, #fff7ed, #fef3c7);
@@ -2921,7 +2921,7 @@ export default {
   font-weight: 600;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?濠电姷鏁告慨鐑藉极閹间礁纾婚柣鎰惈閸ㄥ倿鏌涢锝嗙缂佺姳鍗抽弻鐔兼⒒鐎垫瓕绐楅梺杞扮鐎氫即寮诲☉妯锋闁告鍋涚粻濠氭⒑閸濆嫭锛旂紒鐘虫崌瀵鏁愭径濠勭潉闂佺鏈懝鐐濡偐纾藉ù锝呮惈椤庢挾绱撳鍕獢鐎殿喖顭烽幃銏ゅ礂閼测晛濮洪梻浣瑰濞插秹宕戦幘鎰佺唵鐟滄粓宕板Δ鍛﹂柛鏇ㄥ灱閺佸啴鏌曢崼婵囧櫝闁哄鎳樺娲传閸曨噮娼堕梺鍛婃煥閻倿宕洪妷锕€绶炲┑鐐靛亾閻庡姊虹憴鍕剹闁告妫勯埢鎾舵喆閸曨厾鐦堥梺姹囧灲濞佳嗏叴闂備胶顭堥鍡涘箰閹间焦绠掗梻浣侯焾缁绘劙宕ョ€ｎ剛绀婇柟瀵稿Х濡垱銇勯幘瀵糕槈濞存粓绠栧濠氬磼濞嗘埈妲梺鍦拡閸嬪嫮鍙呴梺缁橆焾椤曆囨倿閸偁浜滈柟鍝勭Х閸忓瞼绱掗幇顔间沪缂佺粯绻堝Λ鍐ㄢ槈閸楃偛澹夐梻?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣?*/
+
 .order-saved-bar {
   background: linear-gradient(90deg, #ecfdf5, #d1fae5);
   border-radius: 12rpx;
@@ -3007,7 +3007,7 @@ export default {
   text-align: center;
 }
 
-/* 闂傚倸鍊峰ù鍥х暦閸偅鍙忛柣銏㈩焾缁€澶愭煥閺囩偛鈧悂宕掗妸鈺傜厽闁逛即娼ф晶顖涚箾閸涱垰鈻堥柡宀€鍠撶划娆撳垂椤曞懎濡峰┑鐘愁問閸犳鍒掗幘璇茶摕闁靛ň鏅涚猾宥夋煕鐏炲墽鈯曢柣婵愪邯濮婅櫣鍖栭弴鐔哥彅濡炪倧瀵岄崹鐢告倶閸愵喗鈷戠紒瀣濠€浼存煠妫颁胶鐭欐い銏℃瀹曡精绠涢幘鎻掝棜?+ 闂傚倸鍊风粈浣革耿闁秴鍌ㄧ憸鏃堝箖濞差亜惟闁靛鍟浠嬪箖閵忋倖鍋傞幖杈剧秶缁辩敻姊虹拠鍙夋崳闁轰礁鎽滃☉鐢稿醇閺囩偟锛涢梺瑙勫劤閻°劍鍒婇幘顔界厱闁规壆鏁搁崢娑欎繆椤愩垻澧︽慨濠呮閸栨牠寮撮悢鍝ュ絽闂備胶鎳撻崯璺ㄦ崲濮椻偓婵℃挳宕橀鑲╁€炲銈庡墻閸撴盯宕伴弽褏鏆︽い鎰剁畱缁€瀣⒒閸喓鈯曢柡?+ 闂傚倸鍊峰ù鍥敋瑜嶉湁闁绘垼妫勭粻鐘绘煙閹冩闁搞儺鍓﹂弫宥夋煟閹邦垰鐨洪柣鎾村灴濡懘顢曢姀鈥愁槱缂備礁顑嗛崹鍦垝?+ 婵犵數濮烽。钘壩ｉ崨鏉戠；闁糕剝蓱濞呯姵淇婇妶鍛殲鐎规洘鐓￠弻娑樼暆閳ь剟宕愬☉銏犵倞闁靛ě鍛婵犳鍠楅敃鈺呭储閹间礁绠柤濮愬€楃壕濂告煟閹伴潧澧柛鏂诲€栭妵鍕箣濠靛洤鏋犻梺?*/
+
 .list-pad { height: calc(264rpx + env(safe-area-inset-bottom)); }
 
 .empty-menu {
@@ -3044,7 +3044,7 @@ export default {
   text { color: #fff; font-size: 28rpx; font-weight: 700; }
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐椋庣矆娴ｉ潻鑰块梺顒€绉撮崒銊ф喐閺冨牆绠栨繛宸簻鎯熼梺闈涱槸閸燁垰顪冩禒瀣畺闁靛繈鍊栭崑鍌炲箹鏉堝墽绉剁紒杈╂暬濮婅櫣鎷犻崣澶嬪闯闂佽桨绀侀幗婊冣槈閻㈢閱囬柡鍥╁仧閿涙盯姊虹憴鍕姢闁宦板妽閸掑﹪骞橀鐣屽幈闂佽澹嗛弫鎼佸储濞戞瑤绻嗘い鎰╁灮婢э附鎱?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮?*/
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
@@ -3091,7 +3091,7 @@ export default {
   background: #ef4444;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐椋庣矆娴ｉ潻鑰块梺顒€绉撮崒銊ф喐閺冨牆绠栨繛宸簻鎯熼梺宕囨嚀缁ㄩ亶宕戦幘璇茬妞ゆ梻鍘х粣娑㈡⒑閸濆嫷妲归柛銊ョ秺閹儳煤椤忓應鎷洪梺鍛婄箓鐎氼厼顔忓┑鍡忔斀妞ゆ梻鍋撻弳顒傗偓?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂?*/
+
 .shop-title-row {
   display: flex;
   align-items: flex-start;
@@ -3112,17 +3112,17 @@ export default {
   font-size: 20rpx;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?Tab 闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣椤愪粙鏌ㄩ悢鍝勑㈢痪鎯ь煼閺屾稑鈽夐崡鐐插濠电偛鐨烽弲鐘诲蓟閺囩喓绠鹃柣鎰靛墯閻濇棃姊洪崫鍕靛剮缂佽埖宀稿濠氬即閵忕娀鍞跺┑鐘绘涧濞层倝顢撳☉銏♀拺缂備焦蓱鐏忣亪鏌涙惔銏㈠弨妤犵偛鐗撴俊鎼佸Ψ椤旇棄缂撻梻浣虹《閸撴繈銆冮崨杈剧稏闁冲搫鎳忛崑鐘虫叏濡搫鑸归柡瀣洴閺屸€崇暆鐎ｎ剛蓱闂佽鍨卞Λ鍐春閸曨垰绀冩い鎾跺閺€銊╂⒒閸屾瑨鍏屾い銏狅工閳诲秹寮撮姀鐘殿唶闂佸綊妫跨粈渚€鎮?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮?*/
+
 .tab-scroll {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: calc(100rpx + env(safe-area-inset-bottom));
-  padding-top: calc(176rpx + env(safe-area-inset-top)); /* 婵?shop-header 婵犵數濮撮惀澶愬级鎼存挸浜鹃柡鍥ュ灩绾惧湱鎲搁悧鍫濈瑲闁哄拋浜铏规嫚閸欏鏀銈庡亜椤︽壆鎹㈠☉娆戠瘈闁搞儜鍡樻啺闂備礁鎲＄粙鎺戭焽濞嗘垵顥氬┑鍌氭啞閻撶喖鏌熼柇锕€骞栫紒鎻掝煼閹?*/
+  padding-top: calc(176rpx + env(safe-area-inset-top)); 
 }
 
-/* 婵犵數濮烽弫鎼佸磻閻愬樊鐒芥繛鍡樻尭鐟欙箓鎮楅敐搴℃灍闁搞倕鑻灃闁挎繂鎳庨弳娆戠磼閻橀潧鏋涢柡灞熷棛鐤€闁挎繂鎳嶇花浠嬫⒑瀹曞洨甯涙慨濠傜秺婵＄敻宕熼姘鳖啋闁荤娀缂氬銊╁箣闁垮绡€?*/
+
 .card-tab.member-center {
   padding: 28rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
   background: #F5F7F9;
@@ -3191,7 +3191,7 @@ export default {
   .member-coupon-use { padding: 0 18rpx; }
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌ｉ姀銏╃劸缂佲偓婢舵劖鐓ラ柡鍥╁仜閳ь剚鎮傚畷鎺楀Ω閳哄倻鍘介梺閫涘嵆濞佳勬櫠椤栨稓绠鹃柛娑卞灠閳诲牓鏌″畝鈧崰鎾跺垝濞嗘挸鍨傛い鏇炴噹婵″嘲鈹戦悩鎰佸晱闁哥姵顨堥崚鎺楀箻鐠囪尪鎽曢梺闈浥堥弲娑氱尵瀹ュ鐓曢悘鐐插⒔閳洟鏌ｅ┑鎰偗婵?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮?*/
+
 .cart-bar {
   position: fixed;
   bottom: calc(100rpx + env(safe-area-inset-bottom));
@@ -3334,7 +3334,7 @@ export default {
 .option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid #07C160; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: #07C160; font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
 
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鎼佸磹閹间礁纾瑰瀣椤愪粙鏌ㄩ悢鍝勑㈢紒鈧崼銉︾叆闁哄洨鍋涢埀顒€鎽滅划锝呂旀担鐟板伎濠碘槅鍨辩€笛呮兜閸撗呮／?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷?*/
+
 .mask {
   position: fixed;
   inset: 0;
@@ -3344,7 +3344,7 @@ export default {
   align-items: flex-end;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊峰ù鍥х暦閸偅鍙忛柣銏㈩焾缁€澶愭煥閺囩偛鈧悂宕掗妸鈺傜厽闁逛即娼ф晶顖涚箾閸涱垰鈻堥柡宀€鍠撶划娆撳垂椤曞懎濡峰┑鐘愁問閸犳鍒掗幘璇茶摕闁靛ň鏅涢崡铏繆閵堝倸浜炬繛瀛樼矒缁犳牕顫忓ú顏勭闁稿繗鍋愮粙鍥⒑閹稿孩绌块梻鍕缁骞掑Δ浣规珖闂佺鏈銊╂晬濠婂牊鈷戠紓浣姑慨宀勬倶韫囨梻鎳囩€规洏鍨介獮姗€顢欑憴锝嗗闂傚倷绶￠崑鍡涘磻濞戙垺鍤愭い鏍ㄧ⊕濞呯娀鏌熺紒銏犳灍闁绘挻娲熼弻宥夊传閸曨偅娈繛瀵稿█娴滃爼寮诲☉銏犵厴闁诡垎鍌氼棜婵犵绱曢崑鎴﹀磹閺嶎偅鏆滈柟鐑樻煛閸嬫挸顫濋悡搴♀拫闂佽鍠掗埀顒佸墯濞笺劑鏌嶈閸撶喎顕ｇ拠宸悑闁割偒鍋呴鍥⒒娴ｅ憡鍟為柟鎼佺畺瀹曚即寮借閺嗭附绻涘顔荤凹闁稿﹦鍏橀弻娑樷攽閸℃浼€闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€?*/
+
 .cart-sheet {
   width: 100%;
   background: #f5f7f8;
@@ -3420,14 +3420,14 @@ export default {
 .ht-status-badge--closed { background: #fee2e2; color: #991b1b; }
 .ht-notice { display: block; font-size: 26rpx; color: rgba(255,255,255,0.85); line-height: 1.5; }
 
-/* 婵犵數濮烽弫鎼佸磻閻愬樊鐒芥繛鍡樻尭鐟欙箓鎮楅敐搴℃灍闁搞倕鑻灃闁挎繂鎳庨弳娆戠磼閻橀潧鏋涢柡宀€鍠栭獮鍡涘级閸熷啯鎹囬弻锝夊箻鐎涙顦ㄦ繛锝呮搐閿曨亝淇婇崼鏇炴そ濞达絿顭堟竟瀣磽娴ｅ搫浜鹃柛搴″暱椤洭鏁撻悩鑼舵憰閻庡箍鍎卞ú锕傚窗閸℃稒鐓曢柡鍥ュ妼楠炴牠鏌嶅畡鎵劯婵﹨娅ｉ幏鐘诲灳閾忣偆浜愰梻浣告惈閹虫劖绻涢埀顒侇殽閻愯宸ユい顓滃姂瀹曘劑顢橀悢琛″亾閸愭祴鏀介柍钘夋閻忋儲淇婂鐓庡缂佹梻鍠栧鎾偄閾忚鍟庨梺鍝勵槸閻楀棙鏅舵禒瀣畺濠靛倸鎲￠悡娆撴煣韫囷絽浜濈€规洖鐭傞弻鐔碱敍濞嗘垵濡界紓浣虹帛缁诲倿锝炲┑瀣垫晣婵炴垶鐟ラ?*/
+
 .cte-btn {
   margin-top: 32rpx; padding: 24rpx 80rpx;
   background: #07C160; border-radius: 16rpx;
   color: #fff; font-size: 30rpx; font-weight: 700;
 }
 
-/* 婵犵數濮烽。钘壩ｉ崨鏉戠；闁规崘娉涚欢銈呂旈敐鍛殲闁稿顑夐弻锝呂熷▎鎯ф閺夆晜绻冪换婵嬪閿濆懐鍘梺鍛婃⒐閻楃姴顕ｉ弻銉晢濞达絿鎳撳鍨攽椤旂瓔娈旀俊顐ｎ殕缁傚秹鎮欓悽鐢碉紲婵犮垼娉涢張顒勫汲椤掑嫭鐓涚€光偓鐎ｎ剛袦閻庢鍣崳锝呯暦閹烘垟妲堟繛鍡樺姉濡叉垿姊婚崒娆掑厡妞ゎ厼鐗撻、鏍箣閻樿尙绛忔俊銈忕到閸欐繈宕堕浣规珖闂佺鏈銊╂偪閳ь剚淇婇悙顏勨偓鏍ь啅婵犳艾纾婚柟鍓х帛閻撴盯鎮楅敍鍗炲暕婢规洜绱撻崒姘偓鎼佸磹閻戣姤鍊块柨鏂垮⒔閻瑩鏌熼悜姗嗘畷闁稿顑夐弻锝呂熷▎鎯ф閺?*/
+
 .home-tab {
   padding: 32rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
   background: #F5F7F9;
@@ -3706,7 +3706,7 @@ export default {
   overflow-y: auto;
 }
 
-/* 濠电姷鏁告慨鐑藉极閸涘﹥鍙忓ù鍏兼綑閸ㄥ倸鈹戦崒婊庣劸闁哄嫨鍎甸弻鈥愁吋鎼粹€崇缂備胶濮抽崡鎶藉蓟閻旂厧绠氶柣妤€鐗滃Λ鍕磼?*/
+
 .success-header {
   padding: 48rpx 40rpx 32rpx;
   text-align: center;
@@ -3782,7 +3782,7 @@ export default {
   color: #9ca3af;
 }
 
-/* 闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌熼幆鏉啃撻柍閿嬫⒒閳ь剙绠嶉崕閬嵥囬鐐插瀭闁稿瞼鍋為悡鐔兼煟閺冨偆鐒炬い銉ヮ儔閺岋繝宕遍鐘垫殼闂佸搫鐭夌紞浣割嚕椤掑嫬鍨傛い鏃囨閳ь剦鍨跺铏圭矙濞嗘儳鍓遍梺鍛婃⒐閻熲晛顕ｆ繝姘у璺猴梗缁卞爼姊洪棃娑辨▓闁哥姵顨呰鐎光偓閸曨兘鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵缂佸顑欓悡鍏碱殽閻愯尙绠荤€规洏鍔戦、娑樷槈濡崵鈧參姊绘担鍛婂暈婵炶绠撳畷鏉课旈崘锝呬壕?*/
+
 .order-status-bar {
   margin: 0 40rpx 0;
   padding: 22rpx 24rpx;
@@ -3822,7 +3822,7 @@ export default {
 .merchant-note-icon { font-size: 24rpx; flex-shrink: 0; }
 .merchant-note-text { font-size: 24rpx; color: #92400e; line-height: 1.5; flex: 1; }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洏鍎抽埀顒婄秵閸忔﹢宕戦幘鍓佺當婵炴垶蓱閸ｅ綊鏌涢妸锔剧畼闁逞屽墮閸樻粓宕戦幘缁樼厱闁哄洢鍔屾禍鐐淬亜閺冣偓閸旀瑩骞冨畡閭︾叆闁告劦鈧垎鍐ｆ斀闁斥晛鍟亸锔筋殽閻愭潙绗掗摶鏍煃瑜滈崜娆擃敊韫囨挴鏀介柛銉ｅ劙缁ㄥ姊虹憴鍕婵炲绋掔粋鎺曨槼闁?*/
+
 .success-items {
   padding: 24rpx 40rpx;
   border-bottom: 2rpx solid #f1f5f9;
@@ -3894,54 +3894,7 @@ export default {
   color: #07C160;
 }
 
-/* 婵犵數濮烽弫鎼佸磻閻愬樊鐒芥繛鍡樻尭鐟欙箓鎮楅敐搴″箺闁瑰啿鐭傚缁樻媴娓氼垳鍔搁柣搴＄仛鐢€崇暦濠婂牊鍋勫瀣濞?/
-.coupon-reward {
-  margin: 24rpx 40rpx;
-  padding: 24rpx;
-  background: linear-gradient(135deg, #fff7ed, #fff3e0);
-  border-radius: 24rpx;
-  border: 2rpx solid #fed7aa;
-}
 
-.coupon-reward-tag {
-  display: block;
-  font-size: 24rpx;
-  color: #9a3412;
-  font-weight: 700;
-  margin-bottom: 16rpx;
-}
-
-.coupon-reward-body {
-  display: flex;
-  align-items: center;
-  gap: 20rpx;
-}
-
-.coupon-amount {
-  font-size: 72rpx;
-  font-weight: 900;
-  color: #07C160;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.coupon-info { flex: 1; }
-
-.coupon-name {
-  display: block;
-  font-size: 28rpx;
-  color: #92400e;
-  font-weight: 700;
-}
-
-.coupon-desc {
-  display: block;
-  font-size: 22rpx;
-  color: #b45309;
-  margin-top: 6rpx;
-}
-
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗ù锝夋交閼板潡姊洪鈧粔顕€鍩€椤掑﹦鐣电€规洖銈告俊椋庘偓锝庝簼閸犳﹢鏌熼鐐珪缂侇喗鐟ч幑鍕€﹂幋婵囨毆闂傚倸鍊峰ù鍥綖婢舵劕纾块柣鎾冲濞戙垹绀嬫い鎾跺Х閻?*/
 .success-actions {
   display: flex;
   flex-direction: column;
@@ -4025,7 +3978,7 @@ export default {
   text { color: #64748b; font-size: 28rpx; }
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鐑芥嚄閸洖绠犻柟鍓х帛閸嬨倝鏌曟繛鐐珔闁搞劌鍊块弻锝夋偄缁嬫妫庨梺鍝勵儐濡啴寮婚悢鍛婄秶濡わ絽鍟宥夋⒑缁嬫鍎滅紒韫矙濠€渚€姊洪幐搴ｇ畵妞わ附婢橀埥澶庮樄闁哄矉缍€缁犳稒绻濋崘鈺冨絿闂備線鈧偛鑻晶鍙夈亜椤愩埄妲搁悡銈嗙節婵犲倻澧曠紒鎰殜閺屸€愁吋鎼粹€崇缂備胶濮锋慨鍨┍婵犲洤围闁告侗鍘藉▓鏌ユ倵鐟欏嫭绀€妞わ妇鏁诲濠氭晲婢跺﹦顓洪梺缁樺姇濡瑩宕归懜鐢碘攳濠电姴娲﹂悞鑲┾偓骞垮劚濡矂骞忓ú顏呪拺闁革富鍙庨悞鐐箾鐎电鍘撮柛鈹垮劜瀵板嫰骞囬鐘插箺婵犲痉鏉库偓鎰板磻閹剧繝绻嗘い鎰剁悼缁犵偞顨ラ悙鍙夘棦鐎规洘锕㈤、姘跺川椤旇姤鐝滈梻鍌欑閹测€趁洪敃鍌氱；闁糕剝铔嬮崶顏嶆▌濠殿喖锕ュ钘壩涢崘銊㈡閺夊牄鍓遍妶澶嬧拺缂佸瀵ч崬澶娒瑰搴″婵″弶鍔欓幃娆撳传閸曨収鍟嬬紓鍌氬€烽悞锕傗€﹂崶顒€鐭?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷?*/
+
 .my-orders-pill {
   position: relative;
   display: flex;
@@ -4036,7 +3989,7 @@ export default {
   text { font-size: 24rpx; color: rgba(255,255,255,0.75); white-space: nowrap; }
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鐑芥嚄閸洖绠犻柟鍓х帛閸嬨倝鏌曟繛鐐珔闁搞劌鍊块弻锝夋偄缁嬫妫庨梺鍝勵儐濡啴寮婚悢鍛婄秶濡わ絽鍟宥夋⒑缁嬫鍎滅紒韫矙濠€渚€姊洪幐搴ｇ畵妞わ附婢橀埥澶庮樄闁哄矉缍€缁犳稒绻濋崘鈺冨絿闂備線鈧偛鑻晶鍙夈亜椤愩埄妲搁悡銈嗙節婵犲倻澧曠紒鎰殜閺屸€愁吋鎼粹€崇閻庤鎸风欢姘跺蓟閻斿吋鐒介柨鏇楀亾妤犵偞鐗滅槐鎺楀礈娴ｉ晲妲愰梺鍝勭灱閸犳牠寮婚崶顒佹櫇闁逞屽墴閻涱噣寮介鐔哄幈闂佺粯鍔曞Ο濠偽熼埀顒€鈹戦纭锋敾婵＄偘绮欓悰顕€骞囬鐔峰妳闂佹寧绻傞崐褰掞綖瀹ュ鈷掑ù锝堟鐢稒銇勯妸銉﹀殗闁轰礁鍟存俊鍫曞醇椤厾缍嶆繝纰夌磿閸嬫垿宕愰弽顓炵鐟滄柨顫忔禒瀣妞ゆ牗姘ㄩ弻褍顪冮妶鍡楃瑨閻庢凹鍙冨畷鎰板醇閺囩喓鍘介梺褰掑亰閸ㄨ京娑甸幆顬＄懓顭ㄩ崘鈺勭缂備浇椴哥敮锟犲箖閳哄倹缍囬柍鍝勫暟閸橆垶姊绘担鍛婃儓闁活厼顦辩槐鐐寸瑹閳ь剙顕ｉ锕€绠涢柡澶婄仢閼板灝鈹戦悙鍙夘棡闁告梹娲栭埢宥夊箣閿旇В鎷绘繛杈剧到閹诧繝宕悙鐑樼厾鐟滅増甯為悾鐑樸亜閵忥紕澧电€规洖鐖奸、妤呭焵椤掑嫭鍊块柛顭戝亖娴滄粓鏌熼崫鍕棞濞存粍鍎抽埞鎴︽偐椤愵澀澹曢梻浣告啞椤ㄥ牓宕戦幇鏉垮嚑鐎广儱顦伴悡蹇涚叓閸パ屽剰闁诲浚浜濋妵?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷?*/
+
 .my-orders-btn {
   position: relative;
   display: flex;
@@ -4077,7 +4030,7 @@ export default {
   text { color: #fff; font-size: 20rpx; font-weight: 800; }
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鐑芥嚄閸洖绠犻柟鍓х帛閸嬨倝鏌曟繛鐐珔闁搞劌鍊块弻锝夋偄缁嬫妫庨梺鍝勵儐濡啴寮婚悢鍛婄秶濡わ絽鍟宥夋⒑缁嬫鍎滅紒韫矙濠€渚€姊洪幐搴ｇ畵妞わ附婢橀埥澶庮樄闁哄矉缍€缁犳稒绻濋崘鈺冨絿闂備線鈧偛鑻晶鍙夈亜椤愩埄妲搁悡銈嗙節婵犲倻澧曠紒鎰殜閺屸€愁吋鎼达絼绮跺┑鐐村灟閸ㄥ湱绮堥崘鈹夸簻闁哄啫鍊甸幏鈩冪箾閻撳函韬慨濠冩そ瀵剟濡烽敂鐣屽絽闂備礁鎽滈崰宥夊础閸愯尙鏆?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷?*/
+
 .orders-sheet {
   width: 100%;
   background: #fff;
@@ -4288,7 +4241,7 @@ export default {
   font-size: 36rpx;
   line-height: 1;
 }
-/* 闂傚倸鍊搁崐椋庣矆娓氣偓楠炴牠顢曢敂钘変罕濠电姴锕ら悧鍡欑矆閸喐鍙忔俊顖濇硶閸亪鏌嶈閸忔稓娆㈠鍓佸祦閻庯綆鍠楅崑鎰版煕閹邦剚鈻曢柍褜鍓氶惄顖氼潖濞差亝顥堟繛鎴炴皑椤斿﹥绻濆▓鍨灈妞ゆ洦鍘鹃崚鎺楀醇閳垛晛浜鹃柨婵嗛閺嬬喖鏌嶉柨瀣仼缂佽鲸鎸婚幏鍛存儌闂€鎰繑闂備胶绮敮锛勭不閺嶎厼钃熸繛鎴欏灩閻撴盯鏌涚仦鍓х煀闁冲嘲鐭傚铏瑰寲閺囩喐婢掗梺绋款儐閹告悂鈥旈崘顔嘉ч柛鈩冾殘娴犳悂鏌ｆ惔锝囨嚄闁搞儰绀佸ú顓㈠箖濠婂牊鍤嶉柕澹啫绠婚梻鍌欑婢瑰﹪鎮￠崼銉ョ；闁告洦鍨遍崐鍫曞级閸碍娅囩痪?*/
+
 .orders-sheet {
   max-height: 86vh;
   padding: 0 0 calc(24rpx + env(safe-area-inset-bottom));
@@ -4602,7 +4555,7 @@ export default {
   background: #f3f5f7;
   text { color: #374151; }
 }
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾妤犵偛顦甸崹楣冨箛娴ｅ湱绋佺紓鍌氬€烽悞锕佹懌闂佸憡鐟ョ换姗€寮婚悢纰辨晬闁挎繂娲ｅЧ?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷?*/
+
 .loading-mask {
   position: fixed;
   inset: 0;
@@ -4690,7 +4643,7 @@ export default {
   margin-top: 4rpx;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊峰ù鍥х暦閸偅鍙忛柡澶嬪殮濞差亜围闁搞儻绲芥禍鐐叏濮椻偓濡潡鏌囬鐐寸厵妞ゆ棁妫勯埢鏇熴亜閵忥紕鈽夋い顐ｇ箞閹剝鎯旈姀鈺佹偑闂傚倸鍊风欢姘焽閼姐倐鍋撻棃娑氱劯鐎规洏鍨介獮鍡氼槾闁?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂?*/
+
 .review-mask {
   align-items: center;
   justify-content: center;
@@ -4827,7 +4780,7 @@ export default {
 
 .remark-placeholder { color: #c8c9cc; }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?婵犵數濮烽弫鎼佸磻閻愬樊鐒芥繛鍡樻尭鐟欙箓鎮楅敐搴℃灍闁搞倕鑻灃闁挎繂鎳庨弳娆戠磼閻橀潧鏋涢柡灞熷棛鐤€闁挎繂鎳嶇花钘夘渻閵堝倹娅呴柛銏＄叀濠€渚€姊虹紒妯忣亜螣婵犲洤纾块煫鍥ㄧ⊕閻撶喖鏌熼幑鎰涧闁兼澘娼￠弻锛勪沪閻ｅ睗銉︺亜瑜岀欢姘跺蓟濞戙垹绠婚悹铏瑰劋閻忓牓鎮楃憴鍕婵＄偘绮欓獮鍐ㄢ枎閹惧厖绱堕梺鍛婃处閸樺吋鎱ㄩ敂鎴掔箚闁绘劦浜滈埀顒佺墱閺侇噣骞掗弬鍝勪壕婵鍘ф晶鎾煙椤斿厜鍋撻幇浣瑰缓闂侀€炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€殿喛顕ч濂稿醇椤愶綆鈧洭姊绘担鍛婂暈闁规悂绠栧畷浼村冀瑜忛弳锔界箾瀹割喕绨奸柛濠勫厴閺屾稑鈹戦崱妤婁紑闂佸憡妫戠粻鎴︹€旈崘顔嘉ч柛鈩冾殘閻熴劑鏌ｆ惔銏犲毈闁告挾鍠栭獮鍐灳閹颁焦寤洪梺閫炲苯澧寸€?*/
+
 .member-price {
   font-size: 24rpx;
   color: #07C160;
@@ -4835,7 +4788,7 @@ export default {
   margin-left: 8rpx;
 }
 
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐宄懊归崶褏鏆﹂柛顭戝亝閸欏繘鏌ｉ姀銏╃劸缂佲偓婢舵劖鐓ラ柡鍥╁仜閳ь剚鎮傚畷鎺楀Ω閳哄倻鍘介梺閫涘嵆濞佳勬櫠椤栨稓绠鹃柛娑卞灠閳诲牓鏌″畝鈧崰鎾跺垝濞嗘挸鍨傛い鏇炴噹婵″嘲鈹戦悩鎰佸晱闁哥姵顨堥崚鎺楀箻鐠囪尪鎽曢梺闈浥堥弲娑㈠础閾忣偅鍙忔俊顖濇硶缁ㄨ法绱掗幇顓ф當闁宠鍨块幃娆撳箵閹烘挸鈧垶姊洪崨濠冣拹闁荤啿鏅涢锝嗙節濮橆剛浼嬮梺褰掝暒缁€渚€骞冮幋锔解拺闁告稑锕ｇ欢閬嶆煕濡湱鐭欑€规洘鍔欓、娑㈡倷缁瀚肩紓鍌氬€烽悞锕傗€﹂崶銊х彾闁告洦鍘剧壕濂告煠閼规澘鐓愮痪顓炵埣閺?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换?*/
+
 .cart-row-spec {
   display: block;
   font-size: 22rpx;
@@ -5163,7 +5116,7 @@ export default {
   background: #cfd6dc;
   opacity: .95;
 }
-/* 闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀?闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻娑㈩敃閿濆棛顦ョ紓浣插亾濠㈣泛澶囬崑鎾诲礂婢跺﹣澹曢梻渚€鈧偛鑻晶鎾煙瀹曞洤浠遍柡灞芥椤撳ジ宕ㄩ鐘亾椤撶儐娓婚柕鍫濇婵倿鏌涢埡浣割伃鐎规洜鏁绘俊鑸靛緞鐎Ｑ勫闂備浇宕甸崰鏍磻婵犲洤鍚归柣鏂垮悑閻撴洟鎮楅敐搴′航闁绘帟濮ゆ穱濠囧矗婢跺﹤顫掗悗娈垮枙缁瑩銆佸鈧幃銏ゅ矗婢跺浼栨繝纰夌磿閸嬫垿宕愰弽顐ｆ殰闁圭儤顧傞崶顒夋晬闁绘劖褰冮崵鎴︽⒑闂堟稓澧曟い锔垮嵆閹?闂傚倸鍊搁崐鎼佸磹妞嬪海鐭嗗〒姘ｅ亾鐎规洦鍨跺畷绋课旈埀顒勫磼閵婏妇绡€濠电姴鍊绘晶鏇犵棯閹岀吋闁哄瞼鍠栧畷婊嗩槾閻㈩垱鐩弻锝夊箻閸愬弶娈婚梺鍝勬湰缁嬫牜绮诲☉銏犵闁告劏鏁╅敂鐣岀閻庢稒顭囬惌鎺旂磼閻樺磭澧い顐㈢箰鐓ゆい蹇撳椤︺劑姊洪崷顓犲笡閻㈩垱甯楀蹇涘川鐎涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰鹃梺鍝勬储閸ㄦ椽鍩涢幒鎳ㄥ綊鏁愰崶鍓佸姼闂佸搫妫濇禍鍫曞蓟濞戞鐔兼嚒閵堝洨鍘滈柣搴ゎ潐濞叉﹢宕归崸妤冨祦婵☆垵鍋愮壕鍏间繆椤栨粌甯堕悽顖涱殜濮婄粯鎷呮笟顖滃姼缂備胶绮崝娆掓濡炪倖鐗楃粙鎾汇€呴幓鎹ㄦ棃鏁愰崨顓熸闂佹娊鏀遍崹鍧楀蓟濞戙垹绠涙い鎾跺仧缁佺兘鏌ｉ姀鈺佺仜闁告梹鍨垮璇测槈濮橈絽浜鹃柨婵嗛娴滄繄鈧娲栭惌鍌炲蓟閿涘嫪娌柣锝呯潡瑜忛埀顒冾潐濞叉﹢銆冮崱妤婂殫闁告洦鍓涚弧鈧繛杈剧到婢瑰﹤螞濠婂牊鈷掗柛灞捐壘閳ь剟顥撶划鍫熺瑹閳ь剙鐣烽鐐查敜婵°倐鍋撻柛灞诲妽缁绘繃绻濋崒婊冾暫缂佺偓鍎抽…鐑藉蓟閻旂厧绀堢憸蹇曟暜濞戙垺鐓熼柟鎯у暱閺嗭綁鏌＄仦鍓ь灱缂佺姵鐩獮娆撳礃閳诡剨闄勭换娑氣偓娑欘焽閻帞绱掗悩宕囧ⅹ妞ゎ偄绻愮叅妞ゅ繐瀚ˇ銊╂⒑閸︻厾甯涢悽顖涘笚濞煎繘宕ㄧ€涙ǚ鎷虹紓浣割儐椤戞瑩宕曢幇鐗堢厵闁荤喓澧楅崰妯尖偓娈垮枦椤曆囶敇閸忕厧绶炲┑鐘插濡差垰鈹戦悩顔肩伇婵炲鐩弫鍐晲閸℃瑧褰?*/
+
 .closed-mask {
   position: fixed;
   inset: 0;
