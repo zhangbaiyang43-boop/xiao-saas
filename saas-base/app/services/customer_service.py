@@ -120,8 +120,12 @@ class CustomerService(BaseService):
 
     async def create_customer(self, tenant_id, **kwargs):
         from sqlalchemy.future import select
+        from sqlalchemy import func
         from sqlalchemy.exc import IntegrityError
         from app.models.customer import Customer
+
+        if not tenant_id:
+            raise ValueError("tenant_id is required for tenant-scoped operations")
 
         if kwargs.get("phone"):
             kwargs["phone"] = str(kwargs["phone"]).strip()
@@ -130,61 +134,72 @@ class CustomerService(BaseService):
         if "short_invite_code" not in kwargs:
             kwargs["short_invite_code"] = _make_short_invite_code()
 
-        customer = Customer(tenant_id=tenant_id, **kwargs)
-        self.db.add(customer)
-        
-        try:
-            await self.db.commit()
-            await self.db.refresh(customer)
-            return customer
-        except IntegrityError as e:
-            # 唯一索引冲突，说明用户已存在，回滚并查询已存在的用户
-            await self.db.rollback()
-            
-            # 根据 openid 或 phone 查询已存在的客户
-            openid = kwargs.get('openid')
-            phone = kwargs.get('phone')
-            
-            if phone:
-                result = await self.db.execute(
-                    select(Customer).filter(
-                        Customer.tenant_id == tenant_id,
-                        Customer.phone == phone,
-                        Customer.status != -1
-                    )
-                )
-                existing = result.scalars().first()
-                if existing:
-                    if existing.status == -1:
-                        return await self.restore_customer(existing, **kwargs)
-                    return existing
+        last_error = None
+        for _ in range(3):
+            # 本店会员序号：按租户独立从 1 递增，用于会员卡号展示（真实资历，不是数据库主键）
+            max_result = await self.db.execute(
+                select(func.max(Customer.store_member_no)).where(Customer.tenant_id == tenant_id)
+            )
+            next_member_no = (max_result.scalar() or 0) + 1
 
-            if openid:
-                result = await self.db.execute(
-                    select(Customer).filter(
-                        Customer.tenant_id == tenant_id,
-                        Customer.openid == openid,
-                        Customer.status != -1
-                    )
-                )
-                existing = result.scalars().first()
-                if existing:
-                    if existing.status == -1:
-                        return await self.restore_customer(existing, **kwargs)
-                    if phone and existing.phone != phone:
-                        existing.phone = phone
-                        if kwargs.get("name") and not existing.name:
-                            existing.name = kwargs.get("name")
-                        await self.db.commit()
-                        await self.db.refresh(existing)
-                    return existing
+            customer = Customer(tenant_id=tenant_id, store_member_no=next_member_no, **kwargs)
+            self.db.add(customer)
 
-                existing = await self.get_customer_by_openid_any_status(openid, tenant_id)
-                if existing:
-                    return await self.restore_customer(existing, **kwargs)
-            
-            # 如果还是找不到，重新抛出异常
-            raise e
+            try:
+                await self.db.commit()
+                await self.db.refresh(customer)
+                return customer
+            except IntegrityError as e:
+                # 唯一索引冲突：可能是 openid/phone 已存在的老用户，也可能是 store_member_no 并发撞号
+                await self.db.rollback()
+                last_error = e
+
+                # 根据 openid 或 phone 查询已存在的客户
+                openid = kwargs.get('openid')
+                phone = kwargs.get('phone')
+
+                if phone:
+                    result = await self.db.execute(
+                        select(Customer).filter(
+                            Customer.tenant_id == tenant_id,
+                            Customer.phone == phone,
+                            Customer.status != -1
+                        )
+                    )
+                    existing = result.scalars().first()
+                    if existing:
+                        if existing.status == -1:
+                            return await self.restore_customer(existing, **kwargs)
+                        return existing
+
+                if openid:
+                    result = await self.db.execute(
+                        select(Customer).filter(
+                            Customer.tenant_id == tenant_id,
+                            Customer.openid == openid,
+                            Customer.status != -1
+                        )
+                    )
+                    existing = result.scalars().first()
+                    if existing:
+                        if existing.status == -1:
+                            return await self.restore_customer(existing, **kwargs)
+                        if phone and existing.phone != phone:
+                            existing.phone = phone
+                            if kwargs.get("name") and not existing.name:
+                                existing.name = kwargs.get("name")
+                            await self.db.commit()
+                            await self.db.refresh(existing)
+                        return existing
+
+                    existing = await self.get_customer_by_openid_any_status(openid, tenant_id)
+                    if existing:
+                        return await self.restore_customer(existing, **kwargs)
+
+                # 找不到已存在的用户，说明冲突来自 store_member_no 并发撞号，重试下一轮
+
+        # 如果还是找不到，重新抛出异常
+        raise last_error
 
     async def update_customer(self, customer_id, **kwargs):
         from sqlalchemy.future import select

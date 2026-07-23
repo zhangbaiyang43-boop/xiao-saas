@@ -14,12 +14,23 @@ branch_labels = None
 depends_on = None
 
 
+def column_exists(table_name: str, column_name: str) -> bool:
+    bind = op.get_bind()
+    columns = sa.inspect(bind).get_columns(table_name)
+    return any(item["name"] == column_name for item in columns)
+
+
 def upgrade():
-    op.add_column("tenant", sa.Column("receiver_name", sa.String(length=128), nullable=True))
-    op.add_column("tenant", sa.Column("receiver_type", sa.String(length=32), nullable=True))
-    op.add_column("tenant", sa.Column("receiver_verified", sa.Boolean(), nullable=False, server_default=sa.text("0")))
-    op.add_column("tenant", sa.Column("payment_locked", sa.Boolean(), nullable=False, server_default=sa.text("1")))
-    op.add_column("tenant", sa.Column("verified_time", sa.DateTime(), nullable=True))
+    if not column_exists("tenant", "receiver_name"):
+        op.add_column("tenant", sa.Column("receiver_name", sa.String(length=128), nullable=True))
+    if not column_exists("tenant", "receiver_type"):
+        op.add_column("tenant", sa.Column("receiver_type", sa.String(length=32), nullable=True))
+    if not column_exists("tenant", "receiver_verified"):
+        op.add_column("tenant", sa.Column("receiver_verified", sa.Boolean(), nullable=False, server_default=sa.text("0")))
+    if not column_exists("tenant", "payment_locked"):
+        op.add_column("tenant", sa.Column("payment_locked", sa.Boolean(), nullable=False, server_default=sa.text("1")))
+    if not column_exists("tenant", "verified_time"):
+        op.add_column("tenant", sa.Column("verified_time", sa.DateTime(), nullable=True))
 
 
 def downgrade():

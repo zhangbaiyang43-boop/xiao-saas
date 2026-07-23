@@ -13,7 +13,14 @@ branch_labels = None
 depends_on = None
 
 
+def table_exists(table_name: str) -> bool:
+    bind = op.get_bind()
+    return sa.inspect(bind).has_table(table_name)
+
+
 def upgrade():
+    if table_exists("queue_tickets"):
+        return
     op.create_table(
         "queue_tickets",
         sa.Column("id", sa.BigInteger(), nullable=False),

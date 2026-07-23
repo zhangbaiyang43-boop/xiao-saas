@@ -41,6 +41,7 @@ def serialize_customer(customer, account=None):
         "tags": customer.tags or [],
         "last_consume_time": customer.last_consume_time,
         "created_at": customer.created_at,
+        "store_member_no": customer.store_member_no,
         "points": 0,
         "level": None,
     }
@@ -266,7 +267,6 @@ async def profile(request: Request, db: AsyncSession = Depends(get_db)):
         f"token_customer_id={customer_id}, customer_id={customer.id}, phone={customer.phone}"
     )
     logger.info(profile_log)
-    print(profile_log, flush=True)
     account = await MembershipService(db).get_account_by_customer(customer_id)
     return success_response(data=serialize_customer(customer, account), msg="ok")
 
@@ -382,6 +382,7 @@ async def consumption_detail(request: Request, consumption_id: int, db: AsyncSes
     TenantContext.set_tenant_id(tenant_id)
     
     service = ConsumptionService(db)
+    service.require_tenant_id()
     query = service.filter_by_tenant(select(Consumption), Consumption)
     query = query.filter(Consumption.id == consumption_id, Consumption.customer_id == customer_id)
     result = await service.db.execute(query)

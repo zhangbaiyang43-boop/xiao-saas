@@ -13,9 +13,17 @@ branch_labels = None
 depends_on = None
 
 
+def column_exists(table_name: str, column_name: str) -> bool:
+    bind = op.get_bind()
+    columns = sa.inspect(bind).get_columns(table_name)
+    return any(item["name"] == column_name for item in columns)
+
+
 def upgrade():
-    op.add_column('menu_items', sa.Column('sales_count', sa.Integer(), nullable=True))
+    if not column_exists('menu_items', 'sales_count'):
+        op.add_column('menu_items', sa.Column('sales_count', sa.Integer(), nullable=True))
 
 
 def downgrade():
-    op.drop_column('menu_items', 'sales_count')
+    if column_exists('menu_items', 'sales_count'):
+        op.drop_column('menu_items', 'sales_count')

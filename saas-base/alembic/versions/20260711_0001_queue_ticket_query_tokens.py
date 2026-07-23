@@ -15,7 +15,15 @@ branch_labels = None
 depends_on = None
 
 
+def column_exists(table_name: str, column_name: str) -> bool:
+    bind = op.get_bind()
+    columns = sa.inspect(bind).get_columns(table_name)
+    return any(item["name"] == column_name for item in columns)
+
+
 def upgrade():
+    if column_exists("queue_tickets", "query_token"):
+        return
     op.add_column("queue_tickets", sa.Column("query_token", sa.String(length=64), nullable=True))
 
     bind = op.get_bind()
