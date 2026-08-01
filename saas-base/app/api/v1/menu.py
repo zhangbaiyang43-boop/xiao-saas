@@ -292,6 +292,22 @@ async def update_stock(
     return success_response(data=serialize_item(item), msg="库存已更新")
 
 
+def _sniff_image_content_type(content: bytes) -> str | None:
+    """按文件头 magic bytes 识别真实图片格式，返回一个服务端白名单里的 Content-Type，
+    不存在就返回 None。只信文件名后缀或客户端传的 Content-Type 头都是可以随意伪造
+    的——传一个后缀是 .png、Content-Type 也写 image/png，但内容其实是 HTML/JS 的文件，
+    COS 会原样用伪造的 Content-Type 提供服务，浏览器直接当网页执行（存储型 XSS）。"""
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 @router.post("/menu/upload-image")
 async def upload_menu_image(
     request: Request,
@@ -307,9 +323,11 @@ async def upload_menu_image(
     content = await file.read()
     if len(content) > 3 * 1024 * 1024:
         return error_response(code=400, msg="图片不能超过 3MB")
+    content_type = _sniff_image_content_type(content)
+    if not content_type:
+        return error_response(code=400, msg="文件内容不是有效图片")
     try:
         from app.core.cos import upload_image
-        content_type = file.content_type or f"image/{ext}"
         url = upload_image(content, file.filename or f"dish.{ext}", content_type)
         return success_response(data={"url": url}, msg="上传成功")
     except Exception as e:

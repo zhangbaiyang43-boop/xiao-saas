@@ -38,8 +38,10 @@ async def get_merchant_templates(
     user=Depends(get_current_user)
 ):
     """获取商家已启用的模列表"""
+    if user.get("type") != "merchant":
+        return error_response(code=401, msg="请先登录商户账号")
     tenant_id = user.get("tenant_id")
-    
+
     service = MarketingTemplateService(db)
     templates = await service.get_merchant_templates(tenant_id)
     
@@ -64,6 +66,8 @@ async def get_marketing_template_detail(
     user=Depends(get_current_user)
 ):
     """获取模详情（含则）"""
+    if user.get("type") != "merchant":
+        return error_response(code=401, msg="请先登录商户账号")
     service = MarketingTemplateService(db)
     template = await service.get_template_by_id(template_id)
     

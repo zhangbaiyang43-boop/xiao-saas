@@ -5,6 +5,33 @@ from starlette.responses import JSONResponse
 from app.core.response import RespVo
 from app.core.security import verify_token
 
+# 封禁商家后已签发的 token 有效期长达 7-30 天，之前只在 /login 那一刻查 tenant.status，
+# 已登录的会话不受影响——被封的商家/顾客还能再用好几天。这里加一层实时状态检查，但不能
+# 对每个已登录请求都直接查库（量大了是个隐患），所以结果按 tenant_id 缓存一小段时间：
+# 封禁生效的延迟从"最长 7 天"缩短到"最多这个 TTL"，而绝大多数请求命中缓存、不产生额外查询。
+TENANT_STATUS_CACHE_TTL_SECONDS = 45
+
+
+async def _is_tenant_active(tenant_id: str) -> bool:
+    from app.core.cache_helper import get_cache, set_cache
+
+    cache_key = f"tenant_active:{tenant_id}"
+    cached = await get_cache(cache_key)
+    if cached is not None:
+        return bool(cached)
+
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.models.tenant import Tenant
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Tenant.status).where(Tenant.tenant_id == tenant_id))
+        status = result.scalar_one_or_none()
+
+    active = bool(status)
+    await set_cache(cache_key, active, ttl=TENANT_STATUS_CACHE_TTL_SECONDS)
+    return active
+
 WHITELIST = {
     "/",
     "/health",
@@ -91,6 +118,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if is_optional:
             return await call_next(request)
+
+        if request.state.tenant_id and not await _is_tenant_active(request.state.tenant_id):
+            return JSONResponse(
+                status_code=403,
+                content=RespVo(code=403, msg="商家已停用").to_response(),
+            )
 
         if request.url.path.startswith(MEMBER_PATH_PREFIXES):
             if payload.get("type") != "member":
