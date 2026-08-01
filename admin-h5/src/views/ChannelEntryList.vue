@@ -1,15 +1,18 @@
 <template>
   <div class="channel-entry-page">
-    <section class="hero-card">
+    <PageHeader title="H5领券页" />
+
+    <div class="page-content">
+    <section class="hero-card animate-in">
       <div>
         <p class="eyebrow">H5领券页</p>
         <h1>给不同平台生成领券链接</h1>
         <p>抖音评论、朋友圈、短信、外卖袋，都可以放同一个可追踪入口。</p>
       </div>
-      <van-button round type="primary" @click="openCreate">新建</van-button>
+      <van-button round type="primary" class="tap-shrink" @click="openCreate">新建</van-button>
     </section>
 
-    <section class="stats-grid">
+    <section class="stats-grid animate-in" style="animation-delay:.04s">
       <div class="stat-card">
         <strong>{{ entries.length }}</strong>
         <span>入口数</span>
@@ -24,20 +27,20 @@
       </div>
     </section>
 
-    <section class="tips-card">
+    <section class="tips-card animate-in" style="animation-delay:.08s">
       <strong>怎么用</strong>
       <p>1. 新建一个入口，选择来源平台。</p>
       <p>2. 复制链接发到抖音、朋友圈或短信。</p>
       <p>3. 顾客打开后领券，后台会记录来源。</p>
     </section>
 
-    <section class="list-panel">
+    <section class="list-panel animate-in" style="animation-delay:.12s">
       <div class="panel-head">
         <div>
           <p class="eyebrow">我的入口</p>
           <h2>复制出去就能用</h2>
         </div>
-        <button class="text-btn" :disabled="loading" @click="loadData">刷新</button>
+        <button class="text-btn tap-shrink" :disabled="loading" @click="loadData">刷新</button>
       </div>
 
       <div v-if="loading" class="state-card">
@@ -51,7 +54,7 @@
       </div>
 
       <div v-else class="entry-list">
-        <article v-for="entry in entries" :key="entry.id" class="entry-card">
+        <article v-for="entry in entries" :key="entry.id" class="entry-card tap-shrink">
           <div class="entry-top">
             <div class="entry-title">
               <strong>{{ entry.name || '领券入口' }}</strong>
@@ -93,6 +96,7 @@
         </article>
       </div>
     </section>
+    </div>
 
     <van-popup v-model:show="showFormDialog" position="bottom" round :style="{ height: '88%' }" closeable>
       <div class="form-popup">
@@ -182,6 +186,7 @@ import {
   showConfirmDialog,
   showToast
 } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 import {
   createChannelEntry,
   deleteChannelEntry,
@@ -455,9 +460,13 @@ onMounted(() => {
 .channel-entry-page {
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 14px 14px 96px;
-  background: #f5f6f8;
-  color: #111827;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  background: var(--bg-page);
+  color: var(--text-1);
+}
+
+.page-content {
+  padding: 14px 14px 0;
 }
 
 .hero-card,
@@ -467,8 +476,8 @@ onMounted(() => {
 .state-card,
 .entry-card {
   border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+  background: var(--bg-card);
+  box-shadow: var(--card-shadow);
 }
 
 .hero-card {
@@ -481,7 +490,7 @@ onMounted(() => {
 
 .eyebrow {
   margin: 0 0 5px;
-  color: #1677ff;
+  color: var(--brand);
   font-size: 12px;
   font-weight: 900;
 }
@@ -490,7 +499,7 @@ onMounted(() => {
 .panel-head h2,
 .form-header h2 {
   margin: 0;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -502,7 +511,7 @@ onMounted(() => {
 .hero-card p:not(.eyebrow),
 .form-header p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -537,19 +546,20 @@ onMounted(() => {
 .stat-card strong {
   font-size: 23px;
   font-weight: 900;
+  color: var(--text-1);
 }
 
 .stat-card span {
   margin-top: 4px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .tips-card {
   margin-top: 12px;
   padding: 14px;
-  background: #fff7ed;
-  color: #9a3412;
+  background: var(--brand-light);
+  color: var(--brand-dark);
 }
 
 .tips-card strong {
@@ -583,7 +593,7 @@ onMounted(() => {
 .text-btn {
   border: 0;
   background: transparent;
-  color: #1677ff;
+  color: var(--brand);
   font-weight: 900;
 }
 
@@ -600,7 +610,7 @@ onMounted(() => {
 
 .entry-card {
   padding: 15px;
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--border);
   box-shadow: none;
 }
 
@@ -617,7 +627,7 @@ onMounted(() => {
 
 .entry-title strong {
   overflow: hidden;
-  color: #111827;
+  color: var(--text-1);
   font-size: 18px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -626,7 +636,7 @@ onMounted(() => {
 
 .entry-title span {
   margin-top: 5px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
 }
 
@@ -634,17 +644,17 @@ onMounted(() => {
   margin-top: 12px;
   padding: 12px;
   border-radius: 14px;
-  background: #f8fafc;
+  background: var(--bg-page);
 }
 
 .entry-link span {
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .entry-link strong {
   margin-top: 6px;
-  color: #111827;
+  color: var(--text-1);
   font-size: 13px;
   word-break: break-all;
 }
@@ -661,7 +671,7 @@ onMounted(() => {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: #f8fafc;
+  background: var(--bg-page);
   text-align: center;
 }
 
@@ -670,13 +680,14 @@ onMounted(() => {
   overflow: hidden;
   font-size: 16px;
   font-weight: 900;
+  color: var(--text-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .entry-data span {
   margin-top: 3px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -691,6 +702,7 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  background: var(--bg-card);
 }
 
 .form-header {
@@ -712,7 +724,7 @@ onMounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding: 12px 16px 18px;
-  border-top: 1px solid #edf1f7;
+  border-top: 1px solid var(--border);
 }
 
 @media (min-width: 768px) {

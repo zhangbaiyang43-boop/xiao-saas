@@ -1,12 +1,12 @@
 <template>
   <div class="distribution-page">
-    <PageHeader title="会员分销" />
+    <PageHeader title="员工推荐" />
 
     <div class="page-content">
     <section class="hero-card animate-in">
-      <div class="hero-badge"><span class="live-dot" v-if="settings.invite_reward_enabled"></span>{{ settings.invite_reward_enabled ? '自动运行中' : '已关闭' }}</div>
-      <h1>让老顾客带新顾客到店</h1>
-      <p class="hero-intro">好友扫码成为会员，首次到店核销后，系统按你选的强度自动给邀请人和新顾客发奖励，具体金额由算法按你的客单价实时计算，绝不会让你亏本。</p>
+      <div class="hero-badge"><span class="live-dot" v-if="settings.enabled"></span>{{ settings.enabled ? '自动运行中' : '已关闭' }}</div>
+      <h1>员工/亲友带客到店，自动记佣金</h1>
+      <p class="hero-intro">员工或亲友把新顾客带到店里，顾客首次到店消费后，系统按你选的强度自动给推荐人记一笔待发放佣金——这笔是现金，不是优惠券，需要你线下实际打款后手动标记已发放。</p>
 
       <div class="intensity-switch">
         <div
@@ -21,25 +21,13 @@
       <p class="hero-desc">{{ tierDesc }}</p>
     </section>
 
-    <section v-if="showIntro" class="panel intro-card animate-in">
-      <div class="intro-head">
-        <strong>还没试过邀请奖励？</strong>
-        <span class="intro-close tap-shrink" @click="dismissIntro">✕</span>
-      </div>
-      <p>老顾客带一位朋友到店消费，双方各得一张小额优惠券——门槛和金额已经按"保守"档配置好，成本可控，先开一周看看效果。</p>
-      <div class="intro-actions">
-        <van-button size="small" round type="primary" @click="focusToggle">现在开启</van-button>
-        <span class="intro-dismiss tap-shrink" @click="dismissIntro">先不用了</span>
-      </div>
-    </section>
-
     <section ref="toggleSectionRef" class="panel animate-in" style="animation-delay:.04s">
       <div class="switch-row">
         <span>
-          <strong>开启邀请奖励</strong>
-          <em>只在好友完成第一次核销后发放，避免无效薅券。</em>
+          <strong>开启员工推荐</strong>
+          <em>只在被推荐顾客完成第一次核销/消费后记账，不是持续按单抽成。</em>
         </span>
-        <van-switch v-model="settings.invite_reward_enabled" size="26" :loading="saving" @change="saveEnabled" />
+        <van-switch v-model="settings.enabled" size="26" :loading="saving" @change="saveEnabled" />
       </div>
     </section>
 
@@ -47,8 +35,8 @@
       <div class="panel-head">
         <div>
           <p class="eyebrow">三档强度</p>
-          <h2>消费后才奖励</h2>
-          <span>金额、门槛、有效期都由算法按客单价自动匹配，不需要你操心具体数字，选一档就行。</span>
+          <h2>首单消费后才记佣金</h2>
+          <span>金额由算法按客单价自动匹配，不需要你操心具体数字，选一档就行。</span>
         </div>
       </div>
 
@@ -66,25 +54,66 @@
           </div>
           <div class="tier-amounts">
             <div>
-              <span>邀请人得</span>
-              <strong>¥{{ o.inviter_reward_amount }}</strong>
-            </div>
-            <div>
-              <span>新顾客得</span>
-              <strong>¥{{ o.invitee_reward_amount }}</strong>
+              <span>推荐人得</span>
+              <strong>¥{{ o.staff_commission_amount }}</strong>
             </div>
           </div>
-          <p class="tier-cond">满¥{{ o.invite_reward_min_spend }}可用 · {{ o.invite_reward_valid_days }}天内有效</p>
         </article>
       </div>
     </section>
 
-    <section class="panel animate-in" style="animation-delay:.12s">
+    <section class="panel animate-in" style="animation-delay:.1s">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">邀请记录</p>
+          <p class="eyebrow">员工管理</p>
+          <h2>给员工/亲友生成专属推荐码</h2>
+          <span>员工不需要登录小程序，把推荐码转发给他，顾客注册时填这个码就能和这位员工关联上。</span>
+        </div>
+      </div>
+
+      <div class="staff-add-row">
+        <input v-model="newStaffName" class="staff-add-input" placeholder="员工姓名，例如：小王" maxlength="20" />
+        <van-button size="small" type="primary" round :loading="creatingStaff" @click="addStaff">生成推荐码</van-button>
+      </div>
+
+      <div v-if="staffList.length === 0" class="state-card">
+        <van-empty description="还没有员工，先在上面加一个" />
+      </div>
+      <div v-else class="staff-list">
+        <article v-for="s in staffList" :key="s.id" class="staff-card">
+          <div
+            v-if="s.share_image_url"
+            class="staff-share-image tap-shrink"
+            role="button"
+            aria-label="查看分享码"
+            @click="downloadShareCode(s)"
+          >
+            <img :src="resolveAssetUrl(s.share_image_url)" alt="员工分享码" />
+          </div>
+          <div class="staff-card-main">
+            <strong>{{ s.name }}</strong>
+            <span class="staff-code" @click="copyCode(s.invite_code)">推荐码：{{ s.invite_code }}（点击复制）</span>
+            <span v-if="s.share_image_url" class="staff-share-tip">下载这张码发给员工，员工扫码后点右上角"转发"即可邀请</span>
+            <span v-else-if="s.share_generation_status === 'FAILED'" class="staff-share-error">
+              分享码生成失败{{ s.share_generation_error ? '：' + s.share_generation_error : '' }}
+              <a class="staff-share-retry" @click="regenerateShareCode(s)">重新生成</a>
+            </span>
+          </div>
+          <van-switch
+            :model-value="s.status === 1"
+            size="22"
+            @update:model-value="(val) => toggleStaffStatus(s, val)"
+          />
+        </article>
+      </div>
+    </section>
+
+    <section class="panel animate-in" style="animation-delay:.14s">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">待发放佣金</p>
           <h2>谁带来了新顾客</h2>
-          <span>记录会在被邀请人入会、到店、奖励发放后更新。</span>
+          <span>记录会在被推荐顾客首次到店核销后生成，金额由你线下打款给对应的人。</span>
         </div>
         <button class="text-btn tap-shrink" :disabled="loading" @click="loadRecords">刷新</button>
       </div>
@@ -92,57 +121,44 @@
       <div class="record-summary">
         <div>
           <strong>{{ total }}</strong>
-          <span>邀请记录</span>
-        </div>
-        <div>
-          <strong>{{ visitedCount }}</strong>
-          <span>已到店</span>
+          <span>推荐记录</span>
         </div>
         <div>
           <strong>{{ pendingCount }}</strong>
           <span>待发放</span>
         </div>
+        <div>
+          <strong>¥{{ pendingAmount }}</strong>
+          <span>待发放金额</span>
+        </div>
       </div>
 
       <div v-if="loading" class="state-card">
-        <van-loading size="24px">正在加载邀请记录</van-loading>
+        <van-loading size="24px">正在加载推荐记录</van-loading>
       </div>
 
       <div v-else-if="records.length === 0" class="state-card">
-        <van-empty description="暂无邀请记录" />
+        <van-empty description="暂无推荐记录" />
       </div>
 
       <div v-else class="record-list">
-        <article v-for="row in records" :key="row.record_id || row.invitee_id" class="record-card tap-shrink">
+        <article v-for="row in records" :key="row.record_id" class="record-card tap-shrink">
           <div class="record-top">
             <div>
-              <strong>{{ row.invitee_name || '新顾客' }}</strong>
-              <span>{{ maskPhone(row.invitee_phone) }}</span>
+              <strong>{{ row.staff_name }}</strong>
+              <span>带来顾客：{{ row.invitee_name }}</span>
             </div>
-            <van-tag :type="row.has_visited ? 'success' : 'default'" round>
-              {{ row.has_visited ? '已到店' : '未到店' }}
+            <van-tag :type="row.status === 'SETTLED' ? 'success' : 'default'" round>
+              {{ row.status === 'SETTLED' ? '已发放' : '待发放' }}
             </van-tag>
           </div>
 
-          <div class="relation-box">
-            <div>
-              <span>邀请人</span>
-              <strong>{{ row.inviter_name || '-' }}</strong>
-              <em>{{ maskPhone(row.inviter_phone) }}</em>
-            </div>
-            <div>
-              <span>加入时间</span>
-              <strong>{{ fmtDate(row.joined_at) || '-' }}</strong>
-              <em>核销：{{ fmtDate(row.first_verify_at) || '-' }}</em>
-            </div>
-          </div>
-
           <div class="reward-row">
-            <span :class="['reward-status', rewardClass(row.reward_status)]">
-              {{ rewardText(row.reward_status) }}
+            <span class="reward-status" :class="row.status === 'SETTLED' ? 'done' : 'pending'">
+              ¥{{ row.commission_amount }}
             </span>
             <van-button
-              v-if="row.reward_status === 'PENDING'"
+              v-if="row.status !== 'SETTLED'"
               round
               plain
               type="primary"
@@ -183,22 +199,29 @@ import {
 } from 'vant'
 import PageHeader from '../components/PageHeader.vue'
 import {
-  getDistributionPreview,
-  getDistributionRecords,
-  getDistributionSettings,
-  settleDistributionRecord,
-  updateDistributionSettings,
+  createStaff,
+  getStaffList,
+  getStaffReferralPreview,
+  getStaffReferralRecords,
+  getStaffReferralSettings,
+  regenerateEntranceCode,
+  settleStaffReferralRecord,
+  updateStaffReferralSettings,
+  updateStaffStatus,
   updateTenantSettings
 } from '../api'
 
-const settings = ref({ invite_reward_enabled: false })
-const preview = ref({})   // /v1/distribution/preview 的三档强度结果
+const settings = ref({ enabled: false })
+const preview = ref({})
 const records = ref([])
 const total = ref(0)
 const saving = ref(false)
 const loading = ref(false)
 const switchingIntensity = ref(false)
 const toggleSectionRef = ref(null)
+const staffList = ref([])
+const newStaffName = ref('')
+const creatingStaff = ref(false)
 
 const intensityOptions = [
   { key: 'conservative', label: '保守' },
@@ -211,29 +234,14 @@ const tierOptions = computed(() => preview.value?.outcomes || [])
 const tierDesc = computed(() => {
   if (!preview.value?.outcomes) return '系统正在为你计算金额…'
   if (!preview.value.has_enough_data) return '数据积累中，当前用安全参数自动运行，满 5 单后为你精算'
-  return '选中的档位立即生效，下方是这一档实际会发放的金额'
+  return '选中的档位立即生效，下方是这一档实际会记的佣金金额'
 })
 
-// 一次性引导卡：商户没开过这功能时提醒它存在，开启后或手动关掉就不再出现——
-// 按 tenant 维度记忆，避免同一浏览器登过多个商户号时互相影响。
-const introDismissKey = computed(() => `distribution_intro_dismissed_${localStorage.getItem('tenant_id') || 'default'}`)
-const introDismissed = ref(localStorage.getItem(introDismissKey.value) === '1')
-const showIntro = computed(() => !settings.value.invite_reward_enabled && !introDismissed.value)
-const dismissIntro = () => {
-  introDismissed.value = true
-  localStorage.setItem(introDismissKey.value, '1')
-}
-const focusToggle = () => {
-  toggleSectionRef.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
-}
-
-// 强度切换：跟 CouponCenter.vue 调的是同一个"通用设置"接口，选中即生效，
-// 这个强度只影响邀请奖励，不会牵动进店券/复购券/新客券那几个各自的强度。
 const switchIntensity = async (key) => {
   if (switchingIntensity.value || key === currentIntensity.value) return
   switchingIntensity.value = true
   try {
-    const res = await updateTenantSettings({ distribution_intensity: key })
+    const res = await updateTenantSettings({ staff_referral_intensity: key })
     if (res.code !== 200) { showToast(res.msg || '切换失败'); return }
     await loadPreview()
     showToast('已切换')
@@ -244,21 +252,11 @@ const switchIntensity = async (key) => {
   }
 }
 
-const visitedCount = computed(() => records.value.filter((item) => item.has_visited).length)
-const pendingCount = computed(() => records.value.filter((item) => item.reward_status === 'PENDING').length)
-
-const fmtDate = (iso) => {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return String(iso).slice(0, 16).replace('T', ' ')
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const maskPhone = (phone) => {
-  if (!phone) return '-'
-  return String(phone).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
-}
+const pendingCount = computed(() => records.value.filter((item) => item.status !== 'SETTLED').length)
+const pendingAmount = computed(() => records.value
+  .filter((item) => item.status !== 'SETTLED')
+  .reduce((sum, item) => sum + Number(item.commission_amount || 0), 0)
+  .toFixed(1))
 
 const extractRows = (data) => {
   if (Array.isArray(data)) return data
@@ -268,48 +266,32 @@ const extractRows = (data) => {
   return []
 }
 
-const rewardText = (status) => {
-  const map = {
-    PENDING: '待发放',
-    SETTLED: '已发放',
-    PA: '已发放'
-  }
-  return map[status] || '未触发'
-}
-
-const rewardClass = (status) => {
-  if (status === 'PENDING') return 'pending'
-  if (status === 'SETTLED' || status === 'PA') return 'done'
-  return 'none'
-}
-
 const loadSettings = async () => {
   try {
-    const res = await getDistributionSettings()
+    const res = await getStaffReferralSettings()
     if (res.code === 200 && res.data) {
-      settings.value = { ...settings.value, invite_reward_enabled: Boolean(res.data.invite_reward_enabled) }
+      settings.value = { ...settings.value, enabled: Boolean(res.data.enabled) }
     }
   } catch (error) {
-    showToast({ message: '分销配置加载失败', icon: 'fail' })
+    showToast({ message: '员工推荐配置加载失败', icon: 'fail' })
   }
 }
 
 const loadPreview = async () => {
   try {
-    const res = await getDistributionPreview()
+    const res = await getStaffReferralPreview()
     if (res.code === 200) preview.value = res.data || {}
   } catch (error) {
     // 加载失败不阻断页面，tierDesc 会退回默认文案
   }
 }
 
-// 商户现在只能改这一个开关，金额/门槛已经不接受手填
 const saveEnabled = async () => {
   saving.value = true
   try {
-    const res = await updateDistributionSettings({ invite_reward_enabled: settings.value.invite_reward_enabled })
+    const res = await updateStaffReferralSettings({ enabled: settings.value.enabled })
     if (res.code === 200) {
-      settings.value = { ...settings.value, invite_reward_enabled: Boolean(res.data?.invite_reward_enabled) }
+      settings.value = { ...settings.value, enabled: Boolean(res.data?.enabled) }
       showToast('设置已保存')
       return
     }
@@ -321,18 +303,113 @@ const saveEnabled = async () => {
   }
 }
 
+const loadStaffList = async () => {
+  try {
+    const res = await getStaffList()
+    if (res.code === 200) staffList.value = extractRows(res.data)
+  } catch (error) {
+    showToast({ message: '员工列表加载失败', icon: 'fail' })
+  }
+}
+
+const addStaff = async () => {
+  const name = newStaffName.value.trim()
+  if (!name) { showToast('请填写员工姓名'); return }
+  creatingStaff.value = true
+  try {
+    const res = await createStaff({ name })
+    if (res.code === 200) {
+      showToast('已生成推荐码')
+      newStaffName.value = ''
+      await loadStaffList()
+      return
+    }
+    showToast(res.msg || '创建失败')
+  } catch (error) {
+    showToast({ message: '创建失败，请稍后重试', icon: 'fail' })
+  } finally {
+    creatingStaff.value = false
+  }
+}
+
+const toggleStaffStatus = async (staff, enabled) => {
+  const nextStatus = enabled ? 1 : 0
+  try {
+    const res = await updateStaffStatus(staff.id, { status: nextStatus })
+    if (res.code === 200) {
+      staff.status = nextStatus
+      return
+    }
+    showToast(res.msg || '操作失败')
+  } catch (error) {
+    showToast({ message: '操作失败', icon: 'fail' })
+  }
+}
+
+const resolveAssetUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return `${import.meta.env.VITE_API_ORIGIN || 'https://api.zhangbaiyang.com'}${url}`
+}
+
+const downloadShareCode = (staff) => {
+  const url = resolveAssetUrl(staff.share_image_url)
+  if (!url) { showToast('这张码还没有图片'); return }
+  window.open(url, '_blank')
+}
+
+const regenerateShareCode = async (staff) => {
+  if (!staff.share_code_id) { showToast('缺少分享码记录，无法重新生成'); return }
+  try {
+    const res = await regenerateEntranceCode(staff.share_code_id)
+    if (res.code === 200) {
+      showToast('已重新生成')
+      await loadStaffList()
+      return
+    }
+    showToast(res.msg || '生成失败')
+  } catch (error) {
+    showToast({ message: '生成失败，请稍后重试', icon: 'fail' })
+  }
+}
+
+const copyText = async (text) => {
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+const copyCode = async (code) => {
+  if (!code) return
+  try {
+    await copyText(code)
+    showToast('已复制推荐码')
+  } catch (error) {
+    showToast({ message: '复制失败，请手动复制', icon: 'fail' })
+  }
+}
+
 const loadRecords = async (append = false) => {
   loading.value = !append
   try {
     const skip = append ? records.value.length : 0
-    const res = await getDistributionRecords({ skip, limit: 50 })
+    const res = await getStaffReferralRecords({ skip, limit: 50 })
     if (res.code === 200) {
       const rows = extractRows(res.data)
       records.value = append ? [...records.value, ...rows] : rows
       total.value = Number(res.data?.total ?? rows.length)
     }
   } catch (error) {
-    showToast({ message: '邀请记录加载失败', icon: 'fail' })
+    showToast({ message: '推荐记录加载失败', icon: 'fail' })
   } finally {
     loading.value = false
   }
@@ -342,14 +419,14 @@ const loadMore = () => loadRecords(true)
 
 const settle = async (row) => {
   if (!row.record_id) {
-    showToast({ message: '缺少记录 ，无法标记', icon: 'fail' })
+    showToast({ message: '缺少记录，无法标记', icon: 'fail' })
     return
   }
   try {
-    const res = await settleDistributionRecord(row.record_id)
+    const res = await settleStaffReferralRecord(row.record_id)
     if (res.code === 200) {
       showToast('已标记发放')
-      row.reward_status = 'SETTLED'
+      row.status = 'SETTLED'
       row.settled_at = res.data?.settled_at || new Date().toISOString()
       return
     }
@@ -360,7 +437,7 @@ const settle = async (row) => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSettings(), loadPreview(), loadRecords()])
+  await Promise.all([loadSettings(), loadPreview(), loadRecords(), loadStaffList()])
 })
 </script>
 
@@ -379,13 +456,13 @@ onMounted(async () => {
 
 .panel,
 .state-card,
-.record-card {
+.record-card,
+.staff-card {
   border-radius: 18px;
   background: var(--bg-card);
   box-shadow: var(--card-shadow);
 }
 
-/* 顶部强度卡：跟"今日"页同一个绿色渐变(--hero-bg)，同一套"选一档立即生效"的决策方式 */
 .hero-card {
   padding: 20px;
   border-radius: 18px;
@@ -467,6 +544,7 @@ onMounted(async () => {
   color: var(--text-1);
   font-weight: 900;
   letter-spacing: 0;
+  font-size: 20px;
 }
 
 .panel-head span {
@@ -508,58 +586,12 @@ onMounted(async () => {
   line-height: 1.45;
 }
 
-.intro-card {
-  border: 1px solid var(--brand);
-  background: color-mix(in srgb, var(--brand) 8%, var(--bg-card));
-}
-
-.intro-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.intro-head strong {
-  color: var(--text-1);
-  font-size: 15px;
-  font-weight: 900;
-}
-
-.intro-close {
-  color: var(--text-3);
-  font-size: 14px;
-  padding: 4px;
-}
-
-.intro-card p {
-  margin: 8px 0 0;
-  color: var(--text-2);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.intro-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 12px;
-}
-
-.intro-dismiss {
-  color: var(--text-3);
-  font-size: 13px;
-}
-
 .panel-head {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
   margin-bottom: 12px;
-}
-
-.panel-head h2 {
-  font-size: 20px;
 }
 
 .text-btn {
@@ -625,12 +657,96 @@ onMounted(async () => {
   color: var(--text-1);
 }
 
-.tier-cond {
-  margin: 8px 0 0;
+.staff-add-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.staff-add-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-page);
+  color: var(--text-1);
+  font-size: 14px;
+}
+
+.staff-list {
+  display: grid;
+  gap: 8px;
+}
+
+.staff-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.staff-card-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.staff-card-main strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 900;
+  color: var(--text-1);
+}
+
+.staff-code {
+  display: block;
+  margin-top: 4px;
+  color: var(--brand);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.staff-share-image {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--bg-page);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.staff-share-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.staff-share-tip {
+  display: block;
+  margin-top: 4px;
   color: var(--text-3);
   font-size: 11px;
-  text-align: center;
   line-height: 1.4;
+}
+
+.staff-share-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.staff-share-retry {
+  color: var(--brand);
+  font-weight: 700;
+  margin-left: 4px;
+  cursor: pointer;
 }
 
 .record-summary {
@@ -655,7 +771,7 @@ onMounted(async () => {
 }
 
 .record-summary strong {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 900;
   color: var(--text-1);
 }
@@ -691,10 +807,7 @@ onMounted(async () => {
 }
 
 .record-top strong,
-.record-top span,
-.relation-box span,
-.relation-box strong,
-.relation-box em {
+.record-top span {
   display: block;
   font-style: normal;
 }
@@ -711,40 +824,6 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.relation-box {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.relation-box div {
-  padding: 12px;
-  border-radius: 14px;
-  background: var(--bg-page);
-}
-
-.relation-box span {
-  color: var(--text-2);
-  font-size: 12px;
-}
-
-.relation-box strong {
-  margin-top: 6px;
-  overflow: hidden;
-  color: var(--text-1);
-  font-size: 15px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.relation-box em {
-  margin-top: 4px;
-  color: var(--text-3);
-  font-size: 12px;
-}
-
 .reward-row {
   display: flex;
   justify-content: space-between;
@@ -759,7 +838,7 @@ onMounted(async () => {
   height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
 }
 
@@ -771,11 +850,6 @@ onMounted(async () => {
 .reward-status.done {
   background: var(--brand-light);
   color: var(--success);
-}
-
-.reward-status.none {
-  background: var(--bg-page);
-  color: var(--text-2);
 }
 
 .load-more {

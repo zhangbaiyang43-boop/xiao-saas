@@ -1,3 +1,5 @@
+@import '../assets/iconfont/iconfont.css';
+
 // ─── Design tokens ────────────────────────────────────────────
 :root {
   --brand:           #07C160;
@@ -6,7 +8,7 @@
   --brand-mid:       #9de8c4;
   --text-1:          #111827;
   --text-2:          #4b5563;
-  --text-3:          #9ca3af;
+  --text-3:          #6b7280;   /* 原 #9ca3af 对白底对比度只有 2.5:1，不达 WCAG AA，调深到 4.8:1 */
   --bg-page:         #f5f6fa;
   --bg-card:         #ffffff;
   --border:          #f0f0f0;
@@ -14,8 +16,28 @@
   --success:         #059952;   /* 与 brand 区分，避免撞色 */
   --danger:          #ef4444;
   --warning:         #f59e0b;
-  --hero-bg:         #07C160;   /* 扁平主色头部 */
+  --hero-bg:         linear-gradient(135deg, #06d16e 0%, #07C160 45%, #048a49 100%);
   --hero-dark:       #1a1a2e;   /* 深色头部（会员卡等） */
+  --card-shadow:     0 4px 20px rgba(17, 24, 39, .05);
+  --gold:            linear-gradient(135deg, #ffd76a 0%, #f5a623 100%);
+  --silver:          linear-gradient(135deg, #d9dfe8 0%, #9aa5b5 100%);
+  --bronze:          linear-gradient(135deg, #e3a873 0%, #b9713f 100%);
+  --card-border:     transparent;
+}
+
+// ─── 暗色模式：跟随系统，只翻转 token，组件代码不用改一行 ──────
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand-light:   rgba(7, 193, 96, .16);
+    --text-1:        #f3f4f6;
+    --text-2:        #b0b6c0;
+    --text-3:        #7c828d;
+    --bg-page:       #101216;
+    --bg-card:       #1a1d23;
+    --border:        #2a2d34;
+    --card-shadow:   0 4px 20px rgba(0, 0, 0, .35);
+    --card-border:   #262931;
+  }
 }
 
 // ─── Reset ────────────────────────────────────────────────────
@@ -40,6 +62,12 @@ html, body { height: 100%; overflow-x: hidden; }
 
 .page-body { padding: 12px 16px 0; }
 
+// ─── 模块间距（今日页起，作为后续所有商家后台页面的统一基础间距）──
+.section-block { padding: 14px 16px 0; }
+// hero 底部做了圆角+负边距，紧跟在它后面的第一个模块要叠在上面（悬浮卡片效果），
+// 用相邻选择器而不是手动加类名，这样不管第一个模块是不是条件渲染的都能自动生效。
+.hero-header + .section-block { position: relative; z-index: 1; }
+
 // ─── Section title (More页 / 分组标题) ───────────────────────
 .section-label,
 .section-title {
@@ -53,17 +81,38 @@ html, body { height: 100%; overflow-x: hidden; }
 
 // ─── Hero header (主页渐变头部) ───────────────────────────────
 .hero-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 52px 20px 20px;
+  padding: 52px 20px 32px;
+  margin-bottom: -20px;
   background: var(--hero-bg);
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+  isolation: isolate;
+  &::before {
+    // 右上角一层柔光，给纯色渐变增加一点光影层次，避免看起来是一块死板的色块
+    content: '';
+    position: absolute;
+    top: -40%; right: -20%;
+    width: 70%; height: 140%;
+    background: radial-gradient(circle, rgba(255,255,255,.16) 0%, transparent 65%);
+    pointer-events: none;
+    z-index: -1;
+  }
 }
-.hero-date { font-size: 12px; color: rgba(255,255,255,.7); margin-bottom: 4px; }
-.hero-name { font-size: 22px; font-weight: 900; color: #fff; }
+.hero-date { font-size: 12px; color: rgba(255,255,255,.72); margin-bottom: 4px; letter-spacing: .02em; }
+.hero-name { font-size: 22px; font-weight: 900; color: #fff; letter-spacing: -.2px; }
 
 // ─── Card defaults (Ant Design override) ──────────────────────
-.ant-card { border-radius: var(--radius-card) !important; }
+.ant-card {
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--card-shadow);
+  background: var(--bg-card) !important;
+  border-color: var(--card-border) !important;
+}
+.ant-card-head { color: var(--text-1) !important; border-color: var(--border) !important; }
 .ant-card-head {
   min-height: 44px !important;
   padding: 0 16px !important;
@@ -145,6 +194,51 @@ html, body { height: 100%; overflow-x: hidden; }
     .stat-label { font-size: 11px; color: var(--text-3); margin-top: 2px; display: block; }
   }
 }
+
+// ─── 动效基础设施（今日页起，所有页面统一复用，不要在页面里各写一份）──
+// 1. 卡片错落进场：给模块加 class="animate-in"，用内联 style 设 animation-delay 做错落
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fadeSlideUp .42s cubic-bezier(.22, 1, .36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-in { animation: none; }
+}
+
+// 2. 呼吸圆点：表示"系统正在实时运行"，套色靠 currentColor，放进任何带文字颜色的徽章里即可
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .45; transform: scale(.7); }
+}
+.live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
+
+// 3. 统一按压反馈：所有可点击的卡片/行套上这个 class，手感统一
+.tap-shrink {
+  transition: transform .15s ease;
+  &:active { transform: scale(.97); }
+}
+
+// 4. 列表项进出场（今日页的"待办"用，后续别的页面凡是列表增删都能直接复用）
+.list-fade-move,
+.list-fade-enter-active,
+.list-fade-leave-active { transition: all .28s ease; }
+.list-fade-enter-from,
+.list-fade-leave-to { opacity: 0; transform: translateY(-8px); }
+.list-fade-leave-active { position: absolute; width: 100%; }
 
 // ─── 统一空状态 padding ───────────────────────────────────────
 .ant-empty { padding: 48px 0 !important; }

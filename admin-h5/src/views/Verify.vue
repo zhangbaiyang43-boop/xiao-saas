@@ -6,10 +6,10 @@
 
     <div class="page-body">
       <!-- 摄像头扫码 -->
-      <a-card :bordered="false" style="margin-bottom:12px;border:1px solid var(--brand-mid)">
+      <a-card :bordered="false" class="animate-in" style="margin-bottom:12px;border:1px solid var(--brand-mid)">
         <div style="font-size:12px;color:var(--brand);font-weight:600;margin-bottom:6px">最快方式</div>
         <div style="font-size:17px;font-weight:700;color:var(--text-1);margin-bottom:12px">打开摄像头扫码</div>
-        <a-button type="primary" block size="large" @click="openScanner" style="height:52px;font-size:16px;font-weight:700">
+        <a-button type="primary" block size="large" class="tap-shrink" @click="openScanner" style="height:52px;font-size:16px;font-weight:700">
           <template #icon><ScanOutlined /></template>
           使用摄像头扫码
         </a-button>
@@ -17,7 +17,7 @@
       </a-card>
 
       <!-- 手动输入 -->
-      <a-card :bordered="false" style="margin-bottom:12px">
+      <a-card :bordered="false" class="animate-in" style="margin-bottom:12px;animation-delay:.04s">
         <div style="font-size:12px;color:var(--text-2);font-weight:600;margin-bottom:6px">备用方式</div>
         <div style="font-size:17px;font-weight:700;color:var(--text-1);margin-bottom:12px">手动输入券码</div>
         <a-input
@@ -34,6 +34,7 @@
           type="primary"
           block
           size="large"
+          class="tap-shrink"
           :loading="loading"
           :disabled="!verifyCode.trim()"
           @click="handleVerify"
@@ -50,11 +51,12 @@
         :message="result.title"
         :description="result.message"
         show-icon
+        class="animate-in"
         style="margin-bottom:12px;border-radius:10px"
       />
 
       <!-- 核销记录 -->
-      <a-card :bordered="false" title="最近核销记录" :body-style="{ padding: 0 }">
+      <a-card :bordered="false" title="最近核销记录" class="animate-in" :body-style="{ padding: 0 }" style="animation-delay:.08s">
         <div v-if="loadingHistory" style="display:flex;justify-content:center;padding:32px"><a-spin /></div>
         <a-empty v-else-if="historyList.length === 0" description="暂无核销记录" style="padding:32px 0" />
         <template v-else>
@@ -74,7 +76,7 @@
       <transition name="slide-up">
         <div v-if="scannerVisible" class="scanner-overlay">
           <div class="scanner-header">
-            <button type="button" @click="closeScanner">关闭</button>
+            <button type="button" class="tap-shrink" @click="closeScanner">关闭</button>
             <div>
               <strong>对准顾客二维码</strong>
               <span>识别后自动核销</span>
@@ -82,7 +84,7 @@
           </div>
           <camera-scanner ref="scannerRef" fullscreen auto-start :continuous="true" @scan="handleScannedCode" @error="handleScanError" />
           <div class="scanner-footer">
-            <a-button block @click="closeScanner" style="color:#fff;border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.1)">改为手动输入</a-button>
+            <a-button block class="tap-shrink" @click="closeScanner" style="color:#fff;border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.1)">改为手动输入</a-button>
           </div>
         </div>
       </transition>
@@ -299,27 +301,28 @@ watch(scannerVisible, v => { document.body.style.overflow = v ? 'hidden' : ''; i
 .success-anim { display: flex; justify-content: center; margin-bottom: 18px; }
 .success-svg { width: 88px; height: 88px; overflow: visible; }
 .svg-circle {
-  fill: none; stroke: #16a34a; stroke-width: 4; stroke-linecap: round;
+  fill: none; stroke: var(--success); stroke-width: 4; stroke-linecap: round;
   stroke-dasharray: 214; stroke-dashoffset: 214;
   transform-origin: center; transform: rotate(-90deg);
   animation: draw-circle 0.5s cubic-bezier(0.4,0,0.2,1) forwards;
 }
 .svg-check {
-  fill: none; stroke: #16a34a; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
+  fill: none; stroke: var(--success); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round;
   stroke-dasharray: 55; stroke-dashoffset: 55;
   animation: draw-check 0.35s ease forwards 0.45s;
 }
 @keyframes draw-circle { to { stroke-dashoffset: 0; } }
 @keyframes draw-check  { to { stroke-dashoffset: 0; } }
 .success-title { margin: 0 0 16px; font-size: 26px; font-weight: 900; letter-spacing: .12em; color: #111827; }
-.success-amount { font-size: 42px; font-weight: 900; color: #ef4444; line-height: 1.1; margin-bottom: 14px; }
+.success-amount { font-size: 42px; font-weight: 900; color: var(--danger); line-height: 1.1; margin-bottom: 14px; }
 .success-customer { font-size: 16px; color: #374151; margin-bottom: 20px; span { color: #6b7280; } }
 .success-hint { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: #9ca3af; }
-.blink-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #16a34a; animation: blink 1s step-start infinite; }
+.blink-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--success); animation: blink 1s step-start infinite; }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 
 /* ── 动画 ── */
 .slide-up-enter-active, .slide-up-leave-active, .pop-enter-active, .pop-leave-active { transition: all .22s ease; }
 .slide-up-enter-from, .slide-up-leave-to { transform: translateY(100%); }
 .pop-enter-from, .pop-leave-to { opacity: 0; transform: scale(.94); }
+
 </style>

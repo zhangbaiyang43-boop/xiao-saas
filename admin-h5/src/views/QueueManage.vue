@@ -5,12 +5,12 @@
         <div class="queue-title">排位管理</div>
         <div class="queue-subtitle">取号 · 叫号 · 入座 · 过号</div>
       </div>
-      <a-button type="text" :loading="loading" @click="loadAll">
+      <a-button type="text" aria-label="刷新" :loading="loading" @click="loadAll">
         <template #icon><ReloadOutlined /></template>
       </a-button>
     </div>
 
-    <div class="summary-band">
+    <div class="summary-band animate-in">
       <div class="summary-main">
         <span>当前叫号</span>
         <strong>{{ status.current_called || '暂无' }}</strong>
@@ -21,13 +21,13 @@
       </div>
     </div>
 
-    <div class="quick-actions">
-      <a-button class="take-btn take-a" :loading="creatingType === 'A'" @click="quickTake('A')">取小桌号</a-button>
-      <a-button class="take-btn take-b" :loading="creatingType === 'B'" @click="quickTake('B')">取中桌号</a-button>
-      <a-button class="take-btn take-c" :loading="creatingType === 'C'" @click="quickTake('C')">取大桌号</a-button>
+    <div class="quick-actions animate-in" style="animation-delay:.04s">
+      <a-button class="take-btn take-a tap-shrink" :loading="creatingType === 'A'" @click="quickTake('A')">取小桌号</a-button>
+      <a-button class="take-btn take-b tap-shrink" :loading="creatingType === 'B'" @click="quickTake('B')">取中桌号</a-button>
+      <a-button class="take-btn take-c tap-shrink" :loading="creatingType === 'C'" @click="quickTake('C')">取大桌号</a-button>
     </div>
 
-    <div class="call-panel">
+    <div class="call-panel animate-in" style="animation-delay:.08s">
       <div class="call-title">叫下一位</div>
       <div class="call-buttons">
         <a-button v-for="type in queueTypes" :key="type.key" class="call-btn" :disabled="isCallDisabled(type.key)" :loading="callingType === type.key" @click="callNext(type.key)">
@@ -68,7 +68,6 @@
           </div>
           <div v-if="ticket.note" class="ticket-note">{{ ticket.note }}</div>
           <div class="ticket-actions">
-            <a-button v-if="ticket.status === 'waiting'" size="large" :disabled="calledCounts[ticket.queue_type] > 0" @click="callSpecific(ticket)">{{ calledCounts[ticket.queue_type] > 0 ? '先处理已叫号' : '叫号' }}</a-button>
             <a-button size="large" type="primary" :loading="updatingId === ticket.id + ':seat'" @click="seatTicket(ticket)">入座</a-button>
             <a-button size="large" danger :loading="updatingId === ticket.id + ':skip'" @click="skipTicket(ticket)">过号</a-button>
           </div>
@@ -213,10 +212,6 @@ async function callNext(type) {
   }
 }
 
-async function callSpecific(ticket) {
-  await callNext(ticket.queue_type)
-}
-
 async function seatTicket(ticket) {
   updatingId.value = `${ticket.id}:seat`
   try {
@@ -247,17 +242,17 @@ onMounted(loadAll)
 </script>
 
 <style scoped>
-.queue-page { min-height: 100vh; background: #f5f6fa; }
+.queue-page { min-height: 100vh; background: var(--bg-page); }
 .queue-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 52px 16px 12px;
-  background: #fff;
-  border-bottom: 1px solid #f0f0f0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
 }
-.queue-title { font-size: 20px; font-weight: 900; color: #111; }
-.queue-subtitle { margin-top: 2px; font-size: 12px; color: #8c8c8c; }
+.queue-title { font-size: 20px; font-weight: 900; color: var(--text-1); }
+.queue-subtitle { margin-top: 2px; font-size: 12px; color: var(--text-3); }
 .summary-band {
   display: grid;
   grid-template-columns: 1fr 112px;
@@ -267,15 +262,16 @@ onMounted(loadAll)
 .summary-main, .summary-side {
   min-height: 88px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--bg-card);
+  box-shadow: var(--card-shadow);
   padding: 14px;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
-.summary-main span, .summary-side span { font-size: 13px; color: #6b7280; }
+.summary-main span, .summary-side span { font-size: 13px; color: var(--text-2); }
 .summary-main strong { margin-top: 6px; font-size: 42px; line-height: 1; color: #ef4444; }
-.summary-side strong { margin-top: 6px; font-size: 32px; line-height: 1; color: #111; }
+.summary-side strong { margin-top: 6px; font-size: 32px; line-height: 1; color: var(--text-1); }
 .quick-actions, .call-buttons {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -286,30 +282,30 @@ onMounted(loadAll)
 .take-a { background: #07c160; border-color: #07c160; color: #fff; }
 .take-b { background: #1677ff; border-color: #1677ff; color: #fff; }
 .take-c { background: #ff7a00; border-color: #ff7a00; color: #fff; }
-.call-panel { margin: 12px 16px 0; padding: 12px; border-radius: 12px; background: #fff; }
-.call-title { margin-bottom: 10px; font-size: 14px; font-weight: 800; color: #111; }
+.call-panel { margin: 12px 16px 0; padding: 12px; border-radius: 12px; background: var(--bg-card); box-shadow: var(--card-shadow); }
+.call-title { margin-bottom: 10px; font-size: 14px; font-weight: 800; color: var(--text-1); }
 .page-alert { margin: 12px 16px 0; border-radius: 10px; }
-.loading-wrap { margin: 12px 16px 0; padding: 14px; border-radius: 12px; background: #fff; }
+.loading-wrap { margin: 12px 16px 0; padding: 14px; border-radius: 12px; background: var(--bg-card); }
 .queue-section { margin: 12px 16px 0; }
 .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.section-title { font-size: 16px; font-weight: 900; color: #111; }
-.section-desc { margin-top: 1px; font-size: 12px; color: #9ca3af; }
-.count-pill { padding: 4px 10px; border-radius: 999px; background: #fff; color: #374151; font-size: 12px; font-weight: 800; }
-.empty-box { padding: 18px; border-radius: 12px; background: #fff; text-align: center; color: #9ca3af; }
-.ticket-card { margin-bottom: 8px; padding: 14px; border-radius: 12px; background: #fff; border-left: 5px solid #e5e7eb; }
+.section-title { font-size: 16px; font-weight: 900; color: var(--text-1); }
+.section-desc { margin-top: 1px; font-size: 12px; color: var(--text-3); }
+.count-pill { padding: 4px 10px; border-radius: 999px; background: var(--bg-card); box-shadow: var(--card-shadow); color: var(--text-2); font-size: 12px; font-weight: 800; }
+.empty-box { padding: 18px; border-radius: 12px; background: var(--bg-card); text-align: center; color: var(--text-3); }
+.ticket-card { margin-bottom: 8px; padding: 14px; border-radius: 12px; background: var(--bg-card); box-shadow: var(--card-shadow); border-left: 5px solid var(--border); }
 .ticket-card.status-called { border-left-color: #ef4444; }
 .ticket-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.queue-no { font-size: 30px; line-height: 1; font-weight: 900; color: #111; }
-.ticket-meta { margin-top: 6px; font-size: 13px; color: #6b7280; }
-.status-tag { flex-shrink: 0; padding: 4px 9px; border-radius: 999px; background: #f3f4f6; color: #374151; font-size: 12px; font-weight: 800; }
+.queue-no { font-size: 30px; line-height: 1; font-weight: 900; color: var(--text-1); }
+.ticket-meta { margin-top: 6px; font-size: 13px; color: var(--text-2); }
+.status-tag { flex-shrink: 0; padding: 4px 9px; border-radius: 999px; background: var(--bg-page); color: var(--text-2); font-size: 12px; font-weight: 800; }
 .status-called .status-tag { background: #fef2f2; color: #ef4444; }
 .ticket-note { margin-top: 8px; padding: 8px; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; }
-.ticket-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.ticket-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 12px; }
 .ticket-actions :deep(.ant-btn) { height: 44px; border-radius: 10px; font-weight: 800; }
 .bottom-space { height: 84px; }
 @media (max-width: 360px) {
   .summary-band { grid-template-columns: 1fr; }
-  .quick-actions, .call-buttons, .ticket-actions { grid-template-columns: 1fr; }
+  .quick-actions, .call-buttons { grid-template-columns: 1fr; }
 }
 </style>
 

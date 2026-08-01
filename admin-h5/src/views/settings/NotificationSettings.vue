@@ -2,12 +2,12 @@
   <div class="sub-page notify-page">
     <PageHeader title="通知提醒" />
     <div class="page-body">
-      <section class="summary-card">
+      <section class="summary-card animate-in">
         <p>消息提醒</p>
         <h1>{{ enabledCount }} 项已开启</h1>
         <span>只保留和日常经营强相关的提醒，减少打扰。</span>
       </section>
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.04s">
         <div class="switch-row">
           <div><strong>核销提醒</strong><span>顾客用券后通知商家</span></div>
           <a-switch v-model:checked="notificationSettings.redeem" @change="saveNotifications" />
@@ -51,18 +51,18 @@ onMounted(loadProfile)
 </script>
 
 <style scoped>
-.notify-page { min-height: 100vh; background: #f5f6f8; }
+.notify-page { min-height: 100vh; background: var(--bg-page); }
 .page-body { padding: 12px 16px 28px; }
-.summary-card, .panel-card { background: #fff; border: 1px solid #eef2f7; border-radius: 14px; }
+.summary-card, .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--card-shadow); }
 .summary-card { padding: 18px; }
 .summary-card p, .summary-card h1, .summary-card span { display: block; margin: 0; }
 .summary-card p { color: #7c3aed; font-size: 12px; font-weight: 900; }
-.summary-card h1 { margin-top: 5px; color: #111827; font-size: 22px; font-weight: 900; }
-.summary-card span { margin-top: 6px; color: #64748b; font-size: 13px; }
+.summary-card h1 { margin-top: 5px; color: var(--text-1); font-size: 22px; font-weight: 900; }
+.summary-card span { margin-top: 6px; color: var(--text-2); font-size: 13px; }
 .panel-card { margin-top: 12px; overflow: hidden; }
-.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #f1f5f9; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .switch-row.last { border-bottom: 0; }
 .switch-row strong, .switch-row span { display: block; }
-.switch-row strong { color: #111827; font-size: 14px; font-weight: 800; }
-.switch-row span { margin-top: 3px; color: #64748b; font-size: 12px; }
+.switch-row strong { color: var(--text-1); font-size: 14px; font-weight: 800; }
+.switch-row span { margin-top: 3px; color: var(--text-2); font-size: 12px; }
 </style>

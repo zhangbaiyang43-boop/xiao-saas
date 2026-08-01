@@ -2,13 +2,13 @@
   <div class="sub-page device-page">
     <PageHeader title="设备与收银" />
     <div class="page-body">
-      <section class="summary-card">
+      <section class="summary-card animate-in">
         <p>订单设备</p>
         <h1>{{ printerConfig.configured ? '打印已就绪' : '建议配置打印机' }}</h1>
         <span>{{ printerConfig.configured ? '订单和排位小票可自动打印' : '配置后减少人工接单和手写小票' }}</span>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.04s">
         <div class="panel-head"><div><strong>小票打印机</strong><span>订单提交后自动推送到后厨</span></div><a-tag :class="printerConfig.configured ? 'tag-ok' : 'tag-warn'">{{ printerConfig.configured ? '已配置' : '未配置' }}</a-tag></div>
         <div class="form-block">
           <a-form layout="vertical">
@@ -34,7 +34,7 @@
         </div>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.08s">
         <div class="panel-head"><div><strong>排位设备</strong><span>排位小票和大屏叫号</span></div></div>
         <div class="queue-block">
           <div class="queue-row"><span>排位小票打印</span><a-tag v-if="printerConfig.configured" color="green">{{ queuePrinterStatusText }}</a-tag><a-tag v-else>未配置</a-tag></div>
@@ -45,7 +45,7 @@
         </div>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.12s">
         <div class="panel-head"><div><strong>收银 API</strong><span>给自动扫码收银机对接使用</span></div></div>
         <template v-if="posConfig">
           <div class="info-row"><span class="info-label">接口地址</span><span class="info-value">{{ posConfig.verify_url }}</span></div>
@@ -56,10 +56,10 @@
         <div class="action-row"><a-button @click="loadPosConfig">刷新</a-button><a-button type="primary" @click="copyPosExample">复制参数</a-button><a-button danger @click="handleResetPosKey">重置密钥</a-button></div>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.16s">
         <div class="panel-head"><div><strong>碰一碰标签</strong><span>手机一碰打开入会、领券或加微信</span></div></div>
         <div class="touch-grid">
-          <button v-for="item in touchActions" :key="item.value" :class="{ active: touchForm.action === item.value }" @click="touchForm.action = item.value"><strong>{{ item.label }}</strong><span>{{ item.desc }}</span></button>
+          <button v-for="item in touchActions" :key="item.value" class="tap-shrink" :class="{ active: touchForm.action === item.value }" @click="touchForm.action = item.value"><strong>{{ item.label }}</strong><span>{{ item.desc }}</span></button>
         </div>
         <div class="form-block compact">
           <a-input v-model:value="touchForm.remark" placeholder="放在哪里，例如：1号桌" style="margin-bottom:8px" />
@@ -239,36 +239,36 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.device-page { min-height: 100vh; background: #f5f6f8; }
+.device-page { min-height: 100vh; background: var(--bg-page); }
 .page-body { padding: 12px 16px 28px; }
-.summary-card, .panel-card { background: #fff; border: 1px solid #eef2f7; border-radius: 14px; }
+.summary-card, .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--card-shadow); }
 .summary-card { padding: 18px; }
 .summary-card p, .summary-card h1, .summary-card span { display: block; margin: 0; }
-.summary-card p { color: #f97316; font-size: 12px; font-weight: 900; }
-.summary-card h1 { margin-top: 5px; color: #111827; font-size: 22px; font-weight: 900; }
-.summary-card span { margin-top: 6px; color: #64748b; font-size: 13px; }
+.summary-card p { color: var(--warning); font-size: 12px; font-weight: 900; }
+.summary-card h1 { margin-top: 5px; color: var(--text-1); font-size: 22px; font-weight: 900; }
+.summary-card span { margin-top: 6px; color: var(--text-2); font-size: 13px; }
 .panel-card { margin-top: 12px; overflow: hidden; }
-.panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 16px 10px; border-bottom: 1px solid #f1f5f9; }
+.panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
 .panel-head strong, .panel-head span { display: block; }
-.panel-head strong { color: #111827; font-size: 15px; font-weight: 900; }
-.panel-head span { margin-top: 4px; color: #64748b; font-size: 12px; }
+.panel-head strong { color: var(--text-1); font-size: 15px; font-weight: 900; }
+.panel-head span { margin-top: 4px; color: var(--text-2); font-size: 12px; }
 .tag-ok, .tag-warn { margin: 0; border-radius: 12px; font-size: 11px; font-weight: 800; }
 .tag-ok { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
 .tag-warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
 .form-block { padding: 14px 16px 16px; }
 .form-block.compact { padding-top: 0; }
 .queue-block { padding: 14px 16px 16px; }
-.queue-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: #111827; font-size: 14px; font-weight: 800; }
-.queue-link, .touch-url { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: #f8fafc; color: #111827; font-size: 12px; line-height: 1.5; word-break: break-all; }
+.queue-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: var(--text-1); font-size: 14px; font-weight: 800; }
+.queue-link, .touch-url { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--bg-page); color: var(--text-1); font-size: 12px; line-height: 1.5; word-break: break-all; }
 .queue-actions, .touch-actions, .action-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
-.action-row { grid-template-columns: repeat(3, 1fr); padding: 12px 16px; border-top: 1px solid #f1f5f9; }
+.action-row { grid-template-columns: repeat(3, 1fr); padding: 12px 16px; border-top: 1px solid var(--border); }
 .queue-display-qr { display: block; width: 128px; height: 128px; margin: 12px auto 0; }
-.empty-tip { padding: 16px; color: #64748b; font-size: 13px; background: #fafafa; }
+.empty-tip { padding: 16px; color: var(--text-2); font-size: 13px; background: var(--bg-page); }
 .touch-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 14px 16px; }
-.touch-grid button { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; padding: 10px 12px; text-align: left; }
-.touch-grid button.active { border-color: #07c160; background: #f0fdf4; }
+.touch-grid button { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-page); color: var(--text-1); padding: 10px 12px; text-align: left; }
+.touch-grid button.active { border-color: var(--brand); background: var(--brand-light); }
 .touch-grid strong, .touch-grid span { display: block; }
-.touch-grid strong { color: #111827; font-size: 14px; font-weight: 800; }
-.touch-grid span { margin-top: 3px; color: #64748b; font-size: 11px; }
+.touch-grid strong { color: var(--text-1); font-size: 14px; font-weight: 800; }
+.touch-grid span { margin-top: 3px; color: var(--text-2); font-size: 11px; }
 @media (max-width: 390px) { .action-row { grid-template-columns: 1fr; } }
 </style>

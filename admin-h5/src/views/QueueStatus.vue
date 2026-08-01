@@ -1,25 +1,25 @@
 <template>
   <div class="queue-status-page">
     <main class="status-shell">
-      <section v-if="loading && !ticket" class="state-card">
+      <section v-if="loading && !ticket" class="state-card animate-in">
         <div class="spinner" />
         <h1>正在查询排队进度</h1>
         <p>请稍候</p>
       </section>
 
-      <section v-else-if="invalid" class="state-card">
+      <section v-else-if="invalid" class="state-card animate-in">
         <div class="invalid-icon">!</div>
         <h1>排队查询已失效</h1>
         <p>{{ error || '请联系门店前台确认当前排队状态' }}</p>
       </section>
 
       <template v-else-if="ticket">
-        <section class="shop-head">
+        <section class="shop-head animate-in">
           <span>{{ ticket.shop_name || '门店排队' }}</span>
           <strong>{{ ticket.status_text || statusText }}</strong>
         </section>
 
-        <section class="number-card" :class="statusClass">
+        <section class="number-card animate-in" :class="statusClass">
           <div class="label">排队号码</div>
           <div class="number">{{ ticket.queue_number || ticket.queue_no }}</div>
           <div class="meta-row">
@@ -28,7 +28,7 @@
           </div>
         </section>
 
-        <section class="progress-card">
+        <section class="progress-card animate-in">
           <div class="wait-main">
             <span>前方等待</span>
             <strong>{{ ticket.ahead_count ?? 0 }}</strong>
@@ -37,7 +37,7 @@
           <div class="estimate">预计等待 {{ ticket.estimated_wait_text || '-' }}</div>
         </section>
 
-        <section class="detail-card">
+        <section class="detail-card animate-in">
           <div class="detail-row">
             <span>当前状态</span>
             <strong>{{ ticket.status_text || statusText }}</strong>
@@ -53,8 +53,8 @@
         </section>
 
         <footer class="refresh-line">
-          <span>{{ pollingLabel }}</span>
-          <button type="button" :disabled="loading" @click="loadStatus(true)">{{ loading ? '刷新中' : '手动刷新' }}</button>
+          <span class="live-line"><span v-if="!isFinal" class="live-dot" />{{ pollingLabel }}</span>
+          <button type="button" class="tap-shrink" :disabled="loading" @click="loadStatus(true)">{{ loading ? '刷新中' : '手动刷新' }}</button>
         </footer>
       </template>
     </main>
@@ -166,9 +166,29 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 基础 .animate-in / .tap-shrink 用全局 global.scss 定义；这里只加错落延迟
+   和这个页面专属的、稍微放大的呼吸点样式（手机顾客页比大屏更小巧）。 */
+.animate-in:nth-of-type(2) { animation-delay: .05s; }
+.animate-in:nth-of-type(3) { animation-delay: .1s; }
+.animate-in:nth-of-type(4) { animation-delay: .15s; }
+@keyframes queueStatusLivePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.8); }
+}
+.live-dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px rgba(7,193,96,.18);
+  animation: queueStatusLivePulse 1.6s ease-in-out infinite;
+  margin-right: 6px;
+}
+.live-line { display: inline-flex; align-items: center; }
+
 .queue-status-page {
   min-height: 100vh;
-  background: #f5f6f8;
+  background: var(--bg-page);
   padding: 14px;
   box-sizing: border-box;
 }
@@ -179,46 +199,46 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 2px 14px;
-  color: #111827;
+  color: var(--text-1);
 }
 .shop-head span { font-size: 18px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shop-head strong { flex-shrink: 0; font-size: 13px; color: #07c160; background: #e8f9f0; border-radius: 999px; padding: 5px 10px; }
+.shop-head strong { flex-shrink: 0; font-size: 13px; color: var(--success); background: var(--brand-light); border-radius: 999px; padding: 5px 10px; }
 .number-card,
 .progress-card,
 .detail-card,
 .state-card {
-  background: #fff;
-  border-radius: 14px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   box-shadow: 0 4px 16px rgba(15, 23, 42, .06);
 }
 .number-card { padding: 22px 18px; text-align: center; }
-.label { font-size: 13px; color: #6b7280; font-weight: 700; }
-.number { margin-top: 8px; font-size: 72px; line-height: 1; font-weight: 1000; color: #ef4444; letter-spacing: 0; }
-.number-card--called .number { color: #07c160; }
+.label { font-size: 13px; color: var(--text-2); font-weight: 700; }
+.number { margin-top: 8px; font-size: 72px; line-height: 1; font-weight: 1000; color: var(--danger); letter-spacing: 0; }
+.number-card--called .number { color: var(--brand); }
 .number-card--seated .number,
 .number-card--skipped .number,
-.number-card--cancelled .number { color: #6b7280; }
+.number-card--cancelled .number { color: var(--text-2); }
 .meta-row { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
-.meta-row span { min-width: 76px; padding: 7px 12px; border-radius: 999px; background: #f3f4f6; color: #111827; font-weight: 800; font-size: 14px; }
+.meta-row span { min-width: 76px; padding: 7px 12px; border-radius: 999px; background: #f3f4f6; color: var(--text-1); font-weight: 800; font-size: 14px; }
 .progress-card { margin-top: 12px; padding: 18px; }
-.wait-main { display: flex; align-items: baseline; justify-content: center; gap: 8px; color: #111827; }
-.wait-main span { font-size: 15px; color: #6b7280; font-weight: 700; }
-.wait-main strong { font-size: 48px; line-height: 1; color: #111827; font-weight: 1000; }
-.estimate { margin-top: 10px; text-align: center; color: #07c160; font-size: 15px; font-weight: 800; }
+.wait-main { display: flex; align-items: baseline; justify-content: center; gap: 8px; color: var(--text-1); }
+.wait-main span { font-size: 15px; color: var(--text-2); font-weight: 700; }
+.wait-main strong { font-size: 48px; line-height: 1; color: var(--text-1); font-weight: 1000; }
+.estimate { margin-top: 10px; text-align: center; color: var(--brand); font-size: 15px; font-weight: 800; }
 .detail-card { margin-top: 12px; padding: 0 16px; }
-.detail-row { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #f0f1f3; }
+.detail-row { min-height: 50px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); }
 .detail-row:last-child { border-bottom: none; }
-.detail-row span { color: #6b7280; font-size: 14px; }
-.detail-row strong { color: #111827; font-size: 14px; text-align: right; }
-.detail-row--tip strong { color: #ef4444; }
-.refresh-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 2px; font-size: 12px; color: #9ca3af; }
-.refresh-line button { border: none; border-radius: 999px; background: #07c160; color: #fff; padding: 8px 14px; font-weight: 800; }
+.detail-row span { color: var(--text-2); font-size: 14px; }
+.detail-row strong { color: var(--text-1); font-size: 14px; text-align: right; }
+.detail-row--tip strong { color: var(--danger); }
+.refresh-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 2px; font-size: 12px; color: var(--text-3); }
+.refresh-line button { border: none; border-radius: 999px; background: var(--brand); color: #fff; padding: 8px 14px; font-weight: 800; }
 .refresh-line button:disabled { opacity: .6; }
 .state-card { margin-top: 28px; padding: 34px 22px; text-align: center; }
-.state-card h1 { margin: 14px 0 8px; font-size: 20px; color: #111827; }
-.state-card p { margin: 0; color: #6b7280; line-height: 1.6; }
-.invalid-icon { width: 52px; height: 52px; margin: 0 auto; border-radius: 50%; background: #fee2e2; color: #ef4444; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; }
-.spinner { width: 44px; height: 44px; margin: 0 auto; border-radius: 50%; border: 4px solid #e5e7eb; border-top-color: #07c160; animation: spin 1s linear infinite; }
+.state-card h1 { margin: 14px 0 8px; font-size: 20px; color: var(--text-1); }
+.state-card p { margin: 0; color: var(--text-2); line-height: 1.6; }
+.invalid-icon { width: 52px; height: 52px; margin: 0 auto; border-radius: 50%; background: #fee2e2; color: var(--danger); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; }
+.spinner { width: 44px; height: 44px; margin: 0 auto; border-radius: 50%; border: 4px solid var(--border); border-top-color: var(--brand); animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (min-width: 768px) {
   .queue-status-page { padding-top: 28px; }

@@ -73,12 +73,23 @@ export const getWeworkContactWays = (params) => request.get('/v1/wework/contact-
 export const getWeworkEvents = (params) => request.get('/v1/wework/events', { params })
 
 export const getDashboardStats = () => request.get('/v1/stats/dashboard')
+export const getTableCouponActivity = () => request.get('/v1/stats/table-coupon-activity')
 export const getMerchantSystemStatus = () => request.get('/v1/merchant/system-status')
 
 export const getDistributionSettings = () => request.get('/v1/distribution/settings')
 export const updateDistributionSettings = (data) => request.put('/v1/distribution/settings', data)
+export const getDistributionPreview = () => request.get('/v1/distribution/preview')
 export const getDistributionRecords = (params) => request.get('/v1/distribution/records', { params })
 export const settleDistributionRecord = (id) => request.post(`/v1/distribution/records/${id}/settle`)
+
+export const getStaffReferralSettings = () => request.get('/v1/staff-referral/settings')
+export const updateStaffReferralSettings = (data) => request.put('/v1/staff-referral/settings', data)
+export const getStaffReferralPreview = () => request.get('/v1/staff-referral/preview')
+export const getStaffReferralRecords = (params) => request.get('/v1/staff-referral/records', { params })
+export const settleStaffReferralRecord = (id) => request.post(`/v1/staff-referral/records/${id}/settle`)
+export const createStaff = (data) => request.post('/v1/staff-referral/staff', data)
+export const getStaffList = () => request.get('/v1/staff-referral/staff')
+export const updateStaffStatus = (id, data) => request.put(`/v1/staff-referral/staff/${id}/status`, data)
 
 export const getMembershipConfig = () => request.get('/v1/membership/config')
 export const getCustomerMembership = (id) => request.get(`/v1/membership/customers/${id}`)
@@ -93,7 +104,9 @@ export const updateMenuItemStock = (id, stock) => request.patch(`/v1/menu/items/
 export const parseMenuText = (text) => request.post('/v1/menu/parse-text', { text })
 export const importMenuBatch = (items) => request.post('/v1/menu/import-batch', { items })
 export const generateDishDesc = (data) => request.post('/v1/menu/generate-desc', data)
-export const getAiDailyAnalysis = () => request.post('/v1/stats/ai-analysis')
+export const searchDishLibrary = (params) => request.get('/v1/dish-library', { params })
+export const contributeDishToLibrary = (data) => request.post('/v1/dish-library/contribute', data)
+export const importDishLibraryBatch = (items) => request.post('/v1/dish-library/import-batch', { items })
 export const uploadDishImage = (file) => {
   const fd = new FormData()
   fd.append('file', file)

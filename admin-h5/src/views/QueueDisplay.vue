@@ -11,7 +11,7 @@
       </div>
     </header>
 
-    <main class="hero-panel">
+    <main class="hero-panel animate-in" :key="status.current_called">
       <div class="hero-label">当前叫号</div>
       <div class="current-number" :class="{ empty: !status.current_called }">
         {{ status.current_called || '暂无叫号' }}
@@ -35,7 +35,7 @@
     </section>
 
     <footer class="display-footer">
-      <span>{{ loading ? '正在更新' : '自动刷新中' }}</span>
+      <span class="live-line"><span class="live-dot" /> {{ loading ? '正在更新' : '自动刷新中' }}</span>
       <span v-if="error" class="error-line">{{ error }}</span>
     </footer>
   </div>
@@ -94,11 +94,30 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 基础 .animate-in 用全局 global.scss 定义；这里只保留大屏专属的、放大版
+   呼吸点样式（10px + 光晕，比手机端 6px 的更适合远距离观看电视大屏）。
+   这是常亮电视大屏，配色固定深色，不跟随 prefers-color-scheme。 */
+@keyframes queueLivePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.8); }
+}
+.live-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 4px rgba(7,193,96,.2);
+  animation: queueLivePulse 1.6s ease-in-out infinite;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.live-line { display: inline-flex; align-items: center; }
+
 .display-page {
   min-height: 100vh;
   box-sizing: border-box;
   padding: 40px 48px 32px;
-  background: #101010;
+  background: var(--hero-dark);
   color: #ffffff;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
@@ -116,6 +135,8 @@ onBeforeUnmount(() => {
 .time-block strong { display: block; font-size: clamp(32px, 4vw, 64px); line-height: .95; font-weight: 900; color: #f5f5f5; }
 .time-block span { display: block; margin-top: 10px; font-size: clamp(15px, 1.2vw, 22px); color: #a3a3a3; font-weight: 800; }
 .hero-panel {
+  position: relative;
+  overflow: hidden;
   min-height: 380px;
   border-radius: 24px;
   background: #ffffff;
@@ -127,13 +148,21 @@ onBeforeUnmount(() => {
   padding: 32px;
   box-shadow: 0 28px 80px rgb(0 0 0 / .28);
 }
+.hero-panel::before {
+  content: '';
+  position: absolute;
+  top: -120px; right: -100px;
+  width: 320px; height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(7,193,96,.12), transparent 70%);
+}
 .hero-label { font-size: clamp(28px, 3vw, 52px); line-height: 1; color: #606060; font-weight: 900; }
 .current-number {
   margin-top: 28px;
   font-size: clamp(112px, 18vw, 260px);
   line-height: .9;
   font-weight: 1000;
-  color: #ef4444;
+  color: var(--danger);
   letter-spacing: 0;
   white-space: nowrap;
 }

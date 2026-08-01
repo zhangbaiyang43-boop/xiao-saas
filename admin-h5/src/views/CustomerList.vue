@@ -5,7 +5,7 @@
     </PageHeader>
 
     <!-- 搜索 -->
-    <div style="padding:12px 16px;background:#fff;border-bottom:1px solid var(--border)">
+    <div class="search-bar animate-in">
       <a-input-search
         v-model:value="keyword"
         placeholder="搜手机号或姓名"
@@ -18,9 +18,9 @@
     <!-- 内容 -->
     <div class="page-body">
       <template v-if="loading && customers.length === 0">
-        <a-skeleton active avatar :paragraph="{ rows: 2 }" style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px" />
-        <a-skeleton active avatar :paragraph="{ rows: 2 }" style="background:#fff;border-radius:12px;padding:14px;margin-bottom:10px" />
-        <a-skeleton active avatar :paragraph="{ rows: 2 }" style="background:#fff;border-radius:12px;padding:14px" />
+        <a-skeleton active avatar :paragraph="{ rows: 2 }" class="customer-skeleton" />
+        <a-skeleton active avatar :paragraph="{ rows: 2 }" class="customer-skeleton" />
+        <a-skeleton active avatar :paragraph="{ rows: 2 }" class="customer-skeleton" style="margin-bottom:0" />
       </template>
 
       <div v-else-if="loadError" class="error-state">
@@ -34,34 +34,38 @@
       </a-empty>
 
       <template v-else>
-        <div v-for="customer in visibleCustomers" :key="customer.id" class="customer-card" @click="goToDetail(customer.id)">
-          <div class="avatar">
-            <UserOutlined style="font-size:20px;color:var(--brand)" />
-          </div>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <span style="font-size:15px;font-weight:700;color:var(--text-1)">{{ customer.name }}</span>
-              <a-tag :color="isActive(customer) ? 'success' : 'error'" size="small" style="font-size:11px">
-                {{ isActive(customer) ? '正常' : '已停用' }}
-              </a-tag>
+        <div class="customer-list animate-in" style="animation-delay:.04s">
+          <div v-for="customer in visibleCustomers" :key="customer.id" class="customer-card tap-shrink" @click="goToDetail(customer.id)">
+            <div class="avatar">
+              <UserOutlined style="font-size:20px;color:var(--brand)" />
             </div>
-            <div style="font-size:13px;color:var(--text-2);margin-bottom:6px">{{ formatPhone(customer.phone) }}</div>
-            <div style="display:flex;gap:6px;flex-wrap:wrap">
-              <span class="c-tag">{{ customer.source }}</span>
-              <span class="c-tag">{{ customer.last_consume_time ? '最近到店' : '还未消费' }}</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                <span style="font-size:15px;font-weight:700;color:var(--text-1)">{{ customer.name }}</span>
+                <a-tag :color="isActive(customer) ? 'success' : 'error'" size="small" style="font-size:11px">
+                  {{ isActive(customer) ? '正常' : '已停用' }}
+                </a-tag>
+              </div>
+              <div style="font-size:13px;color:var(--text-2);margin-bottom:6px">
+                {{ formatPhone(customer.phone) }}<span v-if="customer.store_member_no"> · 会员卡号 {{ formatMemberNo(customer.store_member_no) }}</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <span class="c-tag">{{ customer.source }}</span>
+                <span class="c-tag">{{ customer.last_consume_time ? '最近到店' : '还未消费' }}</span>
+              </div>
             </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0" @click.stop>
-            <a-button size="small" type="primary" ghost @click="sendCoupon(customer)">发券</a-button>
-            <a-dropdown trigger="click" placement="bottomRight">
-              <a-button size="small" style="padding:0 6px"><EllipsisOutlined /></a-button>
-              <template #overlay>
-                <a-menu>
-                  <a-menu-item v-if="isActive(customer)" danger @click="disableCustomer(customer)">停用会员</a-menu-item>
-                  <a-menu-item v-else @click="restore(customer)" style="color:var(--success)">恢复会员</a-menu-item>
-                </a-menu>
-              </template>
-            </a-dropdown>
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0" @click.stop>
+              <a-button size="small" type="primary" ghost @click="sendCoupon(customer)">发券</a-button>
+              <a-dropdown trigger="click" placement="bottomRight">
+                <a-button size="small" style="padding:0 6px"><EllipsisOutlined /></a-button>
+                <template #overlay>
+                  <a-menu>
+                    <a-menu-item v-if="isActive(customer)" danger @click="disableCustomer(customer)">停用会员</a-menu-item>
+                    <a-menu-item v-else @click="restore(customer)" style="color:var(--success)">恢复会员</a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
+            </div>
           </div>
         </div>
         <!-- 加载更多 -->
@@ -103,6 +107,7 @@ function sourceText(item) {
 }
 function isActive(c) { return Number(c.status) === 1 }
 function formatPhone(p) { if (!p) return '未留手机号'; return String(p).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') }
+function formatMemberNo(no) { return String(no).padStart(6, '0') }
 
 async function loadCustomers() {
   loading.value = true
@@ -160,18 +165,30 @@ onMounted(loadCustomers)
 </script>
 
 <style scoped>
+.search-bar {
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+}
+.customer-skeleton {
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
+  padding: 14px;
+  margin-bottom: 10px;
+}
 .customer-card {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  background: #fff;
-  border-radius: 12px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   padding: 14px;
   margin-bottom: 10px;
   cursor: pointer;
   border: 1px solid var(--border);
   transition: background .1s;
-  &:active { background: var(--brand-light); transform: scale(0.99); }
+  &:last-child { margin-bottom: 0; }
+  &:active { background: var(--brand-light); }
 }
 .avatar {
   width: 46px; height: 46px; border-radius: 14px;
@@ -181,7 +198,7 @@ onMounted(loadCustomers)
 }
 .c-tag {
   font-size: 11px; color: var(--text-2);
-  background: #f1f5f9; border-radius: 20px;
+  background: var(--bg-page); border-radius: 20px;
   padding: 2px 8px;
 }
 </style>

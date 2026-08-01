@@ -1,7 +1,7 @@
 <template>
   <div class="order-page">
     <!-- 店铺头部 -->
-    <header class="shop-header">
+    <header class="shop-header animate-in">
       <div class="shop-info">
         <h1>{{ shopName }}</h1>
         <p>营业中 · 桌号 {{ tableNo }} · 人均 ¥{{ avgPrice }}</p>
@@ -13,12 +13,12 @@
     </header>
 
     <!-- 主体：左边分类 + 右边菜品 -->
-    <div class="menu-body">
+    <div class="menu-body animate-in animate-in--delay-1">
       <nav class="category-nav">
         <button
           v-for="cat in categories"
           :key="cat"
-          class="cat-item"
+          class="cat-item tap-shrink"
           :class="{ active: activeCategory === cat }"
           type="button"
           @click="switchCategory(cat)"
@@ -44,7 +44,7 @@
             <div class="dish-counter">
               <button
                 v-if="cartCount(dish.id) > 0"
-                class="counter-btn minus"
+                class="counter-btn minus tap-shrink"
                 type="button"
                 @click="removeFromCart(dish)"
               >
@@ -54,7 +54,7 @@
                 {{ cartCount(dish.id) }}
               </span>
               <button
-                class="counter-btn plus"
+                class="counter-btn plus tap-shrink"
                 type="button"
                 @click="addToCart(dish)"
               >
@@ -68,8 +68,8 @@
     </div>
 
     <!-- 底部购物车栏 -->
-    <footer class="cart-bar" :class="{ 'has-items': totalCount > 0 }">
-      <button class="cart-icon-wrap" type="button" @click="totalCount > 0 && (showCartDetail = true)">
+    <footer class="cart-bar animate-in animate-in--delay-2" :class="{ 'has-items': totalCount > 0 }">
+      <button class="cart-icon-wrap tap-shrink" type="button" @click="totalCount > 0 && (showCartDetail = true)">
         <van-icon name="shopping-cart-o" size="26" />
         <span v-if="totalCount > 0" class="cart-badge">{{ totalCount }}</span>
       </button>
@@ -83,7 +83,7 @@
         </template>
       </div>
       <button
-        class="checkout-btn"
+        class="checkout-btn tap-shrink"
         type="button"
         :disabled="totalCount === 0"
         @click="goCheckout"
@@ -97,18 +97,18 @@
       <div class="cart-sheet">
         <div class="cart-sheet-header">
           <h3>已选商品</h3>
-          <button type="button" class="clear-btn" @click="clearCart">清空</button>
+          <button type="button" class="clear-btn tap-shrink" @click="clearCart">清空</button>
         </div>
         <div class="cart-items">
           <div v-for="item in cartItems" :key="item.id" class="cart-row">
             <span class="cart-row-emoji">{{ item.emoji }}</span>
             <span class="cart-row-name">{{ item.name }}</span>
             <div class="cart-row-right">
-              <button class="counter-btn minus" type="button" @click="removeFromCart(item)">
+              <button class="counter-btn minus tap-shrink" type="button" @click="removeFromCart(item)">
                 <van-icon name="minus" />
               </button>
               <span class="counter-num">{{ item.qty }}</span>
-              <button class="counter-btn plus" type="button" @click="addToCart(item)">
+              <button class="counter-btn plus tap-shrink" type="button" @click="addToCart(item)">
                 <van-icon name="plus" />
               </button>
               <b class="cart-row-price">¥{{ (item.price * item.qty).toFixed(0) }}</b>
@@ -143,7 +143,7 @@
         <van-button type="primary" block round size="large" :loading="ordering" class="phone-submit-btn" @click="submitOrder">
           {{ phone ? '领券并下单' : '直接下单（不领券）' }}
         </van-button>
-        <button type="button" class="phone-skip-btn" @click="showPhoneSheet = false">返回修改</button>
+        <button type="button" class="phone-skip-btn tap-shrink" @click="showPhoneSheet = false">返回修改</button>
       </div>
     </van-popup>
 
@@ -175,8 +175,8 @@
 
     <!-- 菜单加载中 -->
     <div v-if="loadingMenu" class="loading-mask">
-      <van-loading type="spinner" color="#07C160" size="36" />
-      <p>菜单加载中…</p>
+      <van-loading type="spinner" color="var(--brand)" size="36" />
+      <p>菜单加载中，马上就好…</p>
     </div>
   </div>
 </template>
@@ -410,17 +410,21 @@ onMounted(() => {
 <style scoped>
 * { box-sizing: border-box; }
 
+/* ── 进场动效错落延迟（基础 .animate-in/.tap-shrink 用全局 global.scss 定义） ── */
+.animate-in--delay-1 { animation-delay: .06s; }
+.animate-in--delay-2 { animation-delay: .12s; }
+
 .order-page {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: #f5f6fa;
+  background: var(--bg-page);
   font-family: -apple-system, 'PingFang SC', sans-serif;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .shop-header {
-  background: #07C160;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
   padding: 18px 16px 14px;
   color: #fff;
 }
@@ -434,7 +438,7 @@ onMounted(() => {
   gap: 6px;
   margin-top: 10px;
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-card);
   background: rgba(255,255,255,0.2);
   font-size: 13px;
   font-weight: 600;
@@ -451,7 +455,7 @@ onMounted(() => {
   width: 88px;
   flex: none;
   overflow-y: auto;
-  background: #f0f0f0;
+  background: var(--bg-page);
   padding: 8px 0;
 }
 
@@ -461,7 +465,7 @@ onMounted(() => {
   padding: 14px 10px;
   border: 0;
   background: transparent;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   font-weight: 600;
   text-align: center;
@@ -471,15 +475,15 @@ onMounted(() => {
 }
 
 .cat-item.active {
-  background: #fff;
-  color: #07C160;
-  border-left-color: #07C160;
+  background: var(--bg-card);
+  color: var(--brand);
+  border-left-color: var(--brand);
 }
 
 .dish-list {
   flex: 1;
   overflow-y: auto;
-  background: #fff;
+  background: var(--bg-card);
   padding: 0 12px;
 }
 
@@ -487,7 +491,7 @@ onMounted(() => {
   margin: 14px 0 8px;
   font-size: 13px;
   font-weight: 700;
-  color: #9ca3af;
+  color: var(--text-3);
 }
 
 .dish-item {
@@ -496,23 +500,23 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   padding: 12px 0;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--border);
 }
 
 .dish-emoji {
   width: 56px;
   height: 56px;
-  border-radius: 12px;
-  background: #e8f9f0;
+  border-radius: var(--radius-card);
+  background: var(--brand-light);
   display: grid;
   place-items: center;
   font-size: 28px;
 }
 
 .dish-info { display: flex; flex-direction: column; gap: 3px; }
-.dish-info strong { font-size: 15px; font-weight: 700; }
-.dish-info span { font-size: 12px; color: #9ca3af; }
-.dish-info b { font-size: 16px; font-weight: 900; color: #07C160; }
+.dish-info strong { font-size: 15px; font-weight: 700; color: var(--text-1); }
+.dish-info span { font-size: 12px; color: var(--text-3); }
+.dish-info b { font-size: 16px; font-weight: 900; color: var(--brand); }
 
 .dish-counter { display: flex; align-items: center; gap: 6px; }
 
@@ -527,8 +531,8 @@ onMounted(() => {
   font-size: 14px;
 }
 
-.counter-btn.plus { background: #07C160; color: #fff; }
-.counter-btn.minus { background: #f3f4f6; color: #374151; }
+.counter-btn.plus { background: var(--brand); color: #fff; }
+.counter-btn.minus { background: var(--border); color: var(--text-2); }
 
 .counter-num {
   min-width: 18px;
@@ -569,7 +573,7 @@ onMounted(() => {
   cursor: pointer;
 }
 
-.cart-bar.has-items .cart-icon-wrap { background: #07C160; }
+.cart-bar.has-items .cart-icon-wrap { background: var(--brand); }
 
 .cart-badge {
   position: absolute;
@@ -579,7 +583,7 @@ onMounted(() => {
   height: 20px;
   padding: 0 4px;
   border-radius: 10px;
-  background: #ef4444;
+  background: var(--danger);
   color: #fff;
   font-size: 12px;
   font-weight: 800;
@@ -597,7 +601,7 @@ onMounted(() => {
   height: 46px;
   border-radius: 23px;
   border: 0;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 16px;
   font-weight: 900;
@@ -616,9 +620,9 @@ onMounted(() => {
   margin-bottom: 14px;
 }
 
-.cart-sheet-header h3 { font-size: 18px; font-weight: 800; margin: 0; }
+.cart-sheet-header h3 { font-size: 18px; font-weight: 800; margin: 0; color: var(--text-1); }
 
-.clear-btn { border: 0; background: transparent; color: #9ca3af; font-size: 14px; cursor: pointer; }
+.clear-btn { border: 0; background: transparent; color: var(--text-3); font-size: 14px; cursor: pointer; }
 
 .cart-items { display: grid; gap: 12px; margin-bottom: 16px; }
 
@@ -630,21 +634,21 @@ onMounted(() => {
 }
 
 .cart-row-emoji { font-size: 22px; }
-.cart-row-name { font-size: 15px; font-weight: 600; }
+.cart-row-name { font-size: 15px; font-weight: 600; color: var(--text-1); }
 .cart-row-right { display: flex; align-items: center; gap: 8px; }
-.cart-row-price { min-width: 40px; text-align: right; font-size: 15px; font-weight: 800; color: #07C160; }
+.cart-row-price { min-width: 40px; text-align: right; font-size: 15px; font-weight: 800; color: var(--brand); }
 
 .cart-sheet-total {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--border);
   margin-bottom: 14px;
 }
 
-.cart-sheet-total span { font-size: 15px; color: #64748b; }
-.cart-sheet-total b { font-size: 24px; font-weight: 900; color: #07C160; }
+.cart-sheet-total span { font-size: 15px; color: var(--text-2); }
+.cart-sheet-total b { font-size: 24px; font-weight: 900; color: var(--brand); }
 .checkout-btn-full { height: 50px; font-size: 17px; font-weight: 900; }
 
 /* 手机号弹层 */
@@ -658,19 +662,20 @@ onMounted(() => {
   margin: 0 0 8px;
   font-size: 20px;
   font-weight: 800;
+  color: var(--text-1);
 }
 
 .phone-sheet-top p {
   margin: 0;
   font-size: 14px;
-  color: #64748b;
+  color: var(--text-2);
   line-height: 1.6;
 }
 
 .phone-field {
   margin-bottom: 14px;
-  border-radius: 14px;
-  background: #f8fafc;
+  border-radius: var(--radius-card);
+  background: var(--bg-page);
   overflow: hidden;
   font-size: 17px;
 }
@@ -683,7 +688,7 @@ onMounted(() => {
   margin-top: 12px;
   border: 0;
   background: transparent;
-  color: #9ca3af;
+  color: var(--text-3);
   font-size: 14px;
   cursor: pointer;
   text-align: center;
@@ -701,7 +706,7 @@ onMounted(() => {
 
 .svg-circle {
   fill: none;
-  stroke: #16a34a;
+  stroke: var(--success);
   stroke-width: 4;
   stroke-linecap: round;
   stroke-dasharray: 214;
@@ -713,7 +718,7 @@ onMounted(() => {
 
 .svg-check {
   fill: none;
-  stroke: #16a34a;
+  stroke: var(--success);
   stroke-width: 5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -725,30 +730,30 @@ onMounted(() => {
 @keyframes draw-circle { to { stroke-dashoffset: 0; } }
 @keyframes draw-check { to { stroke-dashoffset: 0; } }
 
-.success-sheet h2 { margin: 0 0 6px; font-size: 26px; font-weight: 900; }
-.success-table { margin: 0 0 18px; font-size: 14px; color: #64748b; }
+.success-sheet h2 { margin: 0 0 6px; font-size: 26px; font-weight: 900; color: var(--text-1); }
+.success-table { margin: 0 0 18px; font-size: 14px; color: var(--text-2); }
 
 .coupon-reward {
   margin-bottom: 20px;
   padding: 16px;
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   background: var(--brand-light);
   border: 1px solid var(--brand-mid);
 }
 
 .coupon-reward.no-coupon {
-  background: #f8fafc;
-  border-color: #e2e8f0;
+  background: var(--bg-page);
+  border-color: var(--border);
 }
 
-.coupon-reward.no-coupon p { margin: 0; color: #64748b; font-size: 14px; }
+.coupon-reward.no-coupon p { margin: 0; color: var(--text-2); font-size: 14px; }
 
 .coupon-reward-tag { font-size: 13px; color: #9a3412; font-weight: 700; margin-bottom: 8px; }
 
 .coupon-reward-amount {
   font-size: 40px;
   font-weight: 900;
-  color: #07C160;
+  color: var(--brand);
   line-height: 1;
   margin-bottom: 6px;
 }
@@ -770,6 +775,6 @@ onMounted(() => {
   z-index: 999;
 }
 
-.loading-mask p { color: #64748b; font-size: 14px; margin: 0; }
+.loading-mask p { color: var(--text-2); font-size: 14px; margin: 0; }
 </style>
 

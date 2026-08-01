@@ -2,18 +2,18 @@
   <div class="sub-page settings-detail">
     <PageHeader title="经营设置" />
     <div class="page-body">
-      <section class="summary-card">
+      <section class="summary-card animate-in">
         <p>顾客现在看到</p>
         <h1>{{ opSettings.is_open ? '正常营业' : '休息中' }}</h1>
         <span>{{ opSettings.business_hours || '未设置营业时间' }}</span>
       </section>
 
-      <section class="panel-card">
+      <section class="panel-card animate-in" style="animation-delay:.04s">
         <div class="switch-row">
           <div><strong>营业状态</strong><span>{{ opSettings.is_open ? '顾客可以正常下单' : '顾客会看到休息提示' }}</span></div>
           <a-switch v-model:checked="opSettings.is_open" checked-children="营业" un-checked-children="休息" @change="saveOpSettings" />
         </div>
-        <div class="info-row" @click="openOpDrawer">
+        <div class="info-row tap-shrink" @click="openOpDrawer">
           <span class="info-label">营业时间</span>
           <span class="info-value">{{ opSettings.business_hours || '点击设置' }} <RightOutlined /></span>
         </div>
@@ -45,17 +45,31 @@
         </div>
       </section>
 
-      <section class="panel-card remark-card">
-        <div class="panel-title">下单备注</div>
-        <p>顾客下单时点击即可选择，减少反复沟通。</p>
+      <section class="panel-card remark-card animate-in" style="animation-delay:.08s">
+        <div class="panel-title">单品备注标签</div>
+        <p>顾客点单品备注时点击即可选择，减少反复沟通。</p>
         <div class="chip-list">
           <span v-for="(chip, idx) in opSettings.remark_chips" :key="chip + idx" class="remark-chip">
-            {{ chip }} <button @click="removeRemarkChip(idx)">×</button>
+            {{ chip }} <button class="tap-shrink" @click="removeRemarkChip(idx)">×</button>
           </span>
         </div>
         <div class="add-row">
           <a-input v-model:value="newChipInput" placeholder="输入快捷备注" :maxlength="10" @pressEnter="addRemarkChip" />
           <a-button type="primary" @click="addRemarkChip">添加</a-button>
+        </div>
+      </section>
+
+      <section class="panel-card remark-card animate-in" style="animation-delay:.1s">
+        <div class="panel-title">整单备注标签</div>
+        <p>顾客结账整单备注时点击即可选择，跟单品口味要求分开，用于一起上菜/打包/餐具这类整桌安排。</p>
+        <div class="chip-list">
+          <span v-for="(chip, idx) in opSettings.order_remark_chips" :key="chip + idx" class="remark-chip">
+            {{ chip }} <button class="tap-shrink" @click="removeOrderRemarkChip(idx)">×</button>
+          </span>
+        </div>
+        <div class="add-row">
+          <a-input v-model:value="newOrderChipInput" placeholder="输入快捷备注" :maxlength="10" @pressEnter="addOrderRemarkChip" />
+          <a-button type="primary" @click="addOrderRemarkChip">添加</a-button>
         </div>
       </section>
     </div>
@@ -64,7 +78,7 @@
       <div class="drawer-section">
         <div class="drawer-label">常用时段</div>
         <div class="preset-list">
-          <span v-for="p in hourPresets" :key="p.value" class="preset-chip" :class="{ active: opForm.open_time + '-' + opForm.close_time === p.value }" @click="applyPreset(p.value)">{{ p.label }}</span>
+          <span v-for="p in hourPresets" :key="p.value" class="preset-chip tap-shrink" :class="{ active: opForm.open_time + '-' + opForm.close_time === p.value }" @click="applyPreset(p.value)">{{ p.label }}</span>
         </div>
       </div>
       <div class="drawer-section">
@@ -78,7 +92,7 @@
       <div class="drawer-section">
         <div class="drawer-label">每周休息</div>
         <div class="day-list">
-          <span v-for="d in weekDays" :key="d.value" class="day-chip" :class="{ active: opForm.rest_days.includes(d.value) }" @click="toggleRestDay(d.value)">{{ d.label }}</span>
+          <span v-for="d in weekDays" :key="d.value" class="day-chip tap-shrink" :class="{ active: opForm.rest_days.includes(d.value) }" @click="toggleRestDay(d.value)">{{ d.label }}</span>
         </div>
       </div>
       <div class="preview-box"><span>顾客将看到</span><strong>{{ previewHours }}</strong></div>
@@ -96,6 +110,7 @@ import { getTenantProfile, updateTenantSettings } from '../../api'
 
 const showOpDrawer = ref(false)
 const newChipInput = ref('')
+const newOrderChipInput = ref('')
 const opSettings = ref({
   is_open: true,
   business_hours: '',
@@ -106,6 +121,7 @@ const opSettings = ref({
   delivery_fee: 0,
   min_delivery_amount: 0,
   remark_chips: ['不要辣', '微辣', '不要香菜', '不要葱', '少盐', '打包'],
+  order_remark_chips: ['一起上菜', '全部打包', '加双筷子', '不用餐具', '有儿童用餐'],
 })
 const opForm = ref({ open_time: '10:00', close_time: '22:00', rest_days: [] })
 const hourPresets = [
@@ -139,6 +155,7 @@ async function loadProfile() {
         delivery_fee: res.data.delivery_fee ?? 0,
         min_delivery_amount: res.data.min_delivery_amount ?? 0,
         remark_chips: res.data.remark_chips ?? ['不要辣', '微辣', '不要香菜', '不要葱', '少盐', '打包'],
+        order_remark_chips: res.data.order_remark_chips ?? ['一起上菜', '全部打包', '加双筷子', '不用餐具', '有儿童用餐'],
       }
     }
   } catch { message.error('经营设置加载失败') }
@@ -189,45 +206,57 @@ async function removeRemarkChip(idx) {
   opSettings.value.remark_chips.splice(idx, 1)
   await saveOpSettings()
 }
+async function addOrderRemarkChip() {
+  const v = newOrderChipInput.value.trim()
+  if (!v) return
+  if (opSettings.value.order_remark_chips.includes(v)) { message.warning('已存在'); return }
+  opSettings.value.order_remark_chips.push(v)
+  newOrderChipInput.value = ''
+  await saveOpSettings()
+}
+async function removeOrderRemarkChip(idx) {
+  opSettings.value.order_remark_chips.splice(idx, 1)
+  await saveOpSettings()
+}
 
 onMounted(loadProfile)
 </script>
 
 <style scoped>
-.settings-detail { min-height: 100vh; background: #f5f6f8; }
+.settings-detail { min-height: 100vh; background: var(--bg-page); }
 .page-body { padding: 12px 16px 28px; }
-.summary-card, .panel-card { background: #fff; border: 1px solid #eef2f7; border-radius: 14px; }
+.summary-card, .panel-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--card-shadow); }
 .summary-card { padding: 18px; }
 .summary-card p, .summary-card h1, .summary-card span { display: block; margin: 0; }
-.summary-card p { color: #16a34a; font-size: 12px; font-weight: 900; }
-.summary-card h1 { margin-top: 5px; color: #111827; font-size: 22px; font-weight: 900; }
-.summary-card span { margin-top: 6px; color: #64748b; font-size: 13px; }
+.summary-card p { color: var(--success); font-size: 12px; font-weight: 900; }
+.summary-card h1 { margin-top: 5px; color: var(--text-1); font-size: 22px; font-weight: 900; }
+.summary-card span { margin-top: 6px; color: var(--text-2); font-size: 13px; }
 .panel-card { margin-top: 12px; overflow: hidden; }
-.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #f1f5f9; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .switch-row.last { border-bottom: 0; }
 .switch-row strong, .switch-row span { display: block; }
-.switch-row strong { color: #111827; font-size: 14px; font-weight: 800; }
-.switch-row span { margin-top: 3px; color: #64748b; font-size: 12px; }
+.switch-row strong { color: var(--text-1); font-size: 14px; font-weight: 800; }
+.switch-row span { margin-top: 3px; color: var(--text-2); font-size: 12px; }
 .info-row { cursor: pointer; }
-.delivery-form { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; }
-.panel-title { padding: 14px 16px 0; color: #111827; font-size: 15px; font-weight: 900; }
-.remark-card p { margin: 5px 16px 0; color: #64748b; font-size: 12px; }
+.delivery-form { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.panel-title { padding: 14px 16px 0; color: var(--text-1); font-size: 15px; font-weight: 900; }
+.remark-card p { margin: 5px 16px 0; color: var(--text-2); font-size: 12px; }
 .chip-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
-.remark-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 16px; background: #f0fdf4; color: #16a34a; font-size: 13px; font-weight: 700; }
-.remark-chip button { border: 0; background: transparent; color: #94a3b8; font-size: 15px; line-height: 1; }
+.remark-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 16px; background: var(--brand-light); color: var(--brand-dark); font-size: 13px; font-weight: 700; }
+.remark-chip button { border: 0; background: transparent; color: var(--text-3); font-size: 15px; line-height: 1; }
 .add-row { display: flex; gap: 8px; padding: 0 16px 16px; }
 .drawer-section { margin-bottom: 18px; }
-.drawer-label { margin-bottom: 10px; color: #64748b; font-size: 12px; font-weight: 800; }
+.drawer-label { margin-bottom: 10px; color: var(--text-2); font-size: 12px; font-weight: 800; }
 .preset-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.preset-chip { padding: 7px 12px; border: 1px solid #e5e7eb; border-radius: 18px; background: #f8fafc; font-size: 13px; }
-.preset-chip.active { border-color: #07c160; background: #f0fdf4; color: #16a34a; font-weight: 800; }
-.time-row { display: grid; grid-template-columns: 1fr 32px 1fr; align-items: center; gap: 8px; text-align: center; }
-.time-input { width: 100%; height: 46px; border: 1px solid #e5e7eb; border-radius: 10px; padding: 0 10px; font-size: 18px; font-weight: 800; text-align: center; }
+.preset-chip { padding: 7px 12px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-page); color: var(--text-1); font-size: 13px; }
+.preset-chip.active { border-color: var(--brand); background: var(--brand-light); color: var(--brand-dark); font-weight: 800; }
+.time-row { display: grid; grid-template-columns: 1fr 32px 1fr; align-items: center; gap: 8px; text-align: center; color: var(--text-2); }
+.time-input { width: 100%; height: 46px; border: 1px solid var(--border); border-radius: 10px; padding: 0 10px; font-size: 18px; font-weight: 800; text-align: center; background: var(--bg-card); color: var(--text-1); }
 .day-list { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
-.day-chip { height: 36px; border: 1px solid #e5e7eb; border-radius: 18px; background: #f8fafc; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
-.day-chip.active { border-color: #fecaca; background: #fef2f2; color: #ef4444; }
-.preview-box { margin-bottom: 18px; padding: 12px; border-radius: 10px; background: #f0fdf4; }
+.day-chip { height: 36px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg-page); color: var(--text-1); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+.day-chip.active { border-color: #fecaca; background: #fef2f2; color: var(--danger); }
+.preview-box { margin-bottom: 18px; padding: 12px; border-radius: 10px; background: var(--brand-light); }
 .preview-box span, .preview-box strong { display: block; }
-.preview-box span { color: #64748b; font-size: 11px; }
-.preview-box strong { margin-top: 4px; color: #111827; font-size: 15px; }
+.preview-box span { color: var(--text-2); font-size: 11px; }
+.preview-box strong { margin-top: 4px; color: var(--text-1); font-size: 15px; }
 </style>

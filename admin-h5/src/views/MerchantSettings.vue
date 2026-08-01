@@ -5,62 +5,38 @@
     </PageHeader>
 
     <div class="page-body">
-      <section class="store-card">
+      <section class="store-card animate-in">
         <div class="store-main">
           <div class="store-icon"><ShopOutlined /></div>
           <div class="store-copy">
             <strong>{{ merchant.name || '商家名称' }}</strong>
             <span>{{ merchant.phone || '未填写手机号' }}</span>
+            <span class="store-op-line">{{ opSettings.is_open ? '营业中' : '休息中' }} · {{ operationSummary }}</span>
           </div>
         </div>
         <button class="mini-btn" @click="router.push('/settings/store')">店铺资料</button>
       </section>
 
-      <section class="hero-card">
-        <div>
-          <p>今日经营状态</p>
-          <h1>{{ opSettings.is_open ? '正常营业中' : '当前休息中' }}</h1>
-          <span>{{ operationSummary }}</span>
-        </div>
-        <button class="primary-btn" @click="router.push('/settings/business')">修改经营</button>
-      </section>
-
-      <div class="status-grid">
-        <section class="status-card" @click="router.push('/settings/payment')">
-          <div class="card-head">
-            <div class="card-icon pay"><WalletOutlined /></div>
-            <a-tag :class="['state-tag', wxpayStatusClass]">{{ wxpayStatusText }}</a-tag>
-          </div>
-          <h2>收款安全</h2>
-          <p>{{ paymentSummary }}</p>
-          <div class="card-row"><span>商户号</span><strong>{{ merchant.wx_mchid_masked || '-' }}</strong></div>
-          <div class="lock-tip">收款账户已锁定</div>
-        </section>
-
-        <section class="status-card" @click="router.push('/settings/devices')">
-          <div class="card-head">
-            <div class="card-icon device"><PrinterOutlined /></div>
-            <a-tag :class="printerConfig.configured ? 'tag-ok' : 'tag-warn'">{{ printerConfig.configured ? '已配置' : '未配置' }}</a-tag>
-          </div>
-          <h2>订单设备</h2>
-          <p>{{ printerConfig.configured ? '订单可自动打印，排位小票可用' : '建议配置打印机，减少手工接单' }}</p>
-          <div class="card-row"><span>打印机</span><strong>{{ printerStatusText }}</strong></div>
-          <div class="card-row"><span>大屏</span><strong>{{ queueDisplayUrl ? '可用' : '待加载' }}</strong></div>
-        </section>
-      </div>
-
-      <section class="menu-card">
+      <!-- 常用设置：唯一的配置入口层，"未配置/待处理"用条目上的小标签提示，
+           不再像之前那样单独叠一层状态卡片重复展示同一件事。 -->
+      <section class="menu-card animate-in" style="animation-delay:.04s">
         <div class="menu-title">常用设置</div>
         <div class="menu-item" @click="router.push('/settings/business')">
           <div><strong>经营方式</strong><span>营业时间、堂食、自提、外卖、备注</span></div>
           <RightOutlined />
         </div>
         <div class="menu-item" @click="router.push('/settings/payment')">
-          <div><strong>微信支付</strong><span>查看收款主体、商户号、验证状态</span></div>
+          <div>
+            <strong>微信支付<a-tag v-if="wxpayStatusText !== '已验证'" :class="['inline-tag', wxpayStatusClass]">{{ wxpayStatusText }}</a-tag></strong>
+            <span>查看收款主体、商户号、验证状态</span>
+          </div>
           <RightOutlined />
         </div>
         <div class="menu-item" @click="router.push('/settings/devices')">
-          <div><strong>设备与收银</strong><span>打印机、排位小票、收银 API、碰一碰</span></div>
+          <div>
+            <strong>设备与收银<a-tag v-if="!printerConfig.configured" class="inline-tag tag-warn">未配置打印机</a-tag></strong>
+            <span>打印机、排位小票、收银 API、碰一碰</span>
+          </div>
           <RightOutlined />
         </div>
         <div class="menu-item" @click="router.push('/settings/notifications')">
@@ -69,13 +45,15 @@
         </div>
       </section>
 
-      <section class="menu-card quiet-card">
-        <div class="menu-title">业务入口</div>
-        <div class="quick-grid">
-          <button v-for="item in businessItems" :key="item.path" @click="router.push(item.path)">
-            <component :is="item.icon" />
-            <span>{{ item.label }}</span>
-          </button>
+      <!-- 补充入口：只放"更多"页没有专门入口的功能，避免跟"更多"页重复。
+           分销是获客功能，已经挪到"更多"页顾客增长区了，这里不重复放——
+           剩下两项都是低频配置类工具，改用跟"常用设置"一致的列表样式，
+           不再用宫格（宫格暗示"高频快捷操作"，跟它们的实际使用频率不符）。 -->
+      <section class="menu-card animate-in" style="animation-delay:.08s">
+        <div class="menu-title">其它工具</div>
+        <div v-for="item in businessItems" :key="item.path" class="menu-item" @click="router.push(item.path)">
+          <div><strong>{{ item.label }}</strong><span>{{ item.desc }}</span></div>
+          <RightOutlined />
         </div>
       </section>
     </div>
@@ -87,8 +65,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Modal, message } from 'ant-design-vue'
 import {
-  AppstoreOutlined, ClusterOutlined, GiftOutlined, LinkOutlined, PrinterOutlined,
-  QrcodeOutlined, RightOutlined, ShopOutlined, TeamOutlined, WalletOutlined,
+  LinkOutlined, RightOutlined, ShopOutlined, WechatOutlined,
 } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
 import { getPrinterConfig, getTenantProfile, logoutTenant } from '../api'
@@ -101,7 +78,7 @@ const opSettings = ref({ is_open: true, business_hours: '', dine_in_enabled: tru
 
 const wxpayStatusMap = { unconfigured: '未配置', pending: '待验证', verified: '已验证', paused: '暂停' }
 const wxpayStatusText = computed(() => wxpayStatusMap[merchant.value.payment_status] || '未配置')
-const wxpayStatusClass = computed(() => `wxpay-${merchant.value.payment_status || 'unconfigured'}`)
+const wxpayStatusClass = computed(() => merchant.value.payment_status === 'pending' ? 'tag-pending' : 'tag-warn')
 const operationSummary = computed(() => {
   const modes = []
   if (opSettings.value.dine_in_enabled) modes.push('堂食')
@@ -109,27 +86,11 @@ const operationSummary = computed(() => {
   if (opSettings.value.delivery_enabled) modes.push('外卖')
   return `${opSettings.value.business_hours || '未设置营业时间'} · ${modes.length ? modes.join('/') : '未开启点餐方式'}`
 })
-const paymentSummary = computed(() => {
-  if (merchant.value.payment_status === 'verified') return `${merchant.value.receiver_name || merchant.value.name || '收款主体'} 已完成验证`
-  if (merchant.value.payment_status === 'paused') return '微信支付已暂停，顾客暂不能在线支付'
-  if (merchant.value.payment_status === 'pending') return '已保存配置，等待平台验证'
-  return '还未配置微信支付收款信息'
-})
-const printerStatusText = computed(() => {
-  if (!printerConfig.value.configured) return '未配置'
-  return printerConfig.value.printer_provider === 'kuaimai' ? '快麦已配置' : '飞鹅云已配置'
-})
-const tenantId = computed(() => merchant.value.tenant_id || merchant.value.id || '')
-const publicBaseUrl = computed(() => (import.meta.env.VITE_PUBLIC_BASE_URL || window.location.origin).replace(/\/$/, ''))
-const queueDisplayUrl = computed(() => tenantId.value ? `${publicBaseUrl.value}/queue/display?tenant_id=${encodeURIComponent(tenantId.value)}` : '')
 
+// 业务入口只保留"更多"页没有专门菜单项的功能（桌码/优惠券/分销/会员/菜单在"更多"页已有入口，不重复放）
 const businessItems = [
-  { label: '桌码', path: '/entrance-codes', icon: QrcodeOutlined },
-  { label: '领券页', path: '/channel-entries', icon: LinkOutlined },
-  { label: '优惠券', path: '/coupons', icon: GiftOutlined },
-  { label: '分销', path: '/distribution', icon: ClusterOutlined },
-  { label: '会员', path: '/customers', icon: TeamOutlined },
-  { label: '菜单', path: '/menu', icon: AppstoreOutlined },
+  { label: '领券页', path: '/channel-entries', icon: LinkOutlined, desc: '生成链接/海报，分享给顾客领券' },
+  { label: '企业微信', path: '/wework-settings', icon: WechatOutlined, desc: '对接企业微信，管理客户联系' },
 ]
 
 async function loadData() {
@@ -166,54 +127,28 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.settings-home { min-height: 100vh; background: #f5f6f8; }
+.settings-home { min-height: 100vh; background: var(--bg-page); }
 .page-body { padding: 12px 16px 28px; }
-.store-card, .hero-card, .status-card, .menu-card { background: #fff; border-radius: 14px; border: 1px solid #eef2f7; }
+.store-card, .menu-card { background: var(--bg-card); border-radius: 14px; border: 1px solid var(--border); }
 .store-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; }
 .store-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .store-icon { width: 48px; height: 48px; border-radius: 14px; background: #07c160; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0; }
 .store-copy { min-width: 0; }
 .store-copy strong, .store-copy span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.store-copy strong { color: #111827; font-size: 17px; font-weight: 900; }
-.store-copy span { margin-top: 4px; color: #64748b; font-size: 12px; }
-.mini-btn { height: 34px; border: 1px solid #bbf7d0; color: #16a34a; background: #f0fdf4; border-radius: 8px; padding: 0 12px; font-weight: 800; }
-.hero-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 12px; padding: 16px; }
-.hero-card p, .hero-card h1, .hero-card span { display: block; margin: 0; }
-.hero-card p { color: #16a34a; font-size: 12px; font-weight: 900; }
-.hero-card h1 { margin-top: 5px; color: #111827; font-size: 22px; font-weight: 900; letter-spacing: 0; }
-.hero-card span { margin-top: 6px; color: #64748b; font-size: 12px; line-height: 1.5; }
-.primary-btn { height: 42px; border: 0; border-radius: 10px; background: #07c160; color: #fff; padding: 0 16px; font-weight: 900; flex-shrink: 0; }
-.status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
-.status-card { padding: 14px; cursor: pointer; }
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.card-icon { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 21px; }
-.card-icon.pay { color: #16a34a; background: #f0fdf4; }
-.card-icon.device { color: #f97316; background: #fff7ed; }
-.status-card h2 { margin: 12px 0 0; color: #111827; font-size: 16px; font-weight: 900; }
-.status-card p { min-height: 38px; margin: 6px 0 12px; color: #64748b; font-size: 12px; line-height: 1.55; }
-.card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #f1f5f9; font-size: 12px; }
-.card-row + .card-row { margin-top: 8px; }
-.card-row span { color: #94a3b8; }
-.card-row strong { color: #111827; font-weight: 800; }
-.lock-tip { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: #f0fdf4; color: #15803d; font-size: 12px; font-weight: 800; }
-.state-tag, .tag-ok, .tag-warn { margin: 0; border-radius: 12px; font-size: 11px; font-weight: 800; }
-.wxpay-verified, .tag-ok { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
-.wxpay-pending { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
-.wxpay-paused { color: #6b7280; background: #f8fafc; border-color: #e5e7eb; }
-.wxpay-unconfigured, .tag-warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.store-copy strong { color: var(--text-1); font-size: 17px; font-weight: 900; }
+.store-copy span { margin-top: 4px; color: var(--text-2); font-size: 12px; }
+.store-op-line { color: var(--text-3) !important; }
+.mini-btn { height: 34px; border: 1px solid #bbf7d0; color: #16a34a; background: var(--brand-light); border-radius: 8px; padding: 0 12px; font-weight: 800; }
+
 .menu-card { margin-top: 12px; overflow: hidden; }
-.menu-title { padding: 14px 14px 4px; color: #111827; font-size: 15px; font-weight: 900; }
-.menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border-top: 1px solid #f1f5f9; cursor: pointer; }
+.menu-title { padding: 14px 14px 4px; color: var(--text-1); font-size: 15px; font-weight: 900; }
+.menu-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border-top: 1px solid var(--border); cursor: pointer; transition: background .15s; }
+.menu-item:active { background: var(--bg-page); }
 .menu-item strong, .menu-item span { display: block; }
-.menu-item strong { color: #111827; font-size: 14px; font-weight: 800; }
-.menu-item span { margin-top: 4px; color: #64748b; font-size: 12px; line-height: 1.4; }
-.quiet-card { margin-bottom: 0; }
-.quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px 14px; }
-.quick-grid button { height: 64px; border: 1px solid #eef2f7; border-radius: 12px; background: #f8fafc; color: #111827; font-weight: 800; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
-.quick-grid button span { font-size: 12px; }
-@media (max-width: 390px) {
-  .status-grid { grid-template-columns: 1fr; }
-  .hero-card { align-items: flex-start; flex-direction: column; }
-  .primary-btn { width: 100%; }
-}
+.menu-item strong { color: var(--text-1); font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 6px; }
+.menu-item span { margin-top: 4px; color: var(--text-2); font-size: 12px; line-height: 1.4; }
+.inline-tag { margin: 0; border-radius: 12px; font-size: 11px; font-weight: 800; line-height: 16px; padding: 0 6px; }
+.tag-warn { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.tag-pending { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
+
 </style>

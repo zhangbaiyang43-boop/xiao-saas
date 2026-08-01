@@ -1,6 +1,9 @@
 <template>
   <div class="wework-page">
-    <section class="hero-card">
+    <PageHeader title="企业微信" />
+
+    <div class="page-content">
+    <section class="hero-card animate-in">
       <div>
         <p class="eyebrow">企业微信</p>
         <h1>把顾客加到员工企微</h1>
@@ -11,7 +14,7 @@
       </van-tag>
     </section>
 
-    <section class="panel">
+    <section class="panel animate-in" style="animation-delay:.04s">
       <div class="panel-head">
         <div>
           <p class="eyebrow">第一步</p>
@@ -41,14 +44,14 @@
       <p v-if="lastTestMessage" :class="['test-message', { success: isConnected }]">{{ lastTestMessage }}</p>
     </section>
 
-    <section class="panel">
+    <section class="panel animate-in" style="animation-delay:.08s">
       <div class="panel-head">
         <div>
           <p class="eyebrow">第二步</p>
           <h2>生成联系我二维码</h2>
           <span>顾客扫码后添加员工，适合放在桌贴、海报、收银台。</span>
         </div>
-        <button class="text-btn" @click="showCreatePopup = true">生成</button>
+        <button class="text-btn tap-shrink" @click="showCreatePopup = true">生成</button>
       </div>
 
       <div v-if="qrLoading" class="state-card">
@@ -62,7 +65,7 @@
       </div>
 
       <div v-else class="qr-list">
-        <article v-for="qr in qrList" :key="qr.config_id || qr.id" class="qr-card">
+        <article v-for="qr in qrList" :key="qr.config_id || qr.id" class="qr-card tap-shrink">
           <div class="qr-preview">
             <img v-if="qrImage(qr)" :src="qrImage(qr)" alt="企业微信二维码" />
             <van-icon v-else name="qr" size="32" />
@@ -77,14 +80,14 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel animate-in" style="animation-delay:.12s">
       <div class="panel-head">
         <div>
           <p class="eyebrow">第三步</p>
           <h2>最近企微事件</h2>
           <span>这里显示客户添加员工、删除客户、扫码联系我等事件。</span>
         </div>
-        <button class="text-btn" @click="loadEvents">刷新</button>
+        <button class="text-btn tap-shrink" @click="loadEvents">刷新</button>
       </div>
 
       <div v-if="eventLoading" class="state-card">
@@ -96,7 +99,7 @@
       </div>
 
       <div v-else class="event-list">
-        <article v-for="event in events" :key="event.id" class="event-card">
+        <article v-for="event in events" :key="event.id" class="event-card tap-shrink">
           <div class="event-icon">
             <van-icon :name="getEventIcon(event.event_type)" size="20" />
           </div>
@@ -109,6 +112,7 @@
         </article>
       </div>
     </section>
+    </div>
 
     <van-popup v-model:show="showCreatePopup" position="bottom" round>
       <div class="popup">
@@ -141,6 +145,7 @@ import {
   Tag as VanTag,
   showToast
 } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 import {
   createWeworkContactWay,
   getWeworkConfigStatus,
@@ -327,9 +332,13 @@ onMounted(() => {
 .wework-page {
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 14px 14px 96px;
-  background: #f5f6f8;
-  color: #111827;
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  background: var(--bg-page);
+  color: var(--text-1);
+}
+
+.page-content {
+  padding: 14px 14px 0;
 }
 
 .hero-card,
@@ -338,8 +347,8 @@ onMounted(() => {
 .qr-card,
 .event-card {
   border-radius: 18px;
-  background: #fff;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
+  background: var(--bg-card);
+  box-shadow: var(--card-shadow);
 }
 
 .hero-card {
@@ -352,7 +361,7 @@ onMounted(() => {
 
 .eyebrow {
   margin: 0 0 5px;
-  color: #1677ff;
+  color: var(--brand);
   font-size: 12px;
   font-weight: 900;
 }
@@ -361,7 +370,7 @@ onMounted(() => {
 .panel-head h2,
 .popup h2 {
   margin: 0;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -375,7 +384,7 @@ onMounted(() => {
 .popup p {
   display: block;
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -400,13 +409,13 @@ onMounted(() => {
 .text-btn {
   border: 0;
   background: transparent;
-  color: #1677ff;
+  color: var(--brand);
   font-weight: 900;
 }
 
 .config-list {
   margin-bottom: 12px;
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
 }
@@ -416,7 +425,7 @@ onMounted(() => {
   grid-template-columns: 96px minmax(0, 1fr);
   gap: 10px;
   padding: 12px;
-  border-bottom: 1px solid #edf1f7;
+  border-bottom: 1px solid var(--border);
 }
 
 .config-list div:last-child {
@@ -429,7 +438,7 @@ onMounted(() => {
 }
 
 .config-list span {
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
 }
 
@@ -437,16 +446,17 @@ onMounted(() => {
   min-width: 0;
   word-break: break-all;
   font-size: 13px;
+  color: var(--text-1);
 }
 
 .test-message {
   margin: 10px 0 0;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 13px;
 }
 
 .test-message.success {
-  color: #10b981;
+  color: var(--success);
 }
 
 .state-card {
@@ -467,7 +477,7 @@ onMounted(() => {
   align-items: center;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--border);
   box-shadow: none;
 }
 
@@ -479,8 +489,8 @@ onMounted(() => {
   flex: 0 0 auto;
   overflow: hidden;
   border-radius: 16px;
-  background: #f8fafc;
-  color: #94a3b8;
+  background: var(--bg-page);
+  color: var(--text-3);
 }
 
 .qr-preview img {
@@ -505,7 +515,7 @@ onMounted(() => {
 .qr-main strong,
 .event-main strong {
   overflow: hidden;
-  color: #111827;
+  color: var(--text-1);
   font-size: 16px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -515,7 +525,7 @@ onMounted(() => {
 .qr-main span,
 .event-main span {
   margin-top: 4px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -526,19 +536,20 @@ onMounted(() => {
   place-items: center;
   flex: 0 0 auto;
   border-radius: 14px;
-  background: #eff6ff;
-  color: #1677ff;
+  background: var(--brand-light);
+  color: var(--brand);
 }
 
 .event-card time {
   max-width: 78px;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 12px;
   text-align: right;
 }
 
 .popup {
   padding: 22px 16px 28px;
+  background: var(--bg-card);
 }
 
 .popup h2 {

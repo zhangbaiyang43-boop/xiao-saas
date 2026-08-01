@@ -1,19 +1,18 @@
 <template>
-  <div class="plugin-placeholder-page">
-    <section class="section-block">
-      <div class="section-head">
-        <div>
-          <h2 class="section-title">{{ pluginTitle }}</h2>
-          <p class="section-desc">插件已启用，具体业务页面可按插件约定继续扩展。</p>
-        </div>
-      </div>
+  <div class="sub-page">
+    <PageHeader :title="pluginTitle" />
 
-      <div class="empty-card">
-        <van-icon name="apps" size="48" color="#d1d5db" />
-        <div class="empty-text">插件页面占位</div>
-        <van-button type="primary" @click="$router.push('/plugins')">返回插件中心</van-button>
-      </div>
-    </section>
+    <div class="page-body">
+      <section class="section-block animate-in">
+        <p class="section-desc">插件已启用，具体业务页面可按插件约定继续扩展。</p>
+
+        <div class="empty-card">
+          <van-icon name="apps" size="48" color="var(--text-3)" />
+          <div class="empty-text">插件页面占位</div>
+          <van-button type="primary" round class="tap-shrink" @click="$router.push('/plugins')">返回插件中心</van-button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -21,40 +20,27 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { Button as VanButton, Icon as VanIcon } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 
 const route = useRoute()
 const pluginTitle = computed(() => `${route.params.code || '插件'} 管理`)
 </script>
 
 <style scoped>
-.plugin-placeholder-page {
-  min-height: 100vh;
-  padding: 16px 16px 88px;
-  background: #f6f7fb;
-}
-
 .section-block {
-  margin-bottom: 20px;
-}
-
-.section-head {
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-size: 18px;
-  font-weight: 700;
+  padding-top: 4px;
 }
 
 .section-desc {
   font-size: 13px;
-  color: #8a8f9c;
-  margin-top: 4px;
+  color: var(--text-2);
+  margin: 0 0 16px;
+  line-height: 1.5;
 }
 
 .empty-card {
-  background: #fff;
-  border-radius: 16px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   padding: 48px 24px;
   display: flex;
   flex-direction: column;
@@ -65,6 +51,7 @@ const pluginTitle = computed(() => `${route.params.code || '插件'} 管理`)
 
 .empty-text {
   font-size: 15px;
-  color: #6b7280;
+  color: var(--text-2);
 }
+
 </style>

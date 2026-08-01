@@ -1,6 +1,6 @@
 <template>
   <div class="login-page">
-    <div class="login-card">
+    <div class="login-card animate-in">
       <div class="brand-top">
         <div class="brand-icon"><ShopOutlined style="font-size:28px;color:#fff" /></div>
         <h1>开心点单商家后台</h1>
@@ -13,7 +13,7 @@
         type="error"
         show-icon
         closable
-        style="margin:0 20px 12px;border-radius:8px"
+        style="margin:0 20px 12px;border-radius:10px"
       />
 
       <div style="padding:16px 20px">
@@ -27,7 +27,7 @@
             maxlength="11"
             autocomplete="tel"
           />
-          <div v-if="phoneError" style="color:#ff4d4f;font-size:12px;margin-top:4px">{{ phoneError }}</div>
+          <div v-if="phoneError" class="field-error">{{ phoneError }}</div>
         </div>
         <div style="margin-bottom:12px">
           <div style="position:relative">
@@ -41,20 +41,20 @@
             />
             <button
               type="button"
-              class="code-btn"
+              class="code-btn tap-shrink"
               :disabled="codeSending || codeCountdown > 0"
               @click="handleSendCode"
             >
               {{ codeButtonText }}
             </button>
           </div>
-          <div v-if="codeError" style="color:#ff4d4f;font-size:12px;margin-top:4px">{{ codeError }}</div>
+          <div v-if="codeError" class="field-error">{{ codeError }}</div>
         </div>
         <div class="hint-card">
           <strong>没有账号？</strong>
           <span>账号由平台统一开通。手机号不存在时，请联系服务商：15936889988。</span>
         </div>
-        <button class="submit-btn" :disabled="loading" @click="handleLogin" style="margin-top:16px">
+        <button class="submit-btn tap-shrink" :disabled="loading" @click="handleLogin" style="margin-top:16px">
           {{ loading ? '登录中...' : '登录进入后台' }}
         </button>
       </div>
@@ -194,16 +194,29 @@ onBeforeUnmount(clearCountdown)
   width: 100%;
   max-width: 420px;
   border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 12px 40px rgba(0,0,0,.08);
+  background: var(--bg-card);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 
 .brand-top {
+  position: relative;
   padding: 32px 24px 20px;
   text-align: center;
   background: var(--hero-bg);
   color: #fff;
+  overflow: hidden;
+  isolation: isolate;
+}
+.brand-top::before {
+  /* 跟首页/会员详情的 hero 头部同一个柔光效果，登录页也是同一套语言的一部分 */
+  content: '';
+  position: absolute;
+  top: -40%; right: -20%;
+  width: 70%; height: 140%;
+  background: radial-gradient(circle, rgba(255,255,255,.16) 0%, transparent 65%);
+  pointer-events: none;
+  z-index: -1;
 }
 
 .brand-icon {
@@ -233,16 +246,18 @@ onBeforeUnmount(clearCountdown)
 .native-input {
   width: 100%;
   height: 44px;
-  border: 1px solid #d9d9d9;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0 14px;
   font-size: 15px;
   outline: none;
   box-sizing: border-box;
-  background: #fff;
-  color: #111;
-  &:focus { border-color: #07C160; box-shadow: 0 0 0 2px rgba(7,193,96,.1); }
+  background: var(--bg-page);
+  color: var(--text-1);
+  &:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(7,193,96,.15); }
 }
+
+.field-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
 
 .code-input { padding-right: 104px; }
 
@@ -255,8 +270,8 @@ onBeforeUnmount(clearCountdown)
   height: 30px;
   border-radius: 15px;
   border: none;
-  background: #f0fff6;
-  color: #07C160;
+  background: var(--brand-light);
+  color: var(--brand-dark);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -266,7 +281,7 @@ onBeforeUnmount(clearCountdown)
 .submit-btn {
   width: 100%;
   height: 48px;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   border: none;
   border-radius: 10px;
@@ -274,16 +289,14 @@ onBeforeUnmount(clearCountdown)
   font-weight: 700;
   cursor: pointer;
   &:disabled { opacity: .7; cursor: not-allowed; }
-  &:active { opacity: .9; }
 }
 .hint-card {
   padding: 12px 14px;
   border-radius: 10px;
   background: var(--brand-light);
-  color: #9a3412;
   margin-top: 8px;
   strong, span { display: block; }
-  strong { font-size: 13px; font-weight: 700; }
-  span { font-size: 12px; margin-top: 3px; }
+  strong { font-size: 13px; font-weight: 700; color: var(--brand-dark); }
+  span { font-size: 12px; margin-top: 3px; color: var(--text-2); }
 }
 </style>

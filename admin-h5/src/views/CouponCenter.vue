@@ -1,37 +1,46 @@
 <template>
   <div class="coupon-page">
 
-    <!-- 顶部：系统运行状态 -->
-    <section class="hero-card">
-      <div class="hero-left">
-        <div class="hero-badge">自动运行中</div>
-        <h1>智能营销已为你开启</h1>
-        <p>系统根据你的客单价自动计算券的门槛和面额，顾客感觉赚了，你实际多卖了。</p>
+    <!-- 顶部：强度选择器，跟"今日"页是同一个决策，不是另一套系统 -->
+    <section class="hero-card animate-in">
+      <div class="hero-badge"><span class="live-dot"></span>自动运行中</div>
+      <h1>智能营销已为你开启</h1>
+
+      <div class="intensity-switch">
+        <div
+          v-for="opt in intensityOptions"
+          :key="opt.key"
+          class="intensity-pill tap-shrink"
+          :class="{ 'intensity-pill--on': opt.key === currentIntensity, 'intensity-pill--disabled': switchingIntensity }"
+          @click="switchIntensity(opt.key)"
+        >{{ opt.label }}</div>
       </div>
-      <div class="hero-stats">
-        <div class="stat-item">
-          <span class="stat-num">{{ preview.issued_this_month ?? '—' }}</span>
+
+      <p class="hero-desc">{{ heroDesc }}</p>
+
+      <div class="hero-stat-row">
+        <div class="hero-stat">
+          <span class="stat-num">{{ preview.issued_this_month ?? 0 }}</span>
           <span class="stat-label">本月已发券</span>
         </div>
-        <div class="stat-item">
-          <span class="stat-num">{{ preview.aov ? ('¥' + preview.aov) : '计算中' }}</span>
-          <span class="stat-label">你的客单价</span>
+        <div class="hero-stat">
+          <span class="stat-num">{{ redemptionRateText }}</span>
+          <span class="stat-label">核销率（{{ preview.redeemed_this_month ?? 0 }}张已用）</span>
         </div>
       </div>
     </section>
 
-    <!-- 三个自动则卡片 -->
-    <section class="panel">
+    <!-- 五种发券时机：只说明系统在做什么，不给参数、不给独立开关 -->
+    <section class="panel animate-in" style="animation-delay:.04s">
       <div class="section-header">
         <div>
           <p class="section-eyebrow">全自动</p>
-          <h2>三种发券时机</h2>
+          <h2>五种发券时机</h2>
         </div>
       </div>
-      <p class="section-tip">门槛和面额由系统按你的客单价实时计算，每次发券前自动匹配最合适的档位。</p>
 
       <div class="rule-list">
-        <article v-for="card in ruleCards" :key="card.key" class="rule-card" :class="{ disabled: !preview[card.key]?.enabled }">
+        <article v-for="card in ruleCards" :key="card.key" class="rule-card">
           <div class="rule-head">
             <div class="rule-icon" :class="card.theme">
               <van-icon :name="card.icon" />
@@ -40,84 +49,61 @@
               <h3>{{ card.title }}</h3>
               <p>{{ card.desc }}</p>
             </div>
-            <van-switch
-              :model-value="preview[card.key]?.enabled ?? true"
-              size="24px"
-              :loading="togglingKey === card.key"
-              @change="(v) => toggleRule(card.key, v)"
-            />
           </div>
+        </article>
+      </div>
 
-          <!-- 加权档位只读展示 -->
-          <div v-if="preview[card.key]?.weighted_coupons?.length" class="tiers">
-            <div
-              v-for="(tier, i) in preview[card.key].weighted_coupons"
-              :key="i"
-              class="tier-chip"
-              :class="tierClass(i)"
-            >
-              <span class="tier-name">{{ tier.name }}</span>
-              <span class="tier-val">满{{ tier.threshold }}减{{ tier.amount }}</span>
-              <span class="tier-prob">{{ tier.weight }}% 概率</span>
+      <p class="section-tip">具体门槛和面额由算法根据你的客单价自动匹配，不需要你操心，绝不会让你亏本。</p>
+    </section>
+
+    <!-- 高级设置：给真的想自己管的商家，默认折叠，不占主视图 -->
+    <van-collapse v-model="activeCollapse" class="advanced-collapse animate-in" style="animation-delay:.08s">
+      <van-collapse-item title="高级设置" name="advanced">
+        <div class="advanced-block">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow">可选</p>
+              <h2>手动建券</h2>
+            </div>
+            <div style="display:flex;gap:8px">
+              <van-button plain size="small" type="primary" @click="router.push('/verify')">扫码核销</van-button>
+              <van-button plain size="small" type="primary" @click="router.push('/coupon-records')">发券记录</van-button>
             </div>
           </div>
-
-          <!-- 无历史订单兜底提示 -->
-          <div v-else-if="!preview.aov" class="no-data-tip">
-            <van-icon name="info-o" />
-            <span>收到5单后系统自动计算门槛，现在用默认参数运行</span>
+          <p class="section-tip">核销已并入支付流程自动完成，扫码核销只用于极少数需要手动处理的场景。节假日促销、特定活动可手动建券，与系统自动券互不影响。</p>
+          <div class="quick-actions">
+            <van-button round plain type="primary" @click="openCreate('new_customer_coupon')">建新客券</van-button>
+            <van-button round plain type="primary" @click="openCreate('consumption_coupon')">建复购券</van-button>
+            <van-button round plain type="primary" @click="openCreate('recall_coupon')">建召回券</van-button>
           </div>
-
-          <div class="rule-footer">
-            <span class="footer-tag">顾客随机看到不同券 · 保持新鲜感</span>
-            <span class="footer-tag green">商家成本可控</span>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <!-- 手动建券区：给有特殊需求的商家 -->
-    <section class="panel">
-      <div class="section-header">
-        <div>
-          <p class="section-eyebrow">可选</p>
-          <h2>手动建券</h2>
         </div>
-        <van-button plain size="small" type="primary" @click="router.push('/coupon-records')">发券记录</van-button>
-      </div>
-      <p class="section-tip">节假日促销、特定活动可手动建券，与系统自动券互不影响。</p>
-      <div class="quick-actions">
-        <van-button round plain type="primary" @click="openCreate('new_customer_coupon')">建新客券</van-button>
-        <van-button round plain type="primary" @click="openCreate('consumption_coupon')">建复购券</van-button>
-        <van-button round plain type="primary" @click="openCreate('recall_coupon')">建召回券</van-button>
-      </div>
-    </section>
 
-    <!-- 已建的券列表 -->
-    <section class="panel">
-      <div class="section-header">
-        <div>
-          <p class="section-eyebrow">活动券</p>
-          <h2>已建的券</h2>
+        <div class="advanced-block">
+          <div class="section-header">
+            <div>
+              <p class="section-eyebrow">活动券</p>
+              <h2>已建的券</h2>
+            </div>
+          </div>
+          <div v-if="loadingTemplates" class="empty-state">加载中…</div>
+          <div v-else-if="templates.length === 0" class="empty-state">还没有手动建券，系统自动券已在运行。</div>
+          <div v-else class="template-list">
+            <article v-for="item in templates" :key="item.id" class="template-card">
+              <div class="coupon-face">
+                <strong>¥{{ money(item.value) }}</strong>
+                <span>满{{ money(item.min_amount) }}用</span>
+              </div>
+              <div class="coupon-info">
+                <h3>{{ item.name }}</h3>
+                <p>库存 {{ item.total_stock - item.used_stock }}/{{ item.total_stock }}</p>
+                <p>{{ formatDate(item.end_time) }} 到期</p>
+              </div>
+              <span class="status-pill" :class="{ off: item.status !== 1 }">{{ item.status === 1 ? '上架' : '下架' }}</span>
+            </article>
+          </div>
         </div>
-      </div>
-      <div v-if="loadingTemplates" class="empty-state">加载中…</div>
-      <div v-else-if="templates.length === 0" class="empty-state">还没有手动建券，系统自动券已在运行。</div>
-      <div v-else class="template-list">
-        <article v-for="item in templates" :key="item.id" class="template-card">
-          <div class="coupon-face">
-            <strong>¥{{ money(item.value) }}</strong>
-            <span>满{{ money(item.min_amount) }}用</span>
-          </div>
-          <div class="coupon-info">
-            <h3>{{ item.name }}</h3>
-            <p>库存 {{ item.total_stock - item.used_stock }}/{{ item.total_stock }}</p>
-            <p>{{ formatDate(item.end_time) }} 到期</p>
-          </div>
-          <span class="status-pill" :class="{ off: item.status !== 1 }">{{ item.status === 1 ? '上架' : '下架' }}</span>
-        </article>
-      </div>
-    </section>
+      </van-collapse-item>
+    </van-collapse>
 
     <!-- 手动建券弹窗 -->
     <van-popup v-model:show="showForm" round position="bottom" :style="{ maxHeight: '90vh' }">
@@ -140,21 +126,27 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showFailToast, showSuccessToast } from 'vant'
 import {
   createCouponTemplate,
   getCouponTemplates,
   getMarketingPreview,
-  getTenantSettings,
   updateTenantSettings,
 } from '../api'
 
 const router = useRouter()
 
-// ── 则卡片配置 ──────────────────────────────────────────
+// ── 则卡片配置（只做说明，不再挂独立开关/参数） ────────────
 const ruleCards = [
+  {
+    key: 'entry_coupon',
+    title: '进店券',
+    desc: '顾客扫码进店打开菜单时自动静默发放一张，当日有效，促进当次凑单。',
+    icon: 'shop-collect-o',
+    theme: 'purple',
+  },
   {
     key: 'new_customer_coupon',
     title: '新客券',
@@ -176,17 +168,49 @@ const ruleCards = [
     icon: 'replay',
     theme: 'orange',
   },
+  {
+    key: 'points_reward_coupon',
+    title: '积分好礼券',
+    desc: '顾客攒够积分自动兑换一张，面额比其他自动券更慷慨，奖励长期熟客。',
+    icon: 'point-gift-o',
+    theme: 'gold',
+  },
+]
+
+const intensityOptions = [
+  { key: 'conservative', label: '保守' },
+  { key: 'standard', label: '标准' },
+  { key: 'aggressive', label: '激进' },
 ]
 
 // ── 状态 ────────────────────────────────────────────────
 const preview = ref({})           // 来自 /marketing-preview 的系统计算结果
 const templates = ref([])
 const loadingTemplates = ref(false)
-const togglingKey = ref(null)     // 正在切换开关的 rule key
+const switchingIntensity = ref(false)
+const activeCollapse = ref([])
 const showForm = ref(false)
 const savingForm = ref(false)
 
 const form = reactive({ name: '', value: 5, min_amount: 30, total_stock: 100, valid_days: 7 })
+
+const currentIntensity = computed(() => preview.value?.intensity_outcomes?.current_intensity || 'standard')
+
+const redemptionRateText = computed(() => {
+  const rate = preview.value?.redemption_rate
+  if (rate === null || rate === undefined) return '暂无数据'
+  return `${(rate * 100).toFixed(0)}%`
+})
+
+const heroDesc = computed(() => {
+  const outcomes = preview.value?.intensity_outcomes
+  if (!outcomes) return '系统正在为你自动配置营销参数…'
+  if (!outcomes.has_enough_data) return '数据积累中，当前用安全参数自动运行，满 5 单后为你精算'
+  const cur = (outcomes.outcomes || []).find(o => o.is_current)
+  if (!cur) return '系统已自动为你配置营销参数'
+  const ratio = ((cur.estimated_cost_ratio || 0) * 100).toFixed(1)
+  return `预计本月自动发放约 ${cur.estimated_monthly_coupons} 张券，成本约 ¥${cur.estimated_cost_per_month}（约占营业额 ${ratio}%）`
+})
 
 // ── 数据加载 ─────────────────────────────────────────────
 async function loadPreview() {
@@ -211,16 +235,19 @@ async function loadTemplates() {
   }
 }
 
-// ── 开关切换（只保存 enabled 字段） ──────────────────────
-async function toggleRule(key, enabled) {
-  togglingKey.value = key
+// ── 强度切换：跟"今日"页调用同一个接口，选中即生效 ──────────
+async function switchIntensity(key) {
+  if (switchingIntensity.value || key === currentIntensity.value) return
+  switchingIntensity.value = true
   try {
-    await updateTenantSettings({ coupon_rules: { [key]: { enabled } } })
-    if (preview.value[key]) preview.value[key].enabled = enabled
+    const res = await updateTenantSettings({ marketing_intensity: key })
+    if (res?.code !== 200) { showFailToast(res?.msg || '切换失败'); return }
+    await loadPreview()
+    showSuccessToast('已切换')
   } catch {
-    showFailToast('开关更新失败')
+    showFailToast('切换失败，请稍后重试')
   } finally {
-    togglingKey.value = null
+    switchingIntensity.value = false
   }
 }
 
@@ -252,7 +279,7 @@ async function saveTemplate() {
   try {
     const now = new Date()
     const end = new Date(now.getTime() + Number(form.valid_days || 7) * 86400000)
-    await createCouponTemplate({
+    const res = await createCouponTemplate({
       name: form.name,
       type: 'FIXED',
       value: Number(form.value || 0),
@@ -262,21 +289,21 @@ async function saveTemplate() {
       end_time: end.toISOString(),
       status: 1,
     })
-    showSuccessToast('券已建上架')
+    // 后端就算校验不通过（比如触发了亏本红线）也会返回 HTTP 200，
+    // 必须看 code 才知道是不是真的建成功——不然商家会看到"已上架"，
+    // 但券其实根本没建出来。
+    if (res?.code !== 200) { showFailToast(res?.msg || '创建失败'); return }
+    showSuccessToast('券已上架')
     showForm.value = false
     loadTemplates()
   } catch {
-    showFailToast('建失败，请重试')
+    showFailToast('创建失败，请稍后重试')
   } finally {
     savingForm.value = false
   }
 }
 
 // ── 工具函数 ─────────────────────────────────────────────
-function tierClass(i) {
-  return ['tier-low', 'tier-mid', 'tier-high'][i] || 'tier-low'
-}
-
 function money(v) {
   const n = Number(v || 0)
   return Number.isInteger(n) ? n : n.toFixed(1)
@@ -295,16 +322,12 @@ onMounted(() => { loadPreview(); loadTemplates() })
 .coupon-page {
   min-height: 100vh;
   padding: 12px 12px 84px;
-  background: #f5f6fa;
-  color: #111827;
+  background: var(--bg-page);
+  color: var(--text-1);
 }
 
 /* ── 顶部状态卡 ─────────────────── */
 .hero-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
   padding: 20px;
   margin-bottom: 12px;
   border-radius: 18px;
@@ -322,36 +345,48 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-size: 12px;
   font-weight: 700;
 }
-.hero-badge::before {
-  content: '';
-  display: block;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #fff;
-  animation: pulse 1.5s infinite;
-}
-@keyframes pulse {
-  0%,100% { opacity: 1 } 50% { opacity: .4 }
-}
-.hero-left h1 { font-size: 20px; margin: 0 0 6px; }
-.hero-left p  { font-size: 13px; opacity: .85; margin: 0; line-height: 1.5; }
-.hero-stats {
+.hero-card h1 { font-size: 20px; margin: 0 0 12px; }
+
+.intensity-switch {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex-shrink: 0;
-  text-align: right;
+  gap: 8px;
+  margin-bottom: 12px;
 }
-.stat-num   { display: block; font-size: 22px; font-weight: 900; }
-.stat-label { display: block; font-size: 11px; opacity: .8; }
+.intensity-pill {
+  flex: 1;
+  text-align: center;
+  padding: 9px 0;
+  border-radius: 10px;
+  background: rgba(255,255,255,.16);
+  color: rgba(255,255,255,.85);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.intensity-pill--on {
+  background: #fff;
+  color: #07C160;
+}
+.intensity-pill--disabled {
+  opacity: .6;
+  pointer-events: none;
+}
+
+.hero-desc { font-size: 13px; opacity: .9; margin: 0 0 14px; line-height: 1.5; }
+
+.hero-stat-row { display: flex; gap: 22px; }
+.hero-stat { display: flex; align-items: baseline; gap: 8px; }
+.stat-num   { font-size: 22px; font-weight: 900; }
+.stat-label { font-size: 12px; opacity: .8; }
 
 /* ── 通用面 ───────────────────── */
 .panel {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 18px;
   padding: 16px;
   margin-bottom: 12px;
-  box-shadow: 0 2px 12px rgba(0,0,0,.04);
+  box-shadow: var(--card-shadow);
 }
 .section-header {
   display: flex;
@@ -360,30 +395,27 @@ onMounted(() => { loadPreview(); loadTemplates() })
   margin-bottom: 4px;
 }
 .section-eyebrow { margin: 0 0 4px; color: #07C160; font-size: 12px; font-weight: 700; }
-.section-header h2 { margin: 0; font-size: 20px; }
+.section-header h2 { margin: 0; font-size: 20px; color: var(--text-1); }
 .section-tip {
-  margin: 0 0 14px;
-  color: #64748b;
+  margin: 10px 0 0;
+  color: var(--text-2);
   font-size: 13px;
   line-height: 1.6;
 }
 
-/* ── 则卡片 ───────────────────── */
+/* ── 则卡片：只做说明，无开关无参数 ─────────── */
 .rule-list { display: grid; gap: 10px; }
 .rule-card {
   padding: 14px;
-  border: 1.5px solid #e5e7eb;
+  border: 1.5px solid var(--border);
   border-radius: 16px;
-  transition: opacity .2s;
 }
-.rule-card.disabled { opacity: .55; }
 
 .rule-head {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 44px 1fr;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
 }
 .rule-icon {
   display: grid; place-items: center;
@@ -393,59 +425,31 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-size: 22px;
   flex-shrink: 0;
 }
+.rule-icon.purple { background: #8b5cf6; }
 .rule-icon.green  { background: #10b981; }
 .rule-icon.blue   { background: #3b82f6; }
 .rule-icon.orange { background: #f59e0b; }
+.rule-icon.gold   { background: #ca8a04; }
 
-.rule-meta h3 { margin: 0 0 3px; font-size: 17px; }
-.rule-meta p  { margin: 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.rule-meta h3 { margin: 0 0 3px; font-size: 17px; color: var(--text-1); }
+.rule-meta p  { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
 
-/* ── 加权档位展示 ────────────────── */
-.tiers { display: grid; gap: 8px; margin-bottom: 10px; }
-.tier-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 13px;
+/* ── 高级设置折叠区 ───────────────── */
+.advanced-collapse {
+  border-radius: 18px;
+  overflow: hidden;
+  margin-bottom: 12px;
 }
-.tier-low  { background: #f0fdf4; border: 1px solid #bbf7d0; }
-.tier-mid  { background: #eff6ff; border: 1px solid #bfdbfe; }
-.tier-high { background: #fefce8; border: 1px solid #fde68a; }
-.tier-name { flex: 1; font-weight: 600; color: #374151; }
-.tier-val  { color: #374151; font-weight: 700; }
-.tier-prob { margin-left: auto; color: #9ca3af; font-size: 12px; flex-shrink: 0; }
-
-.no-data-tip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 13px;
-  margin-bottom: 10px;
+.advanced-collapse :deep(.van-collapse-item__title) {
+  font-weight: 700;
+  color: var(--text-1);
+  background: var(--bg-card);
 }
-
-.rule-footer {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
+.advanced-collapse :deep(.van-collapse-item__content) {
+  background: var(--bg-card);
+  color: var(--text-2);
 }
-.footer-tag {
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: #f1f5f9;
-  color: #64748b;
-  font-size: 11px;
-}
-.footer-tag.green {
-  background: #ecfdf5;
-  color: #059669;
-}
+.advanced-block + .advanced-block { margin-top: 16px; }
 
 /* ── 快速建券 ───────────────────── */
 .quick-actions {
@@ -462,7 +466,7 @@ onMounted(() => { loadPreview(); loadTemplates() })
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border: 1px solid #eef2f7;
+  border: 1px solid var(--border);
   border-radius: 14px;
 }
 .coupon-face {
@@ -474,8 +478,8 @@ onMounted(() => { loadPreview(); loadTemplates() })
 }
 .coupon-face strong { font-size: 22px; }
 .coupon-face span   { font-size: 11px; }
-.coupon-info h3 { margin: 0 0 4px; font-size: 16px; }
-.coupon-info p  { margin: 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+.coupon-info h3 { margin: 0 0 4px; font-size: 16px; color: var(--text-1); }
+.coupon-info p  { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
 
 .status-pill {
   padding: 4px 8px;
@@ -486,26 +490,25 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-weight: 700;
   white-space: nowrap;
 }
-.status-pill.off { background: #f1f5f9; color: #64748b; }
+.status-pill.off { background: var(--bg-page); color: var(--text-2); }
 
 /* ── 空状态 ─────────────────────── */
 .empty-state {
   padding: 28px 12px;
   border-radius: 14px;
-  background: #f8fafc;
-  color: #64748b;
+  background: var(--bg-page);
+  color: var(--text-2);
   text-align: center;
   font-size: 14px;
 }
 
 /* ── 建券弹窗 ───────────────────── */
-.form-sheet { padding: 18px 12px 32px; }
-.form-sheet h2 { padding: 0 8px 14px; font-size: 20px; }
+.form-sheet { padding: 18px 12px 32px; background: var(--bg-card); }
+.form-sheet h2 { padding: 0 8px 14px; font-size: 20px; color: var(--text-1); }
 .save-btn { margin-top: 16px; }
 
 @media (max-width: 380px) {
   .quick-actions { grid-template-columns: 1fr; }
   .template-card { grid-template-columns: 80px 1fr auto; }
-  .hero-card { flex-direction: column; }
 }
 </style>

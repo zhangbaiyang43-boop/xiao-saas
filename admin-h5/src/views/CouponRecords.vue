@@ -1,111 +1,116 @@
 <template>
   <div class="coupon-records-page">
-    <section class="hero-card">
-      <div>
-        <p class="eyebrow">发券记录</p>
-        <h1>看清每张券发给了谁</h1>
-        <p>未使用的券可以收回，已核销的券可追踪到客户。</p>
-      </div>
-      <button class="refresh-btn" :disabled="loading" @click="refresh">刷新</button>
-    </section>
+    <PageHeader title="发券记录" />
 
-    <section class="summary-grid">
-      <button
-        v-for="item in summaryItems"
-        :key="item.value"
-        :class="['summary-card', { active: filters.status === item.value }]"
-        @click="selectStatus(item.value)"
-      >
-        <strong>{{ item.count }}</strong>
-        <span>{{ item.label }}</span>
-      </button>
-    </section>
+    <div class="page-content">
+      <section class="hero-card animate-in" style="animation-delay:.02s">
+        <div>
+          <p class="eyebrow">发券记录</p>
+          <h1>看清每张券发给了谁</h1>
+          <p>未使用的券可以收回，已核销的券可追踪到客户。</p>
+        </div>
+        <button class="refresh-btn tap-shrink" :disabled="loading" @click="refresh">刷新</button>
+      </section>
 
-    <section class="filter-card">
-      <van-search
-        v-model="filters.keyword"
-        placeholder="搜手机号、客户名、券码"
-        shape="round"
-        @search="handleSearch"
-        @clear="handleSearch"
+      <section class="summary-grid animate-in" style="animation-delay:.06s">
+        <button
+          v-for="item in summaryItems"
+          :key="item.value"
+          :class="['summary-card', 'tap-shrink', { active: filters.status === item.value }]"
+          @click="selectStatus(item.value)"
+        >
+          <strong>{{ item.count }}</strong>
+          <span>{{ item.label }}</span>
+        </button>
+      </section>
+
+      <section class="filter-card animate-in" style="animation-delay:.1s">
+        <van-search
+          v-model="filters.keyword"
+          placeholder="搜手机号、客户名、券码"
+          shape="round"
+          @search="handleSearch"
+          @clear="handleSearch"
+        />
+        <div class="filter-row">
+          <select v-model="filters.status" class="filter-select" @change="handleSearch">
+            <option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+          <select v-model="filters.source" class="filter-select" @change="handleSearch">
+            <option v-for="item in sourceOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select>
+        </div>
+      </section>
+
+      <section v-if="loading" class="state-card animate-in" style="animation-delay:.14s">
+        <van-loading size="24px" color="var(--brand)">正在加载发券记录</van-loading>
+      </section>
+
+      <section v-else-if="hasError" class="state-card animate-in" style="animation-delay:.14s">
+        <van-empty :description="errorMsg || '加载失败'">
+          <van-button type="primary" size="small" class="tap-shrink" @click="loadRecords">重试</van-button>
+        </van-empty>
+      </section>
+
+      <section v-else-if="records.length === 0" class="state-card animate-in" style="animation-delay:.14s">
+        <van-empty description="暂无发券记录" />
+      </section>
+
+      <section v-else class="record-list animate-in" style="animation-delay:.14s">
+        <article v-for="record in records" :key="record.id" class="record-card tap-shrink">
+          <div class="record-top">
+            <div class="customer">
+              <strong>{{ record.customer_name || '会员用户' }}</strong>
+              <span>{{ record.customer_phone || '-' }}</span>
+            </div>
+            <van-tag :type="getTagType(record.status)" round>
+              {{ getStatusText(record.status) }}
+            </van-tag>
+          </div>
+
+          <div class="coupon-row">
+            <div class="coupon-value">
+              <strong>￥{{ money(record.value) }}</strong>
+              <span>满 {{ money(record.min_amount) }} 可用</span>
+            </div>
+            <div class="coupon-info">
+              <strong>{{ record.template_name || record.coupon_name || '优惠券' }}</strong>
+              <span>券码：{{ record.code || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="record-meta">
+            <span><van-icon name="clock-o" /> {{ formatTime(record.created_at) }}</span>
+            <span>{{ getSourceText(record.source) }}</span>
+          </div>
+
+          <div class="record-actions">
+            <van-button
+              v-if="record.status === 'UNUSED'"
+              round
+              plain
+              type="danger"
+              size="small"
+              class="tap-shrink"
+              @click="handleRecall(record)"
+            >
+              收回这张券
+            </van-button>
+            <van-button round plain type="primary" size="small" class="tap-shrink" @click="goToCustomer(record.customer_id)">
+              查看客户
+            </van-button>
+          </div>
+        </article>
+      </section>
+
+      <van-pagination
+        v-if="pagination.total > pagination.pageSize"
+        v-model="pagination.page"
+        :page-size="pagination.pageSize"
+        :total="pagination.total"
+        @change="handlePageChange"
       />
-      <div class="filter-row">
-        <select v-model="filters.status" class="filter-select" @change="handleSearch">
-          <option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
-        <select v-model="filters.source" class="filter-select" @change="handleSearch">
-          <option v-for="item in sourceOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
-      </div>
-    </section>
-
-    <section v-if="loading" class="state-card">
-      <van-loading size="24px">正在加载发券记录</van-loading>
-    </section>
-
-    <section v-else-if="hasError" class="state-card">
-      <van-empty :description="errorMsg || '加载失败'">
-        <van-button type="primary" size="small" @click="loadRecords">重试</van-button>
-      </van-empty>
-    </section>
-
-    <section v-else-if="records.length === 0" class="state-card">
-      <van-empty description="暂无发券记录" />
-    </section>
-
-    <section v-else class="record-list">
-      <article v-for="record in records" :key="record.id" class="record-card">
-        <div class="record-top">
-          <div class="customer">
-            <strong>{{ record.customer_name || '会员用户' }}</strong>
-            <span>{{ record.customer_phone || '-' }}</span>
-          </div>
-          <van-tag :type="getTagType(record.status)" round>
-            {{ getStatusText(record.status) }}
-          </van-tag>
-        </div>
-
-        <div class="coupon-row">
-          <div class="coupon-value">
-            <strong>￥{{ money(record.value) }}</strong>
-            <span>满 {{ money(record.min_amount) }} 可用</span>
-          </div>
-          <div class="coupon-info">
-            <strong>{{ record.template_name || record.coupon_name || '优惠券' }}</strong>
-            <span>券码：{{ record.code || '-' }}</span>
-          </div>
-        </div>
-
-        <div class="record-meta">
-          <span><van-icon name="clock-o" /> {{ formatTime(record.created_at) }}</span>
-          <span>{{ getSourceText(record.source) }}</span>
-        </div>
-
-        <div class="record-actions">
-          <van-button
-            v-if="record.status === 'UNUSED'"
-            round
-            plain
-            type="danger"
-            size="small"
-            @click="handleRecall(record)"
-          >
-            收回这张券
-          </van-button>
-          <van-button round plain type="primary" size="small" @click="goToCustomer(record.customer_id)">
-            查看客户
-          </van-button>
-        </div>
-      </article>
-    </section>
-
-    <van-pagination
-      v-if="pagination.total > pagination.pageSize"
-      v-model="pagination.page"
-      :page-size="pagination.pageSize"
-      :total="pagination.total"
-      @change="handlePageChange"
-    />
+    </div>
   </div>
 </template>
 
@@ -123,6 +128,7 @@ import {
   showConfirmDialog,
   showToast
 } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 import { getIssuedCoupons, recallCoupon } from '../api'
 
 const router = useRouter()
@@ -307,9 +313,13 @@ onMounted(loadRecords)
 .coupon-records-page {
   min-height: 100vh;
   box-sizing: border-box;
+  background: var(--bg-page);
+  color: var(--text-1);
+}
+
+.page-content {
+  box-sizing: border-box;
   padding: 14px 14px 96px;
-  background: #f5f6f8;
-  color: #111827;
 }
 
 .hero-card,
@@ -317,7 +327,7 @@ onMounted(loadRecords)
 .state-card,
 .record-card {
   border-radius: 18px;
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
 }
 
@@ -331,7 +341,7 @@ onMounted(loadRecords)
 
 .eyebrow {
   margin: 0 0 5px;
-  color: #1677ff;
+  color: var(--brand-dark);
   font-size: 12px;
   font-weight: 900;
 }
@@ -345,7 +355,7 @@ onMounted(loadRecords)
 
 .hero-card p:not(.eyebrow) {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -355,8 +365,8 @@ onMounted(loadRecords)
   padding: 0 13px;
   border: 0;
   border-radius: 999px;
-  background: #eff6ff;
-  color: #1677ff;
+  background: var(--brand-light);
+  color: var(--brand-dark);
   font-weight: 900;
   flex: 0 0 auto;
 }
@@ -372,13 +382,13 @@ onMounted(loadRecords)
   min-height: 68px;
   border: 1px solid transparent;
   border-radius: 16px;
-  background: #fff;
+  background: var(--bg-card);
   text-align: center;
 }
 
 .summary-card.active {
-  border-color: #1677ff;
-  background: #eff6ff;
+  border-color: var(--brand);
+  background: var(--brand-light);
 }
 
 .summary-card strong,
@@ -387,14 +397,14 @@ onMounted(loadRecords)
 }
 
 .summary-card strong {
-  color: #111827;
+  color: var(--text-1);
   font-size: 20px;
   font-weight: 900;
 }
 
 .summary-card span {
   margin-top: 4px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -413,10 +423,10 @@ onMounted(loadRecords)
 .filter-select {
   width: 100%;
   height: 42px;
-  border: 1px solid #e5eaf3;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: #fff;
-  color: #111827;
+  background: var(--bg-card);
+  color: var(--text-1);
   padding: 0 10px;
   font-size: 14px;
 }
@@ -460,7 +470,7 @@ onMounted(loadRecords)
 
 .customer strong {
   overflow: hidden;
-  color: #111827;
+  color: var(--text-1);
   font-size: 17px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -469,7 +479,7 @@ onMounted(loadRecords)
 
 .customer span {
   margin-top: 4px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
 }
 
@@ -509,7 +519,7 @@ onMounted(loadRecords)
 
 .coupon-info strong {
   overflow: hidden;
-  color: #111827;
+  color: var(--text-1);
   font-size: 18px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -518,7 +528,7 @@ onMounted(loadRecords)
 
 .coupon-info span {
   margin-top: 8px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   word-break: break-all;
 }
@@ -528,7 +538,7 @@ onMounted(loadRecords)
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 12px;
 }
 

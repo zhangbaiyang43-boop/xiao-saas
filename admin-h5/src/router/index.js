@@ -1,34 +1,36 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Login from '../views/Login.vue'
-import Layout from '../views/Layout.vue'
-import Dashboard from '../views/Dashboard.vue'
-import CustomerList from '../views/CustomerList.vue'
-import CustomerDetail from '../views/CustomerDetail.vue'
-import ConsumptionList from '../views/ConsumptionList.vue'
-import CouponCenter from '../views/CouponCenter.vue'
-import CouponRecords from '../views/CouponRecords.vue'
-import Distribution from '../views/Distribution.vue'
-import EntranceCodeList from '../views/EntranceCodeList.vue'
-import ChannelEntryList from '../views/ChannelEntryList.vue'
-import Verify from '../views/Verify.vue'
-import PluginPlaceholder from '../views/PluginPlaceholder.vue'
-import MerchantSettings from '../views/MerchantSettings.vue'
-import BusinessSettings from '../views/settings/BusinessSettings.vue'
-import PaymentSettings from '../views/settings/PaymentSettings.vue'
-import DeviceSettings from '../views/settings/DeviceSettings.vue'
-import NotificationSettings from '../views/settings/NotificationSettings.vue'
-import StoreSettings from '../views/settings/StoreSettings.vue'
-import WeworkSettings from '../views/WeworkSettings.vue'
-import MenuManage from '../views/MenuManage.vue'
-import OrderManage from '../views/OrderManage.vue'
-import OrderPage from '../views/OrderPage.vue'
-import QueueManage from '../views/QueueManage.vue'
-import QueueDisplay from '../views/QueueDisplay.vue'
-import QueueStatus from '../views/QueueStatus.vue'
-import More from '../views/More.vue'
-import SuperAdmin from '../views/SuperAdmin.vue'
-import H5Order from '../views/H5Order.vue'
 import { clearSession, hasValidSession } from '../utils/session'
+
+const Login = () => import('../views/Login.vue')
+const Layout = () => import('../views/Layout.vue')
+const Dashboard = () => import('../views/Dashboard.vue')
+const CustomerList = () => import('../views/CustomerList.vue')
+const CustomerDetail = () => import('../views/CustomerDetail.vue')
+const ConsumptionList = () => import('../views/ConsumptionList.vue')
+const CouponCenter = () => import('../views/CouponCenter.vue')
+const CouponRecords = () => import('../views/CouponRecords.vue')
+const Distribution = () => import('../views/Distribution.vue')
+const StaffReferral = () => import('../views/StaffReferral.vue')
+const EntranceCodeList = () => import('../views/EntranceCodeList.vue')
+const ChannelEntryList = () => import('../views/ChannelEntryList.vue')
+const Verify = () => import('../views/Verify.vue')
+const PluginPlaceholder = () => import('../views/PluginPlaceholder.vue')
+const MerchantSettings = () => import('../views/MerchantSettings.vue')
+const BusinessSettings = () => import('../views/settings/BusinessSettings.vue')
+const PaymentSettings = () => import('../views/settings/PaymentSettings.vue')
+const DeviceSettings = () => import('../views/settings/DeviceSettings.vue')
+const NotificationSettings = () => import('../views/settings/NotificationSettings.vue')
+const StoreSettings = () => import('../views/settings/StoreSettings.vue')
+const WeworkSettings = () => import('../views/WeworkSettings.vue')
+const MenuManage = () => import('../views/MenuManage.vue')
+const OrderManage = () => import('../views/OrderManage.vue')
+const OrderPage = () => import('../views/OrderPage.vue')
+const QueueManage = () => import('../views/QueueManage.vue')
+const QueueDisplay = () => import('../views/QueueDisplay.vue')
+const QueueStatus = () => import('../views/QueueStatus.vue')
+const More = () => import('../views/More.vue')
+const SuperAdmin = () => import('../views/SuperAdmin.vue')
+const H5Order = () => import('../views/H5Order.vue')
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
@@ -51,6 +53,7 @@ const routes = [
       { path: 'coupons', name: 'CouponCenter', component: CouponCenter },
       { path: 'coupon-records', name: 'CouponRecords', component: CouponRecords },
       { path: 'distribution', name: 'Distribution', component: Distribution },
+      { path: 'staff-referral', name: 'StaffReferral', component: StaffReferral },
       { path: 'coupon-send', redirect: '/coupons' },
       { path: 'coupon-templates', redirect: '/coupons' },
       { path: 'verify', name: 'Verify', component: Verify },
@@ -88,6 +91,11 @@ router.beforeEach((to, from, next) => {
   const isQueueStatus = to.path === '/queue/status'
   const validSession = hasValidSession()
 
+  if (isSuper && validSession) {
+    next('/')
+    return
+  }
+
   if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus) {
     next()
     return
@@ -95,7 +103,7 @@ router.beforeEach((to, from, next) => {
 
   if (!isLogin && !validSession) {
     clearSession()
-    next({ path: '/login', query: { reason: '登录已过期，请重新登录' } })
+    next({ path: '/login', query: { reason: '\u767b\u5f55\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55' } })
     return
   }
 

@@ -2,13 +2,13 @@
   <div class="sub-page store-page">
     <PageHeader title="店铺资料" />
     <div class="page-body">
-      <section class="summary-card">
+      <section class="summary-card animate-in">
         <div class="store-icon"><ShopOutlined /></div>
         <div><h1>{{ storeForm.name || '商家名称' }}</h1><span>{{ storeForm.phone || '未填写手机号' }}</span></div>
       </section>
-      <section class="panel-card">
-        <a-form layout="vertical" @finish="saveStoreProfile">
-          <a-form-item label="门店名称" :rules="[{ required: true }]">
+      <section class="panel-card animate-in" style="animation-delay:.04s">
+        <a-form :model="storeForm" layout="vertical" @finish="saveStoreProfile">
+          <a-form-item label="门店名称" name="name" :rules="[{ required: true, message: '请输入门店名称' }]">
             <a-input v-model:value="storeForm.name" placeholder="例如：大掌柜火锅店" />
           </a-form-item>
           <a-form-item label="门店地址">
@@ -23,9 +23,9 @@
           <a-button type="primary" html-type="submit" block size="large" :loading="savingStore">保存门店资料</a-button>
         </a-form>
       </section>
-      <section class="plain-card">
+      <section class="plain-card animate-in" style="animation-delay:.08s">
         <strong>商家 ID</strong>
-        <span @click="copyTenantId">{{ tenantId ? tenantId.slice(0, 4) + '****' + tenantId.slice(-4) : '-' }}</span>
+        <span class="tenant-id tap-shrink" @click="copyTenantId">{{ tenantId ? tenantId.slice(0, 4) + '****' + tenantId.slice(-4) : '-' }}</span>
       </section>
     </div>
   </div>
@@ -71,17 +71,18 @@ onMounted(loadProfile)
 </script>
 
 <style scoped>
-.store-page { min-height: 100vh; background: #f5f6f8; }
+.store-page { min-height: 100vh; background: var(--bg-page); }
 .page-body { padding: 12px 16px 28px; }
-.summary-card, .panel-card, .plain-card { background: #fff; border: 1px solid #eef2f7; border-radius: 14px; }
+.summary-card, .panel-card, .plain-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--card-shadow); }
 .summary-card { display: flex; align-items: center; gap: 12px; padding: 16px; }
-.store-icon { width: 50px; height: 50px; border-radius: 15px; background: #07c160; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 25px; flex-shrink: 0; }
+.store-icon { width: 50px; height: 50px; border-radius: 15px; background: var(--brand); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 25px; flex-shrink: 0; }
 .summary-card h1, .summary-card span { display: block; margin: 0; }
-.summary-card h1 { color: #111827; font-size: 19px; font-weight: 900; }
-.summary-card span { margin-top: 4px; color: #64748b; font-size: 13px; }
+.summary-card h1 { color: var(--text-1); font-size: 19px; font-weight: 900; }
+.summary-card span { margin-top: 4px; color: var(--text-2); font-size: 13px; }
 .panel-card { margin-top: 12px; padding: 16px; }
 .plain-card { margin-top: 12px; padding: 14px; }
 .plain-card strong, .plain-card span { display: block; }
-.plain-card strong { color: #111827; font-size: 14px; font-weight: 900; }
-.plain-card span { margin-top: 6px; color: #64748b; font-size: 13px; font-family: monospace; }
+.plain-card strong { color: var(--text-1); font-size: 14px; font-weight: 900; }
+.plain-card span { margin-top: 6px; color: var(--text-2); font-size: 13px; font-family: monospace; }
+.plain-card .tenant-id { cursor: pointer; }
 </style>

@@ -4,11 +4,19 @@
       <a-button type="text" size="small" @click="loadAll" :loading="loading" style="color:var(--brand)">刷新</a-button>
     </PageHeader>
 
-    <div v-if="loading" style="display:flex;justify-content:center;padding:80px"><a-spin size="large" /></div>
+    <template v-if="loading">
+      <div class="member-card member-card--skeleton">
+        <a-skeleton active avatar :title="{ width: '40%' }" :paragraph="{ rows: 1, width: '60%' }" />
+      </div>
+      <div class="page-body">
+        <a-skeleton active :paragraph="{ rows: 2 }" style="background:var(--bg-card);border-radius:var(--radius-card);padding:16px;margin-bottom:12px" />
+        <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:var(--radius-card);padding:16px" />
+      </div>
+    </template>
 
     <template v-else>
       <!-- 会员卡 -->
-      <div class="member-card" :style="!isActive ? { background: '#475569' } : {}">
+      <div class="member-card animate-in" :class="{ 'member-card--inactive': !isActive }">
         <div class="m-avatar"><UserOutlined style="font-size:28px;color:#fff" /></div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -28,7 +36,7 @@
         <a-alert v-if="!isActive" type="error" message="这个会员当前已停用" description="顾客扫码或手机号登录时会提示会员已停用，请联系商家。" show-icon style="margin-bottom:12px;border-radius:10px" />
 
         <!-- 统计数字 -->
-        <a-card :bordered="false" style="margin-bottom:12px">
+        <a-card :bordered="false" class="animate-in" style="margin-bottom:12px">
           <div class="stat-grid">
             <div class="stat-cell"><span class="stat-num" style="color:var(--brand)">{{ availableCouponCount }}</span><span class="stat-label">可用券</span></div>
             <div class="stat-cell"><span class="stat-num">{{ account.points_balance || 0 }}</span><span class="stat-label">积分</span></div>
@@ -37,7 +45,7 @@
         </a-card>
 
         <!-- 操作按钮 -->
-        <a-card :bordered="false" style="margin-bottom:12px">
+        <a-card :bordered="false" class="animate-in" style="margin-bottom:12px;animation-delay:.04s">
           <div style="display:grid;gap:8px">
             <a-button type="primary" block size="large" @click="openSendDialog">
               <template #icon><GiftOutlined /></template>给他发券
@@ -51,7 +59,8 @@
         </a-card>
 
         <!-- 基础信息 -->
-        <a-card :bordered="false" title="基础信息" style="margin-bottom:12px" :body-style="{ padding: 0 }">
+        <a-card :bordered="false" title="基础信息" class="animate-in" style="margin-bottom:12px;animation-delay:.08s" :body-style="{ padding: 0 }">
+          <div class="info-row"><span class="info-label">会员卡号</span><span class="info-value">{{ customer.store_member_no ? formatMemberNo(customer.store_member_no) : '-' }}</span></div>
           <div class="info-row"><span class="info-label">会员 </span><span class="info-value">{{ customer.id || '-' }}</span></div>
           <div class="info-row"><span class="info-label">手机号</span><span class="info-value">{{ customer.phone || '-' }}</span></div>
           <div class="info-row"><span class="info-label">来源入口</span><span class="info-value">{{ sourceText }}</span></div>
@@ -60,12 +69,12 @@
         </a-card>
 
         <!-- 他的券 -->
-        <a-card :bordered="false" title="他的优惠券" style="margin-bottom:12px" :body-style="{ padding: 0 }">
+        <a-card :bordered="false" title="他的优惠券" class="animate-in" style="margin-bottom:12px;animation-delay:.12s" :body-style="{ padding: 0 }">
           <div v-if="couponError" @click="loadCoupons" style="padding:20px;text-align:center;color:var(--danger);cursor:pointer;font-size:13px">优惠券加载失败，点这里重试</div>
           <a-empty v-else-if="customerCoupons.length === 0" description="暂无优惠券" style="padding:24px 0" />
           <template v-else>
             <div v-for="coupon in customerCoupons.slice(0,20)" :key="coupon.id" class="coupon-row">
-              <div class="coupon-face" :style="{ background: coupon.status === 'UNUSED' ? '#ee4444' : '#bbb' }">
+              <div class="coupon-face" :class="{ 'coupon-face--used': coupon.status !== 'UNUSED' }">
                 <div style="font-size:20px;font-weight:900">¥{{ money(coupon.value || coupon.amount || coupon.coupon_amount) }}</div>
                 <div style="font-size:10px;opacity:.9">优惠券</div>
               </div>
@@ -97,7 +106,7 @@
         </a-card>
 
         <!-- 消费记录 -->
-        <a-card :bordered="false" title="消费记录" style="margin-bottom:12px" :body-style="{ padding: 0 }">
+        <a-card :bordered="false" title="消费记录" class="animate-in" style="margin-bottom:12px;animation-delay:.16s" :body-style="{ padding: 0 }">
           <div v-if="consumptionError" @click="loadConsumptions" style="padding:20px;text-align:center;color:var(--danger);cursor:pointer;font-size:13px">消费记录加载失败，点这里重试</div>
           <a-empty v-else-if="consumptions.length === 0" description="暂无消费记录" style="padding:24px 0" />
           <template v-else>
@@ -112,7 +121,7 @@
         </a-card>
 
         <!-- 操作记录 -->
-        <a-card :bordered="false" title="操作记录" style="margin-bottom:12px" :body-style="{ padding: 0 }">
+        <a-card :bordered="false" title="操作记录" class="animate-in" style="margin-bottom:12px;animation-delay:.2s" :body-style="{ padding: 0 }">
           <div v-if="operationLogError" @click="loadOperationLogs" style="padding:20px;text-align:center;color:var(--danger);cursor:pointer;font-size:13px">加载失败，点这里重试</div>
           <a-empty v-else-if="operationLogs.length === 0" description="暂无操作记录" style="padding:24px 0" />
           <template v-else>
@@ -192,6 +201,7 @@ function extractRows(data) {
   return data?.items || data?.results || data?.list || data?.data || []
 }
 function money(v) { const n = Number(v || 0); return Number.isInteger(n) ? n : n.toFixed(2) }
+function formatMemberNo(no) { return String(no).padStart(6, '0') }
 function formatDate(v) {
   if (!v) return '-'
   const d = new Date(v)
@@ -286,14 +296,39 @@ function restore() {
 onMounted(loadAll)
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .member-card {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 20px 16px;
-  background: var(--hero-dark);
+  padding: 24px 16px 32px;
+  margin-bottom: -20px;
+  background: linear-gradient(135deg, #2b2b48 0%, var(--hero-dark) 55%, #101020 100%);
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+  isolation: isolate;
+  &::before {
+    // 跟主页 hero-header 同款柔光，两处的"卡片头部"要看起来是同一套语言
+    content: '';
+    position: absolute;
+    top: -40%; right: -20%;
+    width: 70%; height: 140%;
+    background: radial-gradient(circle, rgba(255,255,255,.14) 0%, transparent 65%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  &--inactive {
+    background: linear-gradient(135deg, #5b6472 0%, #475569 55%, #2f3947 100%);
+  }
+  &--skeleton {
+    display: block;
+    padding: 24px 16px 32px;
+    :deep(.ant-skeleton-avatar) { width: 54px; height: 54px; border-radius: 18px; }
+  }
 }
+// page-body 紧跟在会员卡后面时叠上去，复现主页 hero 的悬浮卡片效果
+.member-card + .page-body { position: relative; z-index: 1; }
 .m-avatar {
   width: 54px; height: 54px; border-radius: 18px;
   background: rgba(255,255,255,.2);
@@ -311,9 +346,11 @@ onMounted(loadAll)
 }
 .coupon-face {
   width: 72px; height: 54px; border-radius: 10px;
-  background: var(--danger);
+  // 跟优惠券中心的券面同一个渐变，保证同一张券在两处看起来是同一个东西
+  background: linear-gradient(135deg, #ff4d4f, #ff7a45);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   color: #fff; flex-shrink: 0;
+  &--used { background: linear-gradient(135deg, #c8ccd4, #9aa5b5); }
 }
 
 .timeline-row {

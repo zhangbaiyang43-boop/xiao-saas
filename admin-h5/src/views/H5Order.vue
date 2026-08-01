@@ -1,7 +1,7 @@
 <template>
   <div class="h5-wrap">
     <!-- 顶栏 -->
-    <div class="top-bar">
+    <div class="top-bar animate-in">
       <div class="shop-name">{{ shop.name || '加载中…' }}</div>
       <div class="shop-meta">
         <span class="status-dot" :class="shop.is_open ? 'open' : 'closed'"></span>
@@ -16,13 +16,13 @@
     </div>
 
     <!-- 主体：分类 + 菜品 -->
-    <div class="menu-body" v-if="!showCart && !showSuccess">
+    <div class="menu-body animate-in animate-in--delay-1" v-if="!showCart && !showSuccess">
       <!-- 分类横栏 -->
       <div class="cat-bar" ref="catBarRef">
         <div
           v-for="cat in categories"
           :key="cat"
-          class="cat-item"
+          class="cat-item tap-shrink"
           :class="{ active: activeCat === cat }"
           @click="scrollToCategory(cat)"
         >{{ cat }}</div>
@@ -30,60 +30,76 @@
 
       <!-- 菜品列表 -->
       <div class="dish-list" ref="dishListRef" @scroll="onDishScroll">
-        <div v-for="cat in categories" :key="cat" :ref="el => catSectionRefs[cat] = el">
-          <div class="cat-section-title">{{ cat }}</div>
-          <div
-            v-for="dish in dishesByCategory[cat]"
-            :key="dish.id"
-            class="dish-row"
-            :class="{ unavailable: !dish.available }"
-          >
-            <img v-if="dish.image || dish.image_url" :src="dish.image || dish.image_url" class="dish-img" />
-            <div class="dish-img dish-img-placeholder" v-else>
-              <span>{{ dish.name?.charAt(0) }}</span>
-            </div>
-            <div class="dish-info">
-              <div class="dish-name">{{ dish.name }}</div>
-              <div class="dish-desc" v-if="dish.description">{{ dish.description }}</div>
-              <div class="dish-price">¥{{ Number(dish.price).toFixed(2) }}</div>
-            </div>
-            <div class="dish-ctrl">
-              <template v-if="dish.available && !dish.sold_out">
-                <button v-if="cartQty(dish.id) > 0" class="btn-minus" @click="removeFromCart(dish)">－</button>
-                <span v-if="cartQty(dish.id) > 0" class="qty-num">{{ cartQty(dish.id) }}</span>
-                <button class="btn-plus" @click="addToCart(dish)">＋</button>
-              </template>
-              <span v-else class="sold-out">已售罄</span>
+        <div v-if="!shop.name && categories.length === 0" class="menu-loading">
+          <div class="menu-loading-spinner"></div>
+          <p>菜单加载中，马上就好…</p>
+        </div>
+        <div v-else-if="categories.length === 0" class="menu-empty">
+          <span class="menu-empty-icon">🍽️</span>
+          <p>菜单还没配置好</p>
+          <span>请稍后刷新，或联系商家确认</span>
+        </div>
+        <template v-else>
+          <div v-for="cat in categories" :key="cat" :ref="el => catSectionRefs[cat] = el">
+            <div class="cat-section-title">{{ cat }}</div>
+            <div
+              v-for="dish in dishesByCategory[cat]"
+              :key="dish.id"
+              class="dish-row"
+              :class="{ unavailable: !dish.available }"
+            >
+              <img v-if="dish.image || dish.image_url" :src="dish.image || dish.image_url" class="dish-img" />
+              <div class="dish-img dish-img-placeholder" v-else>
+                <span>{{ dish.name?.charAt(0) }}</span>
+              </div>
+              <div class="dish-info">
+                <div class="dish-name">{{ dish.name }}</div>
+                <div class="dish-desc" v-if="dish.description">{{ dish.description }}</div>
+                <div class="dish-price">¥{{ Number(dish.price).toFixed(2) }}</div>
+              </div>
+              <div class="dish-ctrl">
+                <template v-if="dish.available && !dish.sold_out">
+                  <button v-if="cartQty(dish.id) > 0" class="btn-minus tap-shrink" @click="removeFromCart(dish)">－</button>
+                  <span v-if="cartQty(dish.id) > 0" class="qty-num">{{ cartQty(dish.id) }}</span>
+                  <button class="btn-plus tap-shrink" @click="addToCart(dish)">＋</button>
+                </template>
+                <span v-else class="sold-out">已售罄</span>
+              </div>
             </div>
           </div>
-        </div>
-        <div style="height:80px"></div>
+          <div style="height:80px"></div>
+        </template>
       </div>
     </div>
 
     <!-- 购物车底栏 -->
-    <div class="cart-bar" v-if="cartCount > 0 && !showCart && !showSuccess" @click="showCart = true">
+    <div class="cart-bar tap-shrink" v-if="cartCount > 0 && !showCart && !showSuccess" @click="showCart = true">
       <div class="cart-icon-wrap">
         <span class="cart-icon">🛒</span>
         <span class="cart-badge">{{ cartCount }}</span>
       </div>
       <div class="cart-total">¥{{ cartTotal.toFixed(2) }}</div>
-      <button class="checkout-btn" @click.stop="goCheckout">去下单</button>
+      <button class="checkout-btn tap-shrink" @click.stop="goCheckout">去下单</button>
     </div>
 
     <!-- 购物车详情页 -->
     <div class="cart-detail" v-if="showCart && !showSuccess">
       <div class="cart-header">
         <span class="cart-title">已选商品</span>
-        <span class="cart-clear" @click="clearCart">清空</span>
+        <span class="cart-clear tap-shrink" @click="clearCart">清空</span>
       </div>
-      <div class="cart-items">
+      <div v-if="cartItems.length === 0" class="cart-empty-state">
+        <span class="cart-empty-icon">🛒</span>
+        <p>购物车是空的</p>
+        <span>回去挑几道喜欢的菜吧</span>
+      </div>
+      <div class="cart-items" v-else>
         <div v-for="item in cartItems" :key="item.id" class="cart-item-row">
           <span class="ci-name">{{ item.name }}</span>
           <div class="ci-ctrl">
-            <button class="btn-minus" @click="removeFromCart(item)">－</button>
+            <button class="btn-minus tap-shrink" @click="removeFromCart(item)">－</button>
             <span class="qty-num">{{ item.qty }}</span>
-            <button class="btn-plus" @click="addToCartById(item)">＋</button>
+            <button class="btn-plus tap-shrink" @click="addToCartById(item)">＋</button>
           </div>
           <span class="ci-price">¥{{ (item.price * item.qty).toFixed(2) }}</span>
         </div>
@@ -94,10 +110,10 @@
       <div class="cart-summary">
         合计 <strong>¥{{ cartTotal.toFixed(2) }}</strong>
       </div>
-      <button class="submit-btn" :disabled="submitting" @click="submitOrder">
+      <button class="submit-btn tap-shrink" :disabled="submitting" @click="submitOrder">
         {{ submitting ? '提交中…' : '提交订单' }}
       </button>
-      <div class="back-link" @click="showCart = false">← 继续点餐</div>
+      <div class="back-link tap-shrink" @click="showCart = false">← 继续点餐</div>
     </div>
 
     <!-- 成功页 -->
@@ -116,8 +132,8 @@
         <div class="status-val" :class="`status-${orderStatus}`">{{ statusLabel }}</div>
       </div>
 
-      <button v-if="orderStatus === 'pending_payment'" class="reorder-btn" :disabled="paying" @click="payCurrentOrder()">{{ paying ? '正在拉起支付…' : '继续支付' }}</button>
-      <button v-else class="reorder-btn" @click="reorder">再点一单</button>
+      <button v-if="orderStatus === 'pending_payment'" class="reorder-btn tap-shrink" :disabled="paying" @click="payCurrentOrder()">{{ paying ? '正在拉起支付…' : '继续支付' }}</button>
+      <button v-else class="reorder-btn tap-shrink" @click="reorder">再点一单</button>
     </div>
 
     <!-- 错误提示 -->
@@ -398,17 +414,21 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 <style scoped>
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* ── 进场动效错落延迟（基础 .animate-in/.tap-shrink 用全局 global.scss 定义） ── */
+.animate-in--delay-1 { animation-delay: .06s; }
+
 .h5-wrap {
   min-height: 100vh;
-  background: #f5f6fa;
+  background: var(--bg-page);
   font-family: -apple-system, 'PingFang SC', sans-serif;
   max-width: 480px;
   margin: 0 auto;
+  color: var(--text-1);
 }
 
 /* 顶栏 */
 .top-bar {
-  background: #07C160;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
   padding: 48px 16px 16px;
   color: #fff;
 }
@@ -427,10 +447,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .cat-bar {
   display: flex;
   gap: 0;
-  background: #fff;
+  background: var(--bg-card);
   overflow-x: auto;
   padding: 0 8px;
-  border-bottom: 0.5px solid #f0f0f0;
+  border-bottom: 0.5px solid var(--border);
   flex-shrink: 0;
   scrollbar-width: none;
 }
@@ -439,12 +459,12 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   white-space: nowrap;
   padding: 10px 14px;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--text-2);
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: color .15s, border-color .15s;
 }
-.cat-item.active { color: #07C160; font-weight: 600; border-bottom-color: #07C160; }
+.cat-item.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
 
 .dish-list { flex: 1; overflow-y: auto; padding: 0 0 16px; }
 
@@ -452,9 +472,35 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   padding: 12px 16px 6px;
   font-size: 12px;
   font-weight: 600;
-  color: #9ca3af;
-  background: #f5f6fa;
+  color: var(--text-3);
+  background: var(--bg-page);
   letter-spacing: .5px;
+}
+
+/* 菜单加载中 / 菜单为空 */
+.menu-loading, .menu-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 72px 24px;
+  color: var(--text-2);
+  font-size: 14px;
+  text-align: center;
+}
+.menu-loading p, .menu-empty p { margin: 4px 0 0; font-weight: 600; color: var(--text-1); }
+.menu-empty span { font-size: 12px; color: var(--text-3); }
+.menu-empty-icon { font-size: 32px; }
+.menu-loading-spinner {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--brand-light);
+  border-top-color: var(--brand);
+  animation: h5-spin .8s linear infinite;
+}
+@keyframes h5-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .menu-loading-spinner { animation-duration: 1.6s; }
 }
 
 .dish-row {
@@ -462,26 +508,26 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   align-items: center;
   gap: 12px;
   padding: 12px 16px;
-  background: #fff;
-  border-bottom: 0.5px solid #f3f4f6;
+  background: var(--bg-card);
+  border-bottom: 0.5px solid var(--border);
 }
 .dish-row.unavailable { opacity: .5; }
 
-.dish-img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex-shrink: 0; }
+.dish-img { width: 64px; height: 64px; border-radius: var(--radius-card); object-fit: cover; flex-shrink: 0; }
 .dish-img-placeholder {
-  background: #f3f4f6;
+  background: var(--bg-page);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 22px;
-  color: #d1d5db;
+  color: var(--text-3);
   font-weight: 700;
 }
 
 .dish-info { flex: 1; min-width: 0; }
-.dish-name { font-size: 14px; font-weight: 600; color: #111; margin-bottom: 3px; }
-.dish-desc { font-size: 12px; color: #9ca3af; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-price { font-size: 15px; font-weight: 700; color: #ef4444; }
+.dish-name { font-size: 14px; font-weight: 600; color: var(--text-1); margin-bottom: 3px; }
+.dish-desc { font-size: 12px; color: var(--text-3); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dish-price { font-size: 15px; font-weight: 700; color: var(--danger); }
 
 .dish-ctrl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .btn-plus, .btn-minus {
@@ -490,10 +536,10 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; flex-shrink: 0;
 }
-.btn-plus { background: #07C160; color: #fff; }
-.btn-minus { background: #f3f4f6; color: #374151; }
-.qty-num { font-size: 15px; font-weight: 700; color: #111; min-width: 18px; text-align: center; }
-.sold-out { font-size: 12px; color: #9ca3af; }
+.btn-plus { background: var(--brand); color: #fff; }
+.btn-minus { background: var(--border); color: var(--text-2); }
+.qty-num { font-size: 15px; font-weight: 700; color: var(--text-1); min-width: 18px; text-align: center; }
+.sold-out { font-size: 12px; color: var(--text-3); }
 
 /* 购物车底栏 */
 .cart-bar {
@@ -501,7 +547,7 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
   bottom: 0; left: 50%; transform: translateX(-50%);
   width: 100%; max-width: 480px;
   background: #1f2937;
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
   padding: 12px 16px;
   display: flex;
   align-items: center;
@@ -513,49 +559,64 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 .cart-icon { font-size: 28px; }
 .cart-badge {
   position: absolute; top: -6px; right: -8px;
-  background: #ef4444; color: #fff;
+  background: var(--danger); color: #fff;
   font-size: 10px; font-weight: 700;
   width: 18px; height: 18px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
 .cart-total { flex: 1; font-size: 18px; font-weight: 700; color: #fff; }
 .checkout-btn {
-  background: #07C160; color: #fff;
+  background: var(--brand); color: #fff;
   border: none; border-radius: 20px;
   padding: 8px 20px; font-size: 14px; font-weight: 700;
   cursor: pointer; flex-shrink: 0;
 }
 
 /* 购物车详情 */
-.cart-detail { background: #fff; min-height: calc(100vh - 100px); padding: 0 0 80px; }
-.cart-header { display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 0.5px solid #f0f0f0; }
-.cart-title { font-size: 16px; font-weight: 700; color: #111; }
-.cart-clear { font-size: 13px; color: #9ca3af; cursor: pointer; }
+.cart-detail { background: var(--bg-card); min-height: calc(100vh - 100px); padding: 0 0 80px; }
+.cart-header { display: flex; justify-content: space-between; align-items: center; padding: 16px; border-bottom: 0.5px solid var(--border); }
+.cart-title { font-size: 16px; font-weight: 700; color: var(--text-1); }
+.cart-clear { font-size: 13px; color: var(--text-3); cursor: pointer; }
+
+.cart-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 56px 24px;
+  color: var(--text-2);
+  font-size: 14px;
+  text-align: center;
+}
+.cart-empty-state p { margin: 4px 0 0; font-weight: 600; color: var(--text-1); }
+.cart-empty-state span { font-size: 12px; color: var(--text-3); }
+.cart-empty-icon { font-size: 32px; }
 
 .cart-items { padding: 0 16px; }
-.cart-item-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 0.5px solid #f9fafb; }
-.ci-name { flex: 1; font-size: 14px; color: #111; }
+.cart-item-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 0.5px solid var(--border); }
+.ci-name { flex: 1; font-size: 14px; color: var(--text-1); }
 .ci-ctrl { display: flex; align-items: center; gap: 8px; }
-.ci-price { font-size: 14px; font-weight: 600; color: #111; min-width: 56px; text-align: right; }
+.ci-price { font-size: 14px; font-weight: 600; color: var(--text-1); min-width: 56px; text-align: right; }
 
 .cart-remark { padding: 12px 16px; }
 .remark-input {
-  width: 100%; height: 40px; border: 0.5px solid #e5e7eb;
+  width: 100%; height: 40px; border: 0.5px solid var(--border);
   border-radius: 8px; padding: 0 12px; font-size: 14px; outline: none;
+  background: var(--bg-card); color: var(--text-1);
 }
-.remark-input:focus { border-color: #07C160; }
+.remark-input:focus { border-color: var(--brand); }
 
-.cart-summary { padding: 12px 16px; font-size: 15px; color: #374151; text-align: right; }
-.cart-summary strong { font-size: 20px; color: #ef4444; }
+.cart-summary { padding: 12px 16px; font-size: 15px; color: var(--text-2); text-align: right; }
+.cart-summary strong { font-size: 20px; color: var(--danger); }
 
 .submit-btn {
   display: block; width: calc(100% - 32px); margin: 0 16px;
-  height: 48px; background: #07C160; color: #fff;
-  border: none; border-radius: 12px; font-size: 16px; font-weight: 700;
+  height: 48px; background: var(--brand); color: #fff;
+  border: none; border-radius: var(--radius-card); font-size: 16px; font-weight: 700;
   cursor: pointer;
 }
 .submit-btn:disabled { opacity: .6; }
-.back-link { text-align: center; padding: 16px; font-size: 14px; color: #9ca3af; cursor: pointer; }
+.back-link { text-align: center; padding: 16px; font-size: 14px; color: var(--text-3); cursor: pointer; }
 
 /* 成功页 */
 .success-page {
@@ -565,39 +626,39 @@ onBeforeUnmount(() => { if (pollTimer) clearInterval(pollTimer) })
 }
 .success-icon {
   width: 72px; height: 72px; border-radius: 50%;
-  background: #07C160; color: #fff;
+  background: var(--brand); color: #fff;
   font-size: 36px; display: flex; align-items: center; justify-content: center;
   margin-bottom: 16px;
 }
-.success-title { font-size: 22px; font-weight: 700; color: #111; margin-bottom: 8px; }
-.success-meta { font-size: 14px; color: #6b7280; margin-bottom: 6px; }
-.success-hint { font-size: 13px; color: #9ca3af; margin-bottom: 12px; }
+.success-title { font-size: 22px; font-weight: 700; color: var(--text-1); margin-bottom: 8px; }
+.success-meta { font-size: 14px; color: var(--text-2); margin-bottom: 6px; }
+.success-hint { font-size: 13px; color: var(--text-3); margin-bottom: 12px; }
 .pay-hint {
   font-size: 13px; color: #92400e;
-  background: #fef3c7; border-radius: 10px;
+  background: #fef3c7; border-radius: var(--radius-card);
   padding: 10px 14px; margin-bottom: 24px;
   display: flex; align-items: center; gap: 8px; width: 100%;
 }
 .pay-hint-icon { font-size: 18px; flex-shrink: 0; }
 
 .status-card {
-  width: 100%; background: #f9fafb;
-  border-radius: 12px; padding: 16px;
+  width: 100%; background: var(--bg-page);
+  border-radius: var(--radius-card); padding: 16px;
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 32px;
 }
-.status-label { font-size: 14px; color: #6b7280; }
+.status-label { font-size: 14px; color: var(--text-2); }
 .status-val { font-size: 15px; font-weight: 700; }
-.status-val.status-pending { color: #d97706; }
+.status-val.status-pending { color: var(--warning); }
 .status-val.status-preparing { color: #2563eb; }
-.status-val.status-done { color: #07C160; }
-.status-val.status-settled { color: #9ca3af; }
-.status-val.status-cancelled { color: #ef4444; }
+.status-val.status-done { color: var(--brand); }
+.status-val.status-settled { color: var(--text-3); }
+.status-val.status-cancelled { color: var(--danger); }
 
 .reorder-btn {
   width: 100%; height: 48px;
-  background: #07C160; color: #fff;
-  border: none; border-radius: 12px;
+  background: var(--brand); color: #fff;
+  border: none; border-radius: var(--radius-card);
   font-size: 16px; font-weight: 700; cursor: pointer;
 }
 

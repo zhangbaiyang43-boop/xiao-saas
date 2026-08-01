@@ -1,90 +1,94 @@
 <template>
   <div class="consumption-page">
-    <section class="hero-card">
-      <div>
-        <p class="eyebrow">消费记录</p>
-        <h1>顾客到店，记一笔消费</h1>
-        <p>录入消费后，系统可继续触发消费后券、积分或后续营销则。</p>
-      </div>
-      <van-button round type="primary" :loading="saving" @click="openCreate">新增消费</van-button>
-    </section>
+    <PageHeader title="消费记录" />
 
-    <section class="quick-card">
-      <div class="panel-head">
+    <div class="page-content">
+      <section class="hero-card animate-in" style="animation-delay:.02s">
         <div>
-          <p class="eyebrow">快速记账</p>
-          <h2>常用金额</h2>
+          <p class="eyebrow">消费记录</p>
+          <h1>顾客到店，记一笔消费</h1>
+          <p>录入消费后，系统可继续触发消费后券、积分或后续营销则。</p>
         </div>
-      </div>
-      <div class="quick-grid">
-        <button v-for="amount in quickAmounts" :key="amount" @click="openCreate({ amount })">
-          ￥{{ amount }}
-        </button>
-      </div>
-    </section>
+        <van-button round type="primary" class="tap-shrink" :loading="saving" @click="openCreate">新增消费</van-button>
+      </section>
 
-    <section class="filter-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">筛选</p>
-          <h2>查某个顾客的消费</h2>
-        </div>
-        <button class="text-btn" @click="resetQuery">重置</button>
-      </div>
-
-      <van-field
-        v-model="query.customer_name"
-        label="顾客"
-        placeholder="选择顾客"
-        readonly
-        is-link
-        @click="openCustomerPicker('filter')"
-      />
-      <div class="date-row">
-        <van-field v-model="query.start_date" type="date" label="开始" placeholder="开始日期" />
-        <van-field v-model="query.end_date" type="date" label="结束" placeholder="结束日期" />
-      </div>
-      <van-button block round type="primary" :loading="loading" @click="submitSearch">查询消费</van-button>
-    </section>
-
-    <section class="list-panel">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">最近消费</p>
-          <h2>门店记账流水</h2>
-        </div>
-        <button class="text-btn" :disabled="loading" @click="loadConsumptions">刷新</button>
-      </div>
-
-      <div v-if="loading" class="state-card">
-        <van-loading size="24px">正在加载消费记录</van-loading>
-      </div>
-
-      <div v-else-if="consumptions.length === 0" class="state-card">
-        <van-empty description="暂无消费记录">
-          <van-button round type="primary" size="small" @click="openCreate">新增第一笔消费</van-button>
-        </van-empty>
-      </div>
-
-      <div v-else class="record-list">
-        <article v-for="item in consumptions" :key="item.id" class="record-card">
-          <div class="record-main">
-            <strong>{{ item.project || '到店消费' }}</strong>
-            <span>{{ customerName(item.customer_id) }} · {{ formatDateTime(item.consume_time || item.created_at) }}</span>
-            <em v-if="item.remark">{{ item.remark }}</em>
+      <section class="quick-card animate-in" style="animation-delay:.06s">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">快速记账</p>
+            <h2>常用金额</h2>
           </div>
-          <div class="record-amount">￥{{ formatMoney(item.amount) }}</div>
-        </article>
-      </div>
+        </div>
+        <div class="quick-grid">
+          <button v-for="amount in quickAmounts" :key="amount" class="tap-shrink" @click="openCreate({ amount })">
+            ￥{{ amount }}
+          </button>
+        </div>
+      </section>
 
-      <van-pagination
-        v-if="pagination.total > pagination.pageSize"
-        v-model="pagination.page"
-        :page-size="pagination.pageSize"
-        :total="pagination.total"
-        @change="handlePageChange"
-      />
-    </section>
+      <section class="filter-card animate-in" style="animation-delay:.1s">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">筛选</p>
+            <h2>查某个顾客的消费</h2>
+          </div>
+          <button class="text-btn tap-shrink" @click="resetQuery">重置</button>
+        </div>
+
+        <van-field
+          v-model="query.customer_name"
+          label="顾客"
+          placeholder="选择顾客"
+          readonly
+          is-link
+          @click="openCustomerPicker('filter')"
+        />
+        <div class="date-row">
+          <van-field v-model="query.start_date" type="date" label="开始" placeholder="开始日期" />
+          <van-field v-model="query.end_date" type="date" label="结束" placeholder="结束日期" />
+        </div>
+        <van-button block round type="primary" class="tap-shrink" :loading="loading" @click="submitSearch">查询消费</van-button>
+      </section>
+
+      <section class="list-panel animate-in" style="animation-delay:.14s">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">最近消费</p>
+            <h2>门店记账流水</h2>
+          </div>
+          <button class="text-btn tap-shrink" :disabled="loading" @click="loadConsumptions">刷新</button>
+        </div>
+
+        <div v-if="loading" class="state-card">
+          <van-loading size="24px" color="var(--brand)">正在加载消费记录</van-loading>
+        </div>
+
+        <div v-else-if="consumptions.length === 0" class="state-card">
+          <van-empty description="暂无消费记录">
+            <van-button round type="primary" size="small" class="tap-shrink" @click="openCreate">新增第一笔消费</van-button>
+          </van-empty>
+        </div>
+
+        <div v-else class="record-list">
+          <article v-for="item in consumptions" :key="item.id" class="record-card tap-shrink">
+            <div class="record-main">
+              <strong>{{ item.project || '到店消费' }}</strong>
+              <span>{{ customerName(item.customer_id) }} · {{ formatDateTime(item.consume_time || item.created_at) }}</span>
+              <em v-if="item.remark">{{ item.remark }}</em>
+            </div>
+            <div class="record-amount">￥{{ formatMoney(item.amount) }}</div>
+          </article>
+        </div>
+
+        <van-pagination
+          v-if="pagination.total > pagination.pageSize"
+          v-model="pagination.page"
+          :page-size="pagination.pageSize"
+          :total="pagination.total"
+          @change="handlePageChange"
+        />
+      </section>
+    </div>
 
     <van-popup v-model:show="showCreatePopup" position="bottom" round :style="{ height: '82%' }">
       <div class="form-popup">
@@ -105,14 +109,14 @@
           <van-field v-model.trim="form.project" label="项目" placeholder="例如：羊肉汤、套餐、洗头" />
           <van-field v-model="form.amount" label="金额" type="number" placeholder="输入消费金额" />
           <div class="quick-projects">
-            <button v-for="item in quickProjects" :key="item" @click="form.project = item">{{ item }}</button>
+            <button v-for="item in quickProjects" :key="item" class="tap-shrink" @click="form.project = item">{{ item }}</button>
           </div>
           <van-field v-model.trim="form.remark" label="备注" placeholder="可选" />
         </div>
 
         <div class="form-footer">
           <van-button block round @click="showCreatePopup = false">取消</van-button>
-          <van-button block round type="primary" :loading="saving" @click="onSubmit">保存消费</van-button>
+          <van-button block round type="primary" class="tap-shrink" :loading="saving" @click="onSubmit">保存消费</van-button>
         </div>
       </div>
     </van-popup>
@@ -141,6 +145,7 @@ import {
   Popup as VanPopup,
   showToast
 } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 import { createConsumption, getCustomers, getConsumptions } from '../api'
 
 const route = useRoute()
@@ -368,9 +373,13 @@ onMounted(async () => {
 .consumption-page {
   min-height: 100vh;
   box-sizing: border-box;
+  background: var(--bg-page);
+  color: var(--text-1);
+}
+
+.page-content {
+  box-sizing: border-box;
   padding: 14px 14px 96px;
-  background: #f5f6f8;
-  color: #111827;
 }
 
 .hero-card,
@@ -380,7 +389,7 @@ onMounted(async () => {
 .state-card,
 .record-card {
   border-radius: 18px;
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: 0 8px 22px rgba(15, 23, 42, 0.05);
 }
 
@@ -394,7 +403,7 @@ onMounted(async () => {
 
 .eyebrow {
   margin: 0 0 5px;
-  color: #1677ff;
+  color: var(--brand-dark);
   font-size: 12px;
   font-weight: 900;
 }
@@ -403,7 +412,7 @@ onMounted(async () => {
 .panel-head h2,
 .form-header h2 {
   margin: 0;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 900;
   letter-spacing: 0;
 }
@@ -415,7 +424,7 @@ onMounted(async () => {
 .hero-card p:not(.eyebrow),
 .form-header p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -442,7 +451,7 @@ onMounted(async () => {
 .text-btn {
   border: 0;
   background: transparent;
-  color: #1677ff;
+  color: var(--brand-dark);
   font-weight: 900;
 }
 
@@ -456,8 +465,8 @@ onMounted(async () => {
 .quick-projects button {
   border: 0;
   border-radius: 14px;
-  background: #eff6ff;
-  color: #1677ff;
+  background: var(--brand-light);
+  color: var(--brand-dark);
   font-weight: 900;
 }
 
@@ -489,7 +498,7 @@ onMounted(async () => {
   gap: 12px;
   align-items: center;
   padding: 15px;
-  border: 1px solid #edf1f7;
+  border: 1px solid var(--border);
   box-shadow: none;
 }
 
@@ -507,7 +516,7 @@ onMounted(async () => {
 
 .record-main strong {
   overflow: hidden;
-  color: #111827;
+  color: var(--text-1);
   font-size: 17px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -516,18 +525,18 @@ onMounted(async () => {
 
 .record-main span {
   margin-top: 6px;
-  color: #64748b;
+  color: var(--text-2);
   font-size: 13px;
 }
 
 .record-main em {
   margin-top: 4px;
-  color: #94a3b8;
+  color: var(--text-3);
   font-size: 12px;
 }
 
 .record-amount {
-  color: #10b981;
+  color: var(--success);
   font-size: 20px;
   font-weight: 900;
   white-space: nowrap;
@@ -574,7 +583,7 @@ onMounted(async () => {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   padding: 12px 16px 18px;
-  border-top: 1px solid #edf1f7;
+  border-top: 1px solid var(--border);
 }
 
 @media (min-width: 768px) {
