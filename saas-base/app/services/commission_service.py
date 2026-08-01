@@ -3,7 +3,7 @@ import random
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, update
 from sqlalchemy.future import select
 
 from app.models.commission_record import CommissionRecord
@@ -477,7 +477,17 @@ class CommissionService(BaseService):
         elif not invite_enabled:
             return []
 
-        # 用 FOR UPDATE 加锁，防止并发核销时重复触发首次奖励（BUG-03）
+        # "首次核销"奖励只应该发一次，但这个顾客通常还没有任何 CommissionRecord 行——
+        # SELECT ... FOR UPDATE 锁不住一行不存在的记录，两个并发请求（比如顾客手上有
+        # 两张券，两笔订单前后脚结算）会同时查到"还没发过"，各自插入一条记录，奖励
+        # 翻倍。跟 coupon_service._dedup_issue_lock 一样，用 UPDATE 顾客行本身来加锁，
+        # 把"查是否已发过 + 真正插入"这两步锁成对同一顾客串行，锁在这次调用所在的
+        # 事务提交/回滚前一直持有。
+        await self.db.execute(
+            update(Customer)
+            .where(Customer.id == customer.id, Customer.tenant_id == tenant_id)
+            .values(updated_at=datetime.utcnow())
+        )
         existing_result = await self.db.execute(
             select(CommissionRecord).filter(
                 CommissionRecord.tenant_id == tenant_id,
@@ -485,7 +495,12 @@ class CommissionService(BaseService):
                 CommissionRecord.source_type == "FIRST_VERIFY",
             ).with_for_update()
         )
-        if existing_result.scalar_one_or_none():
+        # 正常的一次首次奖励会同时插入 level=1（邀请人/员工）和 level=2（被邀请人）两条
+        # 记录，两条都以 user_id=customer.id 记账——`scalar_one_or_none()` 要求最多一行，
+        # 一旦这两条都存在，任何后续核销（哪怕只是顾客手上第二张促销券的正常核销，不需要
+        # 并发）都会在这里直接抛 MultipleResultsFound 把核销流程打断。改用 first()，这里
+        # 只关心"有没有"，不关心具体有几条。
+        if existing_result.scalars().first():
             return []
 
         spend_amount = Decimal(str(getattr(template, "min_amount", None) or getattr(template, "value", 0) or 0))

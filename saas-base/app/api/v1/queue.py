@@ -83,7 +83,11 @@ async def list_queue_tickets(
     status: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    effective_tenant_id = _merchant_tenant(request) or _tenant_id(tenant_id)
+    # 这个接口带完整手机号，只给商家后台（QueueManage.vue）用，不能像 /status 那样兼容公开
+    # 排队屏——之前没登录也能靠 tenant_id 查询参数拉到任意商家的排队顾客手机号列表。
+    effective_tenant_id = _merchant_tenant(request)
+    if not effective_tenant_id:
+        return fail("merchant login required")
     service = QueueService(db)
     tickets = await service.list_tickets(effective_tenant_id, status=status)
     return ok([serialize_queue_ticket(ticket) for ticket in tickets])
