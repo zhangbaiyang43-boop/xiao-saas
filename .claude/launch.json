@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "admin-h5",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "admin-h5",
+      "port": 8989
+    },
+    {
+      "name": "member-mini-client-h5",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:h5"],
+      "cwd": "member-mini-client",
+      "port": 5173
+    }
+  ]
+}

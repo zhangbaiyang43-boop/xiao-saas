@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Order Status Sheet Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f6f8; color: #111827; }
+    .phone { width: min(430px, 100vw); min-height: 100vh; margin: 0 auto; position: relative; overflow: hidden; background: #f4f6f8; }
+    .hero { height: 155px; padding: 18px 18px 0; background: #07c160; color: #fff; }
+    .nav { display: flex; justify-content: space-between; align-items: center; font-size: 24px; opacity: .92; }
+    .nav strong { font-size: 18px; }
+    .title { margin-top: 34px; font-size: 21px; font-weight: 800; }
+    .table { margin-top: 18px; font-size: 15px; font-weight: 700; opacity: .85; }
+    .page { display: flex; height: calc(100vh - 155px); opacity: .42; filter: grayscale(.1); }
+    .side { width: 84px; background: #f1f3f5; padding-top: 14px; display: flex; flex-direction: column; gap: 22px; align-items: center; }
+    .side-item { width: 72px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: #6b7280; font-weight: 700; font-size: 14px; }
+    .side-item.on { color: #07c160; background: #fff; }
+    .list { flex: 1; padding: 16px 12px 120px; overflow: hidden; }
+    .dish { height: 118px; margin-bottom: 12px; border-radius: 14px; background: #fff; display: flex; padding: 12px; box-shadow: 0 8px 20px rgba(15,23,42,.05); }
+    .img { width: 96px; height: 96px; border-radius: 12px; background: #f3f0ea; flex: 0 0 auto; }
+    .info { flex: 1; padding-left: 12px; min-width: 0; }
+    .name { font-size: 18px; font-weight: 800; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .desc { margin-top: 8px; color: #7b828c; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bottom { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; }
+    .price { color: #07c160; font-size: 23px; font-weight: 900; }
+    .plus { width: 34px; height: 34px; border-radius: 50%; background: #07c160; color: #fff; display: grid; place-items: center; font-size: 24px; }
+    .cartbar { position: absolute; left: 0; right: 0; bottom: 48px; height: 74px; background: #111827; display: flex; align-items: center; padding: 0 18px; color: #fff; gap: 14px; }
+    .carticon { width: 52px; height: 52px; border-radius: 50%; background: #07c160; display: grid; place-items: center; font-size: 26px; }
+    .cartprice { font-size: 25px; font-weight: 900; }
+    .cart-count { color:#aeb6c2; font-size:13px; font-weight:700; }
+    .checkout { margin-left: auto; width: 132px; height: 48px; border-radius: 999px; background: #07c160; display: grid; place-items: center; font-weight: 900; }
+    .tabs { position: absolute; left: 14px; right: 14px; top: 168px; z-index: 4; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .tab { border: 0; height: 32px; border-radius: 999px; background: rgba(255,255,255,.88); color: #4b5563; font-size: 12px; font-weight: 800; box-shadow: 0 4px 12px rgba(15,23,42,.08); }
+    .tab.active { background: #111827; color: #fff; }
+    .mask { position: absolute; inset: 0; background: rgba(0,0,0,.58); display: flex; align-items: flex-end; z-index: 3; }
+    .sheet { width: 100%; max-height: 74vh; background: #fff; border-radius: 18px 18px 0 0; padding: 20px 18px max(18px, env(safe-area-inset-bottom)); box-shadow: 0 -14px 36px rgba(15,23,42,.14); overflow: auto; }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .sheet-title { font-size: 24px; font-weight: 950; letter-spacing: 0; }
+    .close { width: 40px; height: 40px; border-radius: 50%; background: #f5f6f7; display: grid; place-items: center; color: #6b7280; font-size: 22px; font-weight: 900; }
+    .icon { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; flex: none; }
+    .card-title-icon { width: 16px; height: 16px; margin-right: 5px; vertical-align: -3px; color: #111827; }
+    .status-card { border-radius: 18px; padding: 18px; border: 1px solid var(--border); background: var(--bg); margin-bottom: 10px; }
+    .status-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .status-chip { height: 30px; padding: 0 12px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; background: var(--main); color: #fff; font-size: 13px; font-weight: 950; white-space: nowrap; }
+    .chip-icon { width: 14px; height: 14px; }
+    .status-title { margin-top: 13px; color: var(--main); font-size: 27px; line-height: 1.15; font-weight: 950; letter-spacing: 0; }
+    .status-desc { margin-top: 8px; color: #4b5563; font-size: 15px; line-height: 1.5; font-weight: 650; }
+    .next-action { margin-top: 12px; min-height: 38px; padding: 9px 12px; border-radius: 12px; display: flex; align-items: center; gap: 8px; color: var(--main); background: rgba(255,255,255,.72); font-size: 14px; font-weight: 900; }
+    .core-strip { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .core-item { min-width: 0; height: 60px; border-radius: 14px; background: #f8fafb; border: 1px solid #edf0f2; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .core-icon { color: #9aa1aa; }
+    .core-icon.amount { color: #07c160; }
+    .core-value { margin-top: 6px; color: #111827; font-size: 16px; line-height: 1; font-weight: 950; white-space: nowrap; }
+    .core-value.amount { color: #07c160; }
+    .progress-card, .detail-card { border: 1px solid #edf0f2; border-radius: 16px; background: #fff; padding: 15px; margin-bottom: 12px; box-shadow: 0 8px 20px rgba(15,23,42,.03); }
+    .progress-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .card-title { font-size: 17px; font-weight: 950; }
+    .card-sub { color: #9aa1aa; font-size: 13px; font-weight: 700; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .step { text-align: center; color: #c3c8ce; font-size: 11px; font-weight: 800; position: relative; }
+    .step-icon-wrap { width: 26px; height: 26px; border-radius: 50%; margin: 0 auto 7px; background: #eef0f2; color: #9aa1aa; display: flex; align-items: center; justify-content: center; position: relative; z-index: 1; }
+    .step-icon-wrap .icon { width: 14px; height: 14px; }
+    .step.done, .step.current { color: #111827; font-size: 12px; }
+    .step.done .step-icon-wrap, .step.current .step-icon-wrap { background: var(--main); color: #fff; }
+    .step.current .step-icon-wrap { box-shadow: 0 0 0 5px var(--soft); }
+    .step-line { position: absolute; top: 13px; left: calc(50% + 15px); right: calc(-50% + 15px); height: 2px; background: #e6e9ee; }
+    .step.done .step-line { background: var(--main); }
+    .order-top { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #f0f2f4; padding-bottom: 11px; }
+    .order-no { color: #7b828c; font-size: 15px; margin-top: 4px; }
+    .detail-amount { color: #07c160; font-size: 22px; font-weight: 950; }
+    .detail-row { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; font-size: 15px; color: #111827; }
+    .muted { color: #7b828c; }
+    .dish-row { display: grid; grid-template-columns: 1fr 42px 56px; gap: 8px; align-items: center; padding-top: 12px; font-size: 16px; font-weight: 850; }
+    .dish-row .qty, .dish-row .money { text-align: right; }
+    .primary-btn { width: 100%; height: 56px; border: 0; border-radius: 999px; background: var(--btn); color: var(--btn-text); font-size: 18px; font-weight: 950; }
+    .canceled { --main:#ef4444; --soft:#fee2e2; --bg:#fff1f2; --border:#fecdd3; --btn:#111827; --btn-text:#fff; }
+    .paid { --main:#0ea5e9; --soft:#e0f2fe; --bg:#eff8ff; --border:#bae6fd; --btn:#07c160; --btn-text:#fff; }
+    .accepted { --main:#f59e0b; --soft:#fef3c7; --bg:#fffbeb; --border:#fde68a; --btn:#07c160; --btn-text:#fff; }
+    .served { --main:#07c160; --soft:#dcfce7; --bg:#ecfdf5; --border:#bbf7d0; --btn:#07c160; --btn-text:#fff; }
+    .completed { --main:#10b981; --soft:#d1fae5; --bg:#f0fdf4; --border:#bbf7d0; --btn:#f3f4f6; --btn-text:#4b5563; }
+  </style>
+</head>
+<body>
+  <svg style="display:none">
+    <symbol id="icon-table" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="3" rx="1"/><path d="M7 9v9M17 9v9"/></symbol>
+    <symbol id="icon-amount" viewBox="0 0 24 24"><path d="M7 4l5 6 5-6M12 10v10M8.5 13.5h7M8.5 16.5h7"/></symbol>
+    <symbol id="icon-time" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="icon-count" viewBox="0 0 24 24"><rect x="6" y="9" width="12" height="9" rx="2"/><path d="M9 9V7a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1"/></symbol>
+    <symbol id="icon-payment" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></symbol>
+    <symbol id="icon-kitchen" viewBox="0 0 24 24"><path d="M7 10a4 4 0 0 1 3-6.5 4 4 0 0 1 4 0 4 4 0 0 1 3 6.5"/><path d="M6 10h12v3H6z"/><path d="M7.5 13 8 19h8l.5-6"/></symbol>
+    <symbol id="icon-served" viewBox="0 0 24 24"><path d="M4 13a8 4 0 0 0 16 0"/><path d="M3 13h18"/><path d="M9 4.5c0 1.2-1.2 1.2-1.2 2.4M13.5 4.5c0 1.2-1.2 1.2-1.2 2.4"/></symbol>
+    <symbol id="icon-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></symbol>
+    <symbol id="icon-warning" viewBox="0 0 24 24"><path d="M12 3.5 21.5 20h-19z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="icon-bell" viewBox="0 0 24 24"><path d="M12 3a5 5 0 0 0-5 5v3l-2 3h14l-2-3V8a5 5 0 0 0-5-5z"/><path d="M9.5 19a2.5 2.5 0 0 0 5 0"/></symbol>
+    <symbol id="icon-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  </svg>
+  <div class="phone">
+    <div class="hero"><div class="nav"><span>?</span><strong id="navTitle"></strong><span>???</span></div><div class="title" id="shopName"></div><div class="table" id="tableText"></div></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="page"><div class="side"><div class="side-item on">?<span id="cat1"></span></div><div class="side-item">?<span id="cat2"></span></div><div class="side-item">?<span id="cat3"></span></div><div class="side-item">?<span id="cat4"></span></div></div><div class="list"><div class="dish"><div class="img"></div><div class="info"><div class="name" id="dishName1"></div><div class="desc" id="dishDesc1"></div><div class="bottom"><div class="price">?38</div><div class="plus">+</div></div></div></div><div class="dish"><div class="img"></div><div class="info"><div class="name" id="dishName2"></div><div class="desc" id="dishDesc2"></div><div class="bottom"><div class="price">?28</div><div class="plus">+</div></div></div></div></div></div>
+    <div class="cartbar"><div class="carticon">??</div><div><div class="cartprice">?38</div><div class="cart-count" id="cartCount"></div></div><div class="checkout" id="checkoutText"></div></div>
+    <div class="mask"><section class="sheet" id="sheet"></section></div>
+  </div>
+  <script>
+    const t = {
+      navTitle:'\u7075\u5b9d\u996d\u5e97 \u70b9\u9910', shopName:'\u7075\u5b9d\u996d\u5e97', tableText:'A03\u684c \u00b7 \u5802\u98df \u203a',
+      cat1:'\u63a8\u8350', cat2:'\u62db\u724c', cat3:'\u6c64\u54c1', cat4:'\u4e3b\u98df',
+      dishName1:'\u62db\u724c\u7ea2\u70e7\u8089', dishDesc1:'\u5165\u53e3\u5373\u5316\uff0c\u80a5\u800c\u4e0d\u817b\uff0c\u6bcf\u65e5\u9650\u91cf', dishName2:'\u5bab\u4fdd\u9e21\u4e01', dishDesc2:'\u9999\u8106\u82b1\u751f\u914d\u5ae9\u9e21\uff0c\u5fae\u8fa3\u9c9c\u9999',
+      cartCount:'\u51711\u4efd', checkout:'\u53bb\u7ed3\u7b97', sheetTitle:'\u672c\u684c\u8ba2\u5355', progress:'\u8ba2\u5355\u8fdb\u5ea6', currentOrder:'\u83dc\u54c1\u660e\u7ec6', orderTime:'16:36', count:'\u51711\u4efd', tableLabel:'\u684c\u53f7', amountLabel:'\u91d1\u989d', timeLabel:'\u65f6\u95f4', countLabel:'\u6570\u91cf', next:'\u4e0b\u4e00\u6b65'
+    };
+    Object.keys(t).forEach(k => { const el = document.getElementById(k); if (el) el.textContent = t[k]; });
+    document.getElementById('checkoutText').textContent = t.checkout;
+    const states = {
+      canceled: { cls:'canceled', tab:'\u5df2\u53d6\u6d88', badge:'\u5f02\u5e38\u72b6\u6001', icon:'icon-warning', title:'\u8ba2\u5355\u5df2\u53d6\u6d88', desc:'\u8fd9\u5355\u4e0d\u4f1a\u7ee7\u7eed\u51fa\u9910\uff0c\u5982\u9700\u7528\u9910\u8bf7\u91cd\u65b0\u70b9\u9910\u3002', showDesc:true, action:'\u91cd\u65b0\u70b9\u9910', btn:'\u91cd\u65b0\u70b9\u9910', progress:0, sub:'\u65e0\u9700\u7b49\u5f85', no:'#7408', amount:'?38.00' },
+      paid: { cls:'paid', tab:'\u5df2\u652f\u4ed8', badge:'\u6b63\u5e38\u8fdb\u884c', icon:'icon-payment', title:'\u5df2\u652f\u4ed8\uff0c\u7b49\u5546\u5bb6\u63a5\u5355', desc:'\u4f60\u5df2\u652f\u4ed8\u6210\u529f\uff0c\u5546\u5bb6\u786e\u8ba4\u540e\u4f1a\u5f00\u59cb\u5907\u9910\u3002', showDesc:false, action:'\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u7a0d\u5019', btn:'\u6211\u77e5\u9053\u4e86', progress:1, sub:'\u9884\u8ba1\u5f88\u5feb\u63a5\u5355', no:'#7409', amount:'?38.00' },
+      accepted: { cls:'accepted', tab:'\u5907\u9910\u4e2d', badge:'\u6b63\u5728\u5907\u9910', icon:'icon-kitchen', title:'\u5546\u5bb6\u5df2\u63a5\u5355', desc:'\u5546\u5bb6\u6b63\u5728\u5907\u9910\uff0c\u5b8c\u6210\u540e\u4f1a\u5c3d\u5feb\u4e0a\u9910\u3002', showDesc:false, action:'\u7b49\u5f85\u4e0a\u9910\u5373\u53ef', btn:'\u6211\u77e5\u9053\u4e86', progress:2, sub:'\u5546\u5bb6\u5904\u7406\u4e2d', no:'#7410', amount:'?66.00' },
+      served: { cls:'served', tab:'\u5df2\u4e0a\u9910', badge:'\u5df2\u9001\u8fbe', icon:'icon-served', title:'\u83dc\u54c1\u5df2\u4e0a\u684c', desc:'\u5982\u83dc\u54c1\u672a\u5230\u9f50\uff0c\u53ef\u8054\u7cfb\u5546\u5bb6\u6838\u5bf9\u3002', showDesc:true, action:'\u8bf7\u786e\u8ba4\u83dc\u54c1', btn:'\u786e\u8ba4\u5df2\u6536\u5230', progress:3, sub:'\u53ef\u5b89\u5fc3\u7528\u9910', no:'#7411', amount:'?66.00' },
+      completed: { cls:'completed', tab:'\u5df2\u5b8c\u6210', badge:'\u8ba2\u5355\u5b8c\u6210', icon:'icon-done', title:'\u672c\u684c\u8ba2\u5355\u5df2\u5b8c\u6210', desc:'\u672c\u6b21\u7528\u9910\u5df2\u5b8c\u6210\uff0c\u6b22\u8fce\u4e0b\u6b21\u5149\u4e34\u3002', showDesc:false, action:'\u53ef\u5173\u95ed\u67e5\u770b', btn:'\u5173\u95ed', progress:4, sub:'\u8ba2\u5355\u5b8c\u6210', no:'#7412', amount:'?66.00' }
+    };
+    const steps = [
+      { name:'\u5df2\u652f\u4ed8', icon:'icon-payment' },
+      { name:'\u5546\u5bb6\u63a5\u5355', icon:'icon-kitchen' },
+      { name:'\u5df2\u4e0a\u9910', icon:'icon-served' },
+      { name:'\u5df2\u5b8c\u6210', icon:'icon-done' }
+    ];
+    let current = 'canceled';
+    const tabs = document.getElementById('tabs');
+    const sheet = document.getElementById('sheet');
+    Object.keys(states).forEach(key => { const b = document.createElement('button'); b.className = 'tab' + (key === current ? ' active' : ''); b.textContent = states[key].tab; b.onclick = () => { current = key; render(); }; tabs.appendChild(b); });
+    function render() {
+      document.querySelectorAll('.tab').forEach((b, i) => b.classList.toggle('active', Object.keys(states)[i] === current));
+      const s = states[current];
+      sheet.className = 'sheet ' + s.cls;
+      sheet.innerHTML = `<div class="sheet-head"><div class="sheet-title">${t.sheetTitle}</div><div class="close">?</div></div><div class="status-card"><div class="status-top"><span class="status-chip"><svg class="icon chip-icon"><use href="#${s.icon}"/></svg>${s.badge}</span><span class="card-sub">${s.no}</span></div><div class="status-title">${s.title}</div>${s.showDesc ? `<div class="status-desc">${s.desc}</div>` : ''}<div class="next-action"><svg class="icon next-icon"><use href="#icon-bell"/></svg><strong>${s.action}</strong></div></div><div class="core-strip"><div class="core-item"><svg class="icon core-icon"><use href="#icon-table"/></svg><div class="core-value">A03</div></div><div class="core-item"><svg class="icon core-icon amount"><use href="#icon-amount"/></svg><div class="core-value amount">${s.amount}</div></div><div class="core-item"><svg class="icon core-icon"><use href="#icon-time"/></svg><div class="core-value">16:36</div></div><div class="core-item"><svg class="icon core-icon"><use href="#icon-count"/></svg><div class="core-value">1\u4efd</div></div></div><div class="progress-card"><div class="progress-head"><div class="card-title">${t.progress}</div><div class="card-sub">${s.sub}</div></div><div class="steps">${steps.map((step, idx) => `<div class="step ${idx < s.progress ? 'done' : ''} ${idx + 1 === s.progress ? 'current' : ''}"><div class="step-icon-wrap"><svg class="icon"><use href="#${step.icon}"/></svg></div>${idx < steps.length - 1 ? '<div class="step-line"></div>' : ''}<div>${step.name}</div></div>`).join('')}</div></div><div class="detail-card"><div class="order-top"><div><div class="card-title"><svg class="icon card-title-icon"><use href="#icon-list"/></svg>${t.currentOrder}</div><div class="order-no">${s.no}</div></div><div class="detail-amount">${s.amount}</div></div><div class="detail-row"><strong>${t.orderTime}</strong><span class="muted">${t.count}</span></div><div class="dish-row"><div>${t.dishName1}</div><div class="qty muted">?1</div><div class="money">?38</div></div></div><button class="primary-btn">${s.btn}</button>`;
+    }
+    render();
+  </script>
+</body>
+</html>

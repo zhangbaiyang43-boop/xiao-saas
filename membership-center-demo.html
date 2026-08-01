@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Membership Center Demo</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 40px 24px; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #eef1f4; color: #111827; }
+  .wrap { display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; align-items: flex-start; }
+  .col { width: 390px; }
+  .col-label { text-align: center; font-size: 15px; font-weight: 900; margin-bottom: 14px; }
+  .col-label.before { color: #9aa1aa; }
+  .col-label.after { color: #07c160; }
+  .phone { width: 390px; min-height: 780px; margin: 0 auto; position: relative; background: #f5f7fb; border-radius: 28px; box-shadow: 0 20px 50px rgba(15,23,42,.18); overflow: hidden; }
+  .hero { padding: 16px 18px 22px; background: #07c160; color: #fff; }
+  .nav { display: flex; justify-content: space-between; align-items: center; font-size: 18px; }
+  .nav strong { font-size: 15px; font-weight: 800; }
+  .shop { margin-top: 16px; font-size: 19px; font-weight: 900; }
+  .tableline { margin-top: 4px; font-size: 12.5px; font-weight: 700; opacity: .9; }
+  .content { padding: 14px 16px 10px; }
+  .icon { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; display: block; }
+  .card { background: #fff; border-radius: 16px; box-shadow: 0 6px 18px rgba(15,23,42,.04); }
+
+  /* ---- BEFORE ---- */
+  .b-identity { display: flex; align-items: center; gap: 14px; padding: 16px; }
+  .b-avatar { width: 46px; height: 46px; border-radius: 50%; background: #eafcf1; color: #07c160; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; flex: 0 0 auto; }
+  .b-identity-main { flex: 1; min-width: 0; }
+  .b-level { display: block; font-size: 17px; font-weight: 900; }
+  .b-growth { display: block; margin-top: 4px; font-size: 12px; color: #9aa1aa; }
+  .b-level-pill { padding: 4px 12px; border-radius: 999px; background: #eafcf1; color: #07c160; font-size: 12px; font-weight: 800; flex: 0 0 auto; }
+  .b-assets { margin-top: 10px; display: flex; padding: 16px 0; }
+  .b-asset { flex: 1; text-align: center; }
+  .b-asset-value { display: block; font-size: 22px; font-weight: 900; }
+  .b-asset-label { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; }
+  .b-asset-hint { display: block; margin-top: 2px; font-size: 11px; color: #9aa1aa; }
+  .b-divider { width: 1px; background: #edf0f2; }
+  .b-banner { margin-top: 10px; background: #07c160; border-radius: 16px; padding: 16px; }
+  .b-banner-title { display: block; color: #fff; font-size: 17px; font-weight: 900; }
+  .b-banner-desc { display: block; margin-top: 4px; color: rgba(255,255,255,.85); font-size: 12.5px; }
+  .b-banner-btn { margin-top: 12px; height: 42px; border-radius: 999px; background: #fff; color: #07c160; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900; }
+  .b-section-title { margin-top: 14px; font-size: 15px; font-weight: 900; }
+  .b-coupon { margin-top: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+  .b-coupon-amt { font-size: 20px; font-weight: 900; color: #07c160; flex: 0 0 auto; }
+  .b-coupon-info { flex: 1; min-width: 0; }
+  .b-coupon-cond { display: block; font-size: 14px; font-weight: 800; }
+  .b-coupon-time { display: block; margin-top: 2px; font-size: 11.5px; color: #9aa1aa; }
+  .b-coupon-btn { padding: 6px 14px; border-radius: 999px; background: #07c160; color: #fff; font-size: 12.5px; font-weight: 800; flex: 0 0 auto; }
+  .b-service { margin-top: 10px; }
+  .b-service-row { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 14px; font-size: 14.5px; font-weight: 800; border-bottom: 1px solid #f1f3f5; }
+  .b-service-row:last-child { border-bottom: 0; }
+
+  /* ---- AFTER ---- */
+  .a-identity { display: flex; align-items: center; gap: 14px; padding: 16px; }
+  .a-avatar { width: 46px; height: 46px; border-radius: 50%; background: #eafcf1; color: #07c160; display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 900; flex: 0 0 auto; }
+  .a-level-pill { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 999px; background: #eafcf1; color: #07c160; font-size: 13px; font-weight: 900; }
+
+  /* ---- Premium identity card (v2, flagship) ---- */
+  @keyframes cardShine { 0% { transform: translateX(-160%) rotate(14deg); } 55% { transform: translateX(160%) rotate(14deg); } 100% { transform: translateX(160%) rotate(14deg); } }
+  @keyframes badgePulse { 0%, 100% { filter: drop-shadow(0 0 2px rgba(232,202,160,.45)); } 50% { filter: drop-shadow(0 0 7px rgba(232,202,160,1)); } }
+  @keyframes borderGlow { 0%, 100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.22), 0 0 0 1px rgba(212,175,110,.28); } 50% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10px 26px rgba(0,0,0,.26), 0 0 0 1px rgba(232,202,160,.6); } }
+
+  .a-identity-v2 { position: relative; padding: 16px 18px 14px; overflow: hidden; background: linear-gradient(120deg,#15392a 0%,#0a2216 42%,#1c4530 100%); border-radius: 16px; animation: borderGlow 3.2s ease-in-out infinite; }
+  .a-identity-v2::before { content:''; position: absolute; inset: 0; opacity: .5; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); pointer-events: none; }
+  .a-id-shine { position: absolute; top: -75%; left: 0; width: 34%; height: 250%; background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(232,202,160,.35) 48%, rgba(255,255,255,0) 100%); animation: cardShine 3.2s ease-in-out infinite; pointer-events: none; }
+  .a-id-glow { position: absolute; right: -34px; top: -34px; width: 130px; height: 130px; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }
+  .a-id-issuer { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; font-size: 10.5px; font-weight: 800; letter-spacing: 2px; color: rgba(232,202,160,.5); text-transform: uppercase; }
+  .a-id-body { position: relative; z-index: 1; margin-top: 14px; display: flex; align-items: center; gap: 14px; }
+  .a-avatar-v2 { width: 52px; height: 52px; border-radius: 50%; background: #16311f; color: #f3e6cf; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; flex: 0 0 auto; box-shadow: 0 0 0 2px #0e2a1a, 0 0 0 3.5px rgba(232,202,160,.85), 0 0 0 6.5px rgba(212,175,110,.14); }
+  .a-identity-v2-main { flex: 1; min-width: 0; }
+  .a-crest-row { display: flex; align-items: center; gap: 7px; }
+  .a-crest-icon { width: 19px; height: 19px; color: #e8caa0; flex: 0 0 auto; animation: badgePulse 3.2s ease-in-out infinite; }
+  .a-level-v2 { font-size: 21px; font-weight: 900; letter-spacing: .5px; background: linear-gradient(100deg,#c9a668,#f9edd6 45%,#c9a668); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .a-level-v2-sub { display: block; margin-top: 4px; font-size: 11px; color: rgba(232,202,160,.55); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+  .a-id-chevron { width: 16px; height: 16px; color: rgba(232,202,160,.55); flex: 0 0 auto; }
+  .a-id-footer { position: relative; z-index: 1; margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(232,202,160,.16); display: flex; align-items: center; justify-content: space-between; }
+  .a-id-number { font-size: 12px; font-weight: 700; letter-spacing: 2.5px; color: rgba(232,202,160,.65); font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .a-id-since { font-size: 10.5px; color: rgba(232,202,160,.4); font-weight: 700; letter-spacing: .5px; }
+
+  .a-identity-v3 { position: relative; padding: 18px; display: flex; align-items: center; gap: 14px; overflow: hidden; background: linear-gradient(120deg,#0bd671,#059053 60%,#04723f); }
+  .a-identity-v3::before { content:''; position: absolute; top: -70%; left: -10%; width: 50%; height: 240%; background: linear-gradient(100deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.35) 50%, rgba(255,255,255,0) 100%); transform: rotate(12deg); }
+  .a-avatar-v3 { width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.16); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 900; flex: 0 0 auto; border: 1.5px solid rgba(255,255,255,.7); position: relative; z-index: 1; }
+  .a-identity-v3-main { position: relative; z-index: 1; flex: 1; min-width: 0; }
+  .a-level-v3 { font-size: 19px; font-weight: 900; color: #fff; letter-spacing: .5px; }
+  .a-level-v3-sub { display: block; margin-top: 4px; font-size: 11.5px; color: rgba(255,255,255,.75); font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .a-crest-icon-v3 { width: 16px; height: 16px; color: #fff; flex: 0 0 auto; }
+
+  .variant-label { font-size: 12px; font-weight: 900; color: #6b7280; margin: 18px 0 8px; }
+  .a-assets { margin-top: 10px; display: flex; padding: 16px 0; }
+  .a-asset { flex: 1; text-align: center; }
+  .a-asset-value { display: block; font-size: 22px; font-weight: 900; }
+  .a-asset-label { display: block; margin-top: 2px; font-size: 14px; font-weight: 700; color: #6b7280; }
+  .a-divider { width: 1px; background: #edf0f2; }
+  .a-banner { margin-top: 10px; background: linear-gradient(135deg,#0bd671,#07c160); border-radius: 16px; padding: 16px; }
+  .a-banner-title { display: block; color: #fff; font-size: 17px; font-weight: 900; }
+  .a-banner-btn { margin-top: 12px; height: 42px; border-radius: 999px; background: #fff; color: #07c160; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900; }
+  .a-section-title { margin-top: 14px; font-size: 15px; font-weight: 900; }
+  .a-coupon { margin-top: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; }
+  .a-coupon-amt { font-size: 20px; font-weight: 900; color: #07c160; flex: 0 0 auto; }
+  .a-coupon-info { flex: 1; min-width: 0; }
+  .a-coupon-cond { display: block; font-size: 14px; font-weight: 800; }
+  .a-coupon-time { display: block; margin-top: 2px; font-size: 11.5px; color: #9aa1aa; }
+  .a-coupon-btn { padding: 6px 14px; border-radius: 999px; background: #07c160; color: #fff; font-size: 12.5px; font-weight: 800; flex: 0 0 auto; }
+  .a-service { margin-top: 10px; }
+  .a-service-row { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 14px; border-bottom: 1px solid #f1f3f5; }
+  .a-service-row:last-child { border-bottom: 0; }
+  .a-service-icon { width: 28px; height: 28px; border-radius: 8px; background: #eafcf1; color: #07c160; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .a-service-icon .icon { width: 14px; height: 14px; }
+  .a-service-label { flex: 1; font-size: 14.5px; font-weight: 800; }
+  .a-service-arrow { color: #c3c8ce; }
+
+  .legend { width: 390px; margin: 16px auto 0; font-size: 12.5px; line-height: 1.7; color: #6b7280; background: #fff; border-radius: 12px; padding: 12px 14px; border: 1px solid #eef0f2; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 900; margin-right: 5px; }
+  .tag.keep { background: #dcfce7; color: #07c160; }
+  .tag.cut { background: #fee2e2; color: #ef4444; }
+  .tag.change { background: #fef3c7; color: #b45309; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="col">
+    <div class="col-label before">改造前</div>
+    <div class="phone">
+      <div class="hero">
+        <div class="nav"><span>⌂</span><strong>灵宝饭店 点餐</strong><span>•••</span></div>
+        <div class="shop">灵宝饭店</div>
+        <div class="tableline">A03桌 · 堂食 ›</div>
+      </div>
+      <div class="content">
+        <div class="card b-identity">
+          <div class="b-avatar">尾</div>
+          <div class="b-identity-main">
+            <text class="b-level">普通会员</text>
+            <text class="b-growth">到店消费自动累计成长值</text>
+          </div>
+          <div class="b-level-pill">普通会员</div>
+        </div>
+
+        <div class="card b-assets">
+          <div class="b-asset"><text class="b-asset-value">20</text><text class="b-asset-label">积分</text><text class="b-asset-hint">消费1元得1积分</text></div>
+          <div class="b-divider"></div>
+          <div class="b-asset"><text class="b-asset-value">3</text><text class="b-asset-label">优惠券</text><text class="b-asset-hint">下单时自动抵扣</text></div>
+        </div>
+
+        <div class="b-banner">
+          <text class="b-banner-title">您有3张优惠券可用</text>
+          <text class="b-banner-desc">查看会员权益享受更多优惠</text>
+          <div class="b-banner-btn">去点餐</div>
+        </div>
+
+        <div class="b-section-title">可用优惠券</div>
+        <div class="card b-coupon"><div class="b-coupon-amt">¥4</div><div class="b-coupon-info"><text class="b-coupon-cond">满52元可用</text><text class="b-coupon-time">有效期至07.29</text></div><div class="b-coupon-btn">立即使用</div></div>
+        <div class="card b-coupon" style="margin-top:8px;"><div class="b-coupon-amt">¥7</div><div class="b-coupon-info"><text class="b-coupon-cond">满99元可用</text><text class="b-coupon-time">今日有效</text></div><div class="b-coupon-btn">立即使用</div></div>
+
+        <div class="card b-service">
+          <div class="b-service-row"><span>积分明细</span><span>›</span></div>
+          <div class="b-service-row"><span>优惠券</span><span>›</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="col-label after">改造后</div>
+    <div class="phone">
+      <div class="hero">
+        <div class="nav"><span>⌂</span><strong>灵宝饭店 点餐</strong><span>•••</span></div>
+        <div class="shop">灵宝饭店</div>
+        <div class="tableline">A03桌 · 堂食 ›</div>
+      </div>
+      <div class="content">
+        <div class="card a-identity-v2">
+          <div class="a-id-glow"></div>
+          <div class="a-id-shine"></div>
+          <div class="a-id-issuer"><span>灵宝饭店 · 甄选会员</span></div>
+          <div class="a-id-body">
+            <div class="a-avatar-v2">尾</div>
+            <div class="a-identity-v2-main">
+              <div class="a-crest-row"><svg class="a-crest-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M2 20L4 9l5 4 3-9 3 9 5-4 2 11z"/></svg><span class="a-level-v2">普通会员</span></div>
+              <text class="a-level-v2-sub">MEMBER</text>
+            </div>
+            <svg class="a-id-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+          <div class="a-id-footer">
+            <text class="a-id-number">NO. 1008 3621</text>
+            <text class="a-id-since">会员自 2024 年</text>
+          </div>
+        </div>
+
+        <div class="card a-assets">
+          <div class="a-asset"><text class="a-asset-value">20</text><text class="a-asset-label">积分</text></div>
+          <div class="a-divider"></div>
+          <div class="a-asset"><text class="a-asset-value">3</text><text class="a-asset-label">优惠券</text></div>
+        </div>
+
+        <div class="a-banner">
+          <text class="a-banner-title">您有3张优惠券可用</text>
+          <div class="a-banner-btn">去点餐</div>
+        </div>
+
+        <div class="a-section-title">可用优惠券</div>
+        <div class="card a-coupon"><div class="a-coupon-amt">¥4</div><div class="a-coupon-info"><text class="a-coupon-cond">满52元可用</text><text class="a-coupon-time">有效期至07.29</text></div><div class="a-coupon-btn">立即使用</div></div>
+        <div class="card a-coupon" style="margin-top:8px;"><div class="a-coupon-amt">¥7</div><div class="a-coupon-info"><text class="a-coupon-cond">满99元可用</text><text class="a-coupon-time">今日有效</text></div><div class="a-coupon-btn">立即使用</div></div>
+
+        <div class="card a-service">
+          <div class="a-service-row">
+            <div class="a-service-icon"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></svg></div>
+            <div class="a-service-label">积分明细</div>
+            <svg class="icon a-service-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+          <div class="a-service-row">
+            <div class="a-service-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/></svg></div>
+            <div class="a-service-label">优惠券</div>
+            <svg class="icon a-service-arrow" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <div><span class="tag cut">删</span>右侧"普通会员"徽章跟左边"普通会员"大字是同一个信息说两遍——现在只保留一处，做成图标+文字的等级徽章</div>
+      <div><span class="tag cut">删</span>"到店消费自动累计成长值" — 解释等级怎么来的，新手教程级文案，天天打开都要看一遍，不影响当下决策</div>
+      <div><span class="tag cut">删</span>积分/优惠券卡片下面"消费1元得1积分""下单时自动抵扣"两行小字 — 同样是规则说明，数字本身（20分/3张）才是用户关心的，规则不需要每次复述</div>
+      <div><span class="tag cut">删</span>绿色横幅里"查看会员权益享受更多优惠" — 跟标题"您有3张优惠券可用"信息重叠，且下面优惠券列表已经是"更多优惠"本身了</div>
+      <div><span class="tag change">改</span>"积分明细""优惠券"两行加图标（时钟=积分记录，票据=优惠券），跟全场其他列表行风格统一</div>
+      <div><span class="tag keep">留</span>积分/优惠券数值、优惠券金额/门槛/有效期、"去点餐"主按钮 — 确认级信息，字号字重不变</div>
+    </div>
+  </div>
+
+  <div style="width:100%; max-width:460px; margin:0 auto;">
+    <div class="variant-label" style="text-align:center; font-size:14px;">已定稿：旗舰卡面（大厂 VIP 卡质感）</div>
+    <div class="card a-identity-v2">
+      <div class="a-id-glow"></div>
+      <div class="a-id-shine"></div>
+      <div class="a-id-issuer"><span>灵宝饭店 · 甄选会员</span></div>
+      <div class="a-id-body">
+        <div class="a-avatar-v2">尾</div>
+        <div class="a-identity-v2-main">
+          <div class="a-crest-row"><svg class="a-crest-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M2 20L4 9l5 4 3-9 3 9 5-4 2 11z"/></svg><span class="a-level-v2">普通会员</span></div>
+          <text class="a-level-v2-sub">MEMBER</text>
+        </div>
+        <svg class="a-id-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </div>
+      <div class="a-id-footer">
+        <text class="a-id-number">NO. 1008 3621</text>
+        <text class="a-id-since">会员自 2024 年</text>
+      </div>
+    </div>
+    <div class="legend" style="width:100%; margin:14px auto 0;">
+      参考了京东PLUS/淘宝88VIP这类大厂会员卡的做法，这轮不再只是调色，是把它当一张"真卡"来做：
+      <div style="margin-top:6px;"><span class="tag change">加</span>卡面有一道会呼吸的金色光带，慢慢扫过整张卡（3秒一循环），这是大厂 VIP 卡的标志性动效，静态截图看不出来，实机上很有"卡在发光"的感觉</div>
+      <div><span class="tag change">加</span>卡片顶部保留发卡方信息"灵宝饭店 · 甄选会员"，右上角英文小字"WEILAI DINING"按你的意见去掉了</div>
+      <div><span class="tag change">加</span>卡片底部左边是真实会员编号"NO. 1008 3621"，右边已按你的选择改成"会员自 2024 年"（来源：商户入驻时间 tenant.created_at，不再用暗示品牌历史的"SINCE"英文写法）</div>
+      <div><span class="tag change">加</span>徽章图标从宝石换成皇冠——全网最通用的"VIP/尊贵"符号，且带呼吸光晕动画</div>
+      <div><span class="tag change">加</span>卡片边框会跟着光带节奏微微增亮，做出"整卡在发光"而不是"光带路过"的层次感</div>
+      <div><span class="tag keep">留</span>头像+等级名的主结构、信息量都没变，纯粹是把"卡"的设计语言（发卡方、卡号、动态光泽）借过来，这些元素在信用卡/大厂VIP卡里本来就是标配，不算多余信息</div>
+    </div>
+  </div>
+
+  <div style="width:100%; max-width:820px; margin:24px auto 0;">
+    <div class="variant-label" style="text-align:center; font-size:14px;">头像字母怎么取（"尾"是哪来的，怎么改更稳）</div>
+    <div class="legend" style="width:100%; margin:0 auto 14px;">
+      现在的代码是 <code style="background:#f1f3f5;padding:1px 6px;border-radius:4px;">(p.name || '会')[0]</code> —— 直接取用户昵称的第一个字符。"尾"就是这么来的，说明这位顾客的微信昵称就是"尾"开头。这个写法在批量场景下有两个隐患：<br/>
+      1）微信昵称什么都可能是：纯 emoji、英文、数字、符号开头，直接截第一个字符经常会截出一个奇怪符号，甚至半个 emoji（JS 按 UTF-16 code unit 截取，emoji 是两个 unit 组成，硬截会碎成乱码方块）；<br/>
+      2）没有兜底：如果名字恰好是纯 emoji，取出来的"第一个字符"可能整个都不是能正常显示的文字。<br/>
+      下面是同一套新规则在几种真实昵称下的表现：<b>有像样的字就用字（中文/英文自动转大写），实在没有就换成皇冠图标，不会再出现奇怪符号。</b>
+    </div>
+    <div style="display:flex; gap:18px; justify-content:center; flex-wrap:wrap;">
+      <div style="text-align:center; width:110px;">
+        <div class="a-avatar-v2" style="margin:0 auto;">尾</div>
+        <div style="margin-top:8px; font-size:12px; color:#6b7280;">昵称"尾巴"<br/>→ 尾</div>
+      </div>
+      <div style="text-align:center; width:110px;">
+        <div class="a-avatar-v2" style="margin:0 auto;">T</div>
+        <div style="margin-top:8px; font-size:12px; color:#6b7280;">昵称"tom_88"<br/>→ T（自动大写）</div>
+      </div>
+      <div style="text-align:center; width:110px;">
+        <div class="a-avatar-v2" style="margin:0 auto;">6</div>
+        <div style="margin-top:8px; font-size:12px; color:#6b7280;">昵称"666大老板"<br/>→ 6</div>
+      </div>
+      <div style="text-align:center; width:110px;">
+        <div class="a-avatar-v2" style="margin:0 auto;"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style="width:20px;height:20px;"><path d="M2 20L4 9l5 4 3-9 3 9 5-4 2 11z"/></svg></div>
+        <div style="margin-top:8px; font-size:12px; color:#6b7280;">昵称"😂🎉🔥"<br/>→ 无可用字，换皇冠图标</div>
+      </div>
+      <div style="text-align:center; width:110px;">
+        <div class="a-avatar-v2" style="margin:0 auto;"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style="width:20px;height:20px;"><path d="M2 20L4 9l5 4 3-9 3 9 5-4 2 11z"/></svg></div>
+        <div style="margin-top:8px; font-size:12px; color:#6b7280;">未授权昵称/空<br/>→ 同样用皇冠图标</div>
+      </div>
+    </div>
+    <div class="legend" style="width:100%; margin:14px auto 0;">
+      另外真正大厂的做法其实是"优先用头像照片，取字只是没照片时的兜底"——你们后端资料接口（<code style="background:#f1f3f5;padding:1px 6px;border-radius:4px;">getMemberProfile</code>）实际上已经在返回 avatar 相关字段（"我的"页头像用的就是这个），但现在这张会员卡完全没用上。真要做到大厂水准，优先级应该是：<b>①真实头像照片 → ②清洗过的首字 → ③皇冠图标兜底</b>，接入的时候我会把这三层都做上。
+    </div>
+    <div class="legend" style="width:100%; margin:10px auto 0;">
+      还有一件事需要你确认：卡片右下角"SINCE 20XX"——我查了 admin-h5 和 member-mini-client 两个仓库，系统里目前<b>没有"营业执照注册时间"这个字段</b>，唯一现成、真实存在的时间数据是商户在你们平台的"入驻时间"（超管后台商户列表里已经在用，字段是 tenant.created_at）。两个方案你选一个：<br/>
+      A）用"入驻时间"顶替，文案改成更准确的表述（比如不写"SINCE"这种暗示品牌历史的英文，换成"会员自 20XX 年"这类不会引起误解的说法）；<br/>
+      B）真要按营业执照时间来，需要先在 admin-h5 商户设置里加一个"营业执照注册时间"录入字段，走一次后端改动，之后才能在卡片上用。
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
