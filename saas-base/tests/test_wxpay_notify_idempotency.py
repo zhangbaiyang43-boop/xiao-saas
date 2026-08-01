@@ -119,7 +119,21 @@ class FakeWxPayService:
         }
 
 
+_ORIGINAL_MODULES = {}
+
+
+def restore_stubs():
+    """撤销 install_stubs() 对 sys.modules 的替换，避免 app.services.coupon_service
+    这类真实模块被永久换成假模块，污染同一个 pytest 进程里跑在后面的其它测试文件。"""
+    for name, original in _ORIGINAL_MODULES.items():
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
 def install_stubs():
+    global _ORIGINAL_MODULES
     modules = {
         "app": types.ModuleType("app"),
         "app.api": types.ModuleType("app.api"),
@@ -130,6 +144,7 @@ def install_stubs():
         "app.core.logger": types.ModuleType("app.core.logger"),
         "app.core.response": types.ModuleType("app.core.response"),
         "app.core.tenant_context": types.ModuleType("app.core.tenant_context"),
+        "app.core.platform_rules": types.ModuleType("app.core.platform_rules"),
         "app.models": types.ModuleType("app.models"),
         "app.models.order": types.ModuleType("app.models.order"),
         "app.models.tenant": types.ModuleType("app.models.tenant"),
@@ -137,6 +152,7 @@ def install_stubs():
         "app.services.coupon_service": types.ModuleType("app.services.coupon_service"),
         "app.services.wxpay_service": types.ModuleType("app.services.wxpay_service"),
     }
+    _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
     for name, module in modules.items():
         sys.modules[name] = module
 
@@ -146,6 +162,7 @@ def install_stubs():
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
+    modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = type("FakeOrderItem", (), {})
     modules["app.models.tenant"].Tenant = FakeTenant
@@ -164,6 +181,9 @@ def load_orders_module():
 
 
 class WxPayNotifyIdempotencyTest(unittest.TestCase):
+    def tearDown(self):
+        restore_stubs()
+
     def test_same_success_callback_three_times_runs_side_effects_once(self):
         module = load_orders_module()
         tenant = FakeTenant()
@@ -173,17 +193,14 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
             "payment_updates": 0,
             "coupon_writeoffs": 0,
             "points_changes": 0,
-            "balance_changes": 0,
             "print_jobs": 0,
         }
 
-        async def fake_on_payment_success(order_obj, db_obj, use_balance=False, payment_method="wxpay"):
+        async def fake_on_payment_success(order_obj, db_obj, payment_method="wxpay"):
             side_effects["payment_updates"] += 1
             side_effects["coupon_writeoffs"] += 1
             side_effects["points_changes"] += 1
             side_effects["print_jobs"] += 1
-            if use_balance:
-                side_effects["balance_changes"] += 1
             order_obj.payment_status = "paid"
             order_obj.payment_method = payment_method
             order_obj.status = "pending"
@@ -205,7 +222,6 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
         self.assertEqual(side_effects["payment_updates"], 1)
         self.assertEqual(side_effects["coupon_writeoffs"], 1)
         self.assertEqual(side_effects["points_changes"], 1)
-        self.assertEqual(side_effects["balance_changes"], 0)
         self.assertEqual(side_effects["print_jobs"], 1)
 
 

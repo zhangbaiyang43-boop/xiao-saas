@@ -77,8 +77,11 @@ class UnauthenticatedBasicOrderContractsTest(unittest.TestCase):
         load_member = js_function_source(MENU_SOURCE, "loadMemberStatus")
         self.assertIn("if (!token)", load_member)
         self.assertIn("bannerInfo.value = null", load_member)
-        self.assertIn("getMemberProfile()", load_member)
-        self.assertIn("getCustomerCoupons('UNUSED')", load_member)
+        # loadMemberStatus 现在把 authRedirect 转发给 getMemberProfile，让调用方（点餐页
+        # onLoad/onShow/切到会员 Tab 这些背景查询）能显式传 authRedirect:false，
+        # token 过期时安静地掉回未登录态，而不是被全局 401 处理整页踢到"我的"去重新登录。
+        self.assertIn("getMemberProfile({ authRedirect: opts.authRedirect !== false })", load_member)
+        self.assertIn("getCustomerCoupons('UNUSED', { authRedirect: opts.authRedirect !== false })", load_member)
         self.assertIn("if (!uni.getStorageSync('customer_token'))", CARD_SOURCE)
         self.assertIn("uni.reLaunch({ url: '/pages/mine/mine' })", CARD_SOURCE)
 

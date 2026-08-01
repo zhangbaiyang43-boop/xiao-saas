@@ -11,6 +11,8 @@ class Customer(BaseModel):
     tags = Column(JSON, default=[])
     inviter_id = Column(BigInteger)
     inviter_parent_id = Column(BigInteger)
+    # inviter_id 指向谁：'customer'（默认，老数据 NULL 一律按 customer 处理）| 'staff'
+    inviter_type = Column(String(16), nullable=True)
     last_consume_time = Column(DateTime)
     status = Column(Integer, default=1, nullable=False)
     deleted_at = Column(DateTime)

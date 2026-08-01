@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     WECHAT_APP_ID: str = ""
     WECHAT_APP_: str = ""
     WECHAT_APP_SECRET: str = ""
+    # 优惠券到期提醒的订阅消息模板 ID，需要在微信公众平台的"订阅消息"里申请对应模板后
+    # 手动填入——没填的话提醒功能整体不生效（前端不显示"提醒我"按钮，后台循环直接跳过）。
+    WECHAT_COUPON_REMINDER_TEMPLATE_ID: str = ""
     H5_ORDER_BASE_URL: str = "https://saas.zhangbaiyang.com"
     PUBLIC_BASE_URL: str = "https://saas.zhangbaiyang.com"
 
@@ -46,19 +49,26 @@ class Settings(BaseSettings):
     FEIEYUN_USER: str = ""   
     FEIEYUN_UKEY: str = ""   
 
-    PLATFORM_REGISTER_KEY: str = ""   
-    SUPER_ADMIN_PASSWORD: str = ""    
+    PLATFORM_REGISTER_KEY: str = ""
+    SUPER_ADMIN_PASSWORD: str = ""
+    SUPER_ADMIN_TOTP_SECRET: str = ""
+    # 商户微信支付私钥/APIv3密钥落库前的应用层加密密钥（Fernet）。
+    # 用 scripts/generate_encryption_key.py 生成一把随机 key。不配置时不加密，仅用于本地开发；生产环境必须配置。
+    SECRET_ENCRYPTION_KEY: str = ""
 
-    WEWORK_CORP_: str = ""
-    WEWORK_AGENT_: str = ""
+    WEWORK_CORP_ID: str = ""
+    WEWORK_AGENT_ID: str = ""
     WEWORK_SECRET: str = ""
     WEWORK_TOKEN: str = ""
     WEWORK_ENCODING_AES_KEY: str = ""
     WEWORK_CALLBACK_URL: str = ""
-    WEWORK_STAFF_USER: str = ""
-    WEWORK_TENANT_: str = ""
+    WEWORK_STAFF_USERID: str = ""
+    WEWORK_TENANT_ID: str = ""
     
     DEBUG: bool = False
+    APP_ENV: str = "development"
+    # 微信 code2session mock 只能在非生产环境显式开启，生产环境配置缺失或微信异常必须失败。
+    ALLOW_MOCK_WECHAT_SESSION: bool = False
     # 独立于 DEBUG 的开关：只有显式设为 true 才允许模拟充值/模拟支付这类会
     # 凭空产生真实余额的测试接口生效。不跟 DEBUG 绑定，因为 DEBUG 在这个项目
     # 的实际部署环境里被发现是 true，不能作为"是否在生产环境"的可靠判断依据。
@@ -85,7 +95,7 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 50
     DB_POOL_RECYCLE: int = 1800
-    AUTO_CREATE_TABLES: bool = True
+    AUTO_CREATE_TABLES: bool = False
     CORS_ORIGINS: str = (
         "https://saas.zhangbaiyang.com,"
         "https://api.zhangbaiyang.com,"

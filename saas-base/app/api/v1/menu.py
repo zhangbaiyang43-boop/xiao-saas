@@ -3,15 +3,19 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel as PydanticBase
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.attributes import flag_modified
 from typing import Optional
 
+from app.config import settings
 from app.core.database import get_db
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
+from app.models.dish_library_item import DishLibraryItem
 from app.models.menu_item import MenuItem
+from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 from app.services.tenant_service import TenantService
 
@@ -101,7 +105,7 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
     TenantContext.set_tenant_id(shop)
     svc = TenantService(db)
     tenant = await svc.get_tenant(shop)
-    if not tenant:
+    if not tenant or not tenant.status:
         return error_response(code=404, msg="商家不存在")
     config = await svc.get_tenant_config(shop)
     biz = (config.business_info or {}) if config else {}
@@ -117,6 +121,30 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         except Exception:
             pass
 
+    # 首单钩子：未登录顾客也要能在点餐页/登录按钮上看到"新客立减¥X"的具体数字，
+    # 不发券、不判断是否已是老客，纯预览——真正是否发得出、发多少由入会时的
+    # issue_auto_coupon 决定，这里只是提前把同一份配置算出来的数字亮出来。
+    new_customer_coupon_preview = None
+    try:
+        from app.services.coupon_service import CouponService
+        preview_cs = CouponService(db)
+        preview_cs.set_tenant_id(shop)
+        new_customer_coupon_preview = await preview_cs.preview_new_customer_coupon()
+    except Exception:
+        pass
+
+    # 老带新双边奖励：顾客端"邀请好友"入口要不要展示，取决于这家店有没有开这条则——
+    # 关掉的话入口不该出现，不然顾客点进去只会看到"暂未开启"，白点一次。
+    invite_reward_enabled = False
+    try:
+        from app.services.commission_service import CommissionService
+        dist_cs = CommissionService(db)
+        dist_cs.set_tenant_id(shop)
+        distribution_rules = await dist_cs.get_distribution_rules()
+        invite_reward_enabled = bool(distribution_rules.get("invite_reward_enabled", False))
+    except Exception:
+        pass
+
     return success_response(data={
         "tenant_id": tenant.tenant_id,
         "name": tenant.name,
@@ -128,9 +156,14 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         "pickup_enabled": biz.get("pickup_enabled", False),
         "delivery_enabled": biz.get("delivery_enabled", False),
         "delivery_fee": biz.get("delivery_fee", 0),
+        "payment_mode": getattr(tenant, "payment_mode", "prepay") or "prepay",
         "remark_chips": biz.get("remark_chips", ["不要辣", "微辣", "不要香菜", "不要葱", "少盐", "打包"]),
+        "order_remark_chips": biz.get("order_remark_chips", ["一起上菜", "全部打包", "加双筷子", "不用餐具", "有儿童用餐"]),
         "category_order": biz.get("category_order", []),
         "entry_coupon": entry_coupon,  # 进店券，None 表示未登录或不满足条件
+        "new_customer_coupon_preview": new_customer_coupon_preview,  # 新客券预览，None 表示该店未开启
+        "invite_reward_enabled": invite_reward_enabled,  # 邀请奖励是否开启，决定"邀请好友"入口显不显示
+        "coupon_reminder_template_id": settings.WECHAT_COUPON_REMINDER_TEMPLATE_ID or "",  # 空字符串表示提醒功能还没配置模板，前端应隐藏"提醒我"按钮
     })
 
 
@@ -150,10 +183,14 @@ async def list_menu_items(
             return error_response(code=401, msg="请先登录")
         query = select(MenuItem).where(MenuItem.tenant_id == tenant_id)
     else:
-        # 顾客端：必须传 shop 参数，只返回上架菜品
+        # 顾客端：必须传 shop 参数，只返回上架菜品；商户被平台停用后菜单也不再对外展示
         if not shop:
             return error_response(code=400, msg="缺少shop参数")
         tenant_id = shop
+        tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == shop))
+        tenant = tenant_result.scalar_one_or_none()
+        if not tenant or not tenant.status:
+            return success_response(data=[])
         query = select(MenuItem).where(MenuItem.tenant_id == shop, MenuItem.available == True)
 
     TenantContext.set_tenant_id(tenant_id)
@@ -183,6 +220,10 @@ async def create_menu_item(
         available=body.available if body.available is not None else True,
         sort_order=body.sort_order or 0,
         stock=body.stock,
+        image=body.image,
+        sales_count=body.sales_count,
+        tags=body.tags,
+        original_price=body.original_price,
     )
     db.add(item)
     await db.commit()
@@ -358,6 +399,142 @@ async def import_menu_batch(
         )
         db.add(item)
         created.append(name)
+    await db.commit()
+    return success_response(data={"count": len(created), "names": created}, msg=f"已导入 {len(created)} 个菜品")
+
+
+class DishLibraryContributeRequest(PydanticBase):
+    name: str
+    category: Optional[str] = None
+    cuisine_type: str  # sichuan | bbq | universal
+    kind: Optional[str] = "dish"  # dish=现做菜品 | standard=标准品(瓶装/包装，图片完全通用)
+    image: str
+    reference_price: Optional[float] = None
+
+
+class DishLibraryImportItem(PydanticBase):
+    id: str
+    price: Optional[float] = None
+    category: Optional[str] = None
+
+
+class DishLibraryImportBatchRequest(PydanticBase):
+    items: list[DishLibraryImportItem]
+
+
+def serialize_library_item(item: DishLibraryItem):
+    return {
+        "id": str(item.id),
+        "name": item.name,
+        "category": item.category,
+        "cuisine_type": item.cuisine_type,
+        "kind": item.kind,
+        "image": item.image,
+        "reference_price": float(item.reference_price) if item.reference_price is not None else None,
+        "use_count": item.use_count or 0,
+    }
+
+
+@router.get("/dish-library")
+async def list_dish_library(
+    request: Request,
+    cuisine_type: Optional[str] = None,
+    keyword: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """浏览/搜索菜品库。universal（标准品）不分菜系，任何 cuisine_type 筛选下都会带出来。"""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+    query = select(DishLibraryItem)
+    if cuisine_type:
+        query = query.where(or_(DishLibraryItem.cuisine_type == cuisine_type, DishLibraryItem.cuisine_type == "universal"))
+    if keyword and keyword.strip():
+        query = query.where(DishLibraryItem.name.ilike(f"%{keyword.strip()}%"))
+    query = query.order_by(DishLibraryItem.use_count.desc(), DishLibraryItem.id.desc()).limit(200)
+    result = await db.execute(query)
+    items = result.scalars().all()
+    return success_response(data=[serialize_library_item(i) for i in items])
+
+
+@router.post("/dish-library/contribute")
+async def contribute_dish_library(
+    body: DishLibraryContributeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """商户主动把自己拍的菜品图分享进库。同名同菜系已存在时不重复建条目，
+    避免同一道菜被反复贡献出一堆近似重复的库存条目。"""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+    name = body.name.strip()
+    if not name:
+        return error_response(code=400, msg="菜品名称不能为空")
+    if not body.image:
+        return error_response(code=400, msg="请先上传图片再分享")
+    if body.cuisine_type not in ("sichuan", "bbq", "universal"):
+        return error_response(code=400, msg="菜系参数不合法")
+    result = await db.execute(
+        select(DishLibraryItem).where(
+            DishLibraryItem.name == name,
+            DishLibraryItem.cuisine_type == body.cuisine_type,
+        )
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        if not existing.image:
+            existing.image = body.image
+            await db.commit()
+        return success_response(msg="该菜品已在菜品库中")
+    item = DishLibraryItem(
+        name=name,
+        category=body.category,
+        cuisine_type=body.cuisine_type,
+        kind=body.kind or "dish",
+        image=body.image,
+        reference_price=body.reference_price,
+        source_tenant_id=tenant_id,
+    )
+    db.add(item)
+    await db.commit()
+    return success_response(msg="已分享到菜品库")
+
+
+@router.post("/dish-library/import-batch")
+async def import_dish_library_batch(
+    body: DishLibraryImportBatchRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+    if not body.items:
+        return error_response(code=400, msg="没有要导入的菜品")
+    ids = [int(i.id) for i in body.items]
+    result = await db.execute(select(DishLibraryItem).where(DishLibraryItem.id.in_(ids)))
+    lib_map = {str(i.id): i for i in result.scalars().all()}
+    TenantContext.set_tenant_id(tenant_id)
+    created = []
+    for req_item in body.items:
+        lib_item = lib_map.get(req_item.id)
+        if not lib_item:
+            continue
+        price = req_item.price if req_item.price is not None else float(lib_item.reference_price or 0)
+        menu_item = MenuItem(
+            tenant_id=tenant_id,
+            name=lib_item.name,
+            price=price,
+            category=req_item.category or lib_item.category or "默认",
+            emoji="🍽️",
+            available=True,
+            sort_order=0,
+            image=lib_item.image,
+        )
+        db.add(menu_item)
+        lib_item.use_count = (lib_item.use_count or 0) + 1
+        created.append(lib_item.name)
     await db.commit()
     return success_response(data={"count": len(created), "names": created}, msg=f"已导入 {len(created)} 个菜品")
 

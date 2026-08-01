@@ -8,6 +8,7 @@ import time
 from typing import Optional
 
 from app.config import settings
+from app.core.crypto import decrypt_secret
 from app.core.logger import logger
 
 
@@ -67,9 +68,9 @@ class WxPayService:
         ):
             self._client = _build_client(
                 mchid=tenant.wx_mchid,
-                api_key_v3=tenant.wx_api_key_v3,
+                api_key_v3=decrypt_secret(tenant.wx_api_key_v3),
                 cert_serial=tenant.wx_cert_serial,
-                private_key_pem=tenant.wx_private_key,
+                private_key_pem=decrypt_secret(tenant.wx_private_key),
                 public_key_id=getattr(tenant, "wx_public_key_id", None),
                 public_key_pem=getattr(tenant, "wx_public_key", None),
             )

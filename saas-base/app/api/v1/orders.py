@@ -4,16 +4,19 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel as PydanticBase
-from sqlalchemy import String, cast, func, or_
+from sqlalchemy import String, and_, cast, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
+from app.core.platform_rules import cap_discount_amount
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem
+from app.models.tenant import Tenant
 from app.services.coupon_service import CouponService
 
 router = APIRouter(prefix="/api/v1", tags=["订单"])
@@ -40,10 +43,47 @@ ORDER_STATUS_TEXT = {
     "cancelled": "已取消",
 }
 ORDER_ALLOWED_TRANSITIONS = {
+    "pending_payment": {"cancelled"},
     "pending": {"preparing", "rejected", "cancelled"},
     "preparing": {"done"},
     "done": {"settled"},
 }
+ORDER_NEXT_ACTIONS = {
+    "prepay": "pay",
+    "postpay": "order_success",
+    "table_account": "table_order_success",
+}
+
+
+def build_order_next_action(payment_mode: str) -> str:
+    if payment_mode not in ORDER_NEXT_ACTIONS:
+        raise ValueError("unsupported payment mode")
+    return ORDER_NEXT_ACTIONS[payment_mode]
+
+
+def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> bool:
+    if getattr(order, "payment_status", None) == "paid":
+        return False
+    order.payment_status = "paid"
+    order.payment_method = payment_method
+    order.payment_time = datetime.now(timezone.utc).isoformat()
+    return True
+
+
+def can_reprint_order(order: Order, print_type: str = "kitchen") -> tuple[bool, str | None]:
+    status = getattr(order, "status", None)
+    payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
+    payment_status = getattr(order, "payment_status", None)
+    if status in ("cancelled", "rejected"):
+        return False, "order cancelled"
+    if print_type == "receipt":
+        return (payment_status == "paid", None if payment_status == "paid" else "order not paid")
+    if print_type == "kitchen":
+        if payment_mode == "prepay":
+            return (payment_status == "paid", None if payment_status == "paid" else "order not paid")
+        if payment_mode in ("postpay", "table_account"):
+            return True, None
+    return False, "unsupported print type"
 
 class OrderItemSpecIn(PydanticBase):
     group: str
@@ -67,15 +107,16 @@ class OrderCreate(PydanticBase):
     total: float  # 前端传入仅用于显示参考，后端重新从 DB 计算
     remark: Optional[str] = None
     coupon_id: Optional[int] = None
-    use_balance: bool = False
     dining_session_id: Optional[int] = None
     participant_token: Optional[str] = None
     client_id: Optional[str] = None
     source: Optional[str] = "miniprogram"
+    staff_note: Optional[str] = None
+    request_id: Optional[str] = None  # 幂等键：同一次提交的双击/弱网重试携带同一个值，重复提交返回同一张订单
 
 
 class MockPayBody(PydanticBase):
-    use_balance: bool = False
+    pass
 
 
 def _split_merchant_note_and_print_meta(raw_note: str | None) -> tuple[str | None, dict]:
@@ -145,7 +186,92 @@ def _serialize_print_meta(order: Order) -> dict:
         "print_last_reason": meta.get("last_reason") if meta else None,
     }
 
-def serialize_order(order: Order, order_items: list):
+async def _set_order_coupon_status_if_locked(order: Order, db: AsyncSession, status: str) -> None:
+    if not getattr(order, "coupon_id", None):
+        return
+    from app.models.coupon import Coupon
+
+    coupon_result = await db.execute(
+        select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+    )
+    coupon = coupon_result.scalar_one_or_none()
+    if coupon and coupon.status == "LOCKED":
+        coupon.status = status
+
+
+async def _unlock_order_coupon_if_locked(order: Order, db: AsyncSession) -> None:
+    await _set_order_coupon_status_if_locked(order, db, "UNUSED")
+
+
+async def _mark_order_coupon_used_if_locked(order: Order, db: AsyncSession) -> None:
+    await _set_order_coupon_status_if_locked(order, db, "USED")
+
+async def _apply_paid_order_member_assets_once(order: Order, db: AsyncSession) -> None:
+    """Apply member consumption assets for one paid order at most once.
+
+    Offline payment modes do not go through the WeChat payment callback, so they
+    need the same member-account side effect when the merchant marks the order
+    paid. PointLedger.ref_id already stores order.id for paid-order consumption,
+    so use it as the narrow idempotency guard without changing schema.
+    """
+    if not getattr(order, "customer_id", None):
+        return
+
+    from app.models.customer import Customer
+    from app.models.point_ledger import PointLedger
+    from app.services.membership_service import MembershipService
+
+    tenant_id = str(order.tenant_id)
+    customer_id = int(order.customer_id)
+    existing_result = await db.execute(
+        select(PointLedger.id).where(
+            PointLedger.tenant_id == tenant_id,
+            PointLedger.customer_id == customer_id,
+            PointLedger.event_type == "consumption",
+            PointLedger.ref_id == str(order.id),
+        )
+    )
+    if existing_result.scalar_one_or_none():
+        return
+
+    customer_result = await db.execute(
+        select(Customer).where(
+            Customer.tenant_id == tenant_id,
+            Customer.id == customer_id,
+            Customer.status == 1,
+        )
+    )
+    customer = customer_result.scalar_one_or_none()
+    if not customer:
+        return
+
+    membership_svc = MembershipService(db)
+    membership_svc.set_tenant_id(tenant_id)
+    await membership_svc.apply_consumption(customer, float(order.total or 0), consumption_id=order.id)
+
+    # 新客券/复购券：prepay 支付成功（_on_payment_success）会发，但 postpay/table_account
+    # 结账走的是这个函数，之前完全没有这一段——商户后台"复购券"卡片的文案明确写的是
+    # "每次下单后自动推送下次用的券"，不是"微信支付后"，postpay/table_account 静默漏发
+    # 与文案承诺不符。同一套 rule_type 判定逻辑（按已支付订单数区分新客/复购），
+    # 发放本身的去重交给 issue_auto_coupon 自己的幂等保护（_dedup_issue_lock）。
+    try:
+        prior_paid_count_result = await db.execute(
+            select(func.count(Order.id)).where(
+                Order.tenant_id == order.tenant_id,
+                Order.customer_id == customer_id,
+                Order.payment_status == "paid",
+                Order.id != order.id,
+            )
+        )
+        prior_paid_count = int(prior_paid_count_result.scalar() or 0)
+        rule_type = "new_customer_coupon" if prior_paid_count == 0 else "consumption_coupon"
+        coupon_svc = CouponService(db)
+        coupon_svc.set_tenant_id(tenant_id)
+        await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
+    except Exception as e:
+        logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")
+
+def serialize_order(order: Order, order_items: list, checkout_requested_at: str | None = None, participant_no: int | None = None):
     print_meta = _serialize_print_meta(order)
     return {
         "id": str(order.id),
@@ -159,13 +285,19 @@ def serialize_order(order: Order, order_items: list):
         "coupon_id": str(order.coupon_id) if order.coupon_id else None,
         "discount_amount": float(order.discount_amount) if order.discount_amount else None,
         "payment_status": getattr(order, "payment_status", "paid"),
+        "payment_mode": getattr(order, "payment_mode", "prepay"),
         "payment_method": getattr(order, "payment_method", None),
+        "checkout_requested_at": checkout_requested_at,
         "dining_session_id": str(order.dining_session_id) if getattr(order, "dining_session_id", None) else None,
         "participant_id": str(order.participant_id) if getattr(order, "participant_id", None) else None,
+        # 这一单是这一桌第几位加入的人点的（从1开始），拼桌场景下商户端接单页
+        # 用来展示"这道菜是哪位点的"，纯展示用，跟真实身份无关。
+        "participant_no": participant_no,
         "order_type": getattr(order, "order_type", None),
         "order_type_text": ORDER_TYPE_TEXT.get(getattr(order, "order_type", None), ""),
         "parent_order_id": str(order.parent_order_id) if getattr(order, "parent_order_id", None) else None,
         "source": getattr(order, "source", "miniprogram"),
+        "staff_note": getattr(order, "staff_note", None),
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "items": [
             {
@@ -192,15 +324,116 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         return error_response(code=400, msg="缺少shop参数")
     TenantContext.set_tenant_id(tenant_id)
 
+    tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant:
+        return error_response(code=404, msg="商户不存在")
+    if not tenant.status:
+        return error_response(code=403, msg="商户已停业，暂不接受点餐")
+    from app.models.tenant_config import TenantConfig
+
+    config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
+    tenant_config = config_result.scalar_one_or_none()
+    business_info = (tenant_config.business_info or {}) if tenant_config else {}
+    if not business_info.get("is_open", True):
+        return error_response(code=400, msg="门店休息中，暂不接受点餐")
+
+    request_id = (body.request_id or "").strip() or None
+    if request_id:
+        replay_result = await db.execute(
+            select(Order).where(Order.tenant_id == tenant_id, Order.client_request_id == request_id)
+        )
+        replay_order = replay_result.scalar_one_or_none()
+        if replay_order:
+            replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
+            replay_items = list(replay_items_result.scalars().all())
+            replay_data = serialize_order(replay_order, replay_items)
+            replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+            return success_response(
+                data={
+                    **replay_data,
+                    "order_id": replay_data["id"],
+                    "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
+                    "next_action": build_order_next_action(replay_payment_mode),
+                    "pay_amount": float(replay_order.total),
+                    "payment_mode": replay_payment_mode,
+                },
+                msg="order already created, please pay",
+            )
+
+    payment_mode = (tenant.payment_mode if tenant else "prepay")
+    table_no_for_zone = (body.table or "").strip()
+    if table_no_for_zone:
+        from app.models.entrance_code import EntranceCode
+
+        zone_result = await db.execute(
+            select(EntranceCode.zone_type)
+            .where(
+                EntranceCode.tenant_id == tenant_id,
+                EntranceCode.table_no == table_no_for_zone,
+                EntranceCode.entry_type == "table",
+                EntranceCode.status == 1,
+            )
+            .order_by(EntranceCode.created_at.desc())
+            .limit(1)
+        )
+        zone_type = zone_result.scalar_one_or_none()
+        # zone_type 为空（没配置分区）时保持原来的 tenant.payment_mode，老商户/老桌码行为不变。
+        if zone_type == "quick":
+            payment_mode = "prepay"
+        elif zone_type == "full":
+            payment_mode = "table_account"
+    payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"
+    is_postpay = payment_mode == "postpay"
+    is_table_account = payment_mode == "table_account"
+    pay_later_mode = is_postpay or is_table_account
+
     customer_id = getattr(request.state, "customer_id", None)
     if customer_id:
         customer_id = int(customer_id)
+
+    # 服务员在 admin-h5 用商户登录态代客加单：不需要顾客身份（participant_token/customer_id），
+    # 只按桌号挂到这一桌当前的桌台会话下，跟顾客自己点的单一起累计进桌台总账。
+    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
 
     dining_session_id = None
     dining_participant_id = None
     order_type = None
     parent_order_id = None
-    if body.dining_session_id:
+    if is_staff_order:
+        merchant_tenant_id = getattr(request.state, "tenant_id", None)
+        if not merchant_tenant_id or merchant_tenant_id != tenant_id:
+            return error_response(code=403, msg="无权为该门店下单")
+        if payment_mode not in ("postpay", "table_account"):
+            return error_response(code=400, msg="预付模式暂不支持代客加单")
+        if body.coupon_id:
+            return error_response(code=400, msg="代客加单不支持使用优惠券")
+        table_no = (body.table or "").strip()
+        if not table_no:
+            return error_response(code=400, msg="缺少桌号")
+
+        from app.services.dining_session_service import DiningSessionService
+
+        try:
+            session = await DiningSessionService(db).get_or_create_open_session_for_staff(tenant_id, table_no)
+        except ValueError as exc:
+            return error_response(code=400, msg=str(exc))
+
+        dining_session_id = session.id
+        existing_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.tenant_id == tenant_id,
+                Order.dining_session_id == session.id,
+                Order.status.notin_(["cancelled", "rejected"]),
+            )
+            .order_by(Order.created_at.asc())
+            .limit(1)
+        )
+        parent_order = existing_order_result.scalar_one_or_none()
+        order_type = "ADD_ON" if parent_order else "INITIAL"
+        parent_order_id = parent_order.id if parent_order else None
+    elif body.dining_session_id:
         from app.models.dining import DiningParticipant, DiningSession
         from app.services.dining_session_service import hash_participant_token
 
@@ -232,16 +465,21 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         participant_result = await db.execute(select(DiningParticipant).where(*participant_filters))
         participant = participant_result.scalar_one_or_none()
         if not participant:
-            return error_response(code=403, msg="participant invalid")
+            # 409 而不是 403：本桌匿名身份没对上，跟"会员登录过期"是两码事。401/403 在这个
+            # 项目里全局约定代表"需要重新登录"，小程序端的通用拦截器会把它们当成会员登录
+            # 失效处理（清掉 customer_token、弹微信授权框），如果这里复用 403 会把一次可以
+            # 静默重试的本桌身份问题误导成"你必须先注册会员"，这正是历史上真实发生过的 bug。
+            return error_response(code=409, msg="本桌身份已失效，请重新扫码")
 
         dining_session_id = session.id
         dining_participant_id = participant.id
+        payment_status_filter = [Order.payment_status == "paid"] if payment_mode == "prepay" else []
         existing_order_result = await db.execute(
             select(Order)
             .where(
                 Order.tenant_id == tenant_id,
                 Order.dining_session_id == session.id,
-                Order.payment_status == "paid",
+                *payment_status_filter,
                 Order.status.notin_(["cancelled", "rejected"]),
             )
             .order_by(Order.created_at.asc())
@@ -252,6 +490,9 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         parent_order_id = parent_order.id if parent_order else None
         participant.last_active_at = _dt.utcnow()
         session.last_activity_at = _dt.utcnow()
+
+    if is_table_account and not dining_session_id:
+        return error_response(code=400, msg="桌台账单模式需要重新扫码进入本桌")
 
     applied_coupon_id = None
     coupon_discount = Decimal("0")
@@ -338,9 +579,9 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             )
             dish = dish_result.scalar_one_or_none()
             if not dish:
-                return error_response(code=400, msg=f"鑿滃搧涓嶅瓨鍦?{item_in.name}")
+                return error_response(code=400, msg=f"菜品不存在:{item_in.name}")
             if not dish.available:
-                return error_response(code=400, msg=f"鑿滃搧宸蹭笅鏋?{dish.name}")
+                return error_response(code=400, msg=f"菜品已下架:{dish.name}")
             if dish.stock is not None and dish.stock <= 0:
                 return error_response(code=400, msg=f"dish sold out: {dish.name}")
             if dish.stock is not None and dish.stock < item_in.qty:
@@ -376,6 +617,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
                 Coupon.status == "UNUSED",
                 Coupon.expire_time > _dt.utcnow(),
             )
+            .with_for_update()
         )
         coupon = coupon_result.scalar_one_or_none()
         if not coupon:
@@ -389,7 +631,12 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         if real_total < min_amount:
             return error_response(code=400, msg="未达到优惠券使用门槛")
 
-        coupon_discount = Decimal(str(tpl.value or 0))
+        if tpl.type == "PERCENT":
+            raw_discount = real_total * float(tpl.value or 0) / 100
+        else:
+            raw_discount = float(tpl.value or 0)
+        # 红线兜底：不管模板配置得对不对，实际减免不超过这一单实付金额的安全比例
+        coupon_discount = Decimal(str(cap_discount_amount(raw_discount, real_total)))
         coupon.status = "LOCKED"
         applied_coupon_id = coupon.id
 
@@ -405,15 +652,46 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         table_no=body.table or "",
         phone=body.phone,
         total=final_total,
-        status="pending_payment",
+        status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment",
         payment_status="unpaid",
+        payment_mode=payment_mode,
         remark=body.remark,
         coupon_id=applied_coupon_id,
         discount_amount=float(coupon_discount) if coupon_discount > 0 else None,
-        source=body.source or "miniprogram",
+        source="staff" if is_staff_order else (body.source or "miniprogram"),
+        staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
+        client_request_id=request_id,
     )
     db.add(order)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        # 前面查重的那一刻还没有这张订单，但几乎同一时间的第二个请求已经抢先建好了
+        # （真正意义上的并发重复提交）——这里接住唯一索引冲突，直接把已建好的那张
+        # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。
+        await db.rollback()
+        if request_id:
+            replay_result = await db.execute(
+                select(Order).where(Order.tenant_id == tenant_id, Order.client_request_id == request_id)
+            )
+            replay_order = replay_result.scalar_one_or_none()
+            if replay_order:
+                replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
+                replay_items = list(replay_items_result.scalars().all())
+                replay_data = serialize_order(replay_order, replay_items)
+                replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+                return success_response(
+                    data={
+                        **replay_data,
+                        "order_id": replay_data["id"],
+                        "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
+                        "next_action": build_order_next_action(replay_payment_mode),
+                        "pay_amount": float(replay_order.total),
+                        "payment_mode": replay_payment_mode,
+                    },
+                    msg="order already created, please pay",
+                )
+        return error_response(code=409, msg="订单提交冲突，请重试")
 
     order_items = []
     for dish_id, name, unit_price, qty in order_items_data:
@@ -427,26 +705,22 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         db.add(oi)
         order_items.append(oi)
 
+    await db.flush()
+    if pay_later_mode:
+        await _print_paid_order_ticket(order, db, reason="order_created_pay_later")
+
     await db.commit()
     await db.refresh(order)
 
-    # 余额可用数（仅显示，实际扣除在支付接口）
-    balance_available = 0.0
-    if customer_id and body.use_balance:
-        from app.models.member_account import MemberAccount
-        acc_result = await db.execute(
-            select(MemberAccount).where(MemberAccount.tenant_id == tenant_id, MemberAccount.customer_id == customer_id)
-        )
-        acc = acc_result.scalar_one_or_none()
-        if acc:
-            balance_available = min(float(acc.balance), float(final_total))
-
+    order_data = serialize_order(order, order_items)
     return success_response(
         data={
-            **serialize_order(order, order_items),
-            "need_payment": True,
+            **order_data,
+            "order_id": order_data["id"],
+            "need_payment": payment_mode == "prepay",
+            "next_action": build_order_next_action(payment_mode),
             "pay_amount": float(final_total),
-            "balance_available": balance_available,
+            "payment_mode": payment_mode,
         },
         msg="order created, please pay",
     )
@@ -476,9 +750,7 @@ async def _recover_wxpay_order_if_paid(order: Order, db: AsyncSession) -> bool:
         if not locked_order or locked_order.status != "pending_payment":
             return False
 
-        _pending_balance = getattr(locked_order, "balance_deduct_requested", None)
-        use_balance_flag = bool(_pending_balance and float(_pending_balance) > 0)
-        await _on_payment_success(locked_order, db, use_balance=use_balance_flag, payment_method="wxpay")
+        await _on_payment_success(locked_order, db, payment_method="wxpay")
         logger.warning(
             "[WXPAY_ORDER_RECOVERED] order_id=%s transaction_id=%s out_trade_no=%s",
             locked_order.id,
@@ -497,15 +769,19 @@ async def _print_paid_order_ticket(
     manual: bool = False,
     reason: str = "auto",
 ) -> dict:
-    """Print a paid order and persist recoverable print state in existing order metadata."""
-    if not order or getattr(order, "payment_status", None) != "paid":
+    """Print an order ticket and persist recoverable print state in existing order metadata."""
+    if not order:
+        return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
+    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
+    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
         return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
 
     locked_result = await db.execute(select(Order).where(Order.id == order.id).with_for_update())
     locked_order = locked_result.scalar_one_or_none()
     if locked_order:
         order = locked_order
-    if getattr(order, "payment_status", None) != "paid":
+    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
+    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
         return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
 
     meta = _get_print_meta(order)
@@ -691,11 +967,13 @@ async def _print_paid_order_ticket(
 async def _on_payment_success(
     order: Order,
     db: AsyncSession,
-    use_balance: bool = False,
     payment_method: str = "wxpay",
 ) -> tuple:
     """Run shared post-payment logic."""
     from app.models.coupon import Coupon
+
+    if getattr(order, "payment_status", None) == "paid":
+        return None, 0.0
 
     customer_id = order.customer_id
     TenantContext.set_tenant_id(str(order.tenant_id))
@@ -716,6 +994,29 @@ async def _on_payment_success(
         if locked_coupon and locked_coupon.status == "LOCKED":
             locked_coupon.status = "USED"
             locked_coupon.use_time = datetime.now(timezone.utc)
+            # 老带新双边奖励的发放判定（CommissionService.record_after_verify）之前只挂在
+            # 店员手动核销（verify.py/pos.py）上；自助点餐支付在这里核销优惠券却从没调用
+            # 过它，导致走小程序自助下单支付（PRODUCT_RULES.md 里明确的主路径）的被邀请
+            # 人，邀请人和他自己永远拿不到这份奖励。这里补上同一次调用——两条核销路径
+            # 共用 record_after_verify 内部按 customer_id+FIRST_VERIFY 加锁去重的判定，
+            # 不会因为走两条路径而重复发放。
+            try:
+                from app.models.coupon_template import CouponTemplate
+                from app.services.commission_service import CommissionService
+
+                template_result = await db.execute(
+                    select(CouponTemplate).where(CouponTemplate.id == locked_coupon.template_id)
+                )
+                coupon_template = template_result.scalar_one_or_none()
+                commission_svc = CommissionService(db)
+                commission_svc.set_tenant_id(str(order.tenant_id))
+                await commission_svc.record_after_verify(locked_coupon, coupon_template)
+                # record_after_verify 内部会 commit，之后同一 session 里所有对象（包括
+                # order）的属性都会被标记过期；显式 refresh 一次，避免下面继续读写
+                # order 时触发 SQLAlchemy 异步会话下的懒加载报错。
+                await db.refresh(order)
+            except Exception as e:
+                logger.warning(f"post-payment invite reward failed: {e}")
         elif locked_coupon and locked_coupon.status != "USED":
             order.coupon_id = None
             order.discount_amount = None
@@ -723,28 +1024,8 @@ async def _on_payment_success(
         order.coupon_id = None
         order.discount_amount = None
 
-    # 余额抵扣
-    balance_deducted = 0.0
-    if use_balance and customer_id:
-        from app.models.member_account import MemberAccount
-        acc_result = await db.execute(
-            select(MemberAccount).where(
-                MemberAccount.tenant_id == str(order.tenant_id),
-                MemberAccount.customer_id == int(customer_id)
-            ).with_for_update()
-        )
-        acc = acc_result.scalar_one_or_none()
-        if acc and float(acc.balance) > 0:
-            cap = float(order.balance_deduct_requested) if getattr(order, "balance_deduct_requested", None) is not None else float(order.total)
-            deduct = min(float(acc.balance), cap)
-            acc.balance = float(acc.balance) - deduct
-            balance_deducted = deduct
-
-    # 支付成功后，这个字段从"计划抵扣多少余额"改为"实际抵扣了多少余额"，供退款时准确拆分微信/余额两部分。
-    order.balance_deduct_requested = balance_deducted if balance_deducted > 0 else None
-
     # 标记支付成功
-    effective_method = "balance" if balance_deducted >= float(order.total) else payment_method
+    effective_method = payment_method
     order.payment_status = "paid"
     order.payment_method = effective_method
     order.payment_time = datetime.now(timezone.utc).isoformat()
@@ -756,19 +1037,47 @@ async def _on_payment_success(
     if customer_id:
         try:
             svc = CouponService(db)
-            order_count_result = await db.execute(
-                select(Order).where(
+            prior_paid_count_result = await db.execute(
+                select(func.count(Order.id)).where(
                     Order.tenant_id == order.tenant_id,
                     Order.customer_id == int(customer_id),
                     Order.payment_status == "paid",
                     Order.id != order.id,
-                ).limit(1)
+                )
             )
-            is_new_customer = order_count_result.scalar_one_or_none() is None
+            prior_paid_count = int(prior_paid_count_result.scalar() or 0)
+            is_new_customer = prior_paid_count == 0
+            # 第二单是"首单到复购"这条转化漏斗里最关键的一步——比第三单、第十单都更值得
+            # 单独识别出来，用来在客户端给一句专属文案（"欢迎回来，这是你的第二次光临"），
+            # 而不是把所有复购场景都用同一句"又送你一张券"糊弄过去。
+            is_second_order = prior_paid_count == 1
             rule_type = "new_customer_coupon" if is_new_customer else "consumption_coupon"
-            coupon_data = await svc.issue_auto_coupon(
+            issue_result = await svc.issue_auto_coupon(
                 int(customer_id), rule_type, consumption_amount=float(order.total)
             )
+            # issue_auto_coupon() 的返回值是内部服务间约定的形状（success_count/sent/
+            # weighted_coupon 嵌套），不是给客户端消费的。这里只在真的发出新券时才
+            # 拍平成小程序端认识的 {id,name,amount,min_amount,expired_at}（和入会接口
+            # 的欢迎券是同一套字段），没发新券（未达门槛、规则关闭、已持有同类未用券）
+            # 一律给 None——不然前端只要判断"coupon 字段存在"就会把 success_count:0
+            # 这种失败/跳过结果误当成"又送了一张券"展示出去。
+            coupon_data = None
+            if issue_result and issue_result.get("success_count", 0) > 0:
+                sent_item = (issue_result.get("sent") or [{}])[0]
+                wc = issue_result.get("weighted_coupon") or {}
+                coupon_data = {
+                    "id": sent_item.get("id"),
+                    "name": wc.get("name") or "优惠券",
+                    "amount": wc.get("amount", 0),
+                    "min_amount": wc.get("threshold", 0),
+                    "expired_at": sent_item.get("expire_time"),
+                    "is_second_order": is_second_order,
+                }
+            # 落库这份快照：微信支付的真实发券走的是 wxpay_notify 异步回调，回调结果
+            # 只回给微信、回不到小程序客户端。存到订单上，客户端支付成功后轮询
+            # /orders/my 就能把这次实际发放的奖励券（或者"这次没发"）拿回来，而不是
+            # 依赖 createWxPayOrder 那个支付前就返回、结构上根本不含 coupon 的旧响应。
+            order.reward_coupon_snapshot = json.dumps(coupon_data, ensure_ascii=False) if coupon_data else None
         except Exception as e:
             logger.warning(f"post-payment coupon failed: {e}")
 
@@ -786,7 +1095,7 @@ async def _on_payment_success(
 
     # Print order ticket after payment. Printing failures are recoverable and must not affect payment state.
     await _print_paid_order_ticket(order, db, reason="payment_success")
-    return coupon_data, balance_deducted
+    return coupon_data, 0.0
 
 
 async def _refund_order_payment(order: Order, db: AsyncSession, reason: str) -> dict:
@@ -851,6 +1160,29 @@ async def _refund_order_payment(order: Order, db: AsyncSession, reason: str) -> 
             logger.error("[REFUND_FAILED] order_id=%s error=%s", order.id, exc)
             return {"success": False, "amount": refunded_amount, "error": str(exc)}
 
+    # 退款后回滚这一单在支付成功时记的账：优惠券和积分/消费额，否则顾客能靠
+    # "付款->拿到积分/等级/优惠券->自己或商家取消退款"反复刷积分和等级。
+    if order.coupon_id:
+        from app.models.coupon import Coupon
+
+        coupon_result = await db.execute(
+            select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+        )
+        coupon = coupon_result.scalar_one_or_none()
+        if coupon and coupon.status in ("LOCKED", "USED"):
+            coupon.status = "UNUSED"
+            coupon.use_time = None
+
+    if order.customer_id:
+        try:
+            from app.services.membership_service import MembershipService
+
+            membership_svc = MembershipService(db)
+            membership_svc.set_tenant_id(str(order.tenant_id))
+            await membership_svc.reverse_consumption(int(order.customer_id), total, consumption_id=order.id)
+        except Exception as exc:
+            logger.warning("[REFUND_POINTS_REVERSAL_FAILED] order_id=%s error=%s", order.id, exc)
+
     order.refund_status = "success"
     order.refund_amount = refunded_amount
     order.refunded_at = datetime.now(timezone.utc)
@@ -886,9 +1218,7 @@ async def mock_pay_order(
         if order.customer_id and (not customer_id or int(customer_id) != int(order.customer_id)):
             return error_response(code=403, msg="forbidden")
 
-        coupon_data, balance_deducted = await _on_payment_success(
-            order, db, use_balance=body.use_balance, payment_method="mock"
-        )
+        coupon_data, _ = await _on_payment_success(order, db, payment_method="mock")
         await db.commit()
         await db.refresh(order)
 
@@ -896,7 +1226,7 @@ async def mock_pay_order(
         order_items = list(items_result.scalars().all())
 
         return success_response(
-            data={**serialize_order(order, order_items), "coupon": coupon_data, "balance_deducted": balance_deducted},
+            data={**serialize_order(order, order_items), "coupon": coupon_data},
             msg="支付成功",
         )
     except Exception as e:
@@ -905,7 +1235,6 @@ async def mock_pay_order(
 
 
 class WxPayBody(PydanticBase):
-    use_balance: bool = False
     js_code: Optional[str] = None
 
 
@@ -930,6 +1259,8 @@ async def create_wxpay_order(
         order = result.scalar_one_or_none()
         if not order:
             raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
+        if getattr(order, "payment_mode", "prepay") != "prepay":
+            raise HTTPException(status_code=400, detail={"success": False, "code": "PAYMENT_NOT_REQUIRED", "message": "该订单无需在线支付"})
         if order.status != "pending_payment":
             raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
         if customer_id and order.customer_id and int(customer_id) != int(order.customer_id):
@@ -941,52 +1272,7 @@ async def create_wxpay_order(
 
         pay_amount = float(order.total)
 
-        # 尝试余额抵扣：若全额覆盖，直接走 mock 流程
-        balance_cover = False
-        partial_balance_amount = 0.0
-        if body.use_balance and customer_id:
-            from app.models.member_account import MemberAccount
-            acc_result = await db.execute(
-                select(MemberAccount).where(MemberAccount.tenant_id == str(order.tenant_id), MemberAccount.customer_id == int(customer_id))
-            )
-            acc = acc_result.scalar_one_or_none()
-            if acc and float(acc.balance) > 0:
-                if float(acc.balance) >= pay_amount:
-                    balance_cover = True
-                else:
-                    partial_balance_amount = float(acc.balance)
-
-        if balance_cover:
-            locked_order_result = await db.execute(
-                select(Order).where(Order.id == int(order_id)).with_for_update()
-            )
-            order = locked_order_result.scalar_one_or_none()
-            if not order:
-                raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
-            if order.status != "pending_payment":
-                logger.warning("[PAYMENT_IDEMPOTENCY_BALANCE_ALREADY_HANDLED] order_id=%s status=%s", order_id, order.status)
-                raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
-            coupon_data, balance_deducted = await _on_payment_success(
-                order, db, use_balance=True, payment_method="balance"
-            )
-            await db.commit()
-            await db.refresh(order)
-            items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-            order_items = list(items_result.scalars().all())
-            return success_response(
-                data={
-                    **serialize_order(order, order_items),
-                    "free": True,
-                    "coupon": coupon_data,
-                    "balance_deducted": balance_deducted,
-                },
-                msg="余额支付成功",
-            )
-
-        if partial_balance_amount > 0:
-            pay_amount = round(pay_amount - partial_balance_amount, 2)
-
-        # 订单实际应付金额已被优惠券/余额抵扣到 0，无需发起微信支付（不再强行收 1 分钱），也不依赖商家是否配置了微信支付
+        # 订单实际应付金额已被优惠券抵扣到 0，无需发起微信支付（不再强行收 1 分钱），也不依赖商家是否配置了微信支付
         if pay_amount <= 0:
             locked_order_result = await db.execute(
                 select(Order).where(Order.id == int(order_id)).with_for_update()
@@ -994,12 +1280,7 @@ async def create_wxpay_order(
             order = locked_order_result.scalar_one_or_none()
             if not order or order.status != "pending_payment":
                 raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
-            order.balance_deduct_requested = partial_balance_amount if partial_balance_amount > 0 else None
-            free_coupon_data, free_balance_deducted = await _on_payment_success(
-                order, db,
-                use_balance=partial_balance_amount > 0,
-                payment_method="balance" if partial_balance_amount > 0 else "free",
-            )
+            free_coupon_data, _ = await _on_payment_success(order, db, payment_method="free")
             await db.commit()
             await db.refresh(order)
             free_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
@@ -1009,7 +1290,6 @@ async def create_wxpay_order(
                     **serialize_order(order, free_order_items),
                     "free": True,
                     "coupon": free_coupon_data,
-                    "balance_deducted": free_balance_deducted,
                 },
                 msg="订单已完成，无需支付",
             )
@@ -1023,7 +1303,6 @@ async def create_wxpay_order(
             order = locked_order_result.scalar_one_or_none()
             if not order or order.status != "pending_payment":
                 raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
-            order.balance_deduct_requested = partial_balance_amount if partial_balance_amount > 0 else None
             await db.commit()
 
             if not openid and body.js_code:
@@ -1139,9 +1418,20 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
             )
             return {"code": "FAIL", "message": "tenant mismatch"}
 
-        _pending_balance = getattr(order, "balance_deduct_requested", None)
-        use_balance_flag = bool(_pending_balance and float(_pending_balance) > 0)
-        await _on_payment_success(order, db, use_balance=use_balance_flag, payment_method="wxpay")
+        # 金额核对：验签只证明这份回调确实来自微信、内容没被篡改，不代表金额就是这笔订单
+        # 该收的钱——微信侧实际扣款金额必须跟下单时算出的 order.total 对得上，否则宁可
+        # 拒绝这次回调也不能把订单标记为已支付，避免商户之间/订单之间任何账务错位被悄悄放过。
+        paid_fen = resource.get("amount", {}).get("total")
+        if paid_fen is not None:
+            expected_fen = round(float(order.total) * 100)
+            if int(paid_fen) != expected_fen:
+                logger.error(
+                    "[WXPAY_AMOUNT_MISMATCH] order_id=%s expected_fen=%s paid_fen=%s",
+                    out_trade_no, expected_fen, paid_fen,
+                )
+                return {"code": "FAIL", "message": "amount mismatch"}
+
+        await _on_payment_success(order, db, payment_method="wxpay")
         await db.commit()
         logger.info(f"微信支付回调成功: order_id={out_trade_no}")
         return {"code": "SUCCESS", "message": "ok"}
@@ -1149,6 +1439,37 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.error(f"wxpay_notify error: {e}\n{traceback.format_exc()}")
         return {"code": "FAIL", "message": str(e)}
+
+
+async def _record_order_consumption(order: Order, db: AsyncSession) -> None:
+    """订单结账后转成一条消费记录，供顾客端"消费记录"页展示。
+    没有 customer_id（匿名/未登录下单）就跳过；记录失败不影响结账本身。"""
+    if not order.customer_id:
+        return
+    try:
+        from app.services.consumption_service import ConsumptionService
+
+        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+        items = items_result.scalars().all()
+        if items:
+            names = "、".join(i.name for i in items[:3])
+            if len(items) > 3:
+                names += f"等{len(items)}件"
+            project = names
+        else:
+            project = "堂食点餐"
+
+        consumption_service = ConsumptionService(db)
+        consumption_service.set_tenant_id(order.tenant_id)
+        await consumption_service.create_consumption(
+            customer_id=order.customer_id,
+            project=project,
+            amount=float(order.total or 0),
+            consume_time=order.completed_at or datetime.utcnow(),
+            remark=f"订单 #{order.id}" + (f" · {order.table_no}桌" if order.table_no else ""),
+        )
+    except Exception as e:
+        logger.error(f"结账后生成消费记录失败 - order_id: {order.id}, error: {e}")
 
 
 class OrderStatusUpdate(PydanticBase):
@@ -1190,15 +1511,35 @@ async def update_order_status(
         if not refund_result["success"]:
             await db.rollback()
             return error_response(code=502, msg=f"操作失败，退款处理异常，请稍后重试：{refund_result['error']}")
+    if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) != "paid":
+        await _unlock_order_coupon_if_locked(order, db)
 
     order.status = body.status
     if body.status == "done" and not getattr(order, "served_at", None):
         order.served_at = datetime.utcnow()
-    if body.status == "settled" and not getattr(order, "completed_at", None):
+    just_settled = body.status == "settled" and not getattr(order, "completed_at", None)
+    if just_settled:
         order.completed_at = datetime.utcnow()
+        marked_offline_paid = False
+        if getattr(order, "payment_mode", "prepay") == "postpay":
+            marked_offline_paid = _mark_order_offline_paid(order)
+        await _mark_order_coupon_used_if_locked(order, db)
+        if marked_offline_paid:
+            await _apply_paid_order_member_assets_once(order, db)
     await db.commit()
     await db.refresh(order)
-    return success_response(data={"id": str(order.id), "status": order.status}, msg="状态已更新")
+    if just_settled:
+        await _record_order_consumption(order, db)
+    return success_response(
+        data={
+            "id": str(order.id),
+            "status": order.status,
+            "payment_status": getattr(order, "payment_status", None),
+            "payment_method": getattr(order, "payment_method", None),
+            "payment_time": getattr(order, "payment_time", None),
+        },
+        msg="状态已更新",
+    )
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
 TABLE_CLOSE_DONE_STATUSES = {"done", "settled", "cancelled", "rejected"}
@@ -1247,7 +1588,7 @@ async def settle_table(
     if blocking_orders:
         return error_response(
             code=409,
-            msg="table has unfinished orders",
+            msg="本桌还有未完成的订单，无法结账",
             data={
                 "table_no": table_no,
                 "dining_session_id": str(active_session.id),
@@ -1263,20 +1604,41 @@ async def settle_table(
 
     total = 0.0
     settled_count = 0
-    for o in table_orders:
-        if o.status == "done":
-            o.status = "settled"
-            settled_count += 1
-        if o.status == "settled":
-            if not getattr(o, "completed_at", None):
-                o.completed_at = datetime.utcnow()
-            total += float(o.total or 0)
+    paid_synced_count = 0
+    newly_settled_orders = []
+    # 这里不能再按 payment_status=="unpaid" 过滤：先付后厨的订单到 done 的时候早就已经
+    # payment_status=="paid" 了，之前只结未付款订单会把先付后厨的订单永远漏在 done 状态，
+    # 既拿不到"已结账"的消费记录（顾客端"消费记录"页永远看不到这笔），这一桌在商家后台也会
+    # 变成清不掉的"幽灵桌台"——结账按钮点了以后（因为 session 已经关闭）下次点就直接 404。
+    # 只要是 done 就该跟着这次结账一起推进到 settled，是否需要补标线下已付款交给下面
+    # payment_mode 的判断去管，不应该影响"要不要把它算作已结账"这件事。
+    settlement_orders = [o for o in table_orders if o.status == "done"]
+    for o in settlement_orders:
+        o.status = "settled"
+        settled_count += 1
+        newly_settled_orders.append(o)
+        if not getattr(o, "completed_at", None):
+            o.completed_at = datetime.utcnow()
+        # 桌台视图的"结账"是餐后付款和桌台账单共用的唯一批量结账入口（小程序下单时不分模式都会建
+        # dining_session，两种模式的订单都会被这里的桌台分组捞到），所以线下已付款的标记不能只认
+        # table_account——postpay 订单结账时同样要在这里补上，否则会留下"已结账却仍显示未支付"的订单。
+        if getattr(o, "payment_mode", "prepay") in ("table_account", "postpay"):
+            if _mark_order_offline_paid(o):
+                paid_synced_count += 1
+                await _apply_paid_order_member_assets_once(o, db)
+        await _mark_order_coupon_used_if_locked(o, db)
+        total += float(o.total or 0)
     await db.commit()
+    for o in newly_settled_orders:
+        await _record_order_consumption(o, db)
     return success_response(
         data={
             "table_no": table_no,
             "dining_session_id": str(active_session.id),
             "settled_count": settled_count,
+            "paid_synced_count": paid_synced_count,
+            "payment_status": "paid",
+            "payment_method": "offline",
             "closed": True,
             "total": total,
         },
@@ -1284,6 +1646,10 @@ async def settle_table(
     )
 class MerchantNoteUpdate(PydanticBase):
     note: str = ""
+
+
+class OrderReprintBody(PydanticBase):
+    print_type: str = "kitchen"
 
 
 @router.patch("/orders/{order_id}/note")
@@ -1315,6 +1681,7 @@ async def update_merchant_note(
 async def reprint_order_ticket(
     order_id: str,
     request: Request,
+    body: Optional[OrderReprintBody] = None,
     db: AsyncSession = Depends(get_db),
 ):
     tenant_id = getattr(request.state, "tenant_id", None)
@@ -1327,8 +1694,10 @@ async def reprint_order_ticket(
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
-    if getattr(order, "payment_status", None) != "paid":
-        return error_response(code=400, msg="order not paid")
+    print_type = (body.print_type if body else "kitchen") or "kitchen"
+    allowed, reason = can_reprint_order(order, print_type=print_type)
+    if not allowed:
+        return error_response(code=400, msg=reason or "order cannot reprint")
     print_result = await _print_paid_order_ticket(order, db, manual=True, reason="manual_reprint")
     await db.commit()
     await db.refresh(order)
@@ -1338,7 +1707,12 @@ async def reprint_order_ticket(
     )
 
 @router.post("/orders/{order_id}/cancel")
-async def cancel_order(order_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def cancel_order(
+    order_id: str,
+    request: Request,
+    participant_token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """Cancel current customer order."""
     from app.models.coupon import Coupon as _Coupon
     from datetime import datetime as _dt
@@ -1348,9 +1722,27 @@ async def cancel_order(order_id: str, request: Request, db: AsyncSession = Depen
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
-    # 归属校验：已登录的订单必须是同一个客户，匿名调用不能取消已登录客户的订单
-    if order.customer_id and (not customer_id or int(customer_id) != int(order.customer_id)):
-        return error_response(code=403, msg="forbidden")
+    # 归属校验：已登录的订单必须是同一个客户；匿名拼桌顾客下的单没有 customer_id，
+    # 必须靠 participant_token 核对身份——否则任何人拿到 order_id 就能取消别人的挂单
+    # （同一桌台其他人能在"本桌已点菜品"里直接看到这个 order_id）。
+    if order.customer_id:
+        if not customer_id or int(customer_id) != int(order.customer_id):
+            return error_response(code=403, msg="forbidden")
+    elif order.participant_id:
+        from app.models.dining import DiningParticipant
+        from app.services.dining_session_service import hash_participant_token
+
+        owns_order = False
+        if participant_token:
+            participant_result = await db.execute(
+                select(DiningParticipant).where(
+                    DiningParticipant.id == order.participant_id,
+                    DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
+                )
+            )
+            owns_order = participant_result.scalar_one_or_none() is not None
+        if not owns_order:
+            return error_response(code=403, msg="forbidden")
     if order.status not in ("pending_payment", "pending"):
         return error_response(code=400, msg="订单已支付或已完成，无法取消")
     if getattr(order, "payment_status", None) == "paid":
@@ -1369,17 +1761,59 @@ async def cancel_order(order_id: str, request: Request, db: AsyncSession = Depen
 
 
 @router.get("/orders/my")
-async def get_my_order(order_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def get_my_order(
+    order_id: str,
+    request: Request,
+    participant_token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
     """Get current customer order status."""
     result = await db.execute(select(Order).where(Order.id == int(order_id)))
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
+
+    # 所有权校验：按 ID 就能查到别人订单的状态/备注，之前只凭 order_id 不做任何校验。
+    # 已登录顾客按 customer_id 核对；匿名同桌顾客按 dining participant 的令牌核对。
+    customer_id = getattr(request.state, "customer_id", None)
+    if order.customer_id:
+        if not customer_id or int(customer_id) != int(order.customer_id):
+            return error_response(code=403, msg="forbidden")
+    elif order.participant_id:
+        from app.models.dining import DiningParticipant
+        from app.services.dining_session_service import hash_participant_token
+
+        owns_order = False
+        if participant_token:
+            participant_result = await db.execute(
+                select(DiningParticipant).where(
+                    DiningParticipant.id == order.participant_id,
+                    DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
+                )
+            )
+            owns_order = participant_result.scalar_one_or_none() is not None
+        if not owns_order:
+            return error_response(code=403, msg="forbidden")
+
     recovered = await _recover_wxpay_order_if_paid(order, db)
     if recovered:
         await db.commit()
         await db.refresh(order)
-    return success_response(data={"id": str(order.id), "status": order.status, "payment_status": order.payment_status, "merchant_note": order.merchant_note})
+
+    reward_coupon = None
+    if order.reward_coupon_snapshot:
+        try:
+            reward_coupon = json.loads(order.reward_coupon_snapshot)
+        except Exception:
+            reward_coupon = None
+
+    return success_response(data={
+        "id": str(order.id),
+        "status": order.status,
+        "payment_status": order.payment_status,
+        "merchant_note": order.merchant_note,
+        "reward_coupon": reward_coupon,
+    })
 
 
 @router.get("/orders")
@@ -1411,7 +1845,17 @@ async def list_orders(
         today_local = utc8_now.date()
         day_start_utc = datetime(today_local.year, today_local.month, today_local.day) - _td(hours=8)
         day_end_utc = day_start_utc + _td(hours=24)
-        query = query.where(Order.created_at >= day_start_utc, Order.created_at < day_end_utc)
+        # A dining session that stays open past midnight still has orders from
+        # "yesterday" blocking settle-table today. Always surface still-open
+        # orders regardless of created_at, or they become invisible in this
+        # list while still blocking checkout (same class of bug as the
+        # pending_payment table-grouping fix above).
+        query = query.where(
+            or_(
+                and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
+                Order.status.in_(TABLE_CLOSE_BLOCKING_STATUSES),
+            )
+        )
 
     normalized_order_no = (order_no or "").strip()
     normalized_tail = (order_tail or tail_no or "").strip()
@@ -1488,7 +1932,34 @@ async def list_orders(
         for item in all_items:
             items_by_order.setdefault(item.order_id, []).append(item)
 
-    rows = [serialize_order(o, items_by_order.get(o.id, [])) for o in orders]
+    session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
+    checkout_requested_by_session = {}
+    if session_ids:
+        from app.models.dining import DiningSession
+
+        sessions_result = await db.execute(
+            select(DiningSession.id, DiningSession.checkout_requested_at).where(
+                DiningSession.id.in_(session_ids)
+            )
+        )
+        for session_id, checkout_requested_at in sessions_result.all():
+            if checkout_requested_at:
+                checkout_requested_by_session[session_id] = checkout_requested_at.isoformat()
+
+    # 拼桌场景下接单页要能看出"这道菜是哪位点的"——跟顾客端"已点菜品"用的是
+    # 同一套编号算法（DiningSessionService.get_participant_ordinals），两边永远对得上。
+    from app.services.dining_session_service import DiningSessionService
+    participant_ordinals = await DiningSessionService.get_participant_ordinals(db, tenant_id, list(session_ids))
+
+    rows = [
+        serialize_order(
+            o,
+            items_by_order.get(o.id, []),
+            checkout_requested_at=checkout_requested_by_session.get(getattr(o, "dining_session_id", None)),
+            participant_no=participant_ordinals.get(getattr(o, "participant_id", None)),
+        )
+        for o in orders
+    ]
     if wants_pagination:
         return success_response(
             data={
@@ -1517,6 +1988,8 @@ async def create_review(
     from app.models.order_review import OrderReview
 
     customer_id = getattr(request.state, "customer_id", None)
+    if not customer_id:
+        return error_response(code=401, msg="请先登录")
     if not 1 <= body.rating <= 5:
         return error_response(code=400, msg="璇勫垎闇€鍦?-5涔嬮棿")
 
@@ -1524,6 +1997,8 @@ async def create_review(
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
+    if int(order.customer_id or 0) != int(customer_id):
+        return error_response(code=403, msg="forbidden")
     if order.status not in ("done", "settled"):
         return error_response(code=400, msg="order not completed")
 
@@ -1574,20 +2049,5 @@ async def list_reviews(
         }
         for r in reviews
     ])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

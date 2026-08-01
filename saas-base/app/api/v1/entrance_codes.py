@@ -92,9 +92,23 @@ async def resolve_entrance_code(scene: str, request: Request, db=Depends(get_db)
         return error_response(code=422, msg="入口类型异常，请重新扫码")
     
     TenantContext.set_tenant_id(item.tenant_id)
-    
+
     logger.info(f"[ENTRY_RESOLVE_RESULT] scene={scene} tenant_id={item.tenant_id} entry_type={entry_type} channel={channel} table_no={table_no} target_page={target_page} success=True")
-    
+
+    staff_invite_code = None
+    staff_name = None
+    if entry_type == "staff_share" and getattr(item, "staff_id", None):
+        from app.models.staff import Staff
+        from sqlalchemy.future import select as _select
+
+        staff_result = await db.execute(
+            _select(Staff).filter(Staff.tenant_id == item.tenant_id, Staff.id == item.staff_id)
+        )
+        staff = staff_result.scalar_one_or_none()
+        if staff:
+            staff_invite_code = staff.invite_code
+            staff_name = staff.name
+
     return success_response(
         data={
             "scene": item.scene,
@@ -107,6 +121,8 @@ async def resolve_entrance_code(scene: str, request: Request, db=Depends(get_db)
             "channel": channel,
             "target_page": target_page,
             "status": item.status,
+            "invite_code": staff_invite_code,
+            "staff_name": staff_name,
         },
         msg="识别成功",
     )
@@ -146,6 +162,7 @@ async def create_entrance_code(data: CreateEntranceCodeRequest, db=Depends(get_d
         order_mode=data.order_mode,
         table_id=data.table_id,
         target_page=data.target_page,
+        zone_type=data.zone_type,
     )
     return success_response(data=EntranceCodeResponse.model_validate(item))
 

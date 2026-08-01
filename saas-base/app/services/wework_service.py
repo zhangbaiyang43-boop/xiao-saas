@@ -16,22 +16,22 @@ class WeworkService:
 
     def config_status(self) -> dict:
         fields = {
-            "corp_id": bool(settings.WEWORK_CORP_),
-            "agent_id": bool(settings.WEWORK_AGENT_),
+            "corp_id": bool(settings.WEWORK_CORP_ID),
+            "agent_id": bool(settings.WEWORK_AGENT_ID),
             "secret": bool(settings.WEWORK_SECRET),
             "token": bool(settings.WEWORK_TOKEN),
             "encoding_aes_key": bool(settings.WEWORK_ENCODING_AES_KEY),
             "callback_url": bool(settings.WEWORK_CALLBACK_URL),
-            "staff_userid": bool(settings.WEWORK_STAFF_USER),
+            "staff_userid": bool(settings.WEWORK_STAFF_USERID),
         }
         missing = [key for key, value in fields.items() if not value]
         return {
             "configured": not missing,
             "missing": missing,
-            "corp_id": settings.WEWORK_CORP_,
-            "agent_id": settings.WEWORK_AGENT_,
+            "corp_id": settings.WEWORK_CORP_ID,
+            "agent_id": settings.WEWORK_AGENT_ID,
             "callback_url": settings.WEWORK_CALLBACK_URL,
-            "staff_userid": settings.WEWORK_STAFF_USER,
+            "staff_userid": settings.WEWORK_STAFF_USERID,
             "token_cached": self._cached_token_valid(),
             "expires_at": self._token_cache.get("expires_at"),
         }
@@ -48,7 +48,7 @@ class WeworkService:
 
         params = urllib.parse.urlencode(
             {
-                "corpid": settings.WEWORK_CORP_,
+                "corpid": settings.WEWORK_CORP_ID,
                 "corpsecret": settings.WEWORK_SECRET,
             }
         )
@@ -78,8 +78,8 @@ class WeworkService:
             "message": "企业微信连接成功",
             "expires_in": token_info["expires_in"],
             "expires_at": token_info["expires_at"],
-            "corp_id": settings.WEWORK_CORP_,
-            "agent_id": settings.WEWORK_AGENT_,
+            "corp_id": settings.WEWORK_CORP_ID,
+            "agent_id": settings.WEWORK_AGENT_ID,
         }
 
     def build_contact_way_payload(
@@ -89,7 +89,7 @@ class WeworkService:
         remark: str | None = None,
         skip_verify: bool = True,
     ) -> dict:
-        staff_userid = userid or settings.WEWORK_STAFF_USER
+        staff_userid = userid or settings.WEWORK_STAFF_USERID
         if not staff_userid:
             raise RuntimeError("企业微信员工 userid 未配置")
 

@@ -11,6 +11,9 @@ class CommissionRecord(BaseModel):
     amount = Column(DECIMAL(10, 2), nullable=False, default=0)
     level = Column(Integer, nullable=False)
     receiver_id = Column(BigInteger, nullable=False)
+    # receiver_id 指向谁：'customer'（默认，老数据 NULL 一律按 customer 处理）| 'staff'——
+    # staff 类型的记录不走发券逻辑，只是记一笔待商家线下结算的现金。
+    receiver_type = Column(String(16), nullable=True)
     commission_amount = Column(DECIMAL(10, 2), nullable=False, default=0)
     status = Column(String(16), nullable=False, default="PENDING")
     source_type = Column(String(32), nullable=False, default="VERIFY")

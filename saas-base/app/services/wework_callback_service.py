@@ -104,7 +104,7 @@ class WeworkCallbackService:
         content_length = socket.ntohl(struct.unpack("I", plaintext[16:20])[0])
         content = plaintext[20 : 20 + content_length]
         corp_id = plaintext[20 + content_length :].decode("utf-8")
-        if corp_id != settings.WEWORK_CORP_:
+        if corp_id != settings.WEWORK_CORP_ID:
             raise RuntimeError("企业微信回调 Corp 不匹配")
         return content.decode("utf-8")
 
@@ -113,7 +113,7 @@ class WeworkCallbackService:
         aes_key = self._aes_key()
         random_bytes = b"1234567890123456"
         msg = plaintext.encode("utf-8")
-        payload = random_bytes + struct.pack("!I", len(msg)) + msg + settings.WEWORK_CORP_.encode("utf-8")
+        payload = random_bytes + struct.pack("!I", len(msg)) + msg + settings.WEWORK_CORP_ID.encode("utf-8")
         payload = self._pkcs7_pad(payload)
         cipher = AES.new(aes_key, AES.MODE_CBC, aes_key[:16])
         encrypted = base64.b64encode(cipher.encrypt(payload)).decode("utf-8")
@@ -167,10 +167,10 @@ class WeworkCallbackService:
         return value
 
     async def _resolve_tenant_id(self) -> str:
-        if settings.WEWORK_TENANT_:
-            return settings.WEWORK_TENANT_
-        if self.db is not None and settings.WEWORK_CORP_:
-            result = await self.db.execute(select(Tenant).filter(Tenant.corp_id == settings.WEWORK_CORP_))
+        if settings.WEWORK_TENANT_ID:
+            return settings.WEWORK_TENANT_ID
+        if self.db is not None and settings.WEWORK_CORP_ID:
+            result = await self.db.execute(select(Tenant).filter(Tenant.corp_id == settings.WEWORK_CORP_ID))
             tenant = result.scalar_one_or_none()
             if tenant:
                 return tenant.tenant_id

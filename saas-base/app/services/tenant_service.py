@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.core.security import get_password_hash, verify_password
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
 
@@ -12,8 +13,8 @@ from app.models.tenant_config import TenantConfig
 DEFAULT_MEMBER_RULES = {
     "levels": [
         {"level": "Lv1", "name": "普通会员", "threshold": 0},
-        {"level": "Lv2", "name": "成长会员", "threshold": 299},
-        {"level": "Lv3", "name": "VIP会员", "threshold": 999},
+        {"level": "Lv2", "name": "银卡会员", "threshold": 299},
+        {"level": "Lv3", "name": "金卡会员", "threshold": 999},
     ],
     "points_per_yuan": 1,
     "points_to_yuan": 100,
@@ -282,4 +283,10 @@ class TenantService:
         return tenant, config
 
     async def change_password(self, tenant: Tenant, old_password: str, new_password: str) -> bool:
-        return False
+        if not verify_password(old_password, tenant.password_hash):
+            return False
+        tenant.password_hash = get_password_hash(new_password)
+        if self.db is not None:
+            await self.db.commit()
+            await self.db.refresh(tenant)
+        return True

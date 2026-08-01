@@ -69,7 +69,7 @@ async def create_template(request: Request, data: CreateCouponTemplateRequest, d
     )
 
     await clear_cache_pattern("coupon_templates:*")
-    return success_response(data=serialize_template(template), msg="建成功")
+    return success_response(data=serialize_template(template), msg="创建成功")
 
 
 @router.put("/{template_id}", response_model=RespVo)

@@ -48,7 +48,6 @@ class PaymentIdempotencyContractsTest(unittest.TestCase):
         self.assertLess(mock_source.index("with_for_update()"), mock_source.index("_on_payment_success"))
 
         create_pay_source = function_source("create_wxpay_order")
-        self.assertIn("PAYMENT_IDEMPOTENCY_BALANCE_ALREADY_HANDLED", create_pay_source)
         self.assertIn("locked_order_result", create_pay_source)
         self.assertLess(create_pay_source.index("locked_order_result"), create_pay_source.index("_on_payment_success"))
 

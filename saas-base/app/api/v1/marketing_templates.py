@@ -113,8 +113,10 @@ async def enable_marketing_template(
     user=Depends(get_current_user)
 ):
     """启用营销模"""
+    if user.get("type") != "merchant":
+        return error_response(code=401, msg="请先登录商户账号")
     tenant_id = user.get("tenant_id")
-    
+
     service = MarketingTemplateService(db)
     
     try:
@@ -136,8 +138,10 @@ async def disable_merchant_template(
     user=Depends(get_current_user)
 ):
     """停用商家模"""
+    if user.get("type") != "merchant":
+        return error_response(code=401, msg="请先登录商户账号")
     tenant_id = user.get("tenant_id")
-    
+
     service = MarketingTemplateService(db)
     
     try:

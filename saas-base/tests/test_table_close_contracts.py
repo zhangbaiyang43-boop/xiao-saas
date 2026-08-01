@@ -9,6 +9,9 @@ DINING_API_SOURCE = (ROOT / "app" / "api" / "v1" / "dining_sessions.py").read_te
 MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+DINING_UTIL_SOURCE = (
+    ROOT.parent / "member-mini-client" / "src" / "utils" / "dining.js"
+).read_text(encoding="utf-8-sig")
 ORDER_MODEL_SOURCE = (ROOT / "app" / "models" / "order.py").read_text(encoding="utf-8-sig")
 DINING_MODEL_SOURCE = (ROOT / "app" / "models" / "dining.py").read_text(encoding="utf-8-sig")
 
@@ -72,8 +75,15 @@ class TableCloseContractsTest(unittest.TestCase):
         self.assertIn("\\u91cd\\u65b0\\u626b\\u7801", MENU_SOURCE)
 
     def test_next_table_scan_forces_new_session_after_closed_page_state(self):
+        # 本桌身份的建立/缓存判断收敛到 utils/dining.js 的 resolveDiningIdentity 共享实现
+        # （entry/index.vue 和 menu.vue 都走这一份，不再各自维护），menu.vue 的
+        # ensureDiningSession 只是薄封装，负责把结果同步进组件自己的响应式状态。
         self.assertIn("const ensureDiningSession = async (force = false)", MENU_SOURCE)
-        self.assertIn("if (!force && diningSessionId.value && diningParticipantToken.value) return true", MENU_SOURCE)
+        self.assertIn("resolveDiningIdentity", MENU_SOURCE)
+        self.assertIn(
+            "if (!force && !staleForOtherTable && cachedSessionId && cachedToken)",
+            DINING_UTIL_SOURCE,
+        )
         self.assertIn("tableSessionClosed.value = false", MENU_SOURCE)
         self.assertIn("await this.ensureDiningSession(true)", MENU_SOURCE)
         self.assertNotIn("if (!tableSessionClosed.value && sessionStatus === 'OPEN') tableSessionClosedNotice", MENU_SOURCE)

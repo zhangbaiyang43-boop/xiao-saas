@@ -1,16 +1,17 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.events import CONSUMPTION_CREATED, DomainEvent, event_bus
 from app.core.pagination import build_page, normalize_pagination
-from app.core.response import RespVo, success_response
+from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.schemas.consumption import CreateConsumptionRequest
 from app.services.consumption_service import ConsumptionService
 from app.services.coupon_service import CouponService
+from app.services.customer_service import CustomerService
 
 router = APIRouter(prefix="/api/v1/consumptions", tags=["消费记录"])
 
@@ -44,10 +45,23 @@ async def list_consumptions(
 
 
 @router.post("/", response_model=RespVo)
-async def create_consumption(data: CreateConsumptionRequest, db: AsyncSession = Depends(get_db)):
+async def create_consumption(data: CreateConsumptionRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+
+    # 越权校验：客户端传的 customer_id 必须属于当前登录商家，否则能给别的商家的
+    # 客户记一笔消费/发一张券，数据挂到自己名下却污染了别的租户的客户记录。
+    customer_service = CustomerService(db)
+    customer_service.set_tenant_id(tenant_id)
+    customer = await customer_service.get_customer_any_status(data.customer_id)
+    if not customer:
+        return error_response(code=404, msg="客户不存在")
+
     consume_time = datetime.fromisoformat(data.consume_time) if data.consume_time else datetime.utcnow()
 
     consumption_service = ConsumptionService(db)
+    consumption_service.set_tenant_id(tenant_id)
     consumption = await consumption_service.create_consumption(
         customer_id=data.customer_id,
         project=data.project,

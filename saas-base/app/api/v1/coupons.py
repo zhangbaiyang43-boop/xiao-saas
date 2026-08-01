@@ -93,17 +93,11 @@ async def send_coupons(request: Request, db: AsyncSession = Depends(get_db)):
     
     # 1. 读取原始请求体
     body = await request.body()
-    print(f"DEBUG - send_coupons: RAW request body (bytes): {body!r}")
-    
+
     # 2. 直接解析JSON，不依赖Pydantic
     import json
     raw_data = json.loads(body)
-    print(f"DEBUG - send_coupons: RAW JSON data: {raw_data}")
-    print(f"DEBUG - send_coupons: template_id from JSON: {raw_data.get('template_id')}, type: {type(raw_data.get('template_id'))}")
-    print(f"DEBUG - send_coupons: customer_ids from JSON: {raw_data.get('customer_ids')}")
-    for i, cid in enumerate(raw_data.get('customer_ids', [])):
-        print(f"DEBUG - send_coupons: customer_ids[{i}] = {cid}, type: {type(cid)}")
-    
+
     # 3. 使用原始数据，保持为字符串
     template_id = raw_data.get('template_id')
     customer_ids = raw_data.get('customer_ids', [])
@@ -113,13 +107,8 @@ async def send_coupons(request: Request, db: AsyncSession = Depends(get_db)):
     if not tenant_id:
         tenant_id = TenantContext.get_tenant_id()
     
-    print(f"DEBUG - send_coupons: tenant_id from request.state: {getattr(request.state, 'tenant_id', 'None')}")
-    print(f"DEBUG - send_coupons: tenant_id from context: {TenantContext.get_tenant_id()}")
-    print(f"DEBUG - send_coupons: final tenant_id: {tenant_id}")
-    
     # 租户校验
     if not tenant_id:
-        print("DEBUG - send_coupons: tenant_id is None, returning error")
         return error_response(code=401, msg="缺少租户信息")
     
     # 设置租户上下文
@@ -130,9 +119,7 @@ async def send_coupons(request: Request, db: AsyncSession = Depends(get_db)):
     
     # 调用发券服务
     result = await service.send_coupons_with_result(template_id, customer_ids)
-    
-    print(f"DEBUG - send_coupons: result: {result}")
-    
+
     # 返回结果
     if result["success_count"] == 0:
         return error_response(code=400, msg=result["reason"] or "发放失败", data=result)

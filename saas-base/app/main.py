@@ -7,8 +7,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.consumptions import router as consumption_router
-from app.api.v1.coupon_templates import router as coupon_template_router
-from app.api.v1.coupons import router as coupon_router
 from app.api.v1.customers import router as customer_router
 from app.api.v1.distribution import router as distribution_router
 from app.api.v1.dining_sessions import router as dining_session_router
@@ -20,10 +18,10 @@ from app.api.v1.membership import router as membership_router
 from app.api.v1.miniapp import router as miniapp_router
 from app.api.v1.plugins import router as plugin_router
 from app.api.v1.pos import router as pos_router
+from app.api.v1.staff_referral import router as staff_referral_router
 from app.api.v1.queue import router as queue_router
 from app.api.v1.stats import router as stats_router
 from app.api.v1.tenant import router as tenant_router
-from app.api.v1.verify import router as verify_router
 from app.api.v1.wework import router as wework_router
 from app.api.v1.channel_entries import router as channel_entries_router
 from app.api.v1.public_channel import router as public_channel_router
@@ -84,12 +82,13 @@ app.include_router(tenant_router)
 app.include_router(merchant_system_router)
 app.include_router(customer_router)
 app.include_router(distribution_router)
+app.include_router(staff_referral_router)
 app.include_router(dining_session_router)
 app.include_router(consumption_router)
-app.include_router(coupon_template_router)
-app.include_router(coupon_router)
+# coupon_template_router / coupon_router / verify_router 不在这里重复注册——
+# CouponPlugin.get_routers()（下面 plugin_manager.load_plugins() 里）已经注册
+# 了这三个路由，这里再注册一次纯属历史遗留的重复挂载，只保留一处注册。
 app.include_router(entrance_code_router)
-app.include_router(verify_router)
 app.include_router(wework_router)
 app.include_router(plugin_router)
 app.include_router(pos_router)
@@ -162,6 +161,129 @@ async def _stale_order_cleanup_loop():
         await asyncio.sleep(INTERVAL)
 
 
+async def _marketing_recall_loop():
+    """每天自动扫描各商户的沉睡客户并发放召回券。
+
+    这是 admin-h5"老客召回券"开关文案("系统自动发券提醒")对应的真实执行体——
+    此前该开关只更新 coupon_rules.enabled，从未有任何定时任务真正扫描客户，
+    商家开了等于没开。CouponService.batch_issue_recall_coupon 内部已经会在
+    未开启时直接跳过（reason: 老客召回券未开启），所以这里对全部商户无差别调用即可。
+    """
+    import asyncio
+    from app.core.database import AsyncSessionLocal
+    from app.core.logger import logger
+    from app.models.tenant import Tenant
+    from app.services.coupon_service import CouponService
+    from sqlalchemy.future import select as _select
+
+    INTERVAL = 24 * 3600  # 每天一次
+    await asyncio.sleep(60)  # 等待应用完全启动
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(_select(Tenant.tenant_id).where(Tenant.status == True))  # noqa: E712
+                tenant_ids = [row[0] for row in result.all()]
+
+            for tid in tenant_ids:
+                try:
+                    async with AsyncSessionLocal() as db:
+                        service = CouponService(db)
+                        service.set_tenant_id(tid)
+                        outcome = await service.batch_issue_recall_coupon()
+                        if outcome.get("success_count"):
+                            logger.info(f"[marketing_recall] tenant={tid} issued={outcome['success_count']}")
+                except Exception:
+                    logger.exception(f"[marketing_recall] tenant={tid} failed")
+        except Exception:
+            logger.exception("[marketing_recall] loop failed")
+        await asyncio.sleep(INTERVAL)
+
+
+async def _coupon_expiry_reminder_loop():
+    """扫描顾客主动申请过提醒（remind_requested）、还没发过（remind_sent_at 为空）、
+    还没用掉、且快要过期的券，推一条微信订阅消息催回来用。
+
+    只在配置了 WECHAT_COUPON_REMINDER_TEMPLATE_ID 时才跑，没配置直接跳过——这是
+    需要商户/平台在微信公众平台"订阅消息"里申请模板之后手动填的，不是代码能替你做的。
+
+    data 里的字段名（thing1/amount2/time3...）必须跟实际选用的订阅消息模板配置的
+    字段名完全一致，这里给的是这类"到期提醒"模板最常见的字段命名，接入真实模板后
+    需要对照微信公众平台的模板详情核对、按需调整。
+    """
+    import asyncio
+    from datetime import datetime as _dt, timedelta
+    from app.core.database import AsyncSessionLocal
+    from app.core.logger import logger
+    from app.models.coupon import Coupon
+    from app.models.coupon_template import CouponTemplate
+    from app.models.customer import Customer
+    from app.models.tenant import Tenant
+    from app.services.wechat_service import WechatService
+    from sqlalchemy.future import select as _select
+
+    INTERVAL = 6 * 3600  # 每6小时扫一次，避免"提前一天提醒"因为一天只跑一次而被错过
+    REMIND_WINDOW_HOURS = 30  # 快过期的定义：还剩不到30小时
+    await asyncio.sleep(90)  # 等待应用完全启动
+
+    while True:
+        try:
+            template_id = (settings.WECHAT_COUPON_REMINDER_TEMPLATE_ID or "").strip()
+            if not template_id:
+                await asyncio.sleep(INTERVAL)
+                continue
+
+            wechat = WechatService()
+            now = _dt.utcnow()
+            window_end = now + timedelta(hours=REMIND_WINDOW_HOURS)
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    _select(Coupon).where(
+                        Coupon.remind_requested == True,  # noqa: E712
+                        Coupon.remind_sent_at.is_(None),
+                        Coupon.status == "UNUSED",
+                        Coupon.expire_time > now,
+                        Coupon.expire_time <= window_end,
+                    ).limit(200)
+                )
+                due_coupons = result.scalars().all()
+
+                for coupon in due_coupons:
+                    try:
+                        customer = await db.get(Customer, coupon.customer_id)
+                        if not customer or not customer.openid:
+                            coupon.remind_sent_at = now
+                            continue
+                        template = await db.get(CouponTemplate, coupon.template_id)
+                        tenant = await db.get(Tenant, coupon.tenant_id)
+
+                        sent = await wechat.send_subscribe_message(
+                            openid=customer.openid,
+                            template_id=template_id,
+                            data={
+                                "thing1": {"value": (tenant.name if tenant else "门店")[:20]},
+                                "amount2": {"value": f"¥{float(template.value):.0f}" if template else ""},
+                                "time3": {"value": coupon.expire_time.strftime("%Y-%m-%d %H:%M")},
+                                "thing4": {"value": "还没用完，记得回来点单哦"},
+                            },
+                        )
+                        if sent:
+                            coupon.remind_sent_at = now
+                            logger.info(f"[coupon_reminder] sent coupon_id={coupon.id} customer_id={coupon.customer_id}")
+                        else:
+                            # 发送失败（比如授权额度已用完）也标记成已处理，不然会跟着这个
+                            # 顾客的这张券每6小时重试一次，永远发不出去也永远占着扫描名额。
+                            coupon.remind_sent_at = now
+                    except Exception:
+                        logger.exception(f"[coupon_reminder] coupon_id={coupon.id} failed")
+
+                if due_coupons:
+                    await db.commit()
+        except Exception:
+            logger.exception("[coupon_reminder] loop failed")
+        await asyncio.sleep(INTERVAL)
+
+
 @app.on_event("startup")
 async def startup():
     import asyncio
@@ -184,6 +306,12 @@ async def startup():
 
     # 启动超时订单后台清理任务
     asyncio.create_task(_stale_order_cleanup_loop())
+
+    # 启动老客召回自动发券任务
+    asyncio.create_task(_marketing_recall_loop())
+
+    # 启动优惠券到期提醒任务（订阅消息未配置模板 ID 时循环内部会直接跳过）
+    asyncio.create_task(_coupon_expiry_reminder_loop())
 
 
 @app.get("/")

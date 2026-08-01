@@ -21,6 +21,7 @@ def serialize_customer(customer, source=None, account=None):
     data = {
         "id": str(customer.id),
         "tenant_id": customer.tenant_id,
+        "store_member_no": customer.store_member_no,
         "openid": customer.openid,
         "external_userid": customer.external_userid,
         "name": customer.name,

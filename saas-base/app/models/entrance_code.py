@@ -27,6 +27,8 @@ class EntranceCode(BaseModel):
     order_mode = Column(String(16), nullable=False, default="dine_in")
     table_id = Column(BigInteger, nullable=True)
     target_page = Column(String(128), nullable=False, default="pages/order/index")
+    zone_type = Column(String(16), nullable=True)  # quick | full | NULL(跟随店铺整体 payment_mode)
+    staff_id = Column(BigInteger, nullable=True)  # entry_type='staff_share' 时，这张码属于哪位员工
 
     __table_args__ = (
         Index("idx_entrance_code_tenant_scene", "tenant_id", "scene", unique=True),

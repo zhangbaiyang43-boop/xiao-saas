@@ -18,6 +18,7 @@ class Tenant(Base):
     logo_url = Column(String(500))
     status = Column(Boolean, default=True)
     is_open = Column(Boolean, default=True)              # 营业开关
+    payment_mode = Column(String(32), nullable=False, default="prepay")  # prepay | postpay | table_account
     wx_pay_enabled = Column(Boolean, default=False)      # 是否已开通微信支付
     wx_mchid = Column(String(64), nullable=True)         # 商家自己的微信支付商户号
     wx_api_key_v3 = Column(String(256), nullable=True)   # 商家 APIv3 密钥

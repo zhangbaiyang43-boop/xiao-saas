@@ -20,6 +20,7 @@ class Order(BaseModel):
     coupon_id = Column(BigInteger, nullable=True)
     discount_amount = Column(Numeric(10, 2), nullable=True)
     payment_status = Column(String(16), nullable=False, default="unpaid")  # unpaid | paid
+    payment_mode = Column(String(32), nullable=False, default="prepay")  # prepay | postpay | table_account
     payment_method = Column(String(16), nullable=True)   # mock | wxpay | balance
     payment_time = Column(String(32), nullable=True)     # ISO string，避免加列类型迁移
     print_status = Column(String(16), nullable=False, default="PENDING")  # PENDING | SUCCESS | FAILED
@@ -31,13 +32,23 @@ class Order(BaseModel):
     refunded_at = Column(DateTime, nullable=True)
     served_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    source = Column(String(16), nullable=False, default="miniprogram")   # miniprogram | h5
+    source = Column(String(16), nullable=False, default="miniprogram")   # miniprogram | h5 | staff
+    staff_note = Column(String(64), nullable=True)  # 服务员代客加单时的可选备注（如"前台-老王"），不关联账号，仅展示
+    # 支付成功后实际发放的首单/复购/第二单奖励券快照（JSON 字符串），供客户端在
+    # 微信支付异步回调落库后，通过轮询 /orders/my 把这个奖励拿回来展示——微信支付的
+    # 真实发券发生在 wxpay_notify 这个服务器对服务器回调里，回调结果不会回到小程序端。
+    reward_coupon_snapshot = Column(Text, nullable=True)
+    # 客户端为这一次"提交订单"生成的幂等键（比如双击提交、弱网超时后自动重试）。
+    # NULL 不受这个唯一约束限制（MySQL/SQLite 的唯一索引都把 NULL 视为互不相同），
+    # 老订单和没传这个字段的调用方完全不受影响。
+    client_request_id = Column(String(64), nullable=True)
 
     __table_args__ = (
         Index("idx_orders_tenant_session", "tenant_id", "dining_session_id"),
         Index("idx_orders_tenant_participant", "tenant_id", "participant_id"),
         Index("idx_orders_tenant_session_status", "tenant_id", "dining_session_id", "status"),
         Index("idx_orders_parent_order", "parent_order_id"),
+        Index("ux_orders_tenant_client_request_id", "tenant_id", "client_request_id", unique=True),
     )
 
 class OrderItem(Base):

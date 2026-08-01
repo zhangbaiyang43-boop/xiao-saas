@@ -75,9 +75,24 @@ class ScanEntryContractsTest(unittest.TestCase):
         self.assertIn("uni.setStorageSync('entrance_scene', ctx.scene)", ENTRY_SOURCE)
         self.assertIn("uni.setStorageSync('tenant_id', ctx.tenant_id)", ENTRY_SOURCE)
         self.assertIn("uni.setStorageSync('table_no', ctx.table)", ENTRY_SOURCE)
-        self.assertIn("resolveDiningSession", ENTRY_SOURCE)
+        # 本桌身份的建立收敛到 utils/dining.js 的 resolveDiningIdentity 共享实现，跟
+        # menu.vue onLoad 走同一份逻辑，入口页不再自己维护一份 resolveDiningSession 调用。
+        self.assertIn("resolveDiningIdentity", ENTRY_SOURCE)
+        self.assertIn("await resolveTableSession(ctx)", ENTRY_SOURCE)
         self.assertIn("subpkg-order/pages/menu", ENTRY_SOURCE)
         self.assertIn("uni.redirectTo", ENTRY_SOURCE)
+
+    def test_entry_page_blocks_navigation_when_dining_identity_fails(self):
+        # 身份建立失败必须挡在入口页，不能带着一个不完整的身份跳进点餐页——
+        # resolveTableSession 失败要抛出，loadEntrance 的 catch 要能拿到具体原因展示，
+        # 而不是一律显示"网络连接失败"掩盖掉真实原因。
+        self.assertIn("if (!identity.ok) throw new Error(", ENTRY_SOURCE)
+        self.assertIn("errorDesc.value = err?.message || '请检查网络后重试'", ENTRY_SOURCE)
+        first_scene_branch = ENTRY_SOURCE.index("if (parsed.scene)")
+        fallback_branch = ENTRY_SOURCE.index("const fallbackTenantId")
+        for branch_start, branch_end in ((first_scene_branch, fallback_branch), (fallback_branch, len(ENTRY_SOURCE))):
+            branch = ENTRY_SOURCE[branch_start:branch_end]
+            self.assertLess(branch.index("await resolveTableSession(ctx)"), branch.index("await routeToMenu(ctx)"))
 
     def test_default_index_forwards_scan_options_to_entry_page_before_cached_route(self):
         self.assertIn("buildEntryUrlFromOptions", INDEX_SOURCE)

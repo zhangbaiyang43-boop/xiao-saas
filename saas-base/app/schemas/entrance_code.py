@@ -15,6 +15,7 @@ class CreateEntranceCodeRequest(BaseModel):
     order_mode: str = Field("dine_in", max_length=16, description="order mode")
     table_id: Optional[int] = Field(None, description="table id")
     target_page: str = Field("pages/order/index", max_length=128, description="target page")
+    zone_type: Optional[str] = Field(None, max_length=16, description="quick | full, only meaningful when entry_type=table")
 
 
 class UpdateEntranceCodeStatusRequest(BaseModel):
@@ -53,6 +54,7 @@ class EntranceCodeResponse(BaseModel):
     order_mode: str
     table_id: Optional[int] = None
     target_page: str
+    zone_type: Optional[str] = None
 
     class Config:
         from_attributes = True

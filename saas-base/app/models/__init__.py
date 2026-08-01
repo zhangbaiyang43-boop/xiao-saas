@@ -17,9 +17,11 @@ from app.models.channel_entry import ChannelEntry, ChannelEntryVisitLog
 from app.models.commission_record import CommissionRecord
 from app.models.customer_operation_log import CustomerOperationLog
 from app.models.menu_item import MenuItem
+from app.models.dish_library_item import DishLibraryItem
 from app.models.order import Order, OrderItem
 from app.models.dining import DiningSession, DiningParticipant
 from app.models.queue_ticket import QueueTicket
+from app.models.staff import Staff
 from .tenant import Tenant
 from .customer import Customer
 from .member_account import MemberAccount
@@ -49,10 +51,12 @@ __all__ = [
     'CommissionRecord',
     'CustomerOperationLog',
     'MenuItem',
+    'DishLibraryItem',
     'Order',
     'OrderItem',
     'DiningSession',
     'DiningParticipant',
     'QueueTicket',
+    'Staff',
 ]
 

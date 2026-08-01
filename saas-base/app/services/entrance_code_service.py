@@ -50,6 +50,8 @@ class EntranceCodeService(BaseService):
         order_mode: str | None = None,
         table_id: int | None = None,
         target_page: str | None = None,
+        zone_type: str | None = None,
+        staff_id: int | None = None,
     ) -> EntranceCode:
         tenant_id = self.require_tenant_id()
         scene = await self._generate_scene()
@@ -79,6 +81,8 @@ class EntranceCodeService(BaseService):
             order_mode=resolved_order_mode,
             table_id=table_id,
             target_page=resolved_target_page,
+            zone_type=zone_type or None,
+            staff_id=staff_id,
         )
         self.db.add(entrance_code)
         await self.db.commit()
@@ -238,9 +242,11 @@ class EntranceCodeService(BaseService):
         )
         await self.db.commit()
         await self.db.refresh(entrance_code)
-        
-        await self._trigger_first_scan_marketing_template(entrance_code.tenant_id, customer_id)
-        
+
+        # 同上（见 verify_service.py 里同样的停用说明）：营销模板自动发券链路已停用，
+        # 只保留 CouponService 自己的 rule_type 发券这一套系统。
+        # await self._trigger_first_scan_marketing_template(entrance_code.tenant_id, customer_id)
+
         return entrance_code
 
     async def _trigger_first_scan_marketing_template(self, tenant_id: int, customer_id: int):
@@ -292,9 +298,19 @@ class EntranceCodeService(BaseService):
         return template
 
     async def issue_new_customer_coupon(self, entrance_code: EntranceCode, customer_id: int) -> dict:
+        """走 /v1/member/login-or-create 这条（目前小程序没在用，走的是
+        miniapp.py 的 entry/join）历史入会路径时的新客券发放。这条路径本身
+        没被前端调用、风险很低，但补上和其它自动发券入口一致的去重保护，
+        避免以后谁重新接上这个入口时又出现同一个客户被发两次新客券的问题。
+        """
         TenantContext.set_tenant_id(entrance_code.tenant_id)
+        coupon_service = CouponService(self.db)
+        coupon_service.set_tenant_id(entrance_code.tenant_id)
+        existing = await coupon_service.get_available_auto_coupon(customer_id, "new_customer_coupon")
+        if existing:
+            return {"success_count": 0, "fail_count": 0, "reason": "已持有未使用的新客券", "sent": [], "failed": []}
         template = await self.ensure_new_customer_coupon_template(entrance_code)
-        return await CouponService(self.db).send_coupons_with_result(template.id, [customer_id])
+        return await coupon_service.send_coupons_with_result(template.id, [customer_id])
 
     async def _find_reusable_new_customer_template(self, tenant_id: str, amount: float) -> CouponTemplate | None:
         now = datetime.utcnow()

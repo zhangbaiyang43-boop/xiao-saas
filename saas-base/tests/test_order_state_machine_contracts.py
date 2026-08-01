@@ -58,7 +58,13 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn("TABLE_CLOSE_BLOCKING_STATUSES", source)
         self.assertIn("TABLE_CLOSE_DONE_STATUSES", source)
         self.assertIn('code=409', source)
-        self.assertIn('"table has unfinished orders"', source)
+        self.assertIn('msg="本桌还有未完成的订单，无法结账"', source)
+        self.assertIn('settlement_orders = [', source)
+        self.assertIn('o.status == "done"', source)
+        # 不能再按 payment_status=="unpaid" 过滤 settlement_orders：先付后厨的订单到 done 时
+        # 已经是 paid 了，按 unpaid 过滤会把它们永远漏在 done，见 test_settle_table_offline_paid_behavior.py。
+        self.assertNotIn('o.status == "done" and getattr(o, "payment_status", None) == "unpaid"', source)
+        self.assertIn('for o in settlement_orders:', source)
         self.assertIn('active_session.status = "CLOSED"', source)
         self.assertIn("active_session.active_key = None", source)
         self.assertIn('o.status = "settled"', source)

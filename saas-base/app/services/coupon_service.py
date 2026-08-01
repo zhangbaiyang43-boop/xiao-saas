@@ -1,4 +1,5 @@
 import random
+from contextlib import asynccontextmanager, AsyncExitStack
 from datetime import datetime, timedelta
 from sqlalchemy import func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,7 @@ from app.models.coupon_template import CouponTemplate
 from app.services.anti_fraud_service import AntiFraudService
 from app.utils.id_generator import generate_coupon_code, generate_snowflake_id
 from app.core.logger import logger
-from app.core.lock import try_acquire_lock
+from app.core.lock import try_acquire_lock, redis_lock
 
 from app.services.base_service import BaseService
 
@@ -56,9 +57,9 @@ class CouponService(BaseService):
 
         return random.choices(options, weights=[item["weight"] for item in options], k=1)[0]
 
-    async def get_merchant_aov(self) -> float:
-        """计算该商户近30天平均客单价，订单数不足时返回0（调用方兜底）。"""
-        from app.core.platform_rules import AOV_LOOKBACK_DAYS, AOV_MIN_ORDERS
+    async def _recent_order_stats(self) -> tuple[float, int]:
+        """近 AOV_LOOKBACK_DAYS 天的 (平均客单价, 有效订单数)，供 AOV 和发放量预测复用。"""
+        from app.core.platform_rules import AOV_LOOKBACK_DAYS
         from app.models.order import Order
         tenant_id = self.require_tenant_id()
         cutoff = datetime.utcnow() - timedelta(days=AOV_LOOKBACK_DAYS)
@@ -70,10 +71,25 @@ class CouponService(BaseService):
             )
         )
         row = result.one()
-        avg_val, count = row[0], row[1]
-        if not count or count < AOV_MIN_ORDERS or not avg_val:
+        avg_val, count = row[0], row[1] or 0
+        return float(avg_val or 0), int(count)
+
+    async def get_merchant_aov(self) -> float:
+        """计算该商户近30天平均客单价，订单数不足时返回0（调用方兜底）。"""
+        from app.core.platform_rules import AOV_MIN_ORDERS
+        avg_val, count = await self._recent_order_stats()
+        if count < AOV_MIN_ORDERS or not avg_val:
             return 0.0
-        return float(avg_val)
+        return avg_val
+
+    async def get_marketing_intensity(self) -> str:
+        """商家选择的营销强度档位（保守/标准/激进），未设置时回落标准档。"""
+        from app.core.platform_rules import resolve_intensity
+        from app.services.tenant_service import TenantService
+        tenant_service = TenantService(self.db)
+        config = await tenant_service.get_tenant_config(self.tenant_id)
+        business_info = (config.business_info or {}) if config else {}
+        return resolve_intensity(business_info.get("marketing_intensity"))
 
     async def get_coupon_rules(self) -> dict:
         from app.core.platform_rules import build_dynamic_rules
@@ -81,18 +97,157 @@ class CouponService(BaseService):
         tenant_service = TenantService(self.db)
         config = await tenant_service.get_tenant_config(self.tenant_id)
         merchant_rules = (config.coupon_rules or {}) if config else {}
-        # 动态则：根据该商户实际客单价生成，新商户用安全兜底值
+        # 动态则：根据该商户实际客单价 + 选择的营销强度生成，新商户用安全兜底值
         aov = await self.get_merchant_aov()
-        platform_rules = build_dynamic_rules(aov)
-        # 商户在后台显式配置的同名字段优先覆盖动态值
+        intensity = await self.get_marketing_intensity()
+        platform_rules = build_dynamic_rules(aov, intensity)
+        # 商户只有显式 locked 某条则时，才允许静态配置覆盖算法算出来的值；
+        # 未 locked 时只认 enabled 开关，金额/门槛始终由算法算——这样商家开
+        # 户时写入的那份历史默认值（旧版 DEFAULT_COUPON_RULES 种子数据）不会
+        # 把算法结果顶掉，保证"傻瓜式"三档强度对所有商户都真正生效。
         merged = {}
         for key, platform_rule in platform_rules.items():
             merchant_override = merchant_rules.get(key, {})
-            merged[key] = {**platform_rule, **merchant_override}
+            if merchant_override.get("locked"):
+                merged[key] = {**platform_rule, **merchant_override}
+            else:
+                merged[key] = dict(platform_rule)
+                if "enabled" in merchant_override:
+                    merged[key]["enabled"] = merchant_override["enabled"]
         for key, rule in merchant_rules.items():
             if key not in merged:
                 merged[key] = rule
         return merged
+
+    async def preview_new_customer_coupon(self) -> dict | None:
+        """未登录顾客也能看到的"首单钩子"文案数据源：只读、不发券、不查重复领取，
+        单纯把 new_customer_coupon 这条则算出来的面额/门槛/有效期报给前端展示用。
+        字段名对齐 miniapp.py 入会成功后真正发放的 new_customer_coupon（amount/min_amount），
+        避免出现"登录前说的数字"和"登录后到手的数字"对不上的落差。"""
+        rules = await self.get_coupon_rules()
+        rule_config = rules.get("new_customer_coupon", {})
+        if not rule_config.get("enabled", False):
+            return None
+
+        options = self.normalize_weighted_coupon_options(rule_config)
+        if options:
+            selected = max(options, key=lambda o: o["weight"])
+        else:
+            amount = float(rule_config.get("amount", 0) or 0)
+            if amount <= 0:
+                return None
+            selected = {
+                "name": rule_config.get("name") or "新客专享券",
+                "amount": amount,
+                "threshold": float(rule_config.get("threshold", 0) or 0),
+                "valid_days": int(rule_config.get("valid_days", 3) or 3),
+            }
+
+        return {
+            "name": selected.get("name") or "新客专享券",
+            "amount": selected.get("amount", 0),
+            "min_amount": selected.get("threshold", 0),
+            "valid_days": selected.get("valid_days", 3),
+        }
+
+    async def estimate_intensity_outcomes(self) -> dict:
+        """阶段二：三档强度各自的预测结果，供"选强度"卡片直接展示预测数字，
+        而不是参数——商家看的是"预计花多少钱、换多少客户"，不是门槛/面额本身。
+
+        成本估算用复购券（每单结账后都会触发，是量级最大的一条线）的加权平均
+        面额 × 预计月订单数来近似，是方向性估算，不是精确财务口径。
+        """
+        from app.core.platform_rules import AOV_LOOKBACK_DAYS, AOV_MIN_ORDERS, INTENSITY_LABELS, INTENSITY_PRESETS, build_dynamic_rules
+
+        aov, order_count = await self._recent_order_stats()
+        has_enough_data = order_count >= AOV_MIN_ORDERS
+        effective_aov = aov if has_enough_data else 30.0
+        monthly_orders = round(order_count / AOV_LOOKBACK_DAYS * 30, 1)
+        current_intensity = await self.get_marketing_intensity()
+
+        outcomes = []
+        for key in INTENSITY_PRESETS:
+            rules = build_dynamic_rules(effective_aov, key)
+            weighted = rules["consumption_coupon"]["weighted_coupons"]
+            total_weight = sum(w["weight"] for w in weighted) or 1
+            avg_amount = sum(w["amount"] * w["weight"] for w in weighted) / total_weight
+            estimated_cost = round(avg_amount * monthly_orders, 2)
+            estimated_revenue = monthly_orders * effective_aov
+            cost_ratio = round(estimated_cost / estimated_revenue, 4) if estimated_revenue > 0 else 0.0
+
+            outcomes.append({
+                "intensity": key,
+                "label": INTENSITY_LABELS[key],
+                "is_current": key == current_intensity,
+                "rules": rules,
+                "estimated_monthly_coupons": monthly_orders,
+                "estimated_cost_per_month": estimated_cost,
+                "estimated_cost_ratio": cost_ratio,
+            })
+
+        return {
+            "aov": round(aov, 1) if aov else None,
+            "has_enough_data": has_enough_data,
+            "current_intensity": current_intensity,
+            "outcomes": outcomes,
+        }
+
+    async def _has_dup_after_lock(self, customer_id: int, rule_type: str) -> bool:
+        """在拿到锁之后再查一次是否已持有同类未用券，供各去重发放入口复用。"""
+        return bool(await self.get_available_auto_coupon(customer_id, rule_type))
+
+    @asynccontextmanager
+    async def _dedup_issue_lock(self, customer_id: int, rule_type: str):
+        """包住"查是否已持有同类未用券 + 真正发放"这两步，防止两个并发请求都在
+        检查那一刻看到"没有"从而各自发一张——纯应用层的 check-then-act 挡不住这种
+        竞态，必须靠锁把这两步锁成一个原子操作。
+
+        数据库行锁是最终安全边界，不管 Redis 是否可用都会生效：不然 Redis 挂了、
+        或者同一进程内多个 worker/多台实例同时跑召回任务时，check-then-act 的
+        竞态窗口会重新暴露出来，同一个业务事件被重复发券。Redis 分布式锁只是在
+        此之上的第一层优化（能让"暂时抢不到锁"的请求快速失败返回，而不是排队等
+        行锁释放），不是唯一防线。
+
+        用 UPDATE（而不是 SELECT ... FOR UPDATE）来加这把锁：SQLite 语法上会接受
+        FOR UPDATE 但直接忽略，测试环境下等于没锁；UPDATE 语句在 MySQL 上正常
+        走行锁，在 SQLite 上会走它自己的写锁语义，两边都能真正拿到互斥，不用
+        为了兼容测试环境单独维护一套逻辑。
+
+        用法：
+            async with self._dedup_issue_lock(customer_id, rule_type) as should_issue:
+                if not should_issue:
+                    return {"success_count": 0, "reason": "..."}
+                ... 真正发放 ...
+        """
+        from sqlalchemy import update
+        from app.models.customer import Customer
+
+        tenant_id = self.require_tenant_id()
+        # 锁住这个顾客的行，让同一顾客+同一租户的并发发放请求在数据库层面串行化，
+        # 直到持锁事务提交/回滚才释放——这个锁会一直持有到调用方那次业务操作
+        # （支付成功/结账/入会等）整体提交为止，这是有意为之：既然要保证"查+发"
+        # 原子，锁就必须覆盖到发放真正落库的那一刻。
+        await self.db.execute(
+            update(Customer)
+            .where(Customer.id == customer_id, Customer.tenant_id == tenant_id)
+            .values(updated_at=datetime.utcnow())
+        )
+
+        if not settings.REDIS_ENABLED:
+            yield not await self._has_dup_after_lock(customer_id, rule_type)
+            return
+
+        lock_key = f"coupon_issue:{tenant_id}:{customer_id}:{rule_type}"
+        try:
+            async with redis_lock(lock_key, timeout=10) as acquired:
+                if not acquired:
+                    yield False
+                    return
+                yield not await self._has_dup_after_lock(customer_id, rule_type)
+        except RuntimeError:
+            # Redis 在 settings.REDIS_ENABLED 为真之后突然不可用了，仍然有上面的
+            # 数据库行锁兜底，不需要再退化成完全不加锁。
+            yield not await self._has_dup_after_lock(customer_id, rule_type)
 
     async def issue_auto_coupon(self, customer_id: int, rule_type: str, consumption_amount: float = None) -> dict:
         rules = await self.get_coupon_rules()
@@ -105,37 +260,67 @@ class CouponService(BaseService):
             trigger_amount = rule_config.get("trigger_amount", 0)
             if float(consumption_amount) < float(trigger_amount):
                 return {"success_count": 0, "reason": f"消费金额{consumption_amount}未达触发门槛{trigger_amount}"}
-        
-        selected_rule = self.select_weighted_coupon(rule_config)
-        amount = selected_rule.get("amount", rule_config.get("amount", 0))
-        threshold = selected_rule.get("threshold", rule_config.get("threshold", 0))
-        valid_days = selected_rule.get("valid_days", rule_config.get("valid_days", 7))
-        template_name = selected_rule.get("name")
-        
-        template = await self._get_or_create_auto_coupon_template(
-            rule_type=rule_type,
-            amount=amount,
-            threshold=threshold,
-            valid_days=valid_days,
-            template_name=template_name
-        )
-        
-        if not template:
-            return {"success_count": 0, "reason": "建优惠券模失败"}
-        
-        result = await self.send_coupons_with_result(template.id, [customer_id], source=rule_type)
-        
-        if result["success_count"] > 0:
-            coupon_info = result["sent"][0] if result["sent"] else {}
-            result["source"] = rule_type
-            result["weighted_coupon"] = {
-                "name": template_name,
-                "amount": amount,
-                "threshold": threshold,
-                "valid_days": valid_days,
-            }
-        
-        return result
+
+        async def _do_issue() -> dict:
+            selected_rule = self.select_weighted_coupon(rule_config)
+            amount = selected_rule.get("amount", rule_config.get("amount", 0))
+            threshold = selected_rule.get("threshold", rule_config.get("threshold", 0))
+            valid_days = selected_rule.get("valid_days", rule_config.get("valid_days", 7))
+            template_name = selected_rule.get("name")
+
+            template = await self._get_or_create_auto_coupon_template(
+                rule_type=rule_type,
+                amount=amount,
+                threshold=threshold,
+                valid_days=valid_days,
+                template_name=template_name
+            )
+
+            if not template:
+                return {"success_count": 0, "reason": "建优惠券模失败"}
+
+            result = await self.send_coupons_with_result(template.id, [customer_id], source=rule_type)
+
+            if result["success_count"] > 0:
+                result["source"] = rule_type
+                result["weighted_coupon"] = {
+                    "name": template_name,
+                    "amount": amount,
+                    "threshold": threshold,
+                    "valid_days": valid_days,
+                }
+
+            return result
+
+        # 去重：手上还有没用完的同类型自动券就不再发新的。门槛/金额是按当时实时客单价
+        # 加权随机算出来的——不去重的话同一个客户每触发一次就多领一张金额、门槛都不一样
+        # 的券，名下会员详情/小程序选券列表看到的"两张券"其实一直在变成新的两张。
+        # entry_coupon 已经这样做了（见 issue_entry_coupon），这里对 issue_auto_coupon
+        # 覆盖的所有 rule_type 统一补齐同样的保护——之前只对 consumption_coupon 生效，
+        # new_customer_coupon 完全没有去重：入会时（miniapp.py /entry/join、
+        # member.py /login-or-create）和首单支付成功时（orders.py _on_payment_success）
+        # 是三条独立的发放入口，只有 /entry/join 自己在调用前手动查过一次是否已有，
+        # 另外两条完全没查，导致一个新客户入会 + 完成首单，稳定拿到两张新客券。
+        # 用分布式锁包住"查+发"两步，防止两个并发请求都在检查那一刻看到"没有"。
+        async with self._dedup_issue_lock(customer_id, rule_type) as should_issue:
+            if not should_issue:
+                reason = "已持有未使用的复购券，本次不再发放" if rule_type == "consumption_coupon" else "已持有未使用的同类券，本次不再发放"
+                return {"success_count": 0, "reason": reason, "skipped_duplicate": True}
+            return await _do_issue()
+
+    async def _existing_entry_coupon_payload(self, customer_id: int) -> dict | None:
+        existing = await self.get_available_auto_coupon(customer_id, "entry_coupon")
+        if not existing:
+            return None
+        from app.models.coupon_template import CouponTemplate as _Tpl
+        tpl = await self.db.get(_Tpl, existing.template_id)
+        return {
+            "coupon_id": str(existing.id),
+            "amount": float(tpl.value) if tpl else 0,
+            "threshold": float(tpl.min_amount) if tpl else 0,
+            "expire_time": existing.expire_time.isoformat() if existing.expire_time else None,
+            "is_new": False,
+        }
 
     async def issue_entry_coupon(self, customer_id: int) -> dict | None:
         """进店券：用户扫码进入菜单时静默发放，当日有效，去重（同一天同一租户只发一次）。"""
@@ -144,46 +329,39 @@ class CouponService(BaseService):
         if not rule_config.get("enabled", False):
             return None
 
-        # 去重：今天是否已持有进店券
-        existing = await self.get_available_auto_coupon(customer_id, "entry_coupon")
-        if existing:
-            from app.models.coupon_template import CouponTemplate as _Tpl
-            tpl = await self.db.get(_Tpl, existing.template_id)
-            return {
-                "coupon_id": str(existing.id),
-                "amount": float(tpl.value) if tpl else 0,
-                "threshold": float(tpl.min_amount) if tpl else 0,
-                "expire_time": existing.expire_time.isoformat() if existing.expire_time else None,
-                "is_new": False,
-            }
+        # 去重：今天是否已持有进店券。用分布式锁包住"查+发"两步——两次几乎同时的
+        # 扫码请求都可能在检查那一刻看到"没有"，不加锁的话会各自发一张。
+        async with self._dedup_issue_lock(customer_id, "entry_coupon") as should_issue:
+            if not should_issue:
+                return await self._existing_entry_coupon_payload(customer_id)
 
-        selected = self.select_weighted_coupon(rule_config)
-        amount = float(selected.get("amount", 3))
-        threshold = float(selected.get("threshold", 50))
-        valid_days = int(selected.get("valid_days", 1))
-        name = selected.get("name", "今日专享券")
+            selected = self.select_weighted_coupon(rule_config)
+            amount = float(selected.get("amount", 3))
+            threshold = float(selected.get("threshold", 50))
+            valid_days = int(selected.get("valid_days", 1))
+            name = selected.get("name", "今日专享券")
 
-        template = await self._get_or_create_auto_coupon_template(
-            rule_type="entry_coupon",
-            amount=amount,
-            threshold=threshold,
-            valid_days=valid_days,
-            template_name=name,
-        )
-        if not template:
+            template = await self._get_or_create_auto_coupon_template(
+                rule_type="entry_coupon",
+                amount=amount,
+                threshold=threshold,
+                valid_days=valid_days,
+                template_name=name,
+            )
+            if not template:
+                return None
+
+            result = await self.send_coupons_with_result(template.id, [customer_id], source="entry_coupon")
+            if result.get("success_count", 0) > 0:
+                sent = result["sent"][0]
+                return {
+                    "coupon_id": sent["id"],
+                    "amount": amount,
+                    "threshold": threshold,
+                    "expire_time": sent.get("expire_time").isoformat() if sent.get("expire_time") else None,
+                    "is_new": True,
+                }
             return None
-
-        result = await self.send_coupons_with_result(template.id, [customer_id], source="entry_coupon")
-        if result.get("success_count", 0) > 0:
-            sent = result["sent"][0]
-            return {
-                "coupon_id": sent["id"],
-                "amount": amount,
-                "threshold": threshold,
-                "expire_time": sent.get("expire_time").isoformat() if sent.get("expire_time") else None,
-                "is_new": True,
-            }
-        return None
 
     async def get_available_auto_coupon(self, customer_id: int, rule_type: str) -> Coupon | None:
         """检查该会员是否已持有指定则类型的有效自动券（去重用）。
@@ -323,7 +501,14 @@ class CouponService(BaseService):
         end_time: datetime | None = None,
         status: int = 1,
     ) -> CouponTemplate:
+        from app.core.exceptions import BusinessException
+        from app.core.platform_rules import assert_template_economics_safe
+
         tenant_id = self.require_tenant_id()
+        try:
+            assert_template_economics_safe(type, value, min_amount)
+        except ValueError as exc:
+            raise BusinessException(message=str(exc)) from exc
 
         template = CouponTemplate(
             tenant_id=tenant_id,
@@ -456,10 +641,44 @@ class CouponService(BaseService):
         return int(result.scalar() or 0)
 
     async def update_template(self, template_id: int, **kwargs) -> CouponTemplate | None:
+        from app.core.exceptions import BusinessException
+        from app.core.platform_rules import assert_template_economics_safe
+
         template = await self.get_template(template_id)
 
         if not template:
             return None
+
+        # 已发过券（used_stock > 0）的模板，禁止修改 type/value/min_amount 这三个
+        # 核心权益字段：Coupon 实例本身不保存这几个字段的快照，顾客手上已经领到、
+        # 还没用掉的券在下单/核销时是实时读模板拿这几个值的——商家改了模板就等于
+        # 悄悄改变了已发放未使用券的实际权益。名称、描述、库存上限、有效期这些
+        # 不影响"已发券值多少钱"的字段不受此限制。
+        core_field_labels = {"type": "类型", "value": "面额", "min_amount": "使用门槛"}
+        if int(template.used_stock or 0) > 0:
+            for field, label in core_field_labels.items():
+                if field not in kwargs:
+                    continue
+                current_value = getattr(template, field)
+                new_value = kwargs[field]
+                changed = (
+                    str(new_value) != str(current_value)
+                    if field == "type"
+                    else float(new_value or 0) != float(current_value or 0)
+                )
+                if changed:
+                    raise BusinessException(
+                        message=f"该模板已发放过 {template.used_stock} 张券，不能再修改{label}，"
+                        f"以免已发放但未使用的顾客券权益被悄悄改变"
+                    )
+
+        effective_type = kwargs.get("type", template.type)
+        effective_value = kwargs.get("value", template.value)
+        effective_min_amount = kwargs.get("min_amount", template.min_amount)
+        try:
+            assert_template_economics_safe(effective_type, effective_value, effective_min_amount)
+        except ValueError as exc:
+            raise BusinessException(message=str(exc)) from exc
 
         for key, value in kwargs.items():
             if hasattr(template, key):
@@ -947,6 +1166,21 @@ class CouponService(BaseService):
 
         return result.scalar_one_or_none()
 
+    async def request_expiry_reminder(self, coupon_id: int, customer_id: int) -> str | None:
+        """顾客在支付成功页点了"提醒我别忘了用"之后调用：只做归属校验+标记，真正的
+        推送由后台每日循环（_coupon_expiry_reminder_loop）扫描 remind_requested 的券来发。
+        返回 None 表示可以标记成功，否则返回具体原因给前端展示。"""
+        coupon = await self.get_customer_coupon(coupon_id, customer_id)
+        if not coupon:
+            return "优惠券不存在"
+        if coupon.status != "UNUSED":
+            return "这张券已经用掉或失效了"
+        if coupon.remind_requested:
+            return None
+        coupon.remind_requested = True
+        await self.db.flush()
+        return None
+
     async def get_coupon_by_code(self, code: str) -> Coupon | None:
         tenant_id = self.require_tenant_id()
 
@@ -961,25 +1195,36 @@ class CouponService(BaseService):
 
     async def get_inactive_customers(self, inactive_days: int, limit: int = 100) -> list:
         from app.models.customer import Customer
-        from app.models.consumption import Consumption
-        from sqlalchemy import and_, not_
+        from app.models.member_account import MemberAccount
 
         tenant_id = self.require_tenant_id()
         cutoff_date = datetime.utcnow() - timedelta(days=inactive_days)
 
+        # "沉睡召回"针对的是"以前来过、现在不来了"的老客，不是"从来没消费过"的新客。
+        # 原来这里用 Consumption 表（LEFT JOIN + IS NULL）判断"最近有没有消费"，但
+        # Consumption 表只有后台手动录入消费才会写，小程序自助点餐支付成功走的是
+        # membership_service.apply_consumption()，只更新 MemberAccount，从来不建
+        # Consumption 记录——所以任何一个只走自助下单的顾客，无论下过多少单，在
+        # Consumption 表里永远查不到"最近消费"，会被这条批量任务当成沉睡客户，
+        # 新客户入会当天就可能连续收到好几张"幸运券"。
+        # 换成 MemberAccount.last_consume_time——这是 apply_consumption() 每次
+        # 真实消费（不管走自助下单还是后台手动录入）都会更新的字段，才是真正覆盖
+        # 主链路的"最近一次消费时间"。last_consume_time 为空说明这个账户从没消费过，
+        # 直接排除在外，不当沉睡客户召回。
         result = await self.db.execute(
             select(Customer)
-            .outerjoin(
-                Consumption,
+            .join(
+                MemberAccount,
                 and_(
-                    Consumption.customer_id == Customer.id,
-                    Consumption.consume_time >= cutoff_date,
-                )
+                    MemberAccount.customer_id == Customer.id,
+                    MemberAccount.tenant_id == Customer.tenant_id,
+                ),
             )
             .filter(
                 Customer.tenant_id == tenant_id,
                 Customer.status != -1,
-                Consumption.id.is_(None),
+                MemberAccount.last_consume_time.isnot(None),
+                MemberAccount.last_consume_time < cutoff_date,
             )
             .limit(limit)
         )
@@ -1001,37 +1246,57 @@ class CouponService(BaseService):
         if not customers:
             return {"success_count": 0, "fail_count": 0, "reason": "没有符合条件的沉睡客户", "customers": []}
 
-        customer_ids = [c.id for c in customers]
+        # 去重：沉睡客户手上还有没用完的召回券，就先别再发新的。这个批量任务每天跑
+        # 一次，客户不来就一直"沉睡"，不去重的话会每天都按当时的实时客单价重新加权
+        # 随机算一张新的召回券——跟 consumption_coupon 是同一类问题（见上面
+        # issue_auto_coupon 里的去重），这里补齐同样的保护。
+        #
+        # 这个批量任务除了每天定时跑一次，商家后台还有一个手动触发入口
+        # （coupons.py 里调用这个函数的那个 API），两边可能在差不多的时间重叠
+        # 执行——所以不能只做一次性检查，要用分布式锁把"筛选名单"到"真正发放"
+        # 之间的整段时间锁住，锁一直拿到发放完成才释放（AsyncExitStack），
+        # 否则两次重叠的批量执行仍然可能各自筛出同一个客户、各发一张。
+        async with AsyncExitStack() as stack:
+            eligible_customers = []
+            for c in customers:
+                should_issue = await stack.enter_async_context(self._dedup_issue_lock(c.id, "recall_coupon"))
+                if should_issue:
+                    eligible_customers.append(c)
 
-        selected_rule = self.select_weighted_coupon(recall_config)
-        amount = selected_rule.get("amount", recall_config.get("amount", 15))
-        threshold = selected_rule.get("threshold", recall_config.get("threshold", 50))
-        valid_days = selected_rule.get("valid_days", recall_config.get("valid_days", 7))
-        template_name = selected_rule.get("name")
+            if not eligible_customers:
+                return {"success_count": 0, "fail_count": 0, "reason": "沉睡客户名下都已持有未用的召回券", "customers": []}
 
-        template = await self._get_or_create_auto_coupon_template(
-            rule_type="recall_coupon",
-            amount=amount,
-            threshold=threshold,
-            valid_days=valid_days,
-            template_name=template_name
-        )
+            customer_ids = [c.id for c in eligible_customers]
 
-        if not template:
-            return {"success_count": 0, "fail_count": len(customer_ids), "reason": "建优惠券模失败", "customers": []}
+            selected_rule = self.select_weighted_coupon(recall_config)
+            amount = selected_rule.get("amount", recall_config.get("amount", 15))
+            threshold = selected_rule.get("threshold", recall_config.get("threshold", 50))
+            valid_days = selected_rule.get("valid_days", recall_config.get("valid_days", 7))
+            template_name = selected_rule.get("name")
 
-        result = await self.send_coupons_with_result(template.id, customer_ids, source="recall_coupon")
+            template = await self._get_or_create_auto_coupon_template(
+                rule_type="recall_coupon",
+                amount=amount,
+                threshold=threshold,
+                valid_days=valid_days,
+                template_name=template_name
+            )
 
-        result["source"] = "recall_coupon"
-        result["weighted_coupon"] = {
-            "name": template_name,
-            "amount": amount,
-            "threshold": threshold,
-            "valid_days": valid_days,
-        }
-        result["customers"] = [
-            {"id": str(c.id), "name": c.name or "", "phone": c.phone or ""}
-            for c in customers
-        ][:result["success_count"]]
+            if not template:
+                return {"success_count": 0, "fail_count": len(customer_ids), "reason": "建优惠券模失败", "customers": []}
 
-        return result
+            result = await self.send_coupons_with_result(template.id, customer_ids, source="recall_coupon")
+
+            result["source"] = "recall_coupon"
+            result["weighted_coupon"] = {
+                "name": template_name,
+                "amount": amount,
+                "threshold": threshold,
+                "valid_days": valid_days,
+            }
+            result["customers"] = [
+                {"id": str(c.id), "name": c.name or "", "phone": c.phone or ""}
+                for c in eligible_customers
+            ][:result["success_count"]]
+
+            return result

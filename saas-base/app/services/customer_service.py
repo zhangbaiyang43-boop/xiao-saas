@@ -124,7 +124,7 @@ class CustomerService(BaseService):
         from sqlalchemy.exc import IntegrityError
         from app.models.customer import Customer
 
-        if not tenant_id:
+        if not tenant_id or self.db is None:
             raise ValueError("tenant_id is required for tenant-scoped operations")
 
         if kwargs.get("phone"):

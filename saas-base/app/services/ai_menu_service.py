@@ -53,34 +53,6 @@ async def generate_dish_description(name: str, price: float, category: str) -> s
     return await _call_deepseek(messages, temperature=0.8, max_tokens=60)
 
 
-async def generate_daily_analysis(data: dict) -> str:
-    """根据今日经营数据生成自然语言分析播报。"""
-    top_dishes = data.get("top_dishes", [])
-    top_str = "、".join([f"{d['name']}({d['qty']}份)" for d in top_dishes[:3]]) or "暂无"
-    yesterday_revenue = data.get("yesterday_revenue", 0)
-    today_revenue = data.get("today_revenue", 0)
-    revenue_diff = today_revenue - yesterday_revenue
-    revenue_trend = f"比昨天{'多' if revenue_diff >= 0 else '少'} ¥{abs(revenue_diff):.0f}" if yesterday_revenue > 0 else ""
-
-    prompt = f"""今日经营数据：
-- 营收：¥{today_revenue:.0f} {revenue_trend}
-- 订单数：{data.get('order_count', 0)} 单
-- 客单价：¥{data.get('avg_order_value', 0):.1f}
-- 新会员：{data.get('new_members', 0)} 人
-- 热销菜品：{top_str}
-- 售罄菜品：{data.get('sold_out_count', 0)} 个"""
-
-    messages = [
-        {"role": "system", "content": (
-            "你是餐厅老的AI助理。根据今日经营数据，用简洁友好的口吻生成一段经营播报，"
-            "包含：今日表现总结、热销亮点、一条具体的经营建议。"
-            "要求：像朋友说话一样自然，不超过100字，分2-3句话，不要用标题或列表格式。"
-        )},
-        {"role": "user", "content": prompt},
-    ]
-    return await _call_deepseek(messages, temperature=0.7, max_tokens=200)
-
-
 async def parse_menu_text(text: str) -> list[dict]:
     """调用 DeepSeek 解析菜单文字，返回菜品列表。"""
     if not settings.DEEPSEEK_API_KEY:

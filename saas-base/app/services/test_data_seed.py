@@ -1,26 +1,23 @@
 """
-演示账号种子数据。
-调用 seed_demo_tenant(db) 可一次性建/重置演示数据。
+测试数据填充。
+调用 seed_test_data(db, tenant_id) 给一个已存在的商户灌入菜品/顾客/优惠券/历史订单等演示数据，
+方便在真实商户上预览后台效果，而不需要手工一条条录入。
+
+安全说明：这个函数会先清空目标商户名下的菜品/顾客/桌台码/优惠券模板/订单，再重新灌入测试数据，
+所以只允许对"还没有真实订单"的商户执行，避免误删真实经营数据。
 """
 import random
 from datetime import datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import get_password_hash
 from app.models.coupon_template import CouponTemplate
 from app.models.customer import Customer
 from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
-from app.models.tenant_config import TenantConfig
-from app.utils.id_generator import generate_snowflake_id
-
-DEMO_TENANT_ = "demo"
-DEMO_PASSWORD = "demo123456"
-DEMO_NAME = "味来餐厅（演示）"
 
 # ── 菜品 ──────────────────────────────────────────────
 MENU_ITEMS = [
@@ -58,7 +55,7 @@ TABLES = [
     {"name": "外带取餐", "table_no": "", "scene": "takeaway", "channel": "TAKEAWAY"},
 ]
 
-# ── 优惠券模 ──────────────────────────────────────────
+# ── 优惠券模板 ──────────────────────────────────────────
 _now = datetime.utcnow()
 COUPON_TEMPLATES = [
     {
@@ -86,42 +83,34 @@ COUPON_TEMPLATES = [
 ]
 
 
-async def _clear_demo_data(db: AsyncSession):
-    """清除演示租户的所有业务数据（保留租户账号本身）。"""
-    # 先删 order_items（无 tenant_id，需要通过 order_id join）
+async def _assert_safe_to_seed(db: AsyncSession, tenant_id: str) -> Tenant:
+    """确认目标商户存在、且还没有真实订单，避免误删真实经营数据。"""
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        raise ValueError("商户不存在")
+
+    order_count = await db.scalar(
+        select(func.count(Order.id)).where(Order.tenant_id == tenant_id)
+    )
+    if order_count:
+        raise ValueError("该商户已有订单记录，为避免误删真实数据，禁止填充测试数据；如需测试环境，请另建一个新商户")
+
+    return tenant
+
+
+async def _clear_seed_data(db: AsyncSession, tenant_id: str) -> None:
+    """清除目标商户名下由填充生成的业务数据（保留商户账号本身）。"""
     order_ids_result = await db.execute(
-        select(Order.id).where(Order.tenant_id == DEMO_TENANT_)
+        select(Order.id).where(Order.tenant_id == tenant_id)
     )
     order_ids = [r for r, in order_ids_result]
     if order_ids:
         await db.execute(delete(OrderItem).where(OrderItem.order_id.in_(order_ids)))
 
     for model in (Order, MenuItem, Customer, EntranceCode, CouponTemplate):
-        await db.execute(delete(model).where(model.tenant_id == DEMO_TENANT_))
+        await db.execute(delete(model).where(model.tenant_id == tenant_id))
 
-    await db.commit()
-
-
-async def _ensure_tenant(db: AsyncSession) -> None:
-    """确保演示租户存在，不存在则建。"""
-    result = await db.execute(select(Tenant).where(Tenant.tenant_id == DEMO_TENANT_))
-    tenant = result.scalar_one_or_none()
-    if not tenant:
-        tenant = Tenant(
-            id=generate_snowflake_id(),
-            tenant_id=DEMO_TENANT_,
-            name=DEMO_NAME,
-            password_hash=get_password_hash(DEMO_PASSWORD),
-            phone="13800000000",
-            address="示例街道88号",
-            is_open=True,
-            status=True,
-        )
-        db.add(tenant)
-    else:
-        tenant.name = DEMO_NAME
-        tenant.password_hash = get_password_hash(DEMO_PASSWORD)
-        tenant.is_open = True
     await db.commit()
 
 
@@ -130,16 +119,16 @@ def _days_ago(n: int, hour: int = 12, minute: int = 0) -> datetime:
     return base - timedelta(days=n)
 
 
-async def seed_demo_tenant(db: AsyncSession) -> dict:
-    """建/重置演示账号数据，返回摘要信息。"""
-    await _clear_demo_data(db)
-    await _ensure_tenant(db)
+async def seed_test_data(db: AsyncSession, tenant_id: str) -> dict:
+    """给已存在的商户灌入测试数据，返回摘要信息。"""
+    await _assert_safe_to_seed(db, tenant_id)
+    await _clear_seed_data(db, tenant_id)
 
     # ── 菜品 ──
     dish_map: dict[str, MenuItem] = {}
     for d in MENU_ITEMS:
         item = MenuItem(
-            tenant_id=DEMO_TENANT_,
+            tenant_id=tenant_id,
             name=d["name"],
             description=d.get("description") or None,
             price=d["price"],
@@ -159,8 +148,8 @@ async def seed_demo_tenant(db: AsyncSession) -> dict:
     customers = []
     for i, name in enumerate(_NAMES):
         c = Customer(
-            tenant_id=DEMO_TENANT_,
-            openid=f"demo_openid_{i:03d}",
+            tenant_id=tenant_id,
+            openid=f"seed_openid_{tenant_id}_{i:03d}",
             name=name,
             phone=f"138{88880000 + i}",
             status=1,
@@ -171,17 +160,17 @@ async def seed_demo_tenant(db: AsyncSession) -> dict:
         customers.append(c)
     await db.flush()
 
-    # ── 优惠券模 ──
+    # ── 优惠券模板 ──
     for ct in COUPON_TEMPLATES:
         db.add(CouponTemplate(
-            tenant_id=DEMO_TENANT_,
+            tenant_id=tenant_id,
             **ct,
         ))
 
     # ── 桌台二维码 ──
     for t in TABLES:
         db.add(EntranceCode(
-            tenant_id=DEMO_TENANT_,
+            tenant_id=tenant_id,
             name=t["name"],
             channel=t.get("channel", "TABLE"),
             scene=t["scene"],
@@ -212,7 +201,7 @@ async def seed_demo_tenant(db: AsyncSession) -> dict:
             customer = random.choice(customers) if random.random() > 0.3 else None
 
             order = Order(
-                tenant_id=DEMO_TENANT_,
+                tenant_id=tenant_id,
                 customer_id=customer.id if customer else None,
                 table_no=f"0{random.randint(1,4)}",
                 total=round(total, 2),
@@ -251,7 +240,7 @@ async def seed_demo_tenant(db: AsyncSession) -> dict:
         customer = random.choice(customers)
 
         order = Order(
-            tenant_id=DEMO_TENANT_,
+            tenant_id=tenant_id,
             customer_id=customer.id,
             table_no=f"0{(i % 4) + 1}",
             total=round(total, 2),
@@ -280,9 +269,7 @@ async def seed_demo_tenant(db: AsyncSession) -> dict:
     await db.commit()
 
     return {
-        "tenant_id": DEMO_TENANT_,
-        "login": DEMO_TENANT_,
-        "password": DEMO_PASSWORD,
+        "tenant_id": tenant_id,
         "menu_items": len(MENU_ITEMS),
         "customers": len(customers),
         "history_orders": order_count,

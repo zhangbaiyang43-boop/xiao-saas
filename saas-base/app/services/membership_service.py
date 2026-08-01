@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.models.benefit_template import BenefitTemplate
 from app.models.customer import Customer
@@ -12,8 +12,8 @@ from app.services.base_service import BaseService
 
 LEVELS = [
     {"code": "LV1", "name": "普通会员", "threshold": 0, "point_multiplier": 1.0},
-    {"code": "LV2", "name": "成长会员", "threshold": 299, "point_multiplier": 1.2},
-    {"code": "LV3", "name": "VIP会员", "threshold": 999, "point_multiplier": 1.5},
+    {"code": "LV2", "name": "银卡会员", "threshold": 299, "point_multiplier": 1.2},
+    {"code": "LV3", "name": "金卡会员", "threshold": 999, "point_multiplier": 1.5},
 ]
 
 POINT_RULES = {
@@ -29,6 +29,13 @@ POINT_REDEEM_RULE = {
     "max_order_discount_rate": 0.3,
     "exclusive_coupon_stack": False,
 }
+
+# 积分兑换走"方案C"：不建自由兑换商城（结账时顾客自己选花多少积分抵多少钱，
+# 需要商家/店员多一层核销判断），改成攒够固定门槛就自动换一张现成的自动券
+# （platform_rules.py 里的 points_reward_coupon），复用 issue_auto_coupon 已有的
+# 去重、模板、安全上限这套机制。上面的 POINT_REDEEM_RULE 是更早以前设计的另一套
+# "按比例自由兑换"方案，从来没有接口真正执行过，跟这里是两套不同的机制，别混着看。
+POINTS_REWARD_THRESHOLD = 1000
 
 DEFAULT_BENEFITS = [
     {"level_code": "LV1", "name": "新人券", "type": "coupon", "value": 10, "condition": "新人可用", "channel": "ALL", "cycle": "once"},
@@ -122,6 +129,7 @@ class MembershipService(BaseService):
         remark: str = None,
     ) -> PointLedger:
         tenant_id = self.require_tenant_id()
+        balance_before = int(account.points_balance or 0)
         # P0 修复：原来是在内存里读出 points_balance 再加再存回去（丢失更新）。
         # 同一个顾客两笔订单几乎同时支付成功时，后提交的一次会覆盖掉前一次的
         # 积分变动。改成数据库原子自增，跟 apply_consumption 里
@@ -147,7 +155,63 @@ class MembershipService(BaseService):
         await self.db.commit()
         await self.db.refresh(account)
         await self.db.refresh(ledger)
+
+        # 积分兑换（方案C）：加完积分之后顺手判断一下是不是攒够门槛了，够了就自动
+        # 换一张券。放在 add_points 里而不是 apply_consumption 里，是因为 add_points
+        # 是所有加积分场景（消费、签到、分享……）共用的唯一入口，不管以后从哪个渠道
+        # 加的积分，都会经过这里，不用每个加积分的地方都单独补一遍判断。
+        await self._maybe_reward_points_milestone(account, balance_before)
         return ledger
+
+    async def _maybe_reward_points_milestone(self, account: MemberAccount, balance_before: int) -> dict | None:
+        """攒够 POINTS_REWARD_THRESHOLD 积分自动换一张券——复用 CouponService 现成的
+        自动发券引擎（去重、模板、cap_discount_amount 安全上限全部照用），不新建
+        一套独立的积分商城。
+
+        用"跨过了几个门槛"而不是"余额是否 >= 门槛"来判断，这样一次性加入大量积分
+        （比如后台手动调整、活动加倍）跨过多个门槛时不会漏发；发出几张就扣掉对应
+        倍数的积分，没发出去的（比如手上还有未用的同类券，被 issue_auto_coupon
+        内置的去重挡住）不扣分，留着等那张用掉后下次再重新判断。
+
+        任何异常都不能影响积分本身已经加成功这个事实——失败了只是这一次没换成
+        券，积分还在，下次加积分时余额还是够门槛，会重新尝试。
+        """
+        balance_after = int(account.points_balance or 0)
+        crossed = balance_after // POINTS_REWARD_THRESHOLD - balance_before // POINTS_REWARD_THRESHOLD
+        if crossed <= 0:
+            return None
+
+        from app.core.logger import logger
+        from app.services.coupon_service import CouponService
+
+        coupon_data = None
+        issued_count = 0
+        try:
+            coupon_svc = CouponService(self.db)
+            coupon_svc.set_tenant_id(self.require_tenant_id())
+            for _ in range(crossed):
+                issue_result = await coupon_svc.issue_auto_coupon(account.customer_id, "points_reward_coupon")
+                if not (issue_result and issue_result.get("success_count", 0) > 0):
+                    break
+                issued_count += 1
+                sent_item = (issue_result.get("sent") or [{}])[0]
+                wc = issue_result.get("weighted_coupon") or {}
+                coupon_data = {
+                    "id": sent_item.get("id"),
+                    "name": wc.get("name") or "积分好礼券",
+                    "amount": wc.get("amount", 0),
+                    "min_amount": wc.get("threshold", 0),
+                    "expired_at": sent_item.get("expire_time"),
+                }
+        except Exception:
+            logger.exception(f"积分兑换券发放异常 customer_id={account.customer_id}")
+
+        if issued_count > 0:
+            account.points_balance = MemberAccount.points_balance - issued_count * POINTS_REWARD_THRESHOLD
+            await self.db.commit()
+            await self.db.refresh(account)
+
+        return coupon_data
 
     async def apply_consumption(self, customer: Customer, amount: float, consumption_id: int = None) -> MemberAccount:
         tenant_id = self.require_tenant_id()
@@ -201,6 +265,71 @@ class MembershipService(BaseService):
         
         if points > 0:
             await self.add_points(account, "consumption", points, "STORE", ref_id=str(consumption_id or ""), remark="消费积分")
+        return account
+
+    async def reverse_consumption(self, customer_id: int, amount: float, consumption_id: int) -> MemberAccount | None:
+        """订单退款后回滚 apply_consumption() 记的账：扣回消费额并收回对应积分。
+
+        按 ref_id=str(consumption_id) 定位这一单当时实际记的积分流水来确定要收回
+        多少积分，不按当前等级倍率重新算一遍——等级在这期间可能已经变化，重新算
+        会扣多或扣少。
+        """
+        tenant_id = self.require_tenant_id()
+        result = await self.db.execute(
+            select(MemberAccount).filter(
+                MemberAccount.tenant_id == tenant_id,
+                MemberAccount.customer_id == customer_id,
+            ).with_for_update()
+        )
+        account = result.scalar_one_or_none()
+        if not account:
+            return None
+
+        ledger_result = await self.db.execute(
+            select(func.coalesce(func.sum(PointLedger.points), 0)).filter(
+                PointLedger.tenant_id == tenant_id,
+                PointLedger.customer_id == customer_id,
+                PointLedger.event_type == "consumption",
+                PointLedger.ref_id == str(consumption_id or ""),
+            )
+        )
+        earned_points = int(ledger_result.scalar() or 0)
+
+        consume_amount = Decimal(str(amount or 0))
+        account.total_consumption = MemberAccount.total_consumption - consume_amount
+        account.yearly_consumption = MemberAccount.yearly_consumption - consume_amount
+        if earned_points:
+            account.points_balance = MemberAccount.points_balance - earned_points
+        await self.db.commit()
+        await self.db.refresh(account)
+
+        customer_result = await self.db.execute(
+            select(Customer).filter(Customer.id == customer_id, Customer.tenant_id == tenant_id)
+        )
+        customer = customer_result.scalar_one_or_none()
+        new_level = self.resolve_level(Decimal(account.yearly_consumption or 0), customer.created_at if customer else None)
+        account.level_code = new_level["code"]
+        account.level_name = new_level["name"]
+        account.level_checked_at = datetime.utcnow()
+        await self.db.commit()
+        await self.db.refresh(account)
+
+        if earned_points:
+            ledger = PointLedger(
+                tenant_id=tenant_id,
+                customer_id=account.customer_id,
+                member_id=account.member_id,
+                event_type="refund_reversal",
+                points=-earned_points,
+                balance_after=account.points_balance,
+                source_channel="STORE",
+                ref_id=str(consumption_id or ""),
+                expire_at=datetime.utcnow(),
+                remark="订单退款收回积分",
+            )
+            self.db.add(ledger)
+            await self.db.commit()
+
         return account
 
     async def get_account_by_customer(self, customer_id: int) -> MemberAccount:

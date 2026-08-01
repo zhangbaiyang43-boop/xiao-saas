@@ -25,6 +25,13 @@ class DiningParticipantBindIn(BaseModel):
     participant_token: str
 
 
+class DiningCheckoutRequestIn(BaseModel):
+    tenant_id: str
+    dining_session_id: str
+    participant_token: Optional[str] = None
+    requested: bool = True
+
+
 @router.post("/resolve")
 async def resolve_dining_session(
     body: DiningSessionResolveIn,
@@ -68,24 +75,66 @@ async def list_current_dining_orders(
         return error_response(code=400, msg="缺少门店或会话")
     customer_id = getattr(request.state, "customer_id", None)
     if not participant_token and not customer_id:
-        return error_response(code=401, msg="缺少本桌身份")
+        # 409 而不是 401：这是"没带本桌匿名身份"，跟"会员登录过期"是两码事——
+        # 401/403 在这个项目里全局约定代表"需要重新登录"，客户端的通用拦截器会把它们
+        # 当成会员登录失效处理，误导顾客去做微信授权。参见 orders.py 里 participant
+        # 校验失败同样改用 409 的注释。
+        return error_response(code=409, msg="缺少本桌身份，请重新扫码")
 
     service = DiningSessionService(db)
-    orders = await service.list_session_orders(
+    result = await service.list_session_orders(
         tenant_id=tenant_id,
         dining_session_id=int(dining_session_id),
         participant_token=participant_token,
         customer_id=int(customer_id) if customer_id else None,
     )
     session_status = await service.get_session_status(tenant_id=tenant_id, dining_session_id=int(dining_session_id))
+    checkout_requested_at = await service.get_checkout_requested_at(tenant_id=tenant_id, dining_session_id=int(dining_session_id))
+    closed_at = await service.get_closed_at(tenant_id=tenant_id, dining_session_id=int(dining_session_id))
     return success_response(
         data={
-            "orders": orders,
+            "orders": result["orders"],
+            "table_total": result["table_total"],
+            "item_count": result["item_count"],
+            "participant_count": result.get("participant_count", 0),
+            "identity_mismatch": result.get("identity_mismatch", False),
             "session_status": session_status,
             "closed": session_status in ("CLOSED", "EXPIRED"),
+            "checkout_requested_at": checkout_requested_at.isoformat() if checkout_requested_at else None,
+            # 真正的结账时间，供顾客端"查看结账详情"展示——区别于订单的下单时间
+            "closed_at": closed_at.isoformat() if closed_at else None,
         },
         msg="ok",
     )
+
+
+@router.post("/checkout-request")
+async def request_table_checkout(
+    body: DiningCheckoutRequestIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """顾客端"吃好了，去结账"的入口：只记录一次请求时间，真正的结账动作仍由商家在后台完成，
+    但商家后台从此能看到"这一桌顾客已经在等结账"，不用再靠巡台去发现。"""
+    tenant_id = (body.tenant_id or "").strip()
+    if not tenant_id or not body.dining_session_id:
+        return error_response(code=400, msg="缺少门店或会话")
+    customer_id = getattr(request.state, "customer_id", None)
+    if not body.participant_token and not customer_id:
+        return error_response(code=409, msg="缺少本桌身份，请重新扫码")
+
+    TenantContext.set_tenant_id(tenant_id)
+    result = await DiningSessionService(db).set_checkout_request(
+        tenant_id=tenant_id,
+        dining_session_id=int(body.dining_session_id),
+        requested=body.requested,
+        participant_token=body.participant_token,
+        customer_id=int(customer_id) if customer_id else None,
+    )
+    if result is None:
+        return error_response(code=404, msg="本桌会话不存在或已结束")
+    await db.commit()
+    return success_response(data=result, msg="ok")
 
 
 @router.post("/participants/bind")

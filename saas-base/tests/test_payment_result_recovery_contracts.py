@@ -54,11 +54,14 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
         self.assertIn("_on_payment_success", recover)
 
     def test_frontend_persists_pending_order_before_payment(self):
-        submit_order = function_source(MENU_SOURCE, "submitOrder")
+        # 实际下单逻辑在 performSubmitOrder 里——submitOrder 现在只是加了重入锁的薄封装，
+        # 这样"本桌身份失效，重建后自动重试一次"才能在不撞锁的情况下递归重试。
+        submit_order = function_source(MENU_SOURCE, "performSubmitOrder")
         self.assertIn("savePendingPaymentOrder()", submit_order)
         self.assertLess(submit_order.index("savePendingPaymentOrder()"), submit_order.index("confirmPay()"))
         self.assertIn("const savePendingPaymentOrder", MENU_SOURCE)
         self.assertIn("const restorePendingPaymentOrder", MENU_SOURCE)
+        self.assertIn("return await performSubmitOrder()", function_source(MENU_SOURCE, "submitOrder"))
 
     def test_frontend_checks_order_status_before_starting_payment_again(self):
         confirm_pay = function_source(MENU_SOURCE, "confirmPay")

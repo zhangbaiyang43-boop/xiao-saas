@@ -434,6 +434,65 @@ async def coupon_detail(request: Request, coupon_id: int, db: AsyncSession = Dep
     return success_response(data=await serialize_coupon(coupon, service), msg="ok")
 
 
+@router.post("/coupons/{coupon_id}/remind-me", response_model=RespVo)
+async def remind_me_before_coupon_expires(request: Request, coupon_id: int, db: AsyncSession = Depends(get_db)):
+    """顾客在支付成功页点"提醒我别忘了用"触发：前端此时应该已经调用过微信的
+    requestSubscribeMessage 拿到一次性推送授权，这里只负责记录"这张券要提醒"，
+    真正发送由后台每日循环去做。"""
+    tenant_id, customer_id, error = current_customer(request)
+    if error:
+        return error
+    TenantContext.set_tenant_id(tenant_id)
+    service = CouponService(db)
+    fail_reason = await service.request_expiry_reminder(coupon_id, customer_id)
+    if fail_reason:
+        return error_response(code=400, msg=fail_reason)
+    await db.commit()
+    return success_response(data={"reminded": True}, msg="已设置提醒")
+
+
+@router.get("/membership", response_model=RespVo)
+async def member_membership(request: Request, db: AsyncSession = Depends(get_db)):
+    """会员等级/成长值/权益墙——复用 MembershipService 已有的等级配置和权益模板，
+    只是把商户后台(/api/v1/membership)才能看到的这套数据，原样开放给顾客自己查。"""
+    from app.api.v1.membership import serialize_benefit
+
+    tenant_id, customer_id, error = current_customer(request)
+    if error:
+        return error
+    TenantContext.set_tenant_id(tenant_id)
+    customer = await CustomerService(db).get_customer(customer_id)
+    if not customer:
+        return error_response(code=404, msg="顾客不存在")
+
+    service = MembershipService(db)
+    account = await service.ensure_account(customer)
+    benefits = await service.list_benefits()
+    levels = service.get_config()["levels"]
+    level_index = {item["code"]: idx for idx, item in enumerate(levels)}
+    current_idx = level_index.get(account.level_code, 0)
+    next_level = levels[current_idx + 1] if current_idx + 1 < len(levels) else None
+
+    return success_response(
+        data={
+            "level_code": account.level_code,
+            "level_name": account.level_name,
+            "points_balance": int(account.points_balance or 0),
+            "yearly_consumption": float(account.yearly_consumption or 0),
+            "levels": levels,
+            "next_level": next_level,
+            "benefits": [
+                {
+                    **serialize_benefit(item),
+                    "unlocked": level_index.get(item.level_code, 0) <= current_idx,
+                }
+                for item in benefits
+            ],
+        },
+        msg="ok",
+    )
+
+
 @router.get("/points", response_model=RespVo)
 async def points_history(
     request: Request,

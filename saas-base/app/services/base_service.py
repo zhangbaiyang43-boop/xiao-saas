@@ -12,11 +12,11 @@ class BaseService:
     def require_tenant_id(self) -> str:
         tenant_id = self.tenant_id or TenantContext.get_current_tenant_id()
         if not tenant_id:
-            raise ValueError("缺少租户上下文")
+            raise ValueError("tenant_id is required for tenant-scoped operations")
         self.tenant_id = tenant_id
         return tenant_id
     
     def filter_by_tenant(self, query, model):
-        if self.tenant_id:
-            return query.filter(model.tenant_id == self.tenant_id)
-        return query
+        if not self.tenant_id:
+            raise ValueError("tenant_id is required for tenant-scoped queries")
+        return query.filter(model.tenant_id == self.tenant_id)

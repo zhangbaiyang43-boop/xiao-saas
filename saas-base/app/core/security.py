@@ -1,10 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Optional
 
+import jwt
 from fastapi import HTTPException, Request
-from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from app.config import settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def create_access_token(tenant_id: str, expires_delta: Optional[timedelta] = None) -> str:
@@ -26,10 +29,11 @@ def create_customer_access_token(
 ) -> str:
     expire = datetime.utcnow() + (expires_delta or timedelta(days=30))
     payload = {
-        "sub": str(customer_id),
+        "sub": f"customer:{customer_id}",
         "tenant_id": tenant_id,
-        "customer_id": str(customer_id),
+        "customer_id": customer_id,
         "type": "member",
+        "role": "customer",
         "exp": expire,
     }
     if openid:
@@ -40,7 +44,7 @@ def create_customer_access_token(
 def verify_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         return None
 
 
@@ -62,8 +66,10 @@ async def get_current_user(request: Request) -> dict:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return False
+    if not hashed_password:
+        return False
+    return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    return ""
+    return pwd_context.hash(password)

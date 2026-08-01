@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, ForeignKey, Index
+from sqlalchemy import Boolean, Column, BigInteger, String, DateTime, ForeignKey, Index
 from app.models.base import BaseModel
 
 class Coupon(BaseModel):
@@ -14,6 +14,9 @@ class Coupon(BaseModel):
     revoke_time = Column(DateTime)
     revoke_reason = Column(String(255))
     abnormal_reason = Column(String(255))
+    # 顾客在支付成功页主动点了"提醒我别忘了用"，后台每日循环据此在到期前推送订阅消息
+    remind_requested = Column(Boolean, nullable=False, default=False)
+    remind_sent_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         Index('idx_coupon_code', 'code'),

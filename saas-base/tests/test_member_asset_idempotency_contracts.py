@@ -31,7 +31,6 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
 
         self.assertIn("locked_coupon.status = \"USED\"", success_source)
-        self.assertIn("acc.balance = float(acc.balance) - deduct", success_source)
         self.assertIn("apply_consumption", success_source)
         self.assertIn("with_for_update()", mock_source)
         self.assertIn("with_for_update()", notify_source)
@@ -57,16 +56,23 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         self.assertIn('if not order or order.status != "pending_payment"', notify_source)
         self.assertLess(notify_source.index('order.status != "pending_payment"'), notify_source.index("_on_payment_success"))
 
-    def test_coupon_and_balance_asset_queries_are_tenant_scoped(self):
+    def test_coupon_asset_queries_are_tenant_scoped(self):
         success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
-        create_order_source = function_source(ORDERS_SOURCE, "create_order")
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
 
         self.assertIn("Coupon.tenant_id == str(order.tenant_id)", success_source)
         self.assertIn("Coupon.customer_id == int(customer_id)", success_source)
-        self.assertIn("MemberAccount.tenant_id == str(order.tenant_id)", success_source)
-        self.assertIn("MemberAccount.tenant_id == tenant_id", create_order_source)
-        self.assertIn("MemberAccount.tenant_id == str(order.tenant_id)", pay_source)
+
+    def test_balance_is_not_mutated_by_order_payment(self):
+        # 余额业务线已下线：下单、支付、mock-pay 都不应该再触碰 MemberAccount。
+        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        create_order_source = function_source(ORDERS_SOURCE, "create_order")
+        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
+
+        self.assertNotIn("MemberAccount", success_source)
+        self.assertNotIn("MemberAccount", create_order_source)
+        self.assertNotIn("MemberAccount", pay_source)
+        self.assertNotIn("MemberAccount", mock_source)
 
     def test_points_use_order_id_as_idempotency_reference(self):
         success_source = function_source(ORDERS_SOURCE, "_on_payment_success")

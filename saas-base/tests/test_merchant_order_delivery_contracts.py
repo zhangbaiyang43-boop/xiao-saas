@@ -48,7 +48,9 @@ class MerchantOrderDeliveryContractsTest(unittest.TestCase):
         self.assertIn("Order.tenant_id == tenant_id", source)
         self.assertIn("date_str == \"today\"", source)
         self.assertIn("_recover_wxpay_order_if_paid(order, db)", source)
-        self.assertIn("serialize_order(o, items_by_order.get(o.id, []))", source)
+        self.assertIn("serialize_order(", source)
+        self.assertIn("items_by_order.get(o.id, [])", source)
+        self.assertIn("checkout_requested_at=checkout_requested_by_session.get(", source)
 
     def test_order_page_polls_without_manual_refresh_dependency(self):
         self.assertIn("loadOrders()", ORDER_MANAGE_SOURCE)

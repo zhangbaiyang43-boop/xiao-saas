@@ -12,6 +12,8 @@ from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/api/v1/tenant", tags=["商家租户"])
 
+PAYMENT_MODES = {"prepay", "postpay", "table_account"}
+
 # 接受任意扁平字段，都存进 business_info
 
 
@@ -20,6 +22,14 @@ def _mask_mchid(mchid: str | None) -> str:
     if len(value) <= 6:
         return value or "-"
     return f"{value[:3]}****{value[-3:]}"
+
+
+def _is_new_merchant(tenant) -> bool:
+    created_at = getattr(tenant, "created_at", None)
+    if not created_at:
+        return True
+    from datetime import datetime as _dt
+    return (_dt.utcnow() - created_at).days <= 7
 
 
 def _payment_status(tenant) -> str:
@@ -59,6 +69,7 @@ def serialize_settings(tenant, config):
             "address": tenant.address,
             "logo_url": tenant.logo_url,
             "status": tenant.status,
+            "payment_mode": getattr(tenant, "payment_mode", "prepay") or "prepay",
         },
         "member_rules": config.member_rules if config else None,
         "coupon_rules": config.coupon_rules if config else None,
@@ -97,6 +108,7 @@ async def get_profile(db: AsyncSession = Depends(get_db)):
             "coupon_rules": data["coupon_rules"],
             "business_info": data["business_info"],
             "plugin_settings": data["plugin_settings"],
+            "is_new_merchant": _is_new_merchant(tenant),
         },
         msg="ok",
     )
@@ -141,6 +153,7 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
     cs = CouponService(db)
     aov = await cs.get_merchant_aov()
     rules = await cs.get_coupon_rules()
+    intensity_outcomes = await cs.estimate_intensity_outcomes()
 
     # 本月已发券数
     month_start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -151,6 +164,18 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
         )
     )
     issued_this_month = int(issued_result.scalar() or 0)
+
+    # 本月发出的券里，有多少已经被核销——这是商家判断"发券到底有没有效果"的关键指标，
+    # 光看发了多少张说明不了问题，发了不用等于白发。
+    redeemed_result = await db.execute(
+        sa_select(sa_func.count(Coupon.id)).where(
+            Coupon.tenant_id == tenant_id,
+            Coupon.created_at >= month_start,
+            Coupon.status == "USED",
+        )
+    )
+    redeemed_this_month = int(redeemed_result.scalar() or 0)
+    redemption_rate = round(redeemed_this_month / issued_this_month, 4) if issued_this_month > 0 else None
 
     def fmt_rule(key):
         r = rules.get(key, {})
@@ -169,10 +194,16 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
     return success_response(data={
         "aov": round(aov, 1) if aov else None,
         "issued_this_month": issued_this_month,
+        "redeemed_this_month": redeemed_this_month,
+        "redemption_rate": redemption_rate,
         "new_customer_coupon": fmt_rule("new_customer_coupon"),
         "consumption_coupon": fmt_rule("consumption_coupon"),
         "recall_coupon": fmt_rule("recall_coupon"),
         "entry_coupon": fmt_rule("entry_coupon"),
+        "points_reward_coupon": fmt_rule("points_reward_coupon"),
+        # 阶段二：三档强度（保守/标准/激进）各自的预测结果，
+        # 后台"选强度"卡片直接用这个字段渲染，不需要自己再算。
+        "intensity_outcomes": intensity_outcomes,
     })
 
 
@@ -203,6 +234,12 @@ async def update_settings(data: FlatSettingsRequest, db: AsyncSession = Depends(
     coupon_rules = flat.pop("coupon_rules", None)
     explicit_business_info = flat.pop("business_info", None)
     plugin_settings = flat.pop("plugin_settings", None)
+    payment_mode = flat.pop("payment_mode", None)
+    if payment_mode is not None:
+        payment_mode = str(payment_mode or "").strip()
+        if payment_mode not in PAYMENT_MODES:
+            return error_response(code=400, msg="不支持的支付模式")
+        tenant.payment_mode = payment_mode
     # 剩余所有扁平字段合入 business_info
     merged_business_info = {**(explicit_business_info or {}), **flat}
     tenant, config = await service.update_tenant_settings(

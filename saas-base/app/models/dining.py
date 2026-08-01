@@ -13,6 +13,7 @@ class DiningSession(BaseModel):
     last_activity_at = Column(DateTime, nullable=False)
     closed_at = Column(DateTime, nullable=True)
     closed_by = Column(String(64), nullable=True)
+    checkout_requested_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ux_dining_session_active_key", "active_key", unique=True),

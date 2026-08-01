@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -11,11 +11,10 @@ router = APIRouter(prefix="/api/v1/distribution", tags=["邀请奖励"])
 
 
 class DistributionSettingsRequest(BaseModel):
+    # 金额/门槛/有效期不再接受商户直接输入——全部由算法按客单价+强度档位实时计算，
+    # 商户能改的只剩这一个开关；强度档位通过 PUT /v1/tenant/settings 的
+    # distribution_intensity 字段单独设置。
     invite_reward_enabled: bool = False
-    inviter_reward_amount: float = Field(5.0, ge=0)
-    invitee_reward_amount: float = Field(5.0, ge=0)
-    invite_reward_min_spend: float = Field(0.0, ge=0)
-    invite_reward_valid_days: int = Field(30, ge=1)
 
 
 @router.get("/settings", response_model=RespVo)
@@ -29,6 +28,13 @@ async def update_distribution_settings(data: DistributionSettingsRequest, db: As
     service = CommissionService(db)
     rules = await service.update_distribution_rules(data.model_dump())
     return success_response(data=rules, msg="邀请奖励设置已保存")
+
+
+@router.get("/preview", response_model=RespVo)
+async def get_distribution_preview(db: AsyncSession = Depends(get_db)):
+    """三档强度各自算出来的真实金额/门槛，供后台"选强度"卡片直接渲染。"""
+    data = await CommissionService(db).get_distribution_preview()
+    return success_response(data=data, msg="ok")
 
 
 @router.get("/records", response_model=RespVo)

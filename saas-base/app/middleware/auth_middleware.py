@@ -37,6 +37,7 @@ OPTIONAL_AUTH_PATHS = {
     "/api/v1/orders",
     "/api/v1/orders/my",
     "/api/v1/dining-sessions/current/orders",
+    "/api/v1/dining-sessions/checkout-request",
 }
 
 # Path prefixes with optional auth (customer or anonymous can access)

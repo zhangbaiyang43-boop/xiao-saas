@@ -191,7 +191,20 @@ def fake_select(model):
     return FakeQuery(model)
 
 
+_ORIGINAL_MODULES = {}
+
+
+def restore_stubs():
+    """Restore stubbed modules after loading the isolated orders module."""
+    for name, original in _ORIGINAL_MODULES.items():
+        if original is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
+
 def install_stubs():
+    global _ORIGINAL_MODULES
     modules = {
         "app": types.ModuleType("app"),
         "app.api": types.ModuleType("app.api"),
@@ -200,6 +213,7 @@ def install_stubs():
         "app.core": types.ModuleType("app.core"),
         "app.core.database": types.ModuleType("app.core.database"),
         "app.core.logger": types.ModuleType("app.core.logger"),
+        "app.core.platform_rules": types.ModuleType("app.core.platform_rules"),
         "app.core.response": types.ModuleType("app.core.response"),
         "app.core.tenant_context": types.ModuleType("app.core.tenant_context"),
         "app.models": types.ModuleType("app.models"),
@@ -211,12 +225,14 @@ def install_stubs():
         "app.services.feieyun_service": types.ModuleType("app.services.feieyun_service"),
         "app.services.kuaimai_service": types.ModuleType("app.services.kuaimai_service"),
     }
+    _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
     for name, module in modules.items():
         sys.modules[name] = module
 
     modules["app.config"].settings = types.SimpleNamespace(DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
+    modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
@@ -246,6 +262,7 @@ def load_orders_module():
 
 class PrintFailureRecoveryContractsTest(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(restore_stubs)
         KuaimaiStub.reset()
         self.module = load_orders_module()
 
