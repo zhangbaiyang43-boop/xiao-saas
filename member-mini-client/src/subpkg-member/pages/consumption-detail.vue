@@ -1,14 +1,11 @@
 <template>
   <view class="page">
     <view v-if="loading" class="loading">
-      <view class="loading-spinner"></view>
-      <text class="loading-text">加载中...</text>
+      <state-loading text="加载中..." />
     </view>
 
     <view v-else-if="error" class="error-state">
-      <view class="error-icon">⚠️</view>
-      <text class="error-title">{{ error }}</text>
-      <button class="refresh-btn" @click="loadDetail">重试</button>
+      <state-error :title="error" retry-text="重试" @retry="loadDetail" />
     </view>
 
     <view v-else-if="consumption" class="detail-container">
@@ -44,11 +41,14 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { getConsumptionDetail } from '@/api/consumption'
 import { formatDateTime, formatMoney } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
 
 export default {
+  components: { StateLoading, StateError },
   setup() {
     const loading = ref(true)
     const error = ref('')
@@ -58,7 +58,6 @@ export default {
       if (!uni.getStorageSync('customer_token')) {
         error.value = '请先登录'
         loading.value = false
-        uni.showToast({ title: '请先登录', icon: 'none' })
         setTimeout(() => {
           uni.reLaunch({ url: '/pages/mine/mine' })
         }, 1500)
@@ -84,11 +83,9 @@ export default {
           consumption.value = res.data
         } else {
           error.value = res.msg || '消费记录加载失败'
-          uni.showToast({ title: res.msg || '消费记录加载失败', icon: 'none' })
         }
       } catch (err) {
         error.value = '网络异常，请检查网络连接'
-        uni.showToast({ title: '网络异常，请检查网络连接', icon: 'none' })
       } finally {
         loading.value = false
       }
@@ -97,10 +94,6 @@ export default {
     const goBack = () => {
       uni.navigateBack()
     }
-
-    onMounted(() => {
-      loadDetail()
-    })
 
     return {
       loading,
@@ -132,50 +125,13 @@ export default {
   padding: 200rpx 0;
 }
 
-.loading-spinner {
-  width: 60rpx;
-  height: 60rpx;
-  border: 4rpx solid #e5e7eb;
-  border-top-color: #2563eb;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.loading-text {
-  margin-top: 24rpx;
-  font-size: 28rpx;
-  color: #6b7280;
-}
-
 .error-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 200rpx 40rpx;
-}
-
-.error-icon {
-  font-size: 80rpx;
-  margin-bottom: 24rpx;
-}
-
-.error-title {
-  font-size: 32rpx;
-  font-weight: 600;
-  color: #dc2626;
-  margin-bottom: 32rpx;
-}
-
-.refresh-btn {
-  padding: 20rpx 48rpx;
-  background: #2563eb;
-  color: #fff;
-  font-size: 28rpx;
-  border-radius: 12rpx;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .detail-container {
@@ -183,7 +139,7 @@ export default {
 }
 
 .header-card {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
   border-radius: 20rpx;
   padding: 60rpx 40rpx;
   text-align: center;

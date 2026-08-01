@@ -1,86 +1,109 @@
-import { isDef, isNumber, isPlainObject, isPromise } from './validator';
-import { canIUseGroupSetData, canIUseNextTick, getSystemInfoSync, } from './version';
-export { isDef } from './validator';
-export { getSystemInfoSync } from './version';
-export function range(num, min, max) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.isWxWork = exports.isPC = exports.getCurrentPage = exports.clamp = exports.addNumber = exports.toPromise = exports.groupSetData = exports.getAllRect = exports.getRect = exports.pickExclude = exports.requestAnimationFrame = exports.addUnit = exports.nextTick = exports.range = exports.getSystemInfoSync = exports.isDef = void 0;
+var validator_1 = require("./validator");
+var version_1 = require("./version");
+var validator_2 = require("./validator");
+Object.defineProperty(exports, "isDef", { enumerable: true, get: function () { return validator_2.isDef; } });
+var version_2 = require("./version");
+Object.defineProperty(exports, "getSystemInfoSync", { enumerable: true, get: function () { return version_2.getSystemInfoSync; } });
+function range(num, min, max) {
     return Math.min(Math.max(num, min), max);
 }
-export function nextTick(cb) {
-    if (canIUseNextTick()) {
+exports.range = range;
+function nextTick(cb) {
+    if ((0, version_1.canIUseNextTick)()) {
         wx.nextTick(cb);
     }
     else {
-        setTimeout(() => {
+        setTimeout(function () {
             cb();
         }, 1000 / 30);
     }
 }
-export function addUnit(value) {
-    if (!isDef(value)) {
+exports.nextTick = nextTick;
+function addUnit(value) {
+    if (!(0, validator_1.isDef)(value)) {
         return undefined;
     }
     value = String(value);
-    return isNumber(value) ? `${value}px` : value;
+    return (0, validator_1.isNumber)(value) ? "".concat(value, "px") : value;
 }
-export function requestAnimationFrame(cb) {
-    return setTimeout(() => {
+exports.addUnit = addUnit;
+function requestAnimationFrame(cb) {
+    return setTimeout(function () {
         cb();
     }, 1000 / 30);
 }
-export function pickExclude(obj, keys) {
-    if (!isPlainObject(obj)) {
+exports.requestAnimationFrame = requestAnimationFrame;
+function pickExclude(obj, keys) {
+    if (!(0, validator_1.isPlainObject)(obj)) {
         return {};
     }
-    return Object.keys(obj).reduce((prev, key) => {
+    return Object.keys(obj).reduce(function (prev, key) {
         if (!keys.includes(key)) {
             prev[key] = obj[key];
         }
         return prev;
     }, {});
 }
-export function getRect(context, selector) {
-    return new Promise((resolve) => {
+exports.pickExclude = pickExclude;
+function getRect(context, selector) {
+    return new Promise(function (resolve) {
         wx.createSelectorQuery()
             .in(context)
             .select(selector)
             .boundingClientRect()
-            .exec((rect = []) => resolve(rect[0]));
+            .exec(function (rect) {
+            if (rect === void 0) { rect = []; }
+            return resolve(rect[0]);
+        });
     });
 }
-export function getAllRect(context, selector) {
-    return new Promise((resolve) => {
+exports.getRect = getRect;
+function getAllRect(context, selector) {
+    return new Promise(function (resolve) {
         wx.createSelectorQuery()
             .in(context)
             .selectAll(selector)
             .boundingClientRect()
-            .exec((rect = []) => resolve(rect[0]));
+            .exec(function (rect) {
+            if (rect === void 0) { rect = []; }
+            return resolve(rect[0]);
+        });
     });
 }
-export function groupSetData(context, cb) {
-    if (canIUseGroupSetData()) {
+exports.getAllRect = getAllRect;
+function groupSetData(context, cb) {
+    if ((0, version_1.canIUseGroupSetData)()) {
         context.groupSetData(cb);
     }
     else {
         cb();
     }
 }
-export function toPromise(promiseLike) {
-    if (isPromise(promiseLike)) {
+exports.groupSetData = groupSetData;
+function toPromise(promiseLike) {
+    if ((0, validator_1.isPromise)(promiseLike)) {
         return promiseLike;
     }
     return Promise.resolve(promiseLike);
 }
+exports.toPromise = toPromise;
 // 浮点数精度处理
-export function addNumber(num1, num2) {
-    const cardinal = Math.pow(10, 10);
+function addNumber(num1, num2) {
+    var cardinal = Math.pow(10, 10);
     return Math.round((num1 + num2) * cardinal) / cardinal;
 }
+exports.addNumber = addNumber;
 // 限制value在[min, max]之间
-export const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
-export function getCurrentPage() {
-    const pages = getCurrentPages();
+var clamp = function (num, min, max) { return Math.min(Math.max(num, min), max); };
+exports.clamp = clamp;
+function getCurrentPage() {
+    var pages = getCurrentPages();
     return pages[pages.length - 1];
 }
-export const isPC = ['mac', 'windows'].includes(getSystemInfoSync().platform);
+exports.getCurrentPage = getCurrentPage;
+exports.isPC = ['mac', 'windows'].includes((0, version_1.getSystemInfoSync)().platform);
 // 是否企业微信
-export const isWxWork = getSystemInfoSync().environment === 'wxwork';
+exports.isWxWork = (0, version_1.getSystemInfoSync)().environment === 'wxwork';

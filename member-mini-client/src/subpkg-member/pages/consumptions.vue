@@ -9,21 +9,17 @@
 
     <!-- 加载态 -->
     <view v-if="loading" class="state-wrap">
-      <view class="loading-ring"></view>
-      <text class="state-text">正在加载记录</text>
+      <state-loading text="正在加载记录" />
     </view>
 
     <!-- 错误态 -->
     <view v-else-if="error" class="state-wrap">
-      <text class="state-text">{{ error }}</text>
-      <button class="btn-primary state-btn" @click="loadConsumptions">刷新重试</button>
+      <state-error :title="error" retry-text="刷新重试" @retry="loadConsumptions" />
     </view>
 
     <!-- 空态 -->
     <view v-else-if="!consumptions.length" class="state-wrap">
-      <text class="state-icon">🧾</text>
-      <text class="state-text">暂无消费记录</text>
-      <text class="state-sub">到店消费或核销优惠券后，这里会自动显示。</text>
+      <state-empty icon="🧾" title="暂无消费记录" desc="到店消费或核销优惠券后，这里会自动显示。" />
     </view>
 
     <!-- 列表 -->
@@ -45,8 +41,12 @@
 import { ref } from 'vue'
 import { getMemberConsumptions } from '@/api/consumption'
 import { formatDateTime, formatMoney } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
+import StateEmpty from '@/components/state-empty/state-empty.vue'
 
 export default {
+  components: { StateLoading, StateError, StateEmpty },
   setup() {
     const loading = ref(false)
     const error = ref('')
@@ -123,64 +123,6 @@ export default {
   align-items: center;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
-
-.state-icon {
-  font-size: 80rpx;
-  line-height: 1;
-}
-
-.state-text {
-  display: block;
-  margin-top: 24rpx;
-  color: #111;
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-}
-
-.state-sub {
-  display: block;
-  margin-top: 12rpx;
-  color: #999;
-  font-size: 26rpx;
-  text-align: center;
-  line-height: 1.6;
-}
-
-.state-btn {
-  margin-top: 32rpx;
-  width: 100%;
-}
-
-/* ── 通用按钮 ─────────────────────────────── */
-.btn-primary {
-  display: block;
-  height: 88rpx;
-  line-height: 88rpx;
-  background: #07C160;
-  color: #fff;
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-  border-radius: 24rpx;
-  border: none;
-  padding: 0;
-  box-sizing: border-box;
-
-  &::after { border: none; }
-}
-
-/* 加载环 */
-.loading-ring {
-  width: 72rpx;
-  height: 72rpx;
-  border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── 消费记录列表 ─────────────────────────── */
 .record-list {

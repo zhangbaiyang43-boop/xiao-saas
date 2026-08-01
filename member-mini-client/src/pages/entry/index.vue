@@ -16,7 +16,9 @@
 
 <script>
 import { ref } from 'vue'
-import { resolveEntranceCode, resolveDiningSession } from '@/api/auth'
+import { resolveEntranceCode } from '@/api/auth'
+import { clearCustomerSession } from '@/utils/auth'
+import { resolveDiningIdentity } from '@/utils/dining'
 
 const text = {
   retry: '重新识别',
@@ -53,18 +55,13 @@ const parseOptions = (options = {}) => {
     entry_type: read('entry_type') || 'table',
     channel: read('channel') || 'TABLE',
     order_mode: read('order_mode') || 'dine_in',
+    // 分销分享链接（invite.vue 的 onShareAppMessage）带的就是这个参数——之前这里
+    // 完全没读它，导致邀请关系从源头就没法绑定，整条老带新双边奖励链路空转。
+    invite_code: read('invite_code', ['inviter_code']),
   }
 }
 
 
-const getDiningClientId = () => {
-  let clientId = uni.getStorageSync('dining_client_id') || ''
-  if (!clientId) {
-    clientId = `dc_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`
-    uni.setStorageSync('dining_client_id', clientId)
-  }
-  return clientId
-}
 const buildMenuUrl = ({ target_page, tenant_id, table, table_id, entry_type, channel, order_mode }) => {
   const page = resolveRegisteredPage(target_page || 'subpkg-order/pages/menu')
   const params = []
@@ -85,6 +82,13 @@ export default {
     const isRouting = ref(false)
 
     const saveContext = (ctx) => {
+      // 换了一家店（tenant_id 变了）就必须清掉上一家的登录态，否则"会员"tab 会
+      // 用旧店的 token 悄悄查出旧店的积分/优惠券，新店这一单也会因为查不到匹配
+      // 租户的客户身份而静默不发积分/优惠券，用户不会有任何提示。
+      const previousTenantId = uni.getStorageSync('tenant_id') || ''
+      if (ctx.tenant_id && previousTenantId && previousTenantId !== ctx.tenant_id) {
+        clearCustomerSession()
+      }
       if (ctx.scene) uni.setStorageSync('entrance_scene', ctx.scene)
       if (ctx.tenant_id) uni.setStorageSync('tenant_id', ctx.tenant_id)
       if (ctx.shop_name) uni.setStorageSync('tenant_name', ctx.shop_name)
@@ -93,6 +97,9 @@ export default {
         uni.setStorageSync('table_no_at', Date.now())
       }
       if (ctx.table_id) uni.setStorageSync('table_id', ctx.table_id)
+      // 只在这次扫描/点击真的带了邀请码时才写入——不能清空之前存的邀请码，
+      // 万一顾客先点了邀请链接、又换成扫桌上的普通桌码，邀请关系不该因此丢失。
+      if (ctx.invite_code) uni.setStorageSync('invite_code', ctx.invite_code)
       uni.setStorageSync('entry_type', ctx.entry_type || 'table')
       uni.setStorageSync('channel', ctx.channel || 'TABLE')
       uni.setStorageSync('order_mode', ctx.order_mode || 'dine_in')
@@ -100,44 +107,63 @@ export default {
     }
 
 
+    // 本桌身份的建立/校验统一走 utils/dining.js 的 resolveDiningIdentity——它同时也是
+    // menu.vue onLoad 时用的那一份，两处不再各自维护，避免再出现"一处改了、另一处忘了"
+    // 的偏差（比如历史上这里曾经漏写 dining_table_no 的持久化）。这里强制刷新（force:
+    // true），确保刚扫完码进来的这一次一定拿到跟当前桌号匹配、服务端确认过的身份，
+    // 失败就直接在入口页报错拦下来，不会带着一个不完整的身份"裸奔"进点餐页。
     const resolveTableSession = async (ctx) => {
-      if (!ctx.tenant_id || !ctx.table) return
-      const clientId = getDiningClientId()
-      const res = await resolveDiningSession({
-        tenant_id: ctx.tenant_id,
-        table_no: ctx.table,
-        client_id: clientId,
-        participant_token: uni.getStorageSync('dining_participant_token') || undefined,
-      })
-      if (res.code !== 200 || !res.data) throw new Error(res.msg || '本桌订单初始化失败')
-      uni.setStorageSync('dining_session_id', res.data.dining_session_id || '')
-      uni.setStorageSync('dining_participant_id', res.data.participant_id || '')
-      uni.setStorageSync('dining_participant_token', res.data.participant_token || '')
-      uni.setStorageSync('dining_client_id', res.data.client_id || clientId)
+      if (!ctx.tenant_id || !ctx.table) throw new Error('缺少门店或桌号信息')
+      const identity = await resolveDiningIdentity({ tenantId: ctx.tenant_id, table: ctx.table, force: true })
+      if (!identity.ok) throw new Error(identity.reason === 'missing_context' ? '缺少门店或桌号信息' : (identity.reason || '本桌身份初始化失败'))
     }
     const routeToMenu = async (ctx) => {
       if (isRouting.value) return
       isRouting.value = true
       const url = buildMenuUrl(ctx)
-      console.log('[ENTRY_MENU_ROUTE_START]', { scene: ctx.scene, tenant_id: ctx.tenant_id, table_no: ctx.table, url })
       await new Promise((resolve) => {
         uni.redirectTo({
           url,
           success: () => {
-            console.log('[ENTRY_MENU_ROUTE_SUCCESS]', { url })
             resolve(true)
           },
           fail: (err) => {
-            console.log('[ENTRY_MENU_ROUTE_FAIL]', { url, error: err })
             uni.reLaunch({
               url,
               success: () => {
-                console.log('[ENTRY_MENU_ROUTE_SUCCESS]', { url })
                 resolve(true)
               },
               fail: (finalErr) => {
-                console.log('[ENTRY_MENU_ROUTE_FINAL_FAIL]', { url, error: finalErr })
                 error.value = '进入菜单失败'
+                errorDesc.value = finalErr?.errMsg || '页面跳转失败'
+                isRouting.value = false
+                resolve(false)
+              }
+            })
+          }
+        })
+      })
+    }
+
+    const routeToStaffShare = async (ctx) => {
+      if (isRouting.value) return
+      isRouting.value = true
+      const params = []
+      if (ctx.tenant_id) params.push('tenant_id=' + encodeURIComponent(ctx.tenant_id))
+      if (ctx.invite_code) params.push('invite_code=' + encodeURIComponent(ctx.invite_code))
+      if (ctx.staff_name) params.push('staff_name=' + encodeURIComponent(ctx.staff_name))
+      if (ctx.shop_name) params.push('shop_name=' + encodeURIComponent(ctx.shop_name))
+      const url = '/subpkg-member/pages/staff-share' + (params.length ? '?' + params.join('&') : '')
+      await new Promise((resolve) => {
+        uni.redirectTo({
+          url,
+          success: () => resolve(true),
+          fail: (err) => {
+            uni.reLaunch({
+              url,
+              success: () => resolve(true),
+              fail: (finalErr) => {
+                error.value = '进入推荐页失败'
                 errorDesc.value = finalErr?.errMsg || '页面跳转失败'
                 isRouting.value = false
                 resolve(false)
@@ -155,10 +181,8 @@ export default {
       const parsed = parseOptions(options)
       try {
         if (parsed.scene) {
-          console.log('[ENTRY_RESOLVE_START]', { scene: parsed.scene })
           const res = await resolveEntranceCode(parsed.scene)
           if (res.code !== 200) {
-            console.log('[ENTRY_RESOLVE_FAIL]', { scene: parsed.scene, status: res.code, message: res.msg })
             error.value = res.msg || '桌码识别失败'
             errorDesc.value = '请联系门店工作人员处理'
             return
@@ -176,9 +200,18 @@ export default {
             order_mode: entrance.order_mode || data.order_mode || parsed.order_mode,
             target_page: entrance.target_page || data.target_page || 'subpkg-order/pages/menu',
           }
+          // 员工分享码：不建桌台身份，直接进员工的专属分享页，让他点右上角转发。
+          if (ctx.entry_type === 'staff_share') {
+            await routeToStaffShare({
+              tenant_id: ctx.tenant_id,
+              invite_code: data.invite_code || '',
+              staff_name: data.staff_name || '',
+              shop_name: ctx.shop_name,
+            })
+            return
+          }
           saveContext(ctx)
           await resolveTableSession(ctx)
-          console.log('[ENTRY_RESOLVE_SUCCESS]', { scene: ctx.scene, tenant_id: ctx.tenant_id, table_no: ctx.table, target_page: ctx.target_page })
           await routeToMenu(ctx)
           return
         }
@@ -195,9 +228,10 @@ export default {
         await resolveTableSession(ctx)
         await routeToMenu(ctx)
       } catch (err) {
-        console.log('[ENTRY_RESOLVE_FAIL]', { scene: parsed.scene, status: 0, message: err.message })
-        error.value = '网络连接失败'
-        errorDesc.value = '请检查网络后重试'
+        // resolveTableSession 失败时会带着具体原因抛出来，直接展示，不要笼统地说"网络连接
+        // 失败"——不然本桌身份建立失败这类问题会被当成网络问题，误导用户去重试网络。
+        error.value = '本桌身份初始化失败'
+        errorDesc.value = err?.message || '请检查网络后重试'
       }
     }
 

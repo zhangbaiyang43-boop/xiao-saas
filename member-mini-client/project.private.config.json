@@ -1,0 +1,34 @@
+{
+  "libVersion": "3.17.0",
+  "projectname": "%E4%BC%9A%E5%91%98%E7%AE%A1%E7%90%86%E5%B0%8F%E7%A8%8B%E5%BA%8F",
+  "condition": {
+    "miniprogram": {
+      "list": [
+        {
+          "name": "subpkg-order/pages/menu",
+          "pathName": "subpkg-order/pages/menu",
+          "query": "shop=DIin4cRsOeaLFFTzk0ZBsVEGV8AHnJzb&table=A01&order_mode=dine_in&entry_type=table&channel=TABLE",
+          "scene": null,
+          "launchMode": "default"
+        }
+      ]
+    }
+  },
+  "setting": {
+    "urlCheck": false,
+    "coverView": false,
+    "lazyloadPlaceholderEnable": false,
+    "skylineRenderEnable": false,
+    "preloadBackgroundData": false,
+    "autoAudits": false,
+    "useApiHook": true,
+    "showShadowRootInWxmlPanel": false,
+    "useStaticServer": false,
+    "useLanDebug": false,
+    "showES6CompileOption": false,
+    "compileHotReLoad": true,
+    "checkInvalidKey": true,
+    "ignoreDevUnusedFiles": true,
+    "bigPackageSizeSupport": true
+  }
+}

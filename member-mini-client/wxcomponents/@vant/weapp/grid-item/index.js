@@ -1,10 +1,12 @@
-import { VantComponent } from '../common/component';
-import { useParent } from '../common/relation';
-import { link } from '../mixins/link';
-VantComponent({
-    relation: useParent('grid'),
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+var component_1 = require("../common/component");
+var relation_1 = require("../common/relation");
+var link_1 = require("../mixins/link");
+(0, component_1.VantComponent)({
+    relation: (0, relation_1.useParent)('grid'),
     classes: ['content-class', 'icon-class', 'text-class'],
-    mixins: [link],
+    mixins: [link_1.link],
     props: {
         icon: String,
         iconColor: String,
@@ -21,30 +23,30 @@ VantComponent({
     data: {
         viewStyle: '',
     },
-    mounted() {
+    mounted: function () {
         this.updateStyle();
     },
     methods: {
-        updateStyle() {
+        updateStyle: function () {
             if (!this.parent) {
                 return;
             }
-            const { data, children } = this.parent;
-            const { columnNum, border, square, gutter, clickable, center, direction, reverse, iconSize, } = data;
+            var _a = this.parent, data = _a.data, children = _a.children;
+            var columnNum = data.columnNum, border = data.border, square = data.square, gutter = data.gutter, clickable = data.clickable, center = data.center, direction = data.direction, reverse = data.reverse, iconSize = data.iconSize;
             this.setData({
-                center,
-                border,
-                square,
-                gutter,
-                clickable,
-                direction,
-                reverse,
-                iconSize,
+                center: center,
+                border: border,
+                square: square,
+                gutter: gutter,
+                clickable: clickable,
+                direction: direction,
+                reverse: reverse,
+                iconSize: iconSize,
                 index: children.indexOf(this),
-                columnNum,
+                columnNum: columnNum,
             });
         },
-        onClick() {
+        onClick: function () {
             this.$emit('click');
             this.jumpLink();
         },

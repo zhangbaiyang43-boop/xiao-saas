@@ -1,10 +1,11 @@
 import request from './request'
 
-export const entryJoin = (data) => {
+export const entryJoin = (data, options = {}) => {
   return request({
     url: '/v1/miniapp/entry/join',
     method: 'POST',
-    data
+    data,
+    authRedirect: options.authRedirect
   })
 }
 
@@ -18,10 +19,11 @@ export const loginOrCreateMember = (data) => {
   })
 }
 
-export const getMemberProfile = () => {
+export const getMemberProfile = (options = {}) => {
   return request({
     url: '/v1/member/profile',
-    method: 'GET'
+    method: 'GET',
+    authRedirect: options.authRedirect
   })
 }
 
@@ -59,11 +61,8 @@ export const resolveEntranceCode = (scene) => {
 export const getPointsHistory = (skip = 0, limit = 30) =>
   request({ url: `/v1/member/points?skip=${skip}&limit=${limit}`, method: 'GET' })
 
-export const getBalance = () =>
-  request({ url: '/v1/member/balance', method: 'GET' })
-
-export const recharge = (amount) =>
-  request({ url: '/v1/member/recharge', method: 'POST', data: { amount } })
+export const getMembershipGrowth = () =>
+  request({ url: '/v1/member/membership', method: 'GET' })
 
 export const getMyCoupons = (status = 'UNUSED') =>
   request({ url: `/v1/member/coupons?status=${status}&limit=100`, method: 'GET' })
@@ -76,10 +75,11 @@ export const resolveDiningSession = (data) => {
   })
 }
 
-export const bindDiningParticipant = (data) => {
+export const bindDiningParticipant = (data, options = {}) => {
   return request({
     url: '/v1/dining-sessions/participants/bind',
     method: 'POST',
-    data
+    data,
+    authRedirect: options.authRedirect
   })
 }

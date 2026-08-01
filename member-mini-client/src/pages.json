@@ -81,15 +81,21 @@
           }
         },
         {
+          "path": "pages/staff-share",
+          "style": {
+            "navigationBarTitleText": "我的推荐"
+          }
+        },
+        {
           "path": "pages/points",
           "style": {
             "navigationBarTitleText": "我的积分"
           }
         },
         {
-          "path": "pages/recharge",
+          "path": "pages/growth",
           "style": {
-            "navigationBarTitleText": "储值充值"
+            "navigationBarTitleText": "会员成长"
           }
         },
         {

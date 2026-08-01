@@ -1,13 +1,20 @@
 <template>
   <view class="page">
     <view class="header">
-      <text class="balance">{{ balance }}</text>
-      <text class="balance-label">我的积分</text>
+      <state-hero-stat
+        :loading="loading"
+        :error="!!error"
+        :value="balance"
+        label="我的积分"
+        loading-label="正在加载积分…"
+        error-label="加载失败，点击重试"
+        @retry="load"
+      />
     </view>
 
-    <!-- 获取规则 -->
+    <!-- 积分规则 -->
     <view class="rules-card">
-      <text class="rules-title">积分获取规则</text>
+      <text class="rules-title">积分规则</text>
       <view class="rule-row">
         <text class="rule-icon">🛒</text>
         <view class="rule-text">
@@ -23,6 +30,13 @@
         </view>
       </view>
       <view class="rule-row">
+        <text class="rule-icon">🎫</text>
+        <view class="rule-text">
+          <text class="rule-main">攒够自动兑券</text>
+          <text class="rule-desc">积分每攒够 1000 分，自动为你兑换一张优惠券，无需手动兑换，去"我的优惠券"查看</text>
+        </view>
+      </view>
+      <view class="rule-row">
         <text class="rule-icon">📅</text>
         <view class="rule-text">
           <text class="rule-main">积分有效期</text>
@@ -32,13 +46,15 @@
     </view>
 
     <view v-if="loading" class="state-wrap">
-      <view class="loading-ring"></view>
-      <text class="state-text">加载中</text>
+      <state-loading text="加载中" />
+    </view>
+
+    <view v-else-if="error" class="state-wrap">
+      <state-error :title="error" retry-text="刷新重试" @retry="load" />
     </view>
 
     <view v-else-if="!records.length" class="state-wrap">
-      <text class="state-text">暂无积分记录</text>
-      <text class="state-sub">消费后自动获得积分，1元 = 1积分</text>
+      <state-empty title="暂无积分记录" desc="消费后自动获得积分，1元 = 1积分" />
     </view>
 
     <view v-else class="record-list">
@@ -59,23 +75,32 @@
 <script>
 import { ref } from 'vue'
 import { getPointsHistory } from '@/api/auth'
+import StateHeroStat from '@/components/state-hero-stat/state-hero-stat.vue'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
+import StateEmpty from '@/components/state-empty/state-empty.vue'
 
 export default {
+  components: { StateHeroStat, StateLoading, StateError, StateEmpty },
   setup() {
     const balance = ref(0)
     const records = ref([])
     const loading = ref(false)
+    const error = ref('')
 
     const load = async () => {
       loading.value = true
+      error.value = ''
       try {
         const res = await getPointsHistory(0, 50)
         if (res.code === 200) {
           balance.value = res.data.balance ?? 0
           records.value = res.data.records || []
+        } else {
+          error.value = res.msg || '加载失败'
         }
       } catch (e) {
-        uni.showToast({ title: '加载失败', icon: 'none' })
+        error.value = '网络不稳定，请稍后再试'
       } finally {
         loading.value = false
       }
@@ -86,7 +111,7 @@ export default {
       return s.slice(0, 10)
     }
 
-    return { balance, records, loading, load, formatDate }
+    return { balance, records, loading, error, load, formatDate }
   },
   onShow() { this.load() }
 }
@@ -99,24 +124,11 @@ export default {
 }
 
 .header {
-  background: #ea580c;
+  background: #07C160;
   padding: 60rpx 40rpx 48rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-}
-
-.balance {
-  font-size: 80rpx;
-  font-weight: 900;
-  color: #fff;
-  line-height: 1;
-}
-
-.balance-label {
-  margin-top: 12rpx;
-  font-size: 26rpx;
-  color: rgba(255,255,255,0.8);
 }
 
 .rules-card {
@@ -168,21 +180,6 @@ export default {
   text-align: center;
 }
 
-.loading-ring {
-  width: 56rpx;
-  height: 56rpx;
-  margin: 0 auto 22rpx;
-  border: 6rpx solid #fed7aa;
-  border-top-color: #ea580c;
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.state-text { display: block; font-size: 28rpx; color: #6b7280; }
-.state-sub { display: block; margin-top: 10rpx; font-size: 24rpx; color: #9ca3af; }
-
 .record-list {
   margin: 22rpx 28rpx;
   background: #fff;
@@ -209,7 +206,7 @@ export default {
   font-size: 36rpx;
   font-weight: 800;
 
-  &.plus { color: #ea580c; }
+  &.plus { color: #07C160; }
   &.minus { color: #6b7280; }
 }
 </style>

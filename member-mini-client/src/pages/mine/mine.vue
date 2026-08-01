@@ -1,49 +1,58 @@
 <template>
   <view class="mine-page">
     <view v-if="loading" class="state-card">
-      <view class="spinner"></view>
-      <text class="state-title">正在加载</text>
+      <state-loading />
     </view>
 
     <view v-else-if="error" class="state-card">
-      <text class="state-title">{{ error }}</text>
-      <text class="state-desc">请稍后重试。</text>
-      <button class="primary-btn" @click="loadProfile">重新加载</button>
+      <state-error :title="error" desc="请稍后重试。" @retry="loadProfile" />
     </view>
 
     <view v-else class="mine-content">
       <view class="identity-card">
-        <image
-          v-if="isLoggedIn && customerAvatar"
-          class="identity-avatar"
-          :src="customerAvatar"
-          mode="aspectFill"
-        />
-        <view v-else class="identity-avatar identity-avatar-default">
-          <text>{{ isLoggedIn ? '我' : '开' }}</text>
+        <view class="identity-top">
+          <image
+            v-if="isLoggedIn && customerAvatar"
+            class="identity-avatar"
+            :src="customerAvatar"
+            mode="aspectFill"
+          />
+          <view v-else class="identity-avatar identity-avatar-default">
+            <text>{{ isLoggedIn ? '我' : '开' }}</text>
+          </view>
+
+          <view class="identity-main">
+            <text class="identity-name">{{ isLoggedIn ? displayName : '未登录' }}</text>
+            <text v-if="isLoggedIn && customerPhone" class="identity-phone">{{ formatPhone(customerPhone) }}</text>
+            <text v-if="isLoggedIn" class="identity-bind">{{ customerPhone ? '已绑定手机号' : '未绑定手机号' }}</text>
+            <view v-if="isLoggedIn" class="identity-stats tap-shrink" @click.stop="goGrowth">
+              <text class="identity-level">{{ memberLevelLabel }}</text>
+              <text class="identity-stats-sep">·</text>
+              <text class="identity-points">积分 {{ memberPoints }}</text>
+              <text class="identity-stats-arrow">›</text>
+            </view>
+          </view>
+
+          <button v-if="isLoggedIn && !customerPhone" class="identity-sub-btn tap-shrink" @click="goBindPhone">去绑定</button>
+          <button
+            v-if="!isLoggedIn && hasStoreContext"
+            class="identity-login-btn tap-shrink"
+            open-type="getPhoneNumber"
+            :disabled="authorizing"
+            @getphonenumber="handleLoginAuth"
+          >{{ authorizing ? '登录中…' : '微信快捷登录' }}</button>
+          <button
+            v-else-if="!isLoggedIn"
+            class="identity-login-btn tap-shrink"
+            :disabled="authorizing"
+            @click="scanStoreCode"
+          >扫码进入门店</button>
         </view>
 
-        <view class="identity-main">
-          <text class="identity-name">{{ isLoggedIn ? displayName : '欢迎使用开心点单' }}</text>
-          <text v-if="isLoggedIn && customerPhone" class="identity-phone">{{ formatPhone(customerPhone) }}</text>
-          <text v-if="isLoggedIn" class="identity-bind">{{ customerPhone ? '已绑定手机号' : '未绑定手机号' }}</text>
-          <text v-else class="identity-phone">登录后查看订单和账户信息</text>
+        <view v-if="!isLoggedIn && hasStoreContext" class="identity-promo">
+          <text class="identity-promo-icon">🎁</text>
+          <text class="identity-promo-text">{{ newCustomerHookText }}</text>
         </view>
-
-        <button v-if="isLoggedIn && !customerPhone" class="identity-sub-btn" @click="goBindPhone">去绑定</button>
-        <button
-          v-if="!isLoggedIn && hasStoreContext"
-          class="identity-login-btn"
-          open-type="getPhoneNumber"
-          :disabled="authorizing"
-          @getphonenumber="handleLoginAuth"
-        >{{ authorizing ? '登录中…' : '微信快捷登录' }}</button>
-        <button
-          v-else-if="!isLoggedIn"
-          class="identity-login-btn"
-          :disabled="authorizing"
-          @click="scanStoreCode"
-        >扫码进入门店</button>
       </view>
 
       <view class="store-card" @click="showStoreInfo">
@@ -76,7 +85,7 @@
         <text class="service-title">服务与设置</text>
         <view class="service-list">
           <view class="service-row" @click="goOrders">
-            <view class="service-icon"><text>单</text></view>
+            <view class="service-icon"><text class="iconfont icon-order"></text></view>
             <view class="service-copy">
               <text class="service-name">我的订单</text>
               <text class="service-desc">{{ !isLoggedIn ? '登录后查看历史订单' : (recentOrder ? '查看历史订单和消费明细' : '暂无订单记录') }}</text>
@@ -84,9 +93,19 @@
             <text class="card-arrow">›</text>
           </view>
 
+          <view v-if="isLoggedIn && inviteRewardEnabled" class="service-divider"></view>
+          <view v-if="isLoggedIn && inviteRewardEnabled" class="service-row" @click="goInvite">
+            <view class="service-icon"><text class="iconfont icon-ticket"></text></view>
+            <view class="service-copy">
+              <text class="service-name">邀请好友</text>
+              <text class="service-desc">带朋友到店，双方都有优惠券</text>
+            </view>
+            <text class="card-arrow">›</text>
+          </view>
+
           <view v-if="storePhone" class="service-divider"></view>
           <view v-if="storePhone" class="service-row" @click="callStore">
-            <view class="service-icon"><text>电</text></view>
+            <view class="service-icon"><text class="iconfont icon-phone"></text></view>
             <view class="service-copy">
               <text class="service-name">联系门店</text>
               <text class="service-desc">拨打门店电话</text>
@@ -96,7 +115,7 @@
         </view>
       </view>
 
-      <button v-if="isLoggedIn" class="logout-text-btn" @click="logout">退出登录</button>
+      <button v-if="isLoggedIn" class="logout-text-btn tap-shrink" @click="logout">退出登录</button>
 
       <view class="agreement-row">
         <text class="agreement-link" @click="openAgreement('user')">用户协议</text>
@@ -110,8 +129,12 @@
 <script>
 import { computed, ref } from 'vue'
 import { getMemberProfile, entryJoin } from '@/api/auth'
+import { getShopInfo } from '@/api/order'
 import { clearCustomerSession, saveCustomerSession } from '@/utils/auth'
+import { scanStoreCode } from '@/utils/scan'
 import { formatMoney, formatPhone } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
 
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
@@ -144,6 +167,7 @@ const formatOrderTime = (value) => {
 }
 
 export default {
+  components: { StateLoading, StateError },
   setup() {
     const customer = ref({})
     const loading = ref(false)
@@ -165,11 +189,46 @@ export default {
       customer.value.tenant_id
     ))
 
-    const currentTableNo = computed(() =>
-      uni.getStorageSync('table_no') ||
-      customer.value.table_no ||
-      ''
-    )
+    const newCustomerCouponPreview = ref(null)   // { name, amount, min_amount, valid_days }
+    // 跟点餐页(menu.vue)读同一个 /v1/shop/info 字段，保证登录按钮上写的数字
+    // 和点餐页会员Tab、登录后弹出的新人券金额是同一个数据源、不会对不上。
+    const newCustomerHookText = computed(() => {
+      const p = newCustomerCouponPreview.value
+      if (!p || !(p.amount > 0)) return '登录解锁会员专属优惠'
+      const amount = formatMoney(p.amount)
+      const min = Number(p.min_amount || 0)
+      return min > 0 ? `新客立减¥${amount}，满${min.toFixed(0)}元可用` : `新客立减¥${amount}，授权手机号立得`
+    })
+    const inviteRewardEnabled = ref(false)   // 这家店有没有开"老带新双边奖励"，决定"邀请好友"入口显不显示
+    const loadNewCustomerCouponPreview = async () => {
+      if (!hasStoreContext.value) return
+      const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+      if (!shop) return
+      try {
+        const res = await getShopInfo(shop)
+        if (res?.code === 200) {
+          newCustomerCouponPreview.value = res.data?.new_customer_coupon_preview || null
+          inviteRewardEnabled.value = Boolean(res.data?.invite_reward_enabled)
+        }
+      } catch (e) {}
+    }
+    const goInvite = () => uni.navigateTo({ url: '/subpkg-member/pages/invite' })
+
+    // 会话正常结束时 menu.vue 会主动清掉 table_no（见 menu.vue 里 tableSessionClosed
+    // 的处理），这里再按时间兜底一层：如果店员在客户没重新打开点餐页的情况下远程结了
+    // 账，table_no 可能没被及时清掉——超过后端会话过期时长（12小时，跟
+    // dining_session_service.SESSION_EXPIRE_HOURS 对齐）就不再当成"当前在店"处理，
+    // 避免顾客几天后打开小程序还看到"XX桌·堂食"这种和事实不符的提示。
+    const TABLE_CONTEXT_STALE_MS = 12 * 60 * 60 * 1000
+    const currentTableNo = computed(() => {
+      const storedTable = uni.getStorageSync('table_no') || ''
+      if (storedTable) {
+        const storedAt = Number(uni.getStorageSync('table_no_at') || 0)
+        if (storedAt && Date.now() - storedAt > TABLE_CONTEXT_STALE_MS) return ''
+        return storedTable
+      }
+      return customer.value.table_no || ''
+    })
 
     const storeSceneText = computed(() => {
       const table = currentTableNo.value
@@ -206,6 +265,10 @@ export default {
 
     const lastVisitText = computed(() => formatShortDate(customer.value.last_consume_time || customer.value.last_visit_time))
 
+    const memberLevelLabel = computed(() => customer.value.level || '普通会员')
+    const memberPoints = computed(() => customer.value.points ?? 0)
+    const goGrowth = () => go('/subpkg-member/pages/growth')
+
     const recentOrderTime = computed(() => formatOrderTime(recentOrder.value?.createdAt || recentOrder.value?.created_at || recentOrder.value?.created_time))
 
     const recentOrderScene = computed(() => {
@@ -226,6 +289,9 @@ export default {
       isLoggedIn.value = Boolean(token)
       error.value = ''
       loadRecentOrder()
+      // 新客券预览（未登录用）和邀请奖励开关（登录后要不要显示"邀请好友"入口）
+      // 共用同一个 /v1/shop/info 请求，两种登录态都要跑，所以放在 token 判断之前。
+      loadNewCustomerCouponPreview()
 
       if (!token) {
         customer.value = {}
@@ -282,6 +348,22 @@ export default {
 
     const go = (url) => uni.navigateTo({ url })
 
+    const returnToOrdering = () => {
+      if (!hasStoreContext.value) return
+      const pages = getCurrentPages()
+      if (pages.length > 1) {
+        uni.navigateBack()
+        return
+      }
+      const table = currentTableNo.value
+      const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+      const query = [
+        table ? `table=${encodeURIComponent(table)}` : '',
+        shop ? `shop=${encodeURIComponent(shop)}` : ''
+      ].filter(Boolean).join('&')
+      uni.redirectTo({ url: `/subpkg-order/pages/menu${query ? `?${query}` : ''}` })
+    }
+
     const handleLoginAuth = async (event) => {
       if (authorizing.value) return
       const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
@@ -308,49 +390,25 @@ export default {
           code,
           phone_code: phoneCode,
           agreement_accepted: true,
-        })
+          invite_code: uni.getStorageSync('invite_code') || '',
+        }, { authRedirect: false })
         if (res?.code !== 200) {
           uni.showToast({ title: res?.msg || '登录失败，请重试', icon: 'none' })
           return
         }
+        // 邀请码是一次性的，绑定动作后端只在"确实是新客户"时才生效——
+        // 不管这次有没有真的绑上，用过就清掉，避免以后在别的店误用。
+        uni.removeStorageSync('invite_code')
         saveCustomerSession(res.data || {})
         isLoggedIn.value = true
         uni.showToast({ title: '已登录', icon: 'none' })
         await loadProfile()
+        returnToOrdering()
       } catch (err) {
         uni.showToast({ title: err?.message || '登录失败，请重试', icon: 'none' })
       } finally {
         authorizing.value = false
       }
-    }
-
-    const routeByScanResult = (res = {}) => {
-      const path = res.path || ''
-      if (path) {
-        const target = path.startsWith('/') ? path : `/${path}`
-        uni.navigateTo({ url: target })
-        return
-      }
-
-      const result = res.result || ''
-      const sceneMatch = result.match(/[?&]scene=([^&]+)/)
-      const scene = sceneMatch ? decodeURIComponent(sceneMatch[1]).trim() : result.trim()
-      if (!scene) {
-        uni.showToast({ title: '没有识别到桌贴码', icon: 'none' })
-        return
-      }
-      uni.setStorageSync('entrance_scene', scene)
-      uni.navigateTo({ url: `/pages/entry/index?scene=${encodeURIComponent(scene)}` })
-    }
-
-    const scanStoreCode = () => {
-      uni.scanCode({
-        onlyFromCamera: true,
-        success: routeByScanResult,
-        fail: () => {
-          uni.showToast({ title: '请扫描桌贴点餐码', icon: 'none' })
-        }
-      })
     }
 
     const goLogin = () => {
@@ -444,12 +502,20 @@ export default {
       authorizing,
       currentStoreName,
       hasStoreContext,
+      newCustomerCouponPreview,
+      newCustomerHookText,
+      loadNewCustomerCouponPreview,
+      inviteRewardEnabled,
+      goInvite,
       storeSceneText,
       storePhone,
       customerPhone,
       customerAvatar,
       displayName,
       lastVisitText,
+      memberLevelLabel,
+      memberPoints,
+      goGrowth,
       recentOrderTime,
       recentOrderScene,
       recentOrderSummary,
@@ -478,7 +544,7 @@ export default {
 <style lang="scss">
 .mine-page {
   min-height: 100vh;
-  background: #F5F7F9;
+  background: var(--bg-page);
 }
 
 .mine-content {
@@ -488,27 +554,12 @@ export default {
 .state-card {
   margin: 160rpx 32rpx 0;
   padding: 40rpx 32rpx;
-  background: #fff;
-  border-radius: 32rpx;
+  background: var(--bg-card);
+  border-radius: var(--radius-hero);
+  box-shadow: var(--card-shadow);
   text-align: center;
 }
 
-.spinner {
-  width: 56rpx;
-  height: 56rpx;
-  margin: 0 auto 22rpx;
-  border: 6rpx solid #d8f7e6;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.state-title,
-.state-desc,
 .identity-name,
 .identity-phone,
 .identity-bind,
@@ -524,36 +575,16 @@ export default {
   display: block;
 }
 
-.state-title {
-  color: #171A1D;
-  font-size: 32rpx;
-  font-weight: 700;
-}
-
-.state-desc {
-  margin-top: 10rpx;
-  color: #7D848E;
-  font-size: 26rpx;
-}
-
-.primary-btn {
-  margin-top: 28rpx;
-  width: 100%;
-  height: 96rpx;
-  border-radius: 24rpx;
-  background: #07C160;
-  color: #fff;
-  font-size: 30rpx;
-  font-weight: 700;
-}
-
 .identity-card {
-  min-height: 280rpx;
   margin: 0 32rpx;
   padding: 36rpx;
-  background: #07C160;
-  border-radius: 36rpx;
+  background: var(--brand-gradient);
+  border-radius: var(--radius-hero);
   color: #fff;
+}
+
+.identity-top {
+  min-height: 208rpx;
   display: flex;
   align-items: center;
   gap: 24rpx;
@@ -609,6 +640,65 @@ export default {
   line-height: 34rpx;
 }
 
+.identity-promo {
+  margin-top: 24rpx;
+  padding: 18rpx 24rpx;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.identity-promo-icon {
+  font-size: 32rpx;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.identity-promo-text {
+  flex: 1;
+  color: #fff7e0;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+}
+
+.identity-stats {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 14rpx;
+  padding: 8rpx 18rpx;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999rpx;
+}
+
+.identity-level {
+  color: #fff7e0;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 34rpx;
+}
+
+.identity-stats-sep {
+  margin: 0 10rpx;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 24rpx;
+}
+
+.identity-points {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
+.identity-stats-arrow {
+  margin-left: 8rpx;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 28rpx;
+  line-height: 1;
+}
+
 .identity-sub-btn,
 .identity-login-btn {
   flex-shrink: 0;
@@ -625,7 +715,7 @@ export default {
   height: 72rpx;
   padding: 0 28rpx;
   background: #fff;
-  color: #07C160;
+  color: var(--brand);
   font-size: 26rpx;
   font-weight: 700;
   line-height: 72rpx;
@@ -638,8 +728,9 @@ export default {
 .recent-order-card,
 .service-card {
   margin: 28rpx 32rpx 0;
-  background: #fff;
-  border-radius: 32rpx;
+  background: var(--bg-card);
+  border-radius: var(--radius-hero);
+  box-shadow: var(--card-shadow);
 }
 
 .store-card {
@@ -656,14 +747,14 @@ export default {
 }
 
 .store-label {
-  color: #8A9099;
+  color: var(--text-3);
   font-size: 26rpx;
   line-height: 36rpx;
 }
 
 .store-name {
   margin-top: 16rpx;
-  color: #171A1D;
+  color: var(--text-1);
   font-size: 34rpx;
   line-height: 48rpx;
   font-weight: 600;
@@ -675,13 +766,13 @@ export default {
 .store-scene,
 .store-visit {
   margin-top: 10rpx;
-  color: #7D848E;
+  color: var(--text-3);
   font-size: 26rpx;
   line-height: 36rpx;
 }
 
 .card-arrow {
-  color: #C3C8CF;
+  color: var(--text-3);
   font-size: 44rpx;
   line-height: 1;
   flex-shrink: 0;
@@ -699,7 +790,7 @@ export default {
 
 .section-title,
 .service-title {
-  color: #171A1D;
+  color: var(--text-1);
   font-size: 34rpx;
   line-height: 48rpx;
   font-weight: 700;
@@ -710,14 +801,14 @@ export default {
   display: flex;
   align-items: center;
   gap: 20rpx;
-  color: #7D848E;
+  color: var(--text-3);
   font-size: 26rpx;
   line-height: 36rpx;
 }
 
 .order-summary {
   margin-top: 16rpx;
-  color: #171A1D;
+  color: var(--text-1);
   font-size: 30rpx;
   line-height: 42rpx;
   overflow: hidden;
@@ -733,13 +824,13 @@ export default {
 }
 
 .order-amount {
-  color: #171A1D;
+  color: var(--text-1);
   font-size: 34rpx;
   font-weight: 800;
 }
 
 .order-status {
-  color: #7D848E;
+  color: var(--text-3);
   font-size: 26rpx;
 }
 
@@ -772,7 +863,7 @@ export default {
   width: 72rpx;
   height: 72rpx;
   border-radius: 20rpx;
-  background: #E9F9F0;
+  background: var(--brand-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -780,9 +871,10 @@ export default {
 }
 
 .service-icon text {
-  color: #07C160;
-  font-size: 28rpx;
-  font-weight: 800;
+  color: var(--brand);
+  font-size: 36rpx;
+  line-height: 40rpx;
+  font-weight: 400;
 }
 
 .service-copy {
@@ -791,7 +883,7 @@ export default {
 }
 
 .service-name {
-  color: #171A1D;
+  color: var(--text-1);
   font-size: 32rpx;
   line-height: 44rpx;
   font-weight: 600;
@@ -799,7 +891,7 @@ export default {
 
 .service-desc {
   margin-top: 4rpx;
-  color: #8A9099;
+  color: var(--text-3);
   font-size: 24rpx;
   line-height: 34rpx;
   overflow: hidden;
@@ -810,7 +902,7 @@ export default {
 .service-divider {
   height: 1rpx;
   margin-left: 92rpx;
-  background: #EEF1F4;
+  background: var(--border);
 }
 
 .logout-text-btn {
@@ -819,7 +911,7 @@ export default {
   height: 72rpx;
   padding: 0 34rpx;
   background: transparent;
-  color: #8A9099;
+  color: var(--text-3);
   font-size: 28rpx;
   line-height: 72rpx;
 }
@@ -835,7 +927,7 @@ export default {
 
 .agreement-link,
 .agreement-sep {
-  color: #A0A5AC;
+  color: var(--text-3);
   font-size: 24rpx;
   line-height: 34rpx;
 }

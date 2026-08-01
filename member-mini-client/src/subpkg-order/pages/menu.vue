@@ -1,23 +1,43 @@
 <template>
   <view class="order-page">
 
-    
+
     <view class="shop-header">
-      <view class="shop-title-main">
-        <text class="shop-name">{{ shopName }}</text>
-        <view class="shop-meta-row" @click="showTableHint">
-          <text class="shop-table-text">{{ tableDisplayText }}</text>
-          <text class="shop-meta-dot">路</text>
-          <text class="shop-mode-text">{{ orderModeDisplayText }}</text>
-          <text class="shop-meta-arrow">鈥</text>
+      <view class="shop-header-row">
+        <image v-if="shopLogo" class="shop-logo" :src="shopLogo" mode="aspectFill" />
+        <view class="shop-title-main">
+          <text class="shop-name">{{ shopName }}</text>
+          <view class="shop-meta-row" @click="showTableHint">
+            <text class="shop-table-text">{{ tableDisplayText }}</text>
+            <text class="shop-meta-dot">·</text>
+            <text class="shop-mode-text">{{ orderModeDisplayText }}</text>
+            <text class="shop-meta-arrow iconfont icon-roundright"></text>
+          </view>
         </view>
       </view>
     </view>
 
-    
+
+    <view v-if="activeTab === 'order' && couponBarVisible" class="coupon-bar tap-shrink" @click="openCouponPicker">
+      <text class="coupon-bar-icon iconfont icon-youhuiquan"></text>
+      <text class="coupon-bar-text">{{ couponBarPrefix }}<text class="coupon-bar-amount">{{ couponBarAmount }}</text></text>
+      <text class="coupon-bar-arrow iconfont icon-roundright"></text>
+    </view>
+    <button
+      v-else-if="activeTab === 'order' && !isCustomerLoggedIn && newCustomerCouponPreview"
+      class="coupon-bar new-customer-bar tap-shrink"
+      open-type="getPhoneNumber"
+      :disabled="memberAuthorizing"
+      @getphonenumber="handleMemberCardAuth"
+    >
+      <text class="coupon-bar-icon iconfont icon-youhuiquan"></text>
+      <text class="coupon-bar-text">{{ newCustomerHookText }}</text>
+      <text class="coupon-bar-arrow iconfont icon-roundright"></text>
+    </button>
+
     <view class="menu-body" v-show="activeTab === 'order'">
 
-      
+
       <scroll-view class="category-nav" scroll-y scroll-with-animation :scroll-top="categoryScrollTop">
         <view
           v-for="(cat, catIdx) in categories"
@@ -27,11 +47,12 @@
           :class="{ active: activeCategory === cat }"
           @click="switchCategory(cat)"
         >
-          <text>{{ cat }}</text>
+          <view class="cat-icon-wrap"><text :class="['cat-icon', 'iconfont', categoryIconClass(cat)]"></text></view>
+          <text class="cat-name">{{ categoryDisplayName(cat) }}</text>
         </view>
       </scroll-view>
 
-      
+
       <scroll-view
         class="dish-scroll"
         scroll-y
@@ -39,9 +60,9 @@
         scroll-with-animation
         @scroll="onDishScroll"
       >
-        
+
         <view v-if="lastOrderItems.length" class="reorder-bar">
-          <text class="reorder-label">鍐嶆潵涓€鍗</text>
+          <text class="reorder-label">再来一单</text>
           <scroll-view scroll-x class="reorder-scroll">
             <view class="reorder-chips">
               <view
@@ -56,17 +77,18 @@
             </view>
           </scroll-view>
           <view class="reorder-all-btn" @click="reorderAll">
-            <text class="reorder-all-text">鍏ㄩ儴鍐嶆潵涓€娆</text>
+            <text class="reorder-all-text">全部再来一份</text>
           </view>
         </view>
 
-        <view v-if="!allDishes.length" class="empty-menu">
+        <view v-if="!loading && !loadError && !allDishes.length" class="empty-menu">
+          <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
           <text class="empty-title">暂无菜品</text>
           <text class="empty-desc">菜单加载失败</text>
           <view class="empty-retry" @click="loadMenu"><text>重新加载</text></view>
         </view>
         <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
-          <view class="cat-divider"><view class="cat-divider-line"></view><text class="cat-divider-text">{{ cat }}</text><view class="cat-divider-line"></view></view>
+          <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
           <view
             v-for="(dish, dishIdx) in dishesByCategory(cat)"
             :key="dish.id"
@@ -83,13 +105,9 @@
                 @error="markDishImageFailed(dish.id)"
               />
               <view v-else class="dish-placeholder">
-                <view class="dish-placeholder-icon">
-                  <view class="dish-placeholder-plate"></view>
-                  <view class="dish-placeholder-stick dish-placeholder-stick--left"></view>
-                  <view class="dish-placeholder-stick dish-placeholder-stick--right"></view>
-                </view>
+                <image class="dish-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
               </view>
-              <view v-if="isSoldOut(dish)" class="dish-soldout-mask"><text>宸插敭缃</text></view>
+              <view v-if="isSoldOut(dish)" class="dish-soldout-mask"><text>已售罄</text></view>
             </view>
             <view class="dish-info">
               <view class="dish-title-row">
@@ -109,12 +127,12 @@
               </view>
               <view class="dish-bottom-row">
                 <view class="dish-price-wrap">
-                  <text class="dish-price-currency">楼</text>
+                  <text class="dish-price-currency">¥</text>
                   <text class="dish-price-amount">{{ dishPriceText(dish) }}</text>
                   <text v-if="dishPriceSuffix(dish)" class="dish-price-suffix">{{ dishPriceSuffix(dish) }}</text>
                 </view>
                 <view class="dish-counter" @click.stop>
-                  <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>宸插敭缃</text></view>
+                  <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>已售罄</text></view>
                   <template v-else-if="hasSpecs(dish)">
                     <view v-if="dishOptionKindCount(dish.id) > 0" class="option-count-pill" @click.stop="openCart">
                       <text>{{ optionCountText(dish.id) }}</text>
@@ -125,11 +143,11 @@
                   </template>
                   <template v-else>
                     <view v-if="cartCount(dish.id) > 0" class="dish-qty-control">
-                      <view class="counter-touch" @click.stop="removeFromCart(dish)"><view class="counter-btn minus"><text>-</text></view></view>
+                      <view class="counter-touch" @click.stop="removeFromCart(dish)"><view class="counter-btn minus"><text class="iconfont icon-move"></text></view></view>
                       <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === dish.id }">{{ cartCount(dish.id) }}</text>
-                      <view class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text>+</text></view></view>
+                      <view class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
                     </view>
-                    <view v-else class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text>+</text></view></view>
+                    <view v-else class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
                   </template>
                 </view>
               </view>
@@ -141,7 +159,7 @@
 
     </view>
 
-    
+
     <scroll-view v-show="activeTab === 'home'" class="tab-scroll" scroll-y>
       <view class="home-tab">
         <view class="ht-status-card">
@@ -167,7 +185,7 @@
         <view v-if="featuredDish" class="ht-section">
           <view class="ht-section-head">
             <text class="ht-section-title">店长推荐</text>
-            <text class="ht-section-sub">绮鹃€夋嫑鐗岃彍鍝</text>
+            <text class="ht-section-sub">精选招牌菜品</text>
           </view>
           <view class="ht-feature-card" @click="openProductDetail(featuredDish)">
             <view class="ht-feature-img-wrap">
@@ -179,7 +197,7 @@
                 @error="markDishImageFailed(featuredDish.id)"
               />
               <view v-else class="ht-feature-placeholder">
-                <view class="ht-feature-plate"></view>
+                <image class="ht-feature-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
               </view>
             </view>
             <view class="ht-feature-info">
@@ -190,7 +208,7 @@
               <text v-if="dishCardDesc(featuredDish)" class="ht-feature-desc">{{ dishCardDesc(featuredDish) }}</text>
               <view class="ht-feature-bottom">
                 <view class="ht-feature-price">
-                  <text class="ht-feature-yen">楼</text>
+                  <text class="ht-feature-yen">¥</text>
                   <text class="ht-feature-amount">{{ dishPriceText(featuredDish) }}</text>
                   <text v-if="dishPriceSuffix(featuredDish)" class="ht-feature-suffix">{{ dishPriceSuffix(featuredDish) }}</text>
                 </view>
@@ -208,8 +226,8 @@
 
         <view v-if="homeLastOrderItems.length" class="ht-section">
           <view class="ht-section-head ht-section-head--row">
-            <text class="ht-section-title">鍐嶆潵涓€鍗</text>
-            <text class="ht-section-action" @click="handleHomeReorderAll">鍏ㄩ儴鍐嶆潵涓€娆</text>
+            <text class="ht-section-title">再来一单</text>
+            <text class="ht-section-action" @click="handleHomeReorderAll">全部再来一份</text>
           </view>
           <view class="ht-last-list">
             <view
@@ -228,46 +246,50 @@
       </view>
     </scroll-view>
 
-    
+
     <scroll-view v-show="activeTab === 'card'" class="tab-scroll" scroll-y>
       <view v-if="bannerInfo" class="card-tab member-center">
-        <view class="member-identity-card">
-          <view class="member-avatar"><text>{{ bannerInfo.nameChar }}</text></view>
-          <view class="member-identity-main">
-            <text class="member-level">{{ memberLevelLabel }}</text>
-            <text class="member-growth-text">{{ memberGrowthText }}</text>
-            <view v-if="memberUpgradeText" class="member-progress-wrap">
-              <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
-              <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
+        <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
+          <view class="mic-glow"></view>
+          <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
+          <view class="mic-body">
+            <view class="member-avatar">
+              <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
+              <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
             </view>
+            <view class="member-identity-main">
+              <view class="mic-crest-row">
+                <text class="member-level">{{ memberLevelLabel }}</text>
+              </view>
+              <text class="mic-sub">MEMBER</text>
+            </view>
+            <text class="mic-chevron iconfont icon-roundright"></text>
           </view>
-          <view class="member-level-pill"><text>{{ memberLevelLabel }}</text></view>
+          <view v-if="memberUpgradeText" class="member-progress-wrap">
+            <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
+            <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
+          </view>
+          <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
+            <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
+            <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
+          </view>
         </view>
 
         <view class="member-assets-card">
-          <view class="member-asset-item" @click="goBalanceDetail">
-            <text class="member-asset-value">楼{{ bannerInfo.balance.toFixed(2) }}</text>
-            <text class="member-asset-label">余额</text>
-            <text class="member-asset-hint">可用于下单支付</text>
-          </view>
-          <view class="member-asset-divider"></view>
           <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
             <text class="member-asset-value">{{ bannerInfo.points || 0 }}</text>
             <text class="member-asset-label">积分</text>
-            <text class="member-asset-hint">消费1元得1积分</text>
           </view>
           <view class="member-asset-divider"></view>
           <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
             <text class="member-asset-value">{{ bannerInfo.couponCount }}</text>
-            <text class="member-asset-label">浼樻儬鍒</text>
-            <text class="member-asset-hint">涓嬪崟鏃惰嚜鍔ㄦ姷鎵</text>
+            <text class="member-asset-label">优惠券</text>
           </view>
         </view>
 
         <view class="member-main-action-card">
           <text class="member-action-title">您有{{ bannerInfo.couponCount }}张优惠券可用</text>
-          <text class="member-action-desc">查看会员权益享受更多优惠</text>
-          <view class="member-action-btn" @click="goOrderFromMember"><text>鍘荤偣椁</text></view>
+          <view class="member-action-btn" @click="goOrderFromMember"><text>去点餐</text></view>
         </view>
 
         <view v-if="usableMemberCoupons.length" class="member-section">
@@ -275,7 +297,7 @@
           <view class="member-coupon-list">
             <view v-for="coupon in usableMemberCoupons" :key="coupon.id || coupon.coupon_id || coupon.name" class="member-coupon-card" @click="useMemberCoupon(coupon)">
               <view class="member-coupon-value">
-                <text class="member-coupon-yen">楼</text>
+                <text class="member-coupon-yen">¥</text>
                 <text class="member-coupon-amount">{{ couponAmountText(coupon) }}</text>
               </view>
               <view class="member-coupon-info">
@@ -288,14 +310,15 @@
         </view>
 
         <view class="member-service-card">
-          <view class="member-service-row" @click="goBalanceDetail">
-            <text>余额明细</text><text class="member-service-arrow">鈥</text>
-          </view>
           <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
-            <text>积分明细</text><text class="member-service-arrow">鈥</text>
+            <view class="member-service-icon"><text class="iconfont icon-timefill"></text></view>
+            <text class="member-service-label">积分明细</text>
+            <text class="member-service-arrow iconfont icon-roundright"></text>
           </view>
           <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
-            <text>浼樻儬鍒</text><text class="member-service-arrow">鈥</text>
+            <view class="member-service-icon"><text class="iconfont icon-youhuiquan"></text></view>
+            <text class="member-service-label">优惠券</text>
+            <text class="member-service-arrow iconfont icon-roundright"></text>
           </view>
         </view>
       </view>
@@ -305,11 +328,11 @@
         <view class="cte-btn cte-btn-plain" @click="loadMemberStatus">
           <text>{{ memberLoading ? '\u52a0\u8f7d\u4e2d...' : '\u91cd\u65b0\u52a0\u8f7d' }}</text>
         </view>
-        <text class="cte-secondary" @click="goOrderFromMember">鍘荤偣椁</text>
+        <text class="cte-secondary" @click="goOrderFromMember">去点餐</text>
       </view>
       <view v-else class="card-tab-empty">
         <text class="cte-title">会员中心</text>
-        <text class="cte-desc">鐧诲綍鍚庝韩鍙椾細鍛樹紭鎯</text>
+        <text class="cte-desc">{{ newCustomerHookText }}</text>
         <button
           class="cte-btn"
           open-type="getPhoneNumber"
@@ -318,11 +341,10 @@
         >
           <text>{{ memberAuthorizing ? '\u6388\u6743\u4e2d...' : '\u67e5\u770b\u4f1a\u5458\u6743\u76ca' }}</text>
         </button>
-        <text class="cte-secondary" @click="goOrderFromMember">鍘荤偣椁</text>
+        <text class="cte-secondary" @click="goOrderFromMember">去点餐</text>
       </view>
     </scroll-view>
 
-    <!-- 闂傚倸鍊烽懗鍫曞箠閹剧粯鍋ら柕濞炬櫅閸ㄥ倿鏌ｉ悢绋款棎闁?Tab -->
     <view v-show="activeTab === 'mine'" class="tab-scroll tab-mine-redirect">
     </view>
 
@@ -333,25 +355,50 @@
         <text class="order-status-entry-desc">{{ tableOrderStatusTitle }}</text>
       </view>
       <text v-if="pendingOrderCount > 0" class="order-status-entry-count">{{ pendingOrderCount }}</text>
-      <text class="order-status-entry-arrow">鈥</text>
+      <text class="order-status-entry-arrow iconfont icon-roundright"></text>
     </view>
 
-    
+
+    <view
+      v-if="activeTab === 'order' && couponNudgeState.visible"
+      class="coupon-nudge-bar"
+      :class="{ 'coupon-nudge-bar--done': couponNudgeState.satisfied }"
+    >
+      <view class="coupon-nudge-main" @click="couponNudgeState.satisfied ? openCouponPicker() : goCouponAddOn()">
+        <text class="coupon-nudge-icon iconfont icon-youhuiquan"></text>
+        <view class="coupon-nudge-copy">
+          <template v-if="couponNudgeState.satisfied">
+            <text class="coupon-nudge-title">已享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}优惠</text>
+          </template>
+          <template v-else>
+            <text class="coupon-nudge-title">再加 <text class="coupon-nudge-strong">¥{{ couponNudgeState.diffText }}</text>，立享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}</text>
+          </template>
+          <text class="coupon-nudge-sub">当前 ¥{{ formatPrice(totalPrice) }} / 门槛 ¥{{ couponNudgeState.thresholdText }}</text>
+        </view>
+      </view>
+      <view v-if="!couponNudgeState.satisfied" class="coupon-nudge-action" @click="goCouponAddOn">
+        <text>去凑单</text>
+      </view>
+      <view v-else class="coupon-nudge-action coupon-nudge-action--plain" @click="openCouponPicker">
+        <text>换券</text>
+      </view>
+    </view>
+
     <view v-show="activeTab === 'order'" class="cart-bar" :class="{ 'has-items': totalCount > 0 }">
       <view class="cart-main" @click="totalCount > 0 ? openCart() : null">
-        
+
         <view class="cart-icon-wrap" :class="{ 'cart-icon-wrap--pulse': cartIconPulse }">
-          <view class="cart-icon-svg"></view>
+          <text :class="['cart-iconfont', 'iconfont', totalCount > 0 ? 'icon-cartfill' : 'icon-cart']"></text>
           <view v-if="totalCount > 0" class="cart-badge" :class="{ 'cart-badge--pulse': cartBadgePulse }">
             <text>{{ cartBadgeText }}</text>
           </view>
         </view>
 
-        
+
         <view class="cart-info">
           <template v-if="totalCount > 0">
-            <text class="cart-price" :class="{ 'cart-price--highlight': amountPulse }">楼{{ formatPrice(totalPrice) }}</text>
-            <text class="cart-tip">鍏眥{ totalCount }}浠</text>
+            <text class="cart-price" :class="{ 'cart-price--highlight': amountPulse }">¥{{ formatPrice(totalPrice) }}</text>
+            <text class="cart-tip">共{{ totalCount }}份</text>
           </template>
           <template v-else>
             <text class="cart-empty">未选择商品</text>
@@ -359,119 +406,108 @@
         </view>
       </view>
 
-      
+
       <view class="cart-right">
         <view
           class="checkout-btn"
           :class="{ disabled: totalCount === 0 }"
           @click.stop="totalCount > 0 && openCart()"
         >
-          <text>鍘荤粨绠</text>
+          <text>去结算</text>
         </view>
       </view>
     </view>
 
-    
+
     <view class="bottom-nav">
       <view :class="['bn-item', { active: activeTab === 'home' }]" @click="activeTab = 'home'">
-        <text class="bn-label">首页</text>
+        <text :class="['bn-icon', 'iconfont', activeTab === 'home' ? 'icon-homefill' : 'icon-home']"></text>
       </view>
       <view :class="['bn-item', { active: activeTab === 'order' }]" @click="activeTab = 'order'">
-        <text class="bn-label">点餐</text>
+        <text :class="['bn-icon', 'iconfont', activeTab === 'order' ? 'icon-shopfill' : 'icon-shop']"></text>
         <view v-if="totalCount > 0 && activeTab !== 'order'" class="bn-dot"></view>
       </view>
       <view :class="['bn-item', { active: activeTab === 'card' }]" @click="switchToCard">
-        <text class="bn-label">会员</text>
+        <text :class="['bn-icon', 'iconfont', activeTab === 'card' ? 'icon-likefill' : 'icon-like']"></text>
         <view v-if="bannerInfo && bannerInfo.couponCount > 0 && activeTab !== 'card'" class="bn-dot"></view>
       </view>
       <view :class="['bn-item', { active: activeTab === 'mine' }]" @click="goMine">
-        <text class="bn-label">我的</text>
+        <text :class="['bn-icon', 'iconfont', activeTab === 'mine' ? 'icon-myfill' : 'icon-my']"></text>
       </view>
     </view>
 
-    
+
     <!-- Order confirmation sheet -->
     <view v-if="showCart" class="mask" @click="closeOrderConfirm">
       <view class="cart-sheet order-confirm-sheet" @click.stop>
         <view class="order-confirm-head">
           <text class="order-confirm-title">{{ confirmationText.title }}</text>
-          <text class="order-confirm-close" @click="closeOrderConfirm">{{ confirmationText.close }}</text>
+          <text class="order-confirm-close iconfont icon-close" @click="closeOrderConfirm"></text>
         </view>
 
         <scroll-view class="order-confirm-content" scroll-y>
-          <view class="order-summary-card" :class="{ 'order-summary-card--missing': !tableNo }">
-            <view class="order-summary-topline">
-              <view class="summary-service">
-                <view class="summary-mode-pill"><text>{{ orderModeText.dineIn }}</text></view>
-                <view class="summary-table-line">
-                  <text class="summary-table-label">{{ confirmationText.tableLabel }}</text>
-                  <text class="summary-table-no">{{ tableNo || orderModeText.unknownTable }}</text>
-                </view>
-              </view>
-              <text class="summary-table-tip">{{ tableNo ? confirmationText.tableTip : confirmationText.tableMissing }}</text>
-            </view>
-            <view class="order-summary-subline">
-              <text>{{ confirmationText.itemCountPrefix }}{{ totalCount }}{{ confirmationText.itemCountSuffix }}</text>
-              <text>{{ prepareHint }}</text>
-            </view>
+          <view class="order-summary-card" :class="{ 'order-summary-card--missing': !tableNo }" @click="showTableHint">
+            <view class="summary-mode-pill"><text>{{ orderModeText.dineIn }}</text></view>
+            <text class="summary-table-no">{{ (tableNo || orderModeText.unknownTable) + '桌' }}</text>
+            <text v-if="!tableNo" class="summary-table-tip">{{ confirmationText.tableMissing }}</text>
           </view>
 
           <view class="confirm-card selected-items-section">
             <view class="selected-items-summary" @click="toggleItemsExpanded">
               <view class="selected-items-title-wrap">
-                <text class="selected-items-title">{{ confirmationText.selectedItems }}({{ totalCount }})</text>
-                <text class="selected-items-sub">{{ itemsExpanded ? confirmationText.itemEditHint : confirmationText.itemFoldHint }}</text>
+                <view class="confirm-title-line"><text class="confirm-title-icon iconfont icon-list"></text><text class="selected-items-title">{{ confirmationText.selectedItems }}({{ totalCount }})</text></view>
               </view>
               <view class="selected-items-action">
                 <text class="selected-items-amount">{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text>
-                <text class="selected-items-toggle">{{ itemsExpanded ? confirmationText.collapse : confirmationText.expand }}</text>
+                <text :class="['selected-items-toggle-icon', 'iconfont', itemsExpanded ? 'icon-pullup' : 'icon-unfold']"></text>
               </view>
             </view>
             <view v-if="itemsExpanded" class="cart-items-panel">
               <scroll-view class="cart-items" scroll-y>
                 <view v-for="item in cartItems" :key="item.specKey || item.id" class="cart-row">
-                  <text class="cart-row-emoji">{{ item.emoji || confirmationText.noIcon }}</text>
                   <view class="cart-row-main">
                     <text class="cart-row-name">{{ item.name }}</text>
                     <text v-if="item.specLabel" class="cart-row-spec">{{ item.specLabel }}</text>
                   </view>
                   <view class="cart-row-right">
-                    <view class="counter-btn minus sm" @click="removeFromCart(item)"><text>-</text></view>
+                    <view class="counter-btn minus sm" @click="removeFromCart(item)"><text class="iconfont icon-move"></text></view>
                     <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === (item.specKey || item.id) }">{{ item.qty }}</text>
-                    <view class="counter-btn plus sm" @click="increaseCartItem(item)"><text>+</text></view>
+                    <view class="counter-btn plus sm" @click="increaseCartItem(item)"><text class="iconfont icon-add"></text></view>
                     <text class="cart-row-price">{{ confirmationText.currency }}{{ formatPrice(item.price * item.qty) }}</text>
                   </view>
                 </view>
               </scroll-view>
-              <view class="cart-clear-line" @click="clearCart"><text>{{ confirmationText.clear }}</text></view>
+              <view class="cart-clear-line" @click="clearCart"><text class="iconfont icon-delete"></text><text>{{ confirmationText.clear }}</text></view>
             </view>
           </view>
 
           <view class="confirm-card order-preference-section">
+            <view class="remark-label-wrap"><text class="remark-label-icon iconfont icon-edit"></text><text class="remark-label">{{ confirmationText.orderRemark }}</text></view>
+            <view v-if="orderRemarkChips.length" class="remark-chips">
+              <view
+                v-for="chip in orderRemarkChips"
+                :key="chip"
+                class="remark-chip"
+                :class="{ 'remark-chip--on': remark.includes(chip) }"
+                @click="toggleRemarkChip(chip)"
+              ><text>{{ chip }}</text></view>
+            </view>
             <view class="remark-row order-remark-row">
-              <text class="remark-label">{{ confirmationText.orderRemark }}</text>
-              <input class="remark-input" v-model="remark" :placeholder="confirmationText.orderRemarkPlaceholder" placeholder-class="remark-placeholder" maxlength="60" />
+              <text v-if="!showOrderRemarkExtra" class="item-remark-extra-toggle" @click="showOrderRemarkExtra = true">+ 其他要求</text>
+              <input v-else class="remark-input" v-model="remark" :placeholder="confirmationText.orderRemarkPlaceholder" placeholder-class="remark-placeholder" maxlength="60" />
             </view>
           </view>
 
           <view class="confirm-card price-summary-card">
-            <view class="price-row"><text>{{ confirmationText.goodsAmount }}</text><text>{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text></view>
-            <view class="price-row price-row--clickable">
-              <text>{{ confirmationText.coupon }}</text>
+            <view class="price-row"><view class="price-label-wrap"><text class="price-label-icon iconfont icon-list"></text><text>{{ confirmationText.goodsAmount }}</text></view><text>{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text></view>
+            <view class="price-row price-row--clickable" @click="openCouponPicker">
+              <view class="price-label-wrap"><text class="price-label-icon iconfont icon-ticket"></text><text>{{ confirmationText.coupon }}</text></view>
               <text v-if="discountAmount > 0" class="price-discount">-{{ confirmationText.currency }}{{ discountAmount.toFixed(2) }} {{ confirmationText.arrow }}</text>
               <text v-else-if="availableCoupons.length > 0" class="price-muted">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
               <text v-else class="price-muted">{{ confirmationText.couponNone }} {{ confirmationText.arrow }}</text>
             </view>
-            <view v-if="estimatedBalanceAvailable > 0" class="price-row balance-row" @click="useBalance = !useBalance">
-              <view class="balance-row-left"><text>{{ confirmationText.balanceDeduction }}</text><text class="balance-row-desc">{{ confirmationText.balanceAvailable }} {{ confirmationText.currency }}{{ estimatedBalanceAvailable.toFixed(2) }}</text></view>
-              <view class="pbl-switch" :class="{ 'pbl-switch--on': useBalance }"><view class="pbl-switch-thumb"></view></view>
-            </view>
-            <view v-if="useBalance && estimatedBalanceDeduction > 0" class="price-row">
-              <text>{{ confirmationText.balanceUsed }}</text>
-              <text class="price-discount">-{{ confirmationText.currency }}{{ estimatedBalanceDeduction.toFixed(2) }}</text>
-            </view>
             <view class="price-row price-row--payable">
-              <text>{{ wechatPayAmount > 0 ? confirmationText.wechatPay : confirmationText.payable }}</text>
+              <view class="price-label-wrap"><text class="price-label-icon iconfont icon-pay"></text><text>{{ confirmPaymentLabel }}</text></view>
               <text>{{ confirmationText.currency }}{{ wechatPayAmount.toFixed(2) }}</text>
             </view>
           </view>
@@ -479,9 +515,41 @@
 
         <view class="order-confirm-bottom">
           <view class="checkout-btn-full" :class="{ 'checkout-btn-full--disabled': !canSubmitOrder || ordering || paying }" @click="goCheckout">
-            <text>{{ payButtonText }}</text>
+            <text class="checkout-btn-icon iconfont icon-pay"></text><text>{{ payButtonText }}</text>
           </view>
         </view>
+      </view>
+    </view>
+
+    <view v-if="showCouponPicker" class="mask" @click="closeCouponPicker">
+      <view class="coupon-picker-sheet" @click.stop>
+        <view class="cp-head">
+          <text class="cp-title">选择优惠券</text>
+          <text class="cp-close iconfont icon-close" @click="closeCouponPicker"></text>
+        </view>
+        <scroll-view class="cp-list" scroll-y>
+          <view class="cp-option" :class="{ 'cp-option--on': !selectedCouponId }" @click="pickCoupon(null)">
+            <view class="cp-option-main">
+              <text class="cp-option-name">不使用优惠券</text>
+            </view>
+            <text :class="['cp-radio-icon', 'iconfont', !selectedCouponId ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
+          </view>
+          <view
+            v-for="c in couponPickerList"
+            :key="c.id"
+            class="cp-option"
+            :class="{ 'cp-option--on': selectedCouponId === c.id, 'cp-option--disabled': !c.eligible }"
+            @click="pickCoupon(c)"
+          >
+            <view class="cp-option-amount"><text>¥{{ couponPickerAmount(c) }}</text></view>
+            <view class="cp-option-main">
+              <text class="cp-option-name">{{ c.name || '\u4f18\u60e0\u5238' }}</text>
+              <text class="cp-option-cond">{{ c.eligible ? couponPickerCondText(c) : '\u8fd8\u5dee' + formatPrice(Math.max(0, Number(c.min_amount || c.threshold_amount || 0) - totalPrice)) + '\u5143\u53ef\u7528' }}</text>
+            </view>
+            <text :class="['cp-radio-icon', 'iconfont', selectedCouponId === c.id ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
+          </view>
+          <view v-if="!couponPickerList.length" class="cp-empty"><text>暂无可用优惠券</text></view>
+        </scroll-view>
       </view>
     </view>
 
@@ -493,7 +561,7 @@
         <view class="checkout-auth-order">
           <view class="checkout-auth-row"><text>{{ authSheetText.store }}</text><text>{{ shopName }}</text></view>
           <view class="checkout-auth-row"><text>{{ authSheetText.table }}</text><text>{{ tableNo || authSheetText.unknownTable }}</text></view>
-          <view class="checkout-auth-row checkout-auth-row--amount"><text>{{ authSheetText.amount }}</text><text>{{ confirmationText.currency }}{{ wechatPayAmount.toFixed(2) }}</text></view>
+          <view class="checkout-auth-row checkout-auth-row--amount"><text>{{ authAmountLabel }}</text><text>{{ confirmationText.currency }}{{ wechatPayAmount.toFixed(2) }}</text></view>
         </view>
         <view class="checkout-auth-auto">
           <text>{{ authSheetText.auto }}</text>
@@ -530,6 +598,24 @@
             <text class="order-status-text">{{ successStatusText }}</text>
           </view>
 
+          <view v-if="earnedCoupon" class="earned-coupon-card">
+            <text class="ec-ribbon">{{ earnedCoupon.isSecondOrder ? '欢迎回来 · 专属奖励' : '支付成功 · 专属奖励' }}</text>
+            <view class="ec-amount-row">
+              <text class="ec-currency">¥</text>
+              <text class="ec-amount">{{ formatPrice(earnedCoupon.amount) }}</text>
+            </view>
+            <text class="ec-cond">{{ earnedCoupon.threshold > 0 ? '满' + formatPrice(earnedCoupon.threshold) + '元可用' : '无门槛立减' }}</text>
+            <view class="ec-divider"></view>
+            <text class="ec-title">{{ (earnedCoupon.isSecondOrder ? '欢迎回来，这是你的第二次光临！再送你一张券：' : '又送你一张券：') + (earnedCoupon.name || '') }}</text>
+            <text v-if="earnedCoupon.expire_time" class="ec-deadline">{{ couponValidityText(earnedCoupon) }}</text>
+            <text
+              v-if="couponReminderTemplateId && earnedCoupon.couponId"
+              class="ec-remind-btn"
+              :class="{ 'ec-remind-btn--done': reminderRequested }"
+              @click="requestCouponReminder"
+            >{{ reminderRequested ? '已设置提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我别忘了用') }}</text>
+          </view>
+
           <view class="success-summary">
             <view class="success-summary-row">
               <text class="success-summary-label">{{ successText.table }}</text>
@@ -561,48 +647,219 @@
         </view>
       </view>
     </view>
+
+    <view v-if="showWelcomeCoupon" class="mask welcome-mask" @click="closeWelcomeCoupon">
+      <view class="welcome-coupon-sheet" @click.stop>
+        <text class="wc-ribbon">送你一张新人券</text>
+        <view class="wc-amount-row">
+          <text class="wc-currency">¥</text>
+          <text class="wc-amount">{{ formatPrice(welcomeCouponData?.amount ?? welcomeCouponData?.value ?? 0) }}</text>
+        </view>
+        <text class="wc-cond">{{ welcomeCouponCondText }}</text>
+        <view class="wc-divider"></view>
+        <text class="wc-name">{{ welcomeCouponData?.name || '优惠券' }}</text>
+        <view class="wc-btn" @click="goOrderFromWelcomeCoupon"><text>去点餐使用</text></view>
+        <text class="wc-skip" @click="closeWelcomeCoupon">稍后再说</text>
+      </view>
+    </view>
+
     <view v-if="showOrders" class="mask" @click="showOrders = false">
-      <view class="orders-sheet" @click.stop>
-        <view class="orders-sheet-head">
-          <text class="orders-sheet-title">本桌订单</text>
-          <text class="orders-sheet-close" @click="showOrders = false">脳</text>
+      <view v-if="isSharedBillMode" class="orders-sheet table-account-sheet" @click.stop>
+        <view class="orders-sheet-head table-account-head">
+          <view class="table-account-back" @click="showOrders = false">
+            <text class="iconfont icon-back"></text>
+          </view>
+          <text class="orders-sheet-title">已点菜品</text>
+          <text class="orders-sheet-close iconfont icon-close" @click="showOrders = false"></text>
         </view>
 
-        <scroll-view class="orders-list" scroll-y>
-          <view class="table-status-card">
-            <view>
-              <view class="table-status-mode">
-                <text>堂食</text>
-              </view>
-              <text class="table-status-no">桌号: {{ tableNo || orderModeText.unknownTable }}</text>
+        <scroll-view v-if="!loadError" class="table-account-list" scroll-y :scroll-into-view="tableAccountScrollInto" scroll-with-animation>
+          <view id="table-account-status-anchor" class="table-account-status">
+            <view class="table-account-status-icon" :class="'table-account-status-icon--' + tableStatusView.tone">
+              <text class="iconfont" :class="tableStatusView.icon"></text>
             </view>
-            <view class="table-status-copy">
-              <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
-              <text class="table-status-sub">{{ tableOrderStatusHint }}</text>
+            <text class="table-account-status-title">{{ tableStatusView.title }}</text>
+            <text class="table-account-status-desc">{{ tableStatusView.desc }}</text>
+            <text v-if="tableStatusView.note" class="table-account-status-note">{{ tableStatusView.note }}</text>
+          </view>
+
+          <view class="table-account-summary">
+            <view class="table-account-summary-left">
+              <text class="table-account-table">{{ tableNo || orderModeText.unknownTable }}桌</text>
+              <text class="table-account-sub">{{ sharedBillSubLabel }}</text>
+            </view>
+            <view class="table-account-summary-right">
+              <text class="table-account-total">¥{{ formatPrice(tableTotal) }}</text>
+              <text class="table-account-count">共 {{ tableItemCount }} 份</text>
+            </view>
+          </view>
+
+          <view class="table-account-section">
+            <view class="table-account-section-head">
+              <text class="table-account-section-title">本桌已点菜品</text>
+            </view>
+
+            <view v-if="tableOrderGroups.length" class="table-account-groups">
+              <view v-for="group in tableOrderGroups" :key="group.id" class="table-account-group">
+                <view class="table-account-group-head">
+                  <view class="table-account-group-left">
+                    <view v-if="group.participantNo" class="participant-badge" :style="{ background: group.participantColor }">{{ group.participantNo }}</view>
+                    <text v-if="group.isStaff" class="table-account-staff-badge">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
+                    <text class="table-account-group-time">{{ group.title }}</text>
+                    <text v-if="group.discountAmount > 0" class="table-account-group-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
+                  </view>
+                  <text class="table-account-group-status" :class="'table-account-group-status--' + group.tone">{{ group.statusText }}</text>
+                </view>
+                <view v-for="(item, idx) in group.items" :key="item.specKey || item.dish_id || item.id || item.name || idx" class="table-account-item" :class="{ 'table-account-item--muted': item.isInvalid }">
+                  <view class="table-account-item-img-wrap">
+                    <image
+                      v-if="orderItemImage(item) && !orderItemImageFailed[group.id + '_' + idx]"
+                      class="table-account-item-img"
+                      :src="orderItemImage(item)"
+                      mode="aspectFill"
+                      @error="markOrderItemImageFailed(group.id + '_' + idx)"
+                    />
+                    <view v-else class="table-account-item-placeholder">
+                      <text>{{ orderItemName(item).slice(0, 1) }}</text>
+                    </view>
+                  </view>
+                  <view class="table-account-item-main">
+                    <text class="table-account-item-name">{{ orderItemName(item) }}</text>
+                    <text v-if="orderItemSpecText(item)" class="table-account-item-spec">{{ orderItemSpecText(item) }}</text>
+                    <text v-if="item.isInvalid" class="table-account-item-mark">{{ item.invalidText }}</text>
+                  </view>
+                  <text class="table-account-item-qty">×{{ orderItemQty(item) }}</text>
+                  <text class="table-account-item-amount">¥{{ formatPrice(orderItemAmount(item)) }}</text>
+                </view>
+              </view>
+            </view>
+
+            <view v-else class="table-account-empty">
+              <text class="table-account-empty-title">本桌还没有已点菜品</text>
+              <text class="table-account-empty-desc">可以先去点菜，后续加菜会自动合并到本桌账单</text>
+            </view>
+          </view>
+
+          <view class="table-account-tip">
+            <text>同桌后续加菜会自动合并，不需要每次付款。</text>
+          </view>
+        </scroll-view>
+
+        <view v-else class="table-status-empty">
+          <text class="table-status-empty-icon iconfont icon-warnfill"></text>
+          <text class="table-status-empty-title">本桌订单加载失败</text>
+          <text class="table-status-empty-desc">请重新加载后再查看本桌账单</text>
+          <view class="table-account-retry" @click="loadMenu"><text>重新加载</text></view>
+        </view>
+
+        <view class="table-account-actions">
+          <view
+            class="table-account-action table-account-action--secondary"
+            :class="{ 'table-account-action--disabled': !canContinueOrder }"
+            @click="handleTableContinueOrder"
+          >
+            <text>{{ tableOrderGroups.length ? '继续加菜' : '去点菜' }}</text>
+          </view>
+          <view
+            v-if="canCheckout"
+            class="table-account-action table-account-action--primary"
+            :class="{ 'table-account-action--disabled': tableCheckouting || checkoutRequested }"
+            @click="handleTableCheckout"
+          >
+            <text>{{ tableCheckouting ? '呼叫中...' : (checkoutRequested ? '已呼叫服务员，等待确认' : '吃好了，去结账') }}</text>
+          </view>
+          <view
+            v-else-if="isTableSettled"
+            class="table-account-action table-account-action--primary table-account-action--ghost"
+            @click="scrollTableAccountToTop"
+          >
+            <text>查看结账详情</text>
+          </view>
+          <view
+            v-else-if="stillPreparing"
+            class="table-account-action table-account-action--primary table-account-action--disabled"
+          >
+            <text>制作中，暂不能结账</text>
+          </view>
+          <view
+            v-else-if="postpayReadyToSettle"
+            class="table-account-action table-account-action--info"
+          >
+            <text>用餐结束请到收银台或联系服务员结账</text>
+          </view>
+        </view>
+      </view>
+
+      <view v-else class="orders-sheet" @click.stop>
+        <view class="orders-sheet-head">
+          <text class="orders-sheet-title">本桌订单</text>
+          <text class="orders-sheet-close iconfont icon-close" @click="showOrders = false"></text>
+        </view>
+
+        <scroll-view v-if="currentTableOrder" class="orders-list" scroll-y>
+          <view class="table-status-card" :class="'table-status-card--' + tableOrderStatusTone">
+            <view class="table-status-top">
+              <view class="table-status-badge">
+                <text class="table-status-badge-icon iconfont" :class="tableOrderStatusIcon"></text>
+                <text>{{ tableOrderStatusBadge }}</text>
+              </view>
+              <text class="table-status-order-no">#{{ currentTableOrder.orderNo }}</text>
+            </view>
+            <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
+            <text class="table-status-sub">{{ tableOrderStatusHint }}</text>
+            <view class="table-status-action">
+              <text class="table-status-action-icon iconfont icon-roundright"></text>
+              <text class="table-status-action-text">{{ tableOrderNextAction }}</text>
+            </view>
+          </view>
+
+          <view class="order-core-strip">
+            <view class="order-core-item">
+              <text class="order-core-icon iconfont icon-zuowei"></text>
+              <text class="order-core-value">{{ tableNo || orderModeText.unknownTable }}</text>
+            </view>
+            <view class="order-core-item">
+              <text class="order-core-icon order-core-icon--amount iconfont icon-pay"></text>
+              <text class="order-core-value order-core-value--amount">{{ '\u00a5' + formatPrice(currentTableOrder.total || 0) }}</text>
+            </view>
+            <view class="order-core-item">
+              <text class="order-core-icon iconfont icon-timefill"></text>
+              <text class="order-core-value">{{ currentTableOrder.createdAt || '-' }}</text>
+            </view>
+            <view class="order-core-item">
+              <text class="order-core-icon iconfont icon-form"></text>
+              <text class="order-core-value">{{ currentOrderItemCount + '\u4efd' }}</text>
             </view>
           </view>
 
           <view class="order-progress-card">
-            <view v-for="step in tableOrderTimeline" :key="step.key" class="order-progress-step" :class="{ active: step.active, done: step.done }">
-              <view class="order-progress-dot"></view>
-              <view class="order-progress-copy">
+            <view class="order-progress-head">
+              <text class="order-progress-card-title">{{ '\u8ba2\u5355\u8fdb\u5ea6' }}</text>
+              <text class="order-progress-card-sub">{{ tableOrderProgressSub }}</text>
+            </view>
+            <view class="order-progress-steps">
+              <view v-for="step in tableOrderTimeline" :key="step.key" class="order-progress-step" :class="{ active: step.active, done: step.done }">
+                <view class="order-progress-dot"><text class="iconfont" :class="step.icon"></text></view>
+                <view v-if="step.key !== 'settled'" class="order-progress-line"></view>
                 <text class="order-progress-title">{{ step.label }}</text>
-                <text v-if="step.desc" class="order-progress-desc">{{ step.desc }}</text>
               </view>
             </view>
           </view>
 
-          <view v-if="currentTableOrder" class="current-order-card">
+          <view class="current-order-card">
             <view class="current-order-head">
               <view>
-                <text class="current-order-title">当前订单</text>
+                <view class="current-order-title-line">
+                  <text class="current-order-title-icon iconfont icon-list"></text>
+                  <text class="current-order-title">{{ '\u83dc\u54c1\u660e\u7ec6' }}</text>
+                </view>
                 <text class="current-order-no">#{{ currentTableOrder.orderNo }}</text>
               </view>
-              <text class="current-order-total">楼{{ Number(currentTableOrder.total || 0).toFixed(2) }}</text>
+              <text class="current-order-total">{{ '\u00a5' + formatPrice(currentTableOrder.total || 0) }}</text>
             </view>
             <view class="current-order-summary">
-              <text>{{ tableOrderStatusTitle }}</text>
-              <text>鍏眥{ currentOrderItemCount }}浠</text>
+              <text>{{ '\u4e0b\u5355\u65f6\u95f4 ' + (currentTableOrder.createdAt || '-') }}</text>
+              <text>{{ '\u5171' + currentOrderItemCount + '\u4efd' }}</text>
             </view>
             <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="current-order-items current-order-items--visible">
               <view v-for="(item, idx) in currentTableOrder.items" :key="item.specKey || item.id || item.name || idx" class="order-detail-row">
@@ -610,8 +867,8 @@
                   <text class="order-detail-name">{{ orderItemName(item) }}</text>
                   <text v-if="orderItemSpecText(item)" class="order-detail-spec">{{ orderItemSpecText(item) }}</text>
                 </view>
-                <text class="order-detail-qty">脳{{ orderItemQty(item) }}</text>
-                <text class="order-detail-amount">楼{{ formatPrice(orderItemAmount(item)) }}</text>
+                <text class="order-detail-qty">{{ '\u00d7' + orderItemQty(item) }}</text>
+                <text class="order-detail-amount">{{ '\u00a5' + formatPrice(orderItemAmount(item)) }}</text>
               </view>
             </view>
             <view v-else class="current-order-empty-detail">
@@ -627,13 +884,13 @@
             <view v-if="showAllOrders">
               <view v-for="order in historyTableOrders" :key="order.id" class="history-order-block">
                 <view class="history-order-row">
-                  <text>#{{ order.orderNo }} 脳{{ orderItemCount(order) }}</text>
-                  <text>楼{{ Number(order.total || 0).toFixed(2) }}</text>
+                  <text>#{{ order.orderNo }} 共{{ orderItemCount(order) }}份</text>
+                  <text>¥{{ Number(order.total || 0).toFixed(2) }}</text>
                 </view>
                 <view v-if="(order.items || []).length" class="history-order-items">
                   <view v-for="(item, idx) in order.items" :key="item.specKey || item.id || item.name || idx" class="history-order-item-row">
-                    <text>{{ orderItemName(item) }} 脳{{ orderItemQty(item) }}</text>
-                    <text>楼{{ formatPrice(orderItemAmount(item)) }}</text>
+                    <text>{{ orderItemName(item) }} ×{{ orderItemQty(item) }}</text>
+                    <text>¥{{ formatPrice(orderItemAmount(item)) }}</text>
                   </view>
                 </view>
               </view>
@@ -641,17 +898,20 @@
           </view>
         </scroll-view>
 
+        <view v-else class="table-status-empty">
+          <text class="table-status-empty-icon iconfont icon-list"></text>
+          <text class="table-status-empty-title">暂无本桌订单</text>
+          <text class="table-status-empty-desc">选好菜品，点击下单即可开始</text>
+        </view>
+
         <view class="orders-actions">
-          <view class="orders-primary-btn" @click="showOrders = false">
-            <text>关闭</text>
-          </view>
-          <view class="orders-secondary-btn" @click="showAllOrders = !showAllOrders">
-            <text>{{ showAllOrders ? '\u6536\u8d77\u5386\u53f2\u8ba2\u5355' : '\u67e5\u770b\u5168\u90e8\u8ba2\u5355' }}</text>
+          <view class="orders-secondary-btn" :class="'orders-secondary-btn--' + tableOrderStatusTone" @click="showOrders = false">
+            <text>{{ tableOrderPrimaryButtonText }}</text>
           </view>
         </view>
       </view>
     </view>
-    
+
     <view v-if="showSpecSheet" class="mask" @click="cancelSpec">
       <view class="spec-sheet option-sheet" @click.stop>
         <view class="spec-detail-hero">
@@ -673,7 +933,7 @@
             <text class="spec-price-symbol">{{ confirmationText.currency }}</text>
             <text class="spec-price-num">{{ formatPrice(specBasePrice) }}</text>
           </view>
-          <view class="spec-sheet-close" @click="cancelSpec"><text>{{ confirmationText.close }}</text></view>
+          <view class="spec-sheet-close" @click="cancelSpec"><text class="iconfont icon-close"></text></view>
         </view>
         <scroll-view class="spec-sheet-body" scroll-y>
           <view v-for="group in specRadioGroups" :key="group.name" class="spec-group-block">
@@ -699,11 +959,23 @@
             </view>
           </view>
           <view class="spec-group-block spec-remark-block">
-            <view class="spec-group-label"><text class="spec-group-name">{{ specText.itemRemark }}</text><text class="spec-optional">{{ specText.optional }}</text></view>
-            <textarea class="item-remark-input" v-model="itemRemark" maxlength="50" :placeholder="specText.itemRemarkPlaceholder" />
-            <text class="item-remark-count">{{ itemRemark.length }}/50</text>
+            <view class="spec-group-label"><view class="spec-group-title-line"><text class="spec-group-icon iconfont icon-form"></text><text class="spec-group-name">{{ specText.itemRemark }}</text></view><text class="spec-optional">{{ specText.optional }}</text></view>
+            <view v-if="filteredRemarkChips.length" class="remark-chip-list">
+              <view
+                v-for="chip in filteredRemarkChips"
+                :key="chip"
+                class="remark-chip-option"
+                :class="{ 'remark-chip-option--on': itemRemark.includes(chip) }"
+                @click="toggleItemRemarkChip(chip)"
+              >{{ chip }}</view>
+            </view>
+            <text v-if="!showItemRemarkExtra" class="item-remark-extra-toggle" @click="showItemRemarkExtra = true">+ 其他要求</text>
+            <template v-else>
+              <textarea class="item-remark-input" v-model="itemRemark" maxlength="50" :placeholder="specText.itemRemarkPlaceholder" />
+              <text class="item-remark-count">{{ itemRemark.length }}/50</text>
+            </template>
           </view>
-          <view class="spec-qty-row"><text class="spec-group-name">{{ specText.qty }}</text><view class="spec-counter-row"><view class="counter-btn minus" @click="specQty > 1 && specQty--"><text>-</text></view><text class="counter-num">{{ specQty }}</text><view class="counter-btn plus" @click="specQty++"><text>+</text></view></view></view>
+          <view class="spec-qty-row"><text class="spec-group-name">{{ specText.qty }}</text><view class="spec-counter-row"><view class="counter-btn minus" @click="specQty > 1 && specQty--"><text class="iconfont icon-move"></text></view><text class="counter-num">{{ specQty }}</text><view class="counter-btn plus" @click="specQty++"><text class="iconfont icon-add"></text></view></view></view>
         </scroll-view>
         <view class="spec-footer">
           <view class="spec-confirm-btn" :class="{ 'spec-confirm-btn--disabled': !canGoNextSpec }" @click="handleSpecPrimary"><text>{{ specPrimaryText }}</text></view>
@@ -713,30 +985,42 @@
 
     <view v-if="storeClosed || tableSessionClosed" class="closed-mask">
       <view class="closed-card">
-        <text class="closed-icon">{{ '\u4f11' }}</text>
+        <view class="closed-icon-wrap"><text class="closed-icon iconfont" :class="tableSessionClosed ? 'icon-roundcheckfill' : 'icon-shopfill'"></text></view>
         <text class="closed-title">{{ tableSessionClosed ? '\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f' : shopName + ' \u5f53\u524d\u4f11\u606f\u4e2d' }}</text>
         <text class="closed-desc">{{ tableSessionClosed ? tableSessionClosedNotice : (closedNotice || '\u8425\u4e1a\u65f6\u95f4\u8bf7\u53c2\u8003\u95e8\u5e97\u516c\u544a') }}</text>
-        <view class="closed-btn" @click="tableSessionClosed ? (showOrders = true) : (storeClosed = false)"><text>{{ tableSessionClosed ? '\u67e5\u770b\u672c\u684c\u8ba2\u5355' : '\u4ecd\u8981\u6d4f\u89c8\u83dc\u5355' }}</text></view>
+        <view v-if="tableSessionClosed" class="closed-btn" @click="goMine"><text>{{ '\u597d\u7684\uff0c\u6211\u77e5\u9053\u4e86' }}</text></view>
+        <view v-else class="closed-btn" @click="storeClosed = false"><text>{{ '\u4ecd\u8981\u6d4f\u89c8\u83dc\u5355' }}</text></view>
       </view>
     </view>
 
-    
+
     <view v-if="loadError && !loading" class="loading-mask">
-      <text class="loading-text">菜单加载失败</text>
+      <text class="loading-text">菜单加载中...</text>
       <view class="retry-btn" @click="loadMenu"><text>重新加载</text></view>
     </view>
 
-    
-    <view v-if="loading" class="loading-mask">
-      <view class="loading-ring" />
-      <text class="loading-text">鑿滃崟鍔犺浇涓?..</text>
+
+    <view v-if="loading" class="loading-mask skeleton-mask">
+      <view class="skeleton-nav">
+        <view v-for="n in 6" :key="n" class="skeleton-nav-item"></view>
+      </view>
+      <view class="skeleton-list">
+        <view v-for="n in 4" :key="n" class="skeleton-dish">
+          <view class="skeleton-thumb"></view>
+          <view class="skeleton-lines">
+            <view class="skeleton-line skeleton-line--title"></view>
+            <view class="skeleton-line skeleton-line--desc"></view>
+            <view class="skeleton-line skeleton-line--price"></view>
+          </view>
+        </view>
+      </view>
     </view>
 
-    
+
     <view v-if="showReview" class="mask review-mask" @click.self="closeReview">
       <view class="review-card">
-        <text class="review-title">用餐评价</text>
-        <text class="review-sub">您的评价对我们很重要</text>
+        <view class="review-title-line"><text class="review-title-icon iconfont icon-evaluate"></text><text class="review-title">评价本次用餐</text></view>
+        <text class="review-sub">您的反馈会帮助门店做得更好</text>
         <view class="review-stars">
           <text
             v-for="n in 5"
@@ -744,7 +1028,7 @@
             class="review-star"
             :class="reviewRating >= n ? 'review-star--on' : ''"
             @click="reviewRating = n"
-          >鈽</text>
+          >★</text>
         </view>
         <view class="review-hint-row">
           <text class="review-hint">{{ reviewHintText }}</text>
@@ -757,7 +1041,7 @@
           auto-height
         />
         <view class="review-actions">
-          <view class="review-btn-skip" @click="closeReview"><text>跳过</text></view>
+          <view class="review-btn-skip" @click="closeReview"><text>暂不评价</text></view>
           <view class="review-btn-submit" :class="reviewRating === 0 ? 'review-btn-submit--disabled' : ''" @click="doSubmitReview"><text>提交评价</text></view>
         </view>
       </view>
@@ -768,10 +1052,12 @@
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
-import { getMenuItems, getShopInfo, createOrder, cancelOrder, submitReview, createWxPayOrder, getCurrentDiningOrders, getOrderStatus } from '@/api/order'
-import { getCustomerCoupons } from '@/api/coupon'
-import { getMemberProfile, joinByEntranceCode, resolveDiningSession, bindDiningParticipant } from '@/api/auth'
+import { getMenuItems, getShopInfo, createOrder, cancelOrder, submitReview, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
+import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
+import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
+import { getMemberProfile, getMembershipGrowth, joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
+import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -785,47 +1071,43 @@ export default {
     const tableNo = ref('')
     const shopId = ref('')
     const shopName = ref(uni.getStorageSync('tenant_name') || '\u672a\u6765\u9910\u5385')
+    const shopLogo = ref('')
+    const shopCreatedAt = ref('')
+    const memberSinceText = computed(() => {
+      const year = new Date(shopCreatedAt.value).getFullYear()
+      return Number.isNaN(year) ? '' : '\u4f1a\u5458\u81ea ' + year + ' \u5e74'
+    })
     const diningSessionId = ref(uni.getStorageSync('dining_session_id') || '')
     const diningParticipantToken = ref(uni.getStorageSync('dining_participant_token') || '')
     const diningClientId = ref(uni.getStorageSync('dining_client_id') || '')
+    const paymentMode = ref('prepay')
+    const normalizePaymentMode = (mode) => {
+      const value = String(mode || 'prepay').trim()
+      return ['prepay', 'postpay', 'table_account'].includes(value) ? value : 'prepay'
+    }
     const orderModeText = {
       dineIn: '\u5802\u98df',
       delivery: '\u5916\u5356',
       tableLabel: '\u684c\u53f7',
       unknownTable: '\u672a\u8bc6\u522b'
     }
-    const getOrCreateDiningClientId = () => {
-      if (!diningClientId.value) {
-        diningClientId.value = 'dc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12)
-        uni.setStorageSync('dining_client_id', diningClientId.value)
-      }
-      return diningClientId.value
-    }
-
+    // 只更新本组件的响应式状态；实际的"怎么建立/校验本桌身份、往 storage 写哪些字段"
+    // 全部收敛到 utils/dining.js 的 resolveDiningIdentity/persistDiningContext，跟扫码
+    // 入口页（entry/index.vue）共用同一份实现，不再各自维护一份。
     const persistDiningContext = (data = {}) => {
       diningSessionId.value = data.dining_session_id || diningSessionId.value || ''
       diningParticipantToken.value = data.participant_token || diningParticipantToken.value || ''
       diningClientId.value = data.client_id || diningClientId.value || ''
-      if (diningSessionId.value) uni.setStorageSync('dining_session_id', diningSessionId.value)
-      if (data.participant_id) uni.setStorageSync('dining_participant_id', data.participant_id)
-      if (diningParticipantToken.value) uni.setStorageSync('dining_participant_token', diningParticipantToken.value)
-      if (diningClientId.value) uni.setStorageSync('dining_client_id', diningClientId.value)
+      persistDiningStorage(data)
     }
 
     const ensureDiningSession = async (force = false) => {
       const tenantId = shopId.value || uni.getStorageSync('tenant_id') || ''
       const table = tableNo.value || uni.getStorageSync('table_no') || ''
-      if (!tenantId || !table) return false
       if (tableSessionClosed.value && !force) return false
-      if (!force && diningSessionId.value && diningParticipantToken.value) return true
-      const res = await resolveDiningSession({
-        tenant_id: tenantId,
-        table_no: table,
-        client_id: getOrCreateDiningClientId(),
-        participant_token: diningParticipantToken.value || undefined,
-      })
-      if (res?.code !== 200 || !res.data) return false
-      persistDiningContext(res.data)
+      const identity = await resolveDiningIdentity({ tenantId, table, force })
+      if (!identity.ok) return false
+      persistDiningContext(identity.data)
       tableSessionClosed.value = false
       return true
     }
@@ -835,7 +1117,7 @@ export default {
       const tenantId = shopId.value || uni.getStorageSync('tenant_id') || ''
       if (!tenantId) return
       try {
-        await bindDiningParticipant({ tenant_id: tenantId, participant_token: diningParticipantToken.value })
+        await bindDiningParticipant({ tenant_id: tenantId, participant_token: diningParticipantToken.value }, { authRedirect: false })
       } catch (e) {}
     }
 
@@ -852,29 +1134,78 @@ export default {
         id: String(order.id || ''),
         orderNo: String(order.order_no || order.id || '').slice(-4),
         status: order.status || 'pending',
+        paymentStatus: order.payment_status || '',
+        paymentMode: normalizePaymentMode(order.payment_mode),
+        diningSessionId: order.dining_session_id ? String(order.dining_session_id) : '',
+        tableSessionId: order.dining_session_id ? String(order.dining_session_id) : '',
         items: Array.isArray(order.items) ? order.items.map(i => ({ ...i, qty: Number(i.qty || 0), price: Number(i.price || 0) })) : [],
         total: Number(order.total || 0),
+        discountAmount: Number(order.discount_amount || 0),
+        tableTotal: Number(order.table_total || order.session_total || 0),
+        participantNo: order.participant_no ?? null,
+        isStaff: order.source === 'staff',
+        staffNote: order.staff_note || '',
         createdAt: timeStr,
         createdTs: Number.isNaN(created.getTime()) ? Date.now() : created.getTime(),
         table: order.table_no || tableNo.value,
       }
     }
 
-    const syncDiningOrders = async () => {
+    // \u672c\u684c\u4eba\u6570\u53d8\u5316\u63d0\u793a\uff08\u53c2\u7167\u5ba2\u5982\u4e91\u540c\u6b3e\u4f53\u9a8c\uff09\uff1a\u53ea\u5728\u4eba\u6570\u6bd4\u4e0a\u4e00\u6b21\u540c\u6b65"\u53d8\u591a"\u65f6\u63d0\u9192\u4e00\u6b21\uff0c
+    // \u7b2c\u4e00\u6b21\u540c\u6b65\u4e0d\u63d0\u9192\uff08\u4e0d\u7136\u521a\u8fdb\u684c\u5c31\u5f39\u4e00\u4e2a"\u6709\u4eba\u52a0\u5165"\u5f88\u5947\u602a\uff0c\u90a3\u662f\u81ea\u5df1\uff09\u3002\u4eba\u6570\u4e0d\u843d\u5230
+    // \u5177\u4f53\u662f\u8c01\uff0c\u8ddf"\u53c2\u4e0e\u8005\u7f16\u53f7"\u6807\u7b7e\u662f\u540c\u4e00\u4e2a"\u4e0d\u66b4\u9732\u771f\u5b9e\u8eab\u4efd"\u7684\u539f\u5219\u3002
+    const knownParticipantCount = ref(0)
+    const hasSyncedParticipantCount = ref(false)
+
+    // 身份没就绪（守卫拦下）或后端明确回了 identity_mismatch，都不能悄悄返回"查不到订单"了
+    // 事——那跟"这一桌真的还没人点单"在界面上长得一模一样，顾客不会知道是身份出了问题。
+    // 这两种情况都先强制重建一次身份再重试，isRetry 保证最多重试一次，不会死循环。
+    const syncDiningOrders = async (isRetry = false) => {
       const query = diningOrderQuery()
-      if (!query.tenant_id || !query.dining_session_id || !query.participant_token) return false
+      if (!query.tenant_id || !query.dining_session_id || !query.participant_token) {
+        if (isRetry) return false
+        return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
+      }
       try {
         const res = await getCurrentDiningOrders(query)
         if (res?.code !== 200) return false
+        if (res.data?.identity_mismatch) {
+          if (isRetry) return false
+          return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
+        }
         const sessionStatus = String(res.data?.session_status || '').toUpperCase()
+        tableSessionStatus.value = sessionStatus
+        tableSessionTotal.value = Number(res.data?.table_total || res.data?.session_total || 0)
         tableSessionClosed.value = res.data?.closed === true || ['CLOSED', 'EXPIRED'].includes(sessionStatus)
         if (tableSessionClosed.value) {
           tableSessionClosedNotice.value = '\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c'
+          // Session closed: clear the local "which table" markers so the
+          // mine page won't keep showing this settled table as still dining.
+          uni.removeStorageSync('table_no')
+          uni.removeStorageSync('table_no_at')
+          uni.removeStorageSync('dining_session_id')
+          uni.removeStorageSync('dining_participant_id')
+          uni.removeStorageSync('dining_participant_token')
+          uni.removeStorageSync('dining_table_no')
         }
+        checkoutRequestedAt.value = res.data?.checkout_requested_at || ''
+        tableSessionClosedAt.value = res.data?.closed_at || ''
         myOrders.value = (res.data?.orders || []).map(mapServerOrder)
         saveMyOrders()
+
+        const newParticipantCount = Number(res.data?.participant_count || 0)
+        if (newParticipantCount > 0) {
+          if (hasSyncedParticipantCount.value && newParticipantCount > knownParticipantCount.value) {
+            uni.showToast({ title: '\u6709\u65b0\u4f19\u4f34\u626b\u7801\u52a0\u5165\u4e86\u672c\u684c', icon: 'none', duration: 2500 })
+          }
+          knownParticipantCount.value = newParticipantCount
+          hasSyncedParticipantCount.value = true
+        }
         return true
       } catch (e) {
+        if (!isRetry && isDiningIdentityError(e)) {
+          return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
+        }
         return false
       }
     }
@@ -887,11 +1218,11 @@ export default {
       })
     }
     const confirmationText = {
-      title: '\u786e\u8ba4\u8ba2\u5355', tableLabel: '\u684c\u53f7', tableTip: '\u8bf7\u786e\u8ba4\u684c\u53f7\u6b63\u786e', tableMissing: '\u672a\u8bc6\u522b\u684c\u53f7\uff0c\u8bf7\u91cd\u65b0\u626b\u7801',
-      itemCountPrefix: '\u5171', itemCountSuffix: '\u4ef6\u5546\u54c1', selectedItems: '\u5df2\u9009\u5546\u54c1', itemFoldHint: '\u9700\u8981\u4fee\u6539\u65f6\u518d\u5c55\u5f00', itemEditHint: '\u53ef\u4fee\u6539\u6570\u91cf', expand: '\u5c55\u5f00 >', collapse: '\u6536\u8d77', clear: '\u6e05\u7a7a\u5df2\u9009\u5546\u54c1',
+      title: '\u786e\u8ba4\u8ba2\u5355', tableMissing: '\u672a\u8bc6\u522b\u684c\u53f7\uff0c\u8bf7\u91cd\u65b0\u626b\u7801',
+      selectedItems: '\u5df2\u9009\u5546\u54c1', clear: '\u6e05\u7a7a\u5df2\u9009\u5546\u54c1',
       remark: '\u5907\u6ce8', remarkPlaceholder: '\u5176\u4ed6\u8981\u6c42\u2026', goodsAmount: '\u5546\u54c1\u91d1\u989d', coupon: '\u4f18\u60e0\u5238', couponAvailable: '\u5f20\u53ef\u7528', couponNone: '\u6682\u65e0\u53ef\u7528', noThreshold: '\u65e0\u95e8\u69db', thresholdPrefix: '\u6ee1',
-      balanceDeduction: '\u4f59\u989d\u62b5\u6263', balanceAvailable: '\u53ef\u7528', balanceUsed: '\u5df2\u62b5\u6263', payable: '\u5e94\u4ed8\u91d1\u989d', wechatPay: '\u5fae\u4fe1\u652f\u4ed8', payNow: '\u7acb\u5373\u652f\u4ed8', balancePay: '\u4f59\u989d\u652f\u4ed8',
-      orderRemark: '\u6574\u5355\u5907\u6ce8', orderRemarkPlaceholder: '\u4f8b\u5982\uff1a\u4e00\u8d77\u4e0a\u83dc\u3001\u5168\u90e8\u6253\u5305\u3001\u9700\u8981\u513f\u7ae5\u9910\u5177', unavailable: '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355', confirming: '\u6b63\u5728\u786e\u8ba4\u8ba2\u5355\u2026', paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026', prepareHint: '\u4e0b\u5355\u540e\u5546\u5bb6\u5f00\u59cb\u5236\u4f5c', currency: '\u00a5', close: 'x', arrow: '>', noIcon: ''
+      payable: '\u5e94\u4ed8\u91d1\u989d', wechatPay: '\u5fae\u4fe1\u652f\u4ed8', tableAccount: '\u684c\u53f0\u8d26\u5355', postpay: '\u9910\u540e\u4ed8\u6b3e', payNow: '\u7acb\u5373\u652f\u4ed8', submitTableAccount: '\u63d0\u4ea4\u5230\u684c\u53f0\u8d26\u5355', submitOrder: '\u63d0\u4ea4\u8ba2\u5355',
+      orderRemark: '\u6574\u5355\u5907\u6ce8', orderRemarkPlaceholder: '\u4f8b\u5982\uff1a\u4e00\u8d77\u4e0a\u83dc\u3001\u5168\u90e8\u6253\u5305\u3001\u9700\u8981\u513f\u7ae5\u9910\u5177', unavailable: '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355', confirming: '\u6b63\u5728\u786e\u8ba4\u8ba2\u5355\u2026', paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026', currency: '\u00a5', close: 'x', arrow: '>'
     }
     const successText = {
       title: '\u4e0b\u5355\u6210\u529f',
@@ -921,10 +1252,75 @@ export default {
     const loading = ref(false)
     const loadError = ref(false)
     const ordering = ref(false)
+    // 提交订单的幂等键：开开购物车时生成一次，
+    // 同一次结算内的重试（弱网超时后重新提交）都带同一个值，
+    // 后端用它返回同一张订单而不是建出第二张。
+    const pendingSubmitRequestId = ref('')
+    const ensureSubmitRequestId = () => {
+      if (!pendingSubmitRequestId.value) {
+        pendingSubmitRequestId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      }
+      return pendingSubmitRequestId.value
+    }
     const showCart = ref(false)
     const itemsExpanded = ref(false)
     const showSuccess = ref(false)
     const earnedCoupon = ref(null)
+    const reminderRequested = ref(false)
+    const requestingReminder = ref(false)
+    const requestCouponReminder = async () => {
+      if (requestingReminder.value || reminderRequested.value) return
+      if (!earnedCoupon.value?.couponId || !couponReminderTemplateId.value) return
+      requestingReminder.value = true
+      try {
+        // 微信这个订阅额度是一次性的，用户点了"允许"才算真正拿到推送权限；
+        // 不管用户在弹窗里选了允许还是拒绝，我们都记一次"顾客想要提醒"——
+        // 真发不发得出去，交给后台按有没有拿到授权去处理，这里不做二次拦截。
+        await new Promise((resolve) => {
+          uni.requestSubscribeMessage({
+            tmplIds: [couponReminderTemplateId.value],
+            complete: resolve,
+          })
+        })
+        const res = await remindMeForCoupon(earnedCoupon.value.couponId)
+        if (res?.code === 200) {
+          reminderRequested.value = true
+          uni.showToast({ title: '好的，到期前会提醒你', icon: 'none' })
+        } else {
+          uni.showToast({ title: res?.msg || '设置失败，请重试', icon: 'none' })
+        }
+      } catch (e) {
+        uni.showToast({ title: '设置失败，请重试', icon: 'none' })
+      } finally {
+        requestingReminder.value = false
+      }
+    }
+    const showWelcomeCoupon = ref(false)
+    const welcomeCouponData = ref(null)
+    const welcomeCouponCondText = computed(() => {
+      const min = Number(welcomeCouponData.value?.min_amount || 0)
+      return min > 0 ? '\u6ee1' + min.toFixed(0) + '\u5143\u53ef\u7528' : '\u65e0\u95e8\u69db\u53ef\u7528'
+    })
+    const consumeWelcomeCoupon = () => {
+      if (uni.getStorageSync('coupon_modal_shown') !== 'false') return null
+      uni.setStorageSync('coupon_modal_shown', 'true')
+      const raw = uni.getStorageSync('welcome_coupon')
+      if (!raw) return null
+      try { return JSON.parse(raw) } catch { return null }
+    }
+    const checkWelcomeCoupon = () => {
+      const data = consumeWelcomeCoupon()
+      if (!data) return
+      welcomeCouponData.value = data
+      showWelcomeCoupon.value = true
+    }
+    const closeWelcomeCoupon = () => {
+      showWelcomeCoupon.value = false
+    }
+    const goOrderFromWelcomeCoupon = () => {
+      showWelcomeCoupon.value = false
+      activeTab.value = 'order'
+    }
     const orderNo = ref('')
     const orderId = ref('')
     const orderStatus = ref('pending') // pending | preparing | done
@@ -942,6 +1338,7 @@ export default {
       amount: '\u5e94\u4ed8\u91d1\u989d',
       unknownTable: '\u672a\u8bc6\u522b',
       confirm: '\u6388\u6743\u5e76\u652f\u4ed8',
+      confirmSubmit: '\u6388\u6743\u5e76\u63d0\u4ea4\u8ba2\u5355',
       confirmFree: '\u6388\u6743\u5e76\u5b8c\u6210\u8ba2\u5355',
       authorizing: '\u6b63\u5728\u6388\u6743\u2026',
       submitting: '\u6b63\u5728\u63d0\u4ea4\u8ba2\u5355\u2026',
@@ -954,13 +1351,7 @@ export default {
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
     const payAmount = ref(0)
-    const pendingOrderId = ref('')   // 待支付订单ID
-    const useBalance = ref(false)    // 是否使用余额
-    const balanceAvailable = ref(0)  // 可用余额
-    const balanceDeducted = ref(0)   // 已扣余额
-    const actualPayAmount = computed(() =>
-      useBalance.value ? Math.max(payAmount.value - balanceAvailable.value, 0) : payAmount.value
-    )
+    const pendingOrderId = ref('')
     const showReview = ref(false)
     const reviewRating = ref(0)
     const reviewContent = ref('')
@@ -970,10 +1361,18 @@ export default {
       return hints[reviewRating.value] || ''
     })
     let statusPollTimer = null
+    let tablePresencePollTimer = null
 
-    const myOrders = ref([]) // 我的订单
+    const myOrders = ref([])
     const showOrders = ref(false)
     const showAllOrders = ref(false)
+    const tableSessionStatus = ref('')
+    const tableSessionTotal = ref(0)
+    const tableCheckouting = ref(false)
+    const checkoutRequestedAt = ref('')
+    const tableSessionClosedAt = ref('')   // 真正的结账时间（区别于下单时间），给"查看结账详情"用
+    const tableAccountScrollInto = ref('')
+    const orderItemImageFailed = ref({})
     const storeClosed = ref(false)
     const tableSessionClosed = ref(false)
     const tableSessionClosedNotice = ref('\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c')
@@ -989,6 +1388,7 @@ export default {
     const refreshCustomerAuthState = () => {
       authStateVersion.value += 1
       isCustomerLoggedIn.value = Boolean(uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))
+      checkWelcomeCoupon()
     }
     const hasCustomerIdentity = computed(() => {
       authStateVersion.value
@@ -1013,10 +1413,12 @@ export default {
     const switchToCard = () => {
       activeTab.value = 'card'
       refreshCustomerAuthState()
-      if (hasCustomerIdentity.value && !bannerInfo.value) loadMemberStatus()
+      if (hasCustomerIdentity.value && !bannerInfo.value) loadMemberStatus({ authRedirect: false })
     }
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
     const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '\u666e\u901a\u4f1a\u5458')
+    const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
+    const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
     const memberProgressPercent = computed(() => {
       const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)
       const target = Number(bannerInfo.value?.nextGrowth || 0)
@@ -1057,16 +1459,20 @@ export default {
           code,
           phone_code: phoneCode,
           agreement_accepted: true,
-        })
+          invite_code: uni.getStorageSync('invite_code') || '',
+        }, { authRedirect: false })
         if (res?.code !== 200) {
-          uni.showToast({ title: '\u5df2\u52a0\u5165' + added + '\u4efd', icon: 'success', duration: 1200 })
+          uni.showToast({ title: res?.msg || '\u52a0\u5165\u4f1a\u5458\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
           return
         }
+        // \u9080\u8bf7\u7801\u7528\u8fc7\u5c31\u6e05\u6389\uff0c\u907f\u514d\u4ee5\u540e\u5728\u522b\u7684\u5e97\u8bef\u7528
+        uni.removeStorageSync('invite_code')
         saveCustomerSession(res.data || {})
         await bindCurrentDiningParticipant()
-        await loadMemberStatus()
+        await loadMemberStatus({ authRedirect: false })
         activeTab.value = 'card'
         uni.showToast({ title: '\u5df2\u767b\u5f55', icon: 'none' })
+        checkWelcomeCoupon()
       } catch (err) {
         uni.showToast({ title: err?.message || '\u6388\u6743\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
       } finally {
@@ -1077,8 +1483,6 @@ export default {
       selectedCouponId.value = coupon?.id || coupon?.coupon_id || null
       activeTab.value = 'order'
     }
-    const goBalanceDetail = () => uni.navigateTo({ url: '/subpkg-member/pages/consumptions' })
-
     const loadDistance = (shopLat, shopLng) => {
       if (!shopLat || !shopLng) return
       uni.getLocation({
@@ -1096,7 +1500,6 @@ export default {
     }
     const closedNotice = ref('')
 
-    // 瑙勬牸閫夋嫨鐩稿叧鐘舵€?
     const showSpecSheet = ref(false)
     const specDish = ref({})
     const specQty = ref(1)
@@ -1104,6 +1507,19 @@ export default {
     const selectedSpecs = ref({})
     const selectedExtras = ref([])
     const itemRemark = ref('') // { groupName: [optName] }
+    const showItemRemarkExtra = ref(false)
+    const itemRemarkExtra = computed(() => {
+      let text = itemRemark.value
+      remarkChips.value.forEach((chip) => { text = text.split(chip).join('') })
+      return text.replace(/\s+/g, ' ').trim()
+    })
+    const toggleItemRemarkChip = (chip) => {
+      if (itemRemark.value.includes(chip)) {
+        itemRemark.value = itemRemark.value.replace(chip, '').replace(/^\s+|\s+$/g, '').trim()
+      } else {
+        itemRemark.value = itemRemark.value ? itemRemark.value + ' ' + chip : chip
+      }
+    }
     const imageLoadFailed = ref({})
     const detailImageFailed = ref(false)
 
@@ -1138,6 +1554,35 @@ export default {
       const groups = specAllGroups.value.filter(g => g.type === 'checkbox' || g.type === 'multiple' || g.type === 'multi')
       return groups.flatMap(g => g.options).filter(o => o.name)
     })
+    // 备注快捷词跟这道菜自己的规格选项字面重复时不再展示——比如这道菜的"辣度"
+    // 规格已经问过"不辣/微辣/中辣/重辣"，备注里就不该再问一遍"不要辣/微辣"，不然
+    // 顾客两边都能点、选出自相矛盾的组合（规格选中辣、备注又点不要辣），厨房不
+    // 知道听哪个。去掉"不要/不/少/多/加/免"这类常见修饰前缀取核心词再比较，纯
+    // 字符串规则、不做语义理解，能覆盖"不要辣"对应规格选项"不辣"这类同义表达，
+    // 又不会误伤"少盐""打包"这些跟规格无关的词。
+    const SPEC_REMARK_MODIFIER_PREFIXES = ['不要', '不', '少', '多', '加', '免']
+    const specRemarkCoreWord = (text) => {
+      const raw = String(text || '').trim()
+      for (const prefix of SPEC_REMARK_MODIFIER_PREFIXES) {
+        if (raw.startsWith(prefix) && raw.length > prefix.length) return raw.slice(prefix.length)
+      }
+      return raw
+    }
+    const specGroupOptionCoreWords = computed(() => {
+      const words = new Set()
+      specAllGroups.value.forEach((group) => {
+        group.options.forEach((opt) => {
+          const core = specRemarkCoreWord(opt.name)
+          if (core) words.add(core)
+        })
+      })
+      return words
+    })
+    const filteredRemarkChips = computed(() => {
+      const coreWords = specGroupOptionCoreWords.value
+      if (!coreWords.size) return remarkChips.value
+      return remarkChips.value.filter((chip) => !coreWords.has(specRemarkCoreWord(chip)))
+    })
     const specBasePrice = computed(() => Number(specDish.value.price) || 0)
     const specExtraPrice = computed(() => {
       let extra = 0
@@ -1154,7 +1599,7 @@ export default {
     const selectedSpecSummary = computed(() => selectedSpecRows.value.map(i => i.value).join(specText.separator))
     const specDishDesc = computed(() => String(specDish.value.desc || specDish.value.description || '').trim())
     const missingRequiredSpecGroup = computed(() => specRadioGroups.value.find(group => group.required && !(selectedSpecs.value[group.name] || []).length))
-    const requiredGroupPrompt = (group) => /鍙ｅ懗|鍛抽亾|杈ｅ害/.test(group?.name || '') ? specText.chooseTaste : specText.chooseSpec
+    const requiredGroupPrompt = (group) => new RegExp('\\u8fa3|\\u53e3\\u5473|\\u751c\\u5ea6|\\u6e29\\u5ea6').test(group?.name || '') ? specText.chooseTaste : specText.chooseSpec
     const canGoNextSpec = computed(() => !isSoldOut(specDish.value) && !missingRequiredSpecGroup.value)
     const specPrimaryText = computed(() => {
       if (isSoldOut(specDish.value)) return '\u5df2\u552e\u7f44'
@@ -1231,16 +1676,212 @@ export default {
 
     const currentTableOrder = computed(() => {
       if (!myOrders.value.length) return null
-      return [...myOrders.value]
+      const active = [...myOrders.value]
         .filter(order => !['cancelled', 'rejected'].includes(normalizeOrderStatus(order.status)))
-        .sort((a, b) => activeOrderRank(a) - activeOrderRank(b))[0] || myOrders.value[0]
+        .sort((a, b) => activeOrderRank(a) - activeOrderRank(b))[0]
+      if (active) return active
+      // 全部订单都已取消/拒单时，只有当前设备正在跟踪的那单才继续展示"异常状态"，
+      // 避免把本桌历史上别人取消的旧单当成当前顾客的订单弹出来。
+      return myOrders.value.find(order => order.id === orderId.value) || null
     })
 
     const historyTableOrders = computed(() =>
       myOrders.value.filter(order => !currentTableOrder.value || order.id !== currentTableOrder.value.id)
     )
 
+    const isTableAccountMode = computed(() => paymentMode.value === "table_account")
+    const isPostpayMode = computed(() => paymentMode.value === "postpay")
+    // 餐后付款和桌台账单，后端其实是同一套机制：同一桌多次下单共用同一个 dining_session，
+    // 商家在后台也是按整桌一次性结账（settle-table），不是按单笔结账。小程序这边如果还是把
+    // 餐后付款当成"每笔订单各自一个独立进度条"来展示，就跟后端的真实行为对不上——这里统一
+    // 用"共享账单模式"复用桌台账单那套汇总视图，只是底部动作不同（见下面 canCheckout 附近）。
+    const isSharedBillMode = computed(() => isTableAccountMode.value || isPostpayMode.value)
+    const sharedBillSubLabel = computed(() => isPostpayMode.value ? '堂食 · 餐后统一结账' : '堂食 · 本桌统一结账')
+    const tableSessionId = computed(() => String(diningSessionId.value || uni.getStorageSync('dining_session_id') || ''))
+    const isSameDiningSessionOrder = (order) => {
+      const orderSessionId = String(order?.diningSessionId || order?.tableSessionId || '')
+      if (!tableSessionId.value || !orderSessionId) return false
+      return orderSessionId === tableSessionId.value
+    }
+    const tableSessionOrders = computed(() =>
+      myOrders.value
+        .filter(order => ['table_account', 'postpay'].includes(normalizePaymentMode(order?.paymentMode || paymentMode.value)))
+        .filter(isSameDiningSessionOrder)
+        .sort((a, b) => Number(a.createdTs || 0) - Number(b.createdTs || 0))
+    )
+    const isOrderInvalid = (order) => ['cancelled', 'rejected'].includes(normalizeOrderStatus(order?.status))
+    const isItemInvalid = (item) => ['refunded', 'refund', 'cancelled', 'canceled'].includes(String(item?.status || item?.refund_status || '').toLowerCase())
+    const validTableOrders = computed(() => tableSessionOrders.value.filter(order => !isOrderInvalid(order)))
+    const tableTotal = computed(() => {
+      if (Number(tableSessionTotal.value) > 0) return Number(tableSessionTotal.value)
+      const backendTotal = validTableOrders.value.map(order => Number(order.tableTotal || 0)).find(total => total > 0)
+      if (backendTotal) return backendTotal
+      return validTableOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
+    })
+    const tableItemCount = computed(() =>
+      validTableOrders.value.reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => itemSum + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0), 0)
+    )
+    const tableGroupStatusText = (status) => ({
+      pending: '待确认',
+      preparing: '制作中',
+      done: '已上桌',
+      settled: '已结账',
+      cancelled: '已取消',
+      rejected: '已取消',
+    })[normalizeOrderStatus(status)] || '待确认'
+    const tableGroupStatusTone = (status) => {
+      const normalized = normalizeOrderStatus(status)
+      if (['cancelled', 'rejected'].includes(normalized)) return 'muted'
+      if (normalized === 'settled') return 'settled'
+      if (normalized === 'done') return 'served'
+      return 'active'
+    }
+    // 拼桌时同一桌可能好几个人各自的手机都在下单，用固定的一组颜色循环分配，
+    // 不够用就从头再来一轮——纯展示用的编号，跟真实身份无关，参考大厂拼单点餐的做法。
+    const PARTICIPANT_COLORS = ['#07C160', '#FF7D45', '#5B8FF9', '#F5A623', '#B37FEB', '#3ABBB0']
+    const participantColor = (no) => {
+      if (!no || no < 1) return PARTICIPANT_COLORS[0]
+      return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
+    }
+    const tableOrderGroups = computed(() =>
+      tableSessionOrders.value.map((order, index) => ({
+        id: order.id || String(index),
+        title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
+        statusText: tableGroupStatusText(order.status),
+        tone: tableGroupStatusTone(order.status),
+        discountAmount: Number(order.discountAmount || 0),
+        participantNo: order.participantNo || null,
+        participantColor: participantColor(order.participantNo),
+        isStaff: Boolean(order.isStaff),
+        staffNote: order.staffNote || '',
+        items: (order.items || []).map(item => ({
+          ...item,
+          isInvalid: isOrderInvalid(order) || isItemInvalid(item),
+          invalidText: isOrderInvalid(order) ? '已取消' : '已退菜',
+        })),
+      }))
+    )
+    const isTableSettled = computed(() => {
+      if (tableSessionClosed.value) return true
+      if (tableSessionStatus.value === 'CLOSED') return true
+      return tableSessionOrders.value.length > 0 && tableSessionOrders.value.every(order => normalizeOrderStatus(order.status) === 'settled')
+    })
+    const canContinueOrder = computed(() => isSharedBillMode.value && !tableSessionClosed.value && tableSessionStatus.value !== 'CLOSED')
+    // 桌台账单/餐后付款都必须等本桌所有有效订单都做完（done）才算"可以结账"，否则会出现
+    // 桌台账单顾客点了"去结账"、商家在后台点结账时却被后端 settle-table 以"本桌还有未完成
+    // 的订单"拒绝的落差；餐后付款虽然没有"去结账"按钮，但同样的判断决定要不要提示去收银台。
+    const allOrdersDone = computed(() =>
+      validTableOrders.value.length > 0 && validTableOrders.value.every(order => normalizeOrderStatus(order.status) === 'done')
+    )
+    const stillPreparing = computed(() => tableOrderGroups.value.length > 0 && !isTableSettled.value && !allOrdersDone.value)
+    const checkoutRequested = computed(() => Boolean(checkoutRequestedAt.value))
+    // 只有桌台账单才有"去结账"这个可点击的自助操作——餐后付款结账动作在商家手里
+    // （收银台/服务员操作后台"结账"按钮），小程序这边只负责提示，不提供可点的按钮。
+    const canCheckout = computed(() =>
+      isTableAccountMode.value && tableItemCount.value > 0 && !isTableSettled.value && !tableCheckouting.value && allOrdersDone.value
+    )
+    const postpayReadyToSettle = computed(() =>
+      isPostpayMode.value && tableItemCount.value > 0 && !isTableSettled.value && allOrdersDone.value
+    )
+    // "查看结账详情"点击后要做的事：账单信息（结账时间/优惠/明细）本来就在这个 sheet
+    // 里，不需要再跳一个页面或弹一次窗——只是把视图滚回顶部，让这些信息进入视野。
+    // 之前这里错误地复用了"发起结账"的 handleTableCheckout，点了只会弹"请联系服务员"。
+    const scrollTableAccountToTop = async () => {
+      tableAccountScrollInto.value = ''
+      await nextTick()
+      tableAccountScrollInto.value = 'table-account-status-anchor'
+    }
+    const formatClosedAtTime = (raw) => {
+      if (!raw) return ''
+      const d = new Date(raw)
+      if (Number.isNaN(d.getTime())) return ''
+      return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
+    }
+    const tableStatusView = computed(() => {
+      if (isTableSettled.value) {
+        const closedTimeText = formatClosedAtTime(tableSessionClosedAt.value)
+        const payNote = isTableAccountMode.value
+          ? '由商家柜台现结，无需再次付款'
+          : (isPostpayMode.value ? '已在收银台完成支付' : '')
+        return {
+          icon: 'icon-roundcheckfill',
+          title: '本桌已结账',
+          desc: closedTimeText ? `结账时间 ${closedTimeText}` : '本次用餐账单已经结清',
+          note: payNote,
+          tone: 'settled',
+        }
+      }
+      if (!tableOrderGroups.value.length) return { icon: 'icon-list', title: '本桌还没有已点菜品', desc: '先点菜，后续加菜会自动合并', tone: 'settled' }
+      const statuses = validTableOrders.value.map(order => normalizeOrderStatus(order.status))
+      if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '商家正在确认订单，请稍候', tone: 'active' }
+      if (statuses.includes('preparing')) return { icon: 'icon-beican', title: '菜品正在制作', desc: '厨房正在制作，可以继续加菜', tone: 'active' }
+      if (statuses.includes('done')) {
+        if (isPostpayMode.value) {
+          return { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '用餐结束请到收银台或联系服务员结账', tone: 'served' }
+        }
+        return checkoutRequested.value
+          ? { icon: 'icon-roundcheckfill', title: '已呼叫服务员', desc: '请稍候，服务员马上为您结账', tone: 'served' }
+          : { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '吃好后可统一结账', tone: 'served' }
+      }
+      return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
+    })
+    const orderItemImage = (item) => item?.image || item?.image_url || item?.cover || item?.cover_url || ''
+    const markOrderItemImageFailed = (key) => { orderItemImageFailed.value = { ...orderItemImageFailed.value, [key]: true } }
+
     const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
+
+
+    const tableOrderStatusTone = computed(() => {
+      if (!currentTableOrder.value) return 'empty'
+      const status = currentTableOrderStatus.value
+      if (['cancelled', 'rejected'].includes(status)) return 'canceled'
+      if (status === 'pending') return 'paid'
+      if (status === 'preparing') return 'preparing'
+      if (status === 'done') return 'served'
+      if (status === 'settled') return 'settled'
+      return 'paid'
+    })
+
+    const tableOrderStatusBadge = computed(() => ({
+      canceled: '\u5f02\u5e38\u72b6\u6001',
+      paid: '\u6b63\u5e38\u8fdb\u884c',
+      preparing: '\u6b63\u5728\u5907\u9910',
+      served: '\u5df2\u9001\u8fbe',
+      settled: '\u8ba2\u5355\u5b8c\u6210',
+    })[tableOrderStatusTone.value] || '\u6b63\u5e38\u8fdb\u884c')
+
+    const tableOrderStatusIcon = computed(() => ({
+      canceled: 'icon-warnfill',
+      paid: 'icon-pay',
+      preparing: 'icon-beican',
+      served: 'icon-deliver',
+      settled: 'icon-roundcheckfill',
+    })[tableOrderStatusTone.value] || 'icon-pay')
+
+    const tableOrderNextAction = computed(() => ({
+      canceled: '\u91cd\u65b0\u70b9\u9910',
+      paid: '\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u7a0d\u5019',
+      preparing: '\u7b49\u5f85\u4e0a\u9910\u5373\u53ef',
+      served: '\u8bf7\u786e\u8ba4\u83dc\u54c1',
+      settled: '\u53ef\u5173\u95ed\u67e5\u770b',
+    })[tableOrderStatusTone.value] || '\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u7a0d\u5019')
+
+    const tableOrderProgressSub = computed(() => ({
+      canceled: '\u65e0\u9700\u7b49\u5f85',
+      paid: '\u9884\u8ba1\u5f88\u5feb\u63a5\u5355',
+      preparing: '\u5546\u5bb6\u5904\u7406\u4e2d',
+      served: '\u53ef\u5b89\u5fc3\u7528\u9910',
+      settled: '\u8ba2\u5355\u5b8c\u6210',
+    })[tableOrderStatusTone.value] || '\u8ba2\u5355\u8fdb\u884c\u4e2d')
+
+    const tableOrderPrimaryButtonText = computed(() => ({
+      empty: '\u53bb\u70b9\u9910',
+      canceled: '\u91cd\u65b0\u70b9\u9910',
+      paid: '\u6211\u77e5\u9053\u4e86',
+      preparing: '\u6211\u77e5\u9053\u4e86',
+      served: '\u786e\u8ba4\u5df2\u6536\u5230',
+      settled: '\u5173\u95ed',
+    })[tableOrderStatusTone.value] || '\u6211\u77e5\u9053\u4e86')
 
     const tableOrderStatusTitle = computed(() => ({
       pending: '\u5546\u5bb6\u6b63\u5728\u786e\u8ba4\u8ba2\u5355',
@@ -1260,10 +1901,10 @@ export default {
       const order = ['pending', 'preparing', 'done', 'settled']
       const currentIndex = Math.max(0, order.indexOf(currentTableOrderStatus.value))
       return [
-        { key: 'paid', status: 'pending', label: '\u5df2\u652f\u4ed8', desc: currentTableOrder.value?.createdAt || '' },
-        { key: 'preparing', status: 'preparing', label: '\u5546\u5bb6\u5df2\u63a5\u5355', desc: currentIndex >= 1 ? '\u53a8\u623f\u5f00\u59cb\u5904\u7406' : '' },
-        { key: 'done', status: 'done', label: '\u5df2\u4e0a\u9910', desc: currentIndex >= 2 ? '\u9910\u54c1\u5df2\u5b8c\u6210' : '' },
-        { key: 'settled', status: 'settled', label: '\u5df2\u5b8c\u6210', desc: currentIndex >= 3 ? '\u672c\u684c\u5df2\u7ed3\u675f' : '' },
+        { key: 'paid', status: 'pending', label: '\u5df2\u652f\u4ed8', icon: 'icon-pay', desc: currentTableOrder.value?.createdAt || '' },
+        { key: 'preparing', status: 'preparing', label: '\u5546\u5bb6\u5df2\u63a5\u5355', icon: 'icon-beican', desc: currentIndex >= 1 ? '\u53a8\u623f\u5f00\u59cb\u5904\u7406' : '' },
+        { key: 'done', status: 'done', label: '\u5df2\u4e0a\u9910', icon: 'icon-deliver', desc: currentIndex >= 2 ? '\u9910\u54c1\u5df2\u5b8c\u6210' : '' },
+        { key: 'settled', status: 'settled', label: '\u5df2\u5b8c\u6210', icon: 'icon-roundcheckfill', desc: currentIndex >= 3 ? '\u672c\u684c\u5df2\u7ed3\u675f' : '' },
       ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
     })
 
@@ -1277,7 +1918,7 @@ export default {
       if (item?.specLabel) return item.specLabel
       if (item?.spec_text) return item.spec_text
       if (Array.isArray(item?.specifications) && item.specifications.length) {
-        return item.specifications.map(spec => spec.value || spec.name).filter(Boolean).join(' 路 ')
+        return item.specifications.map(spec => spec.value || spec.name).filter(Boolean).join(' \u00b7 ')
       }
       return ''
     }
@@ -1293,12 +1934,6 @@ export default {
       myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))).length
     )
 
-    const tableTotalSpent = computed(() =>
-      myOrders.value
-        .filter(o => !['cancelled', 'rejected'].includes(o.status))
-        .reduce((s, o) => s + (Number(o.total) || 0), 0)
-    )
-
     const statusLabel = (s) => ({ pending: '\u7b49\u5f85\u63a5\u5355', preparing: '\u5907\u9910\u4e2d', done: '\u5df2\u5b8c\u6210', rejected: '\u5df2\u62d2\u5355', cancelled: '\u5df2\u53d6\u6d88', settled: '\u5df2\u7ed3\u8d26' })[s] || s
 
     const doCancelOrder = (order) => {
@@ -1308,7 +1943,7 @@ export default {
         success: async ({ confirm }) => {
           if (!confirm) return
           try {
-            await cancelOrder(order.id)
+            await cancelOrder(order.id, diningParticipantToken.value || uni.getStorageSync('dining_participant_token'))
             order.status = 'cancelled'
             saveMyOrders()
             if (orderId.value === order.id) {
@@ -1316,9 +1951,9 @@ export default {
               orderStatus.value = 'cancelled'
               showSuccess.value = false
             }
-            uni.showToast({ title: '\u5df2\u52a0\u5165' + added + '\u4efd', icon: 'success', duration: 1200 })
+            uni.showToast({ title: '\u8ba2\u5355\u5df2\u53d6\u6d88', icon: 'success', duration: 1200 })
           } catch {
-            uni.showToast({ title: '\u5df2\u52a0\u5165' + added + '\u4efd', icon: 'success', duration: 1200 })
+            uni.showToast({ title: '\u53d6\u6d88\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none', duration: 1200 })
           }
         }
       })
@@ -1392,6 +2027,12 @@ export default {
       pendingOrderId.value = ''
     }
 
+    const clearStalePrepayOrderForPayLater = () => {
+      if (isPrepayMode.value || !pendingOrderId.value) return
+      clearPendingPaymentOrder()
+      pendingPaymentIntent.value = null
+    }
+
     const isPaidOrSubmittedOrder = (order) => {
       const status = order?.status || ''
       const paymentStatus = order?.payment_status || ''
@@ -1406,7 +2047,7 @@ export default {
       if (!id) return false
       recoveringPayment = true
       try {
-        const res = await getOrderStatus(id)
+        const res = await getOrderStatus(id, diningParticipantToken.value)
         const data = res?.data || {}
         if (isPaidOrSubmittedOrder(data)) {
           orderId.value = id
@@ -1503,7 +2144,6 @@ export default {
 
     const closeSuccessAndWait = () => {
       finishOrdering()
-      console.log('[click_close_and_wait]', { order_id: orderId.value })
     }
 
     const continueOrdering = () => {
@@ -1514,41 +2154,29 @@ export default {
       selectedCouponId.value = null
       activeTab.value = 'order'
       uni.showToast({ title: successText.backToMenu, icon: 'none', duration: 900 })
-      console.log('[click_continue_ordering]', { order_id: orderId.value })
     }
 
     const viewOrderDetail = () => {
       showSuccess.value = false
       refreshAllOrderStatuses()
       showOrders.value = true
-      console.log('[click_view_order_detail]', { order_id: orderId.value })
     }
     function startStatusPoll(id) {
       stopStatusPoll()
-      const baseUrl = uni.getStorageSync('api_base_url') || 'https://api.zhangbaiyang.com/api'
       statusPollTimer = setInterval(() => {
-刷新订单状态
-        uni.request({
-          url: baseUrl + '/v1/orders/my',
-          method: 'GET',
-          data: { order_id: id },
-          header: { Authorization: 'Bearer ' + (uni.getStorageSync('customer_token') || '') },
-          success: (res) => {
-            const body = res.data || {}
-            if (body.code === 200) {
-              const newStatus = body.data?.status || 'pending'
-              merchantNote.value = body.data?.merchant_note || ''
-              orderStatus.value = newStatus
-              const rec = myOrders.value.find(o => o.id === id)
-              if (rec && rec.status !== newStatus) {
-                rec.status = newStatus
-                saveMyOrders()
-              }
-              if (['settled', 'cancelled', 'rejected'].includes(newStatus)) stopStatusPoll()
+        getOrderStatus(id, diningParticipantToken.value).then((body) => {
+          if (body.code === 200) {
+            const newStatus = body.data?.status || 'pending'
+            merchantNote.value = body.data?.merchant_note || ''
+            orderStatus.value = newStatus
+            const rec = myOrders.value.find(o => o.id === id)
+            if (rec && rec.status !== newStatus) {
+              rec.status = newStatus
+              saveMyOrders()
             }
-          },
-          fail: () => { /* 忽略轮询失败 */ }
-        })
+            if (['settled', 'cancelled', 'rejected'].includes(newStatus)) stopStatusPoll()
+          }
+        }).catch(() => { })
       }, 15000)
     }
 
@@ -1556,67 +2184,118 @@ export default {
       if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
     }
 
+    // 本桌人数轮询：只在顾客真的停留在点餐页时跑，间隔比订单状态轮询（15秒）更松——
+    // "有人加入"不是紧急信息，稍微有延迟没关系，没必要跟催单一样频繁。onHide/onUnload
+    // 会停掉，不在后台空耗电量和流量。
+    function startTablePresencePoll() {
+      stopTablePresencePoll()
+      tablePresencePollTimer = setInterval(() => {
+        syncDiningOrders().catch(() => {})
+      }, 25000)
+    }
+
+    function stopTablePresencePoll() {
+      if (tablePresencePollTimer) { clearInterval(tablePresencePollTimer); tablePresencePollTimer = null }
+    }
+
     async function refreshAllOrderStatuses() {
       if (await syncDiningOrders()) return
-      const baseUrl = uni.getStorageSync('api_base_url') || 'https://api.zhangbaiyang.com/api'
-      const token = uni.getStorageSync('customer_token') || ''
       const orders = myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status)))
       orders.forEach(order => {
-        uni.request({
-          url: baseUrl + '/v1/orders/my',
-          method: 'GET',
-          data: { order_id: order.id },
-          header: { Authorization: 'Bearer ' + token },
-          success: (res) => {
-            const body = res.data || {}
-            if (body.code === 200) {
-              const newStatus = body.data?.status || order.status
-              const rec = myOrders.value.find(o => o.id === order.id)
-              if (rec && rec.status !== newStatus) {
-                rec.status = newStatus
-                saveMyOrders()
-              }
+        getOrderStatus(order.id, diningParticipantToken.value).then((body) => {
+          if (body.code === 200) {
+            const newStatus = body.data?.status || order.status
+            const rec = myOrders.value.find(o => o.id === order.id)
+            if (rec && rec.status !== newStatus) {
+              rec.status = newStatus
+              saveMyOrders()
             }
-          },
-          fail: () => {}
-        })
+          }
+        }).catch(() => {})
       })
     }
     const remark = ref('')
     const remarkChips = ref(['\u4e0d\u8981\u8fa3', '\u5fae\u8fa3', '\u4e0d\u8981\u9999\u83dc', '\u4e0d\u8981\u8471', '\u5c11\u76d0', '\u6253\u5305'])
+    const orderRemarkChips = ref(['\u4e00\u8d77\u4e0a\u83dc', '\u5168\u90e8\u6253\u5305', '\u52a0\u53cc\u7b77\u5b50', '\u4e0d\u7528\u9910\u5177', '\u6709\u513f\u7ae5\u7528\u9910'])
+    const showOrderRemarkExtra = ref(false)
+    const orderRemarkExtra = computed(() => {
+      let text = remark.value
+      orderRemarkChips.value.forEach((chip) => { text = text.split(chip).join('') })
+      return text.replace(/\s+/g, ' ').trim()
+    })
     const deliveryEnabled = ref(false)
     const availableCoupons = ref([])
     const selectedCouponId = ref(null)
     const selectedCoupon = computed(() =>
       availableCoupons.value.find(c => c.id === selectedCouponId.value) || null
     )
+    const couponBarVisible = computed(() => isCustomerLoggedIn.value && availableCoupons.value.length > 0)
+    const bestCouponValue = computed(() => {
+      if (!availableCoupons.value.length) return 0
+      return Math.max(...availableCoupons.value.map(c => Number(c.value || c.amount || 0)))
+    })
+    const couponBarText = computed(() => `\u60a8\u6709${availableCoupons.value.length}\u5f20\u4f18\u60e0\u5238\uff0c\u6700\u9ad8\u51cf\u00a5${formatPrice(bestCouponValue.value)}`)
+    const couponBarPrefix = computed(() => `\u60a8\u6709${availableCoupons.value.length}\u5f20\u4f18\u60e0\u5238\uff0c\u6700\u9ad8\u51cf`)
+    const couponBarAmount = computed(() => `\u00a5${formatPrice(bestCouponValue.value)}`)
+    const MAX_DISCOUNT_RATIO = 0.20
     const discountAmount = computed(() => {
       if (!selectedCoupon.value) return 0
       const min = Number(selectedCoupon.value.min_amount || selectedCoupon.value.threshold_amount || 0)
       if (totalPrice.value < min) return 0
-      return Number(selectedCoupon.value.value || selectedCoupon.value.amount || 0)
+      const rawDiscount = Number(selectedCoupon.value.value || selectedCoupon.value.amount || 0)
+      return Math.min(rawDiscount, Math.round(totalPrice.value * MAX_DISCOUNT_RATIO * 100) / 100)
     })
     const finalPrice = computed(() => Math.max(totalPrice.value - discountAmount.value, 0))
-    const estimatedBalanceAvailable = computed(() => {
-      const balance = Number(bannerInfo.value?.balance || 0)
-      return Math.max(0, Math.min(balance, finalPrice.value))
+    const showCouponPicker = ref(false)
+    // 面额一样大的时候，谁排前面不能看后端接口凑巧返回的顺序——快过期的那张要是没被
+    // 选中用掉，白白过期作废，就是纯浪费掉的营销成本。所以打平时改成比谁先过期。
+    const compareCouponPriority = (a, b) => {
+      const valueDiff = Number(b.value || b.amount || 0) - Number(a.value || a.amount || 0)
+      if (valueDiff !== 0) return valueDiff
+      const aExpire = new Date(a.expire_time || a.valid_end_time || '2099-01-01').getTime()
+      const bExpire = new Date(b.expire_time || b.valid_end_time || '2099-01-01').getTime()
+      return aExpire - bExpire
+    }
+    const couponPickerList = computed(() =>
+      [...availableCoupons.value]
+        .map(c => ({ ...c, eligible: totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0) }))
+        .sort((a, b) => (b.eligible - a.eligible) || compareCouponPriority(a, b))
+    )
+    const couponPickerAmount = (c) => formatPrice(c.value || c.amount || 0)
+    const couponPickerCondText = (c) => {
+      const min = Number(c.min_amount || c.threshold_amount || 0)
+      return min > 0 ? '\u6ee1' + formatPrice(min) + '\u5143\u53ef\u7528' : '\u65e0\u95e8\u69db\u53ef\u7528'
+    }
+    const openCouponPicker = () => { showCouponPicker.value = true }
+    const closeCouponPicker = () => { showCouponPicker.value = false }
+    const pickCoupon = (coupon) => {
+      if (coupon && !coupon.eligible) return
+      selectedCouponId.value = coupon ? coupon.id : null
+      showCouponPicker.value = false
+    }
+    const wechatPayAmount = computed(() => finalPrice.value)
+    const isPrepayMode = computed(() => paymentMode.value === 'prepay')
+    const confirmPaymentLabel = computed(() => {
+      if (paymentMode.value === 'table_account') return confirmationText.tableAccount
+      if (paymentMode.value === 'postpay') return confirmationText.postpay
+      return wechatPayAmount.value > 0 ? confirmationText.wechatPay : confirmationText.payable
     })
-    const estimatedBalanceDeduction = computed(() => (useBalance.value ? Math.min(estimatedBalanceAvailable.value, finalPrice.value) : 0))
-    const wechatPayAmount = computed(() => Math.max(finalPrice.value - estimatedBalanceDeduction.value, 0))
-    const prepareHint = computed(() => confirmationText.prepareHint)
+    const authAmountLabel = computed(() => isPrepayMode.value ? authSheetText.amount : confirmationText.goodsAmount)
     const canSubmitOrder = computed(() => totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
     const payButtonText = computed(() => {
       if (ordering.value) return confirmationText.confirming
       if (paying.value) return confirmationText.paying
       if (tableSessionClosed.value) return '\u672c\u684c\u5df2\u7ed3\u675f'
       if (!canSubmitOrder.value) return confirmationText.unavailable
-      if (useBalance.value && wechatPayAmount.value <= 0) return confirmationText.balancePay + ' ' + confirmationText.currency + finalPrice.value.toFixed(2)
+      if (paymentMode.value === 'table_account') return confirmationText.submitTableAccount
+      if (paymentMode.value === 'postpay') return confirmationText.submitOrder
       return confirmationText.payNow + ' ' + confirmationText.currency + wechatPayAmount.value.toFixed(2)
     })
     const authPrimaryText = computed(() => {
       if (authActionStatus.value === 'authorizing') return authSheetText.authorizing
       if (authActionStatus.value === 'submitting') return authSheetText.submitting
       if (authActionStatus.value === 'paying') return authSheetText.paying
+      if (!isPrepayMode.value) return authSheetText.confirmSubmit
       if (wechatPayAmount.value <= 0) return authSheetText.confirmFree
       return authSheetText.confirm + ' ' + confirmationText.currency + wechatPayAmount.value.toFixed(2)
     })
@@ -1625,7 +2304,6 @@ export default {
       tableId: tableNo.value,
       cartSnapshot: cartItems.value.map(item => ({ id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specKey: item.specKey || '' })),
       couponId: selectedCouponId.value || null,
-      balanceEnabled: useBalance.value && estimatedBalanceAvailable.value > 0,
       orderRemark: remark.value.trim(),
       payableAmount: wechatPayAmount.value,
       requestId: 'pay_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
@@ -1703,17 +2381,46 @@ export default {
       let sorted = order.length ? order.filter(c => raw.includes(c)) : [...raw]
       raw.forEach(c => { if (!sorted.includes(c)) sorted.push(c) })
       const hasRecommended = allDishes.value.some(d => {
-        const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(/[,锛孿s]+/).map(t => t.trim()).filter(Boolean)
+        const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
         return tags.includes('\u63a8\u8350') || tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500')
       })
       if (hasRecommended) sorted = [RECOMMEND_CAT, ...sorted.filter(c => c !== RECOMMEND_CAT)]
       return sorted
     })
 
+    const normalizeCategoryText = (cat) => String(cat || '').trim()
+
+    const categoryDisplayName = (cat) => {
+      const text = normalizeCategoryText(cat)
+      if (text === RECOMMEND_CAT) return RECOMMEND_CAT
+      if (/\u62db\u724c|\u70ed\u9500|\u7279\u8272/.test(text)) return '\u62db\u724c'
+      if (/\u6c64|\u7ca5|\u4f8b\u6c64/.test(text)) return '\u6c64\u54c1'
+      if (/\u4e3b\u98df|\u7c73\u996d|\u7c73\u7ebf|\u9762|\u7c89|\u996d/.test(text)) return '\u4e3b\u98df'
+      if (/\u996e|\u5976\u8336|\u5496\u5561|\u679c\u6c41|\u8336|\u9152/.test(text)) return '\u996e\u54c1'
+      if (/\u70b9\u5fc3|\u8336\u70b9|\u751c\u54c1|\u5305\u5b50|\u997a\u5b50/.test(text)) return text.length > 3 ? '\u70b9\u5fc3' : text
+      return text.length > 4 ? text.slice(0, 4) : text
+    }
+
+    const categoryIconClass = (cat) => {
+      const text = normalizeCategoryText(cat)
+      if (text === RECOMMEND_CAT) return 'icon-likefill'
+      if (/\u62db\u724c|\u70ed\u9500|\u7279\u8272/.test(text)) return 'icon-xiaochao'
+      if (/\u6c64|\u7ca5|\u4f8b\u6c64/.test(text)) return 'icon-zhou'
+      if (/\u9762|\u7c89/.test(text)) return 'icon-mianshi'
+      if (/\u4e3b\u98df|\u7c73\u996d|\u996d/.test(text)) return 'icon-mifan'
+      if (/\u51b7\u996e|\u996e\u54c1|\u996e\u6599|\u679c\u6c41/.test(text)) return 'icon-lengyin'
+      if (/\u70ed\u996e|\u5496\u5561|\u8336/.test(text)) return 'icon-reyin'
+      if (/\u70b9\u5fc3|\u8336\u70b9/.test(text)) return 'icon-chadian'
+      if (/\u5305\u5b50/.test(text)) return 'icon-baozi'
+      if (/\u997a\u5b50/.test(text)) return 'icon-jiaozi'
+      if (/\u751c\u54c1/.test(text)) return 'icon-tianpin'
+      return 'icon-chadian'
+    }
+
     const dishesByCategory = (cat) => {
       if (cat === RECOMMEND_CAT) {
         return allDishes.value.filter(d => {
-          const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(/[,锛孿s]+/).map(t => t.trim()).filter(Boolean)
+          const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
           return tags.includes('\u63a8\u8350') || tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500')
         })
       }
@@ -1723,12 +2430,10 @@ export default {
     const dishImage = (dish) => dish.image_url || dish.image || dish.cover_image || ''
 
     const dishTags = (dish) => {
-      // 获取菜品标签
       if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
       if (typeof dish.tags === 'string' && dish.tags.trim()) {
-        return dish.tags.split(/[,锛孿s]+/).map(t => t.trim()).filter(Boolean).slice(0, 3)
+        return dish.tags.split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean).slice(0, 3)
       }
-默认返回空数组
       return []
     }
 
@@ -1766,10 +2471,10 @@ export default {
     const formatPrice = (val) => {
       const n = Number(val)
       if (isNaN(n)) return val
-      return n % 1 === 0 ? String(n) : String(n)
+      return n % 1 === 0 ? String(n) : n.toFixed(2)
     }
     const hasSpecs = (dish) => {
-      const tags = Array.isArray(dish.tags) ? dish.tags : String(dish.tags || '').split(/[,锛孿s]+/).map(t => t.trim()).filter(Boolean)
+      const tags = Array.isArray(dish.tags) ? dish.tags : String(dish.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
       return !!dish.has_options || !!dish.hasOptions || tags.includes('\u591a\u89c4\u683c') || tags.includes('\u89c4\u683c') || (Array.isArray(dish.spec_groups) && dish.spec_groups.length > 0) || (Array.isArray(dish.specs) && dish.specs.length > 0) || (Array.isArray(dish.spec_options) && dish.spec_options.length > 0)
     }
     const specButtonText = (dish) => dish.option_button_text || dish.spec_button_text || (hasSpecs(dish) ? specText.chooseTaste : specText.chooseSpec)
@@ -1822,7 +2527,7 @@ export default {
     })
     const dishMatchesHistoryItem = (dish, item) => String(dish.id) === String(item.id || item.dish_id || item.menu_item_id || '') || dish.name === item.name
     const findHistoryDish = (item) => allDishes.value.find(d => dishMatchesHistoryItem(d, item))
-    const historyItemHasSpecSnapshot = (item) => !!(item?.specKey || item?.specLabel || item?.specifications?.length || /[（(]/.test(String(item?.name || "")))
+    const historyItemHasSpecSnapshot = (item) => !!(item?.specKey || item?.specLabel || item?.specifications?.length || /[闂?]/.test(String(item?.name || "")))
     const validateHistoryReorderItem = (item) => {
       const dish = findHistoryDish(item)
       if (!dish || isSoldOut(dish)) return { dish, reason: 'unavailable' }
@@ -1831,24 +2536,23 @@ export default {
     }
     const showHistoryReorderToast = ({ added = 0, skippedUnavailable = 0, skippedSpec = 0 }) => {
       if (added > 0) {
-        let title = '已加入' + added + '份'
+        let title = '已加入' + added + '件'
         if (skippedUnavailable > 0) title += '，部分菜品已下架或售罄'
         else if (skippedSpec > 0) title += '，部分规格已变更，请重新选择'
         uni.showToast({ title, icon: 'none', duration: 1400 })
         return
       }
       if (skippedUnavailable > 0) {
-        uni.showToast({ title: '部分菜品已下架或售罄', icon: 'none', duration: 1400 })
+        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1400 })
         return
       }
       if (skippedSpec > 0) {
-        uni.showToast({ title: '部分规格已变更，请重新选择', icon: 'none', duration: 1400 })
+        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1400 })
         return
       }
       uni.showToast({ title: '没有可重新加入的菜品', icon: 'none', duration: 1200 })
     }
 
-获取最近订单商品
     const lastOrderItems = computed(() => {
       const last = myOrders.value.find(o => !['cancelled', 'rejected'].includes(o.status))
       if (!last || !last.items) return []
@@ -1875,12 +2579,12 @@ export default {
       if (storeClosed.value) return
       const check = validateHistoryReorderItem(item)
       if (!check.dish || check.reason === 'unavailable') {
-        uni.showToast({ title: '部分菜品已下架或售罄', icon: 'none', duration: 1200 })
+        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
         return
       }
       if (check.reason === 'spec_changed') {
         openSpecSheet(check.dish)
-        uni.showToast({ title: '部分规格已变更，请重新选择', icon: 'none', duration: 1200 })
+        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
         return
       }
       addToCart(check.dish)
@@ -1910,12 +2614,12 @@ export default {
     const reorderItem = (item) => {
       const check = validateHistoryReorderItem(item)
       if (!check.dish || check.reason === 'unavailable') {
-        uni.showToast({ title: '部分菜品已下架或售罄', icon: 'none', duration: 1200 })
+        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
         return
       }
       if (check.reason === 'spec_changed') {
         openSpecSheet(check.dish)
-        uni.showToast({ title: '部分规格已变更，请重新选择', icon: 'none', duration: 1200 })
+        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
         return
       }
       addToCart(check.dish)
@@ -1969,6 +2673,7 @@ export default {
       }
       selectedExtras.value = existingItem?.extras ? [...existingItem.extras] : []
       itemRemark.value = existingItem?.itemRemark || ''
+      showItemRemarkExtra.value = Boolean(itemRemarkExtra.value)
       showSpecSheet.value = true
     }
 
@@ -2042,7 +2747,20 @@ export default {
     )
     const cartBadgeText = computed(() => totalCount.value > 99 ? '99+' : String(totalCount.value))
 
-    // 会员节省金额
+    const couponNudgeState = computed(() => buildCouponNudgeState({
+      totalPrice: totalPrice.value,
+      totalCount: totalCount.value,
+      coupons: availableCoupons.value,
+    }))
+
+    const goCouponAddOn = () => {
+      const preferred = categories.value.find(cat => /主食|米饭|饮|小菜|凉菜|点心|甜品/.test(String(cat)))
+      const fallbackDish = allDishes.value
+        .filter(dish => !isSoldOut(dish))
+        .sort((a, b) => dishPriceBase(a) - dishPriceBase(b))[0]
+      const target = preferred || fallbackDish?.category || categories.value[0]
+      if (target) switchCategory(target)
+    }
     const memberSavings = computed(() => {
       return cartItems.value.reduce((s, item) => {
         const dish = allDishes.value.find(d => d.id === item.id)
@@ -2053,11 +2771,10 @@ export default {
       }, 0)
     })
 
-    // 婊氬姩鐩稿叧鐘舵€?
-    const dishScrollTopVal = ref(0)  // 菜品列表滚动位置
+    const dishScrollTopVal = ref(0)
     const categoryScrollTarget = ref('')
     const categoryScrollTop = ref(0)
-    const categoryItemHeight = 96
+    const categoryItemHeight = 108
     const categoryVisibleRows = 6
     let categoryVisibleStart = 0
     const syncCategoryVisible = (cat) => {
@@ -2070,9 +2787,8 @@ export default {
     }
     let currentScrollTop = 0
     let ignoreScroll = false
-    let sectionTops = []             // 分类区域顶部位置
+    let sectionTops = []
 
-    // 缓存分类区域位置
     const cacheSectionPositions = (retry = 0) => {
       const cats = categories.value
       if (!cats.length) return
@@ -2089,26 +2805,23 @@ export default {
           cat,
           top: Math.max(0, (res[i + 1]?.top ?? 0) - svTop + currentScrollTop),
         }))
-滚动到顶部时激活第一个分类
         if (currentScrollTop < 10 && cats.length) {
           activeCategory.value = cats[0]
         }
       })
     }
 
-    // 切换分类
     const switchCategory = (cat) => {
       activeCategory.value = cat
       ignoreScroll = true
       setTimeout(() => { ignoreScroll = false }, 600)
       const idx = categories.value.indexOf(cat)
       syncCategoryVisible(cat)
-滚动到对应分类区域
       scrollTarget.value = ''
       nextTick(() => { scrollTarget.value = 'cat-sec-' + idx })
     }
 
-    
+
     let scrollThrottleTimer = null
     const onDishScroll = (e) => {
       currentScrollTop = e.detail.scrollTop
@@ -2138,9 +2851,10 @@ export default {
     }
 
     const openCart = async () => {
+      pendingSubmitRequestId.value = ''
+      await loadShopSettings()
       showCart.value = true
       itemsExpanded.value = totalCount.value <= 1
-      useBalance.value = estimatedBalanceAvailable.value > 0
       if (uni.getStorageSync('customer_token')) {
         try {
           const res = await getCustomerCoupons('UNUSED')
@@ -2148,11 +2862,14 @@ export default {
           const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
           availableCoupons.value = list
           const eligible = list.filter(c => totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0))
-          if (eligible.length) {
-            eligible.sort((a, b) => Number(b.value || b.amount || 0) - Number(a.value || a.amount || 0))
-            selectedCouponId.value = eligible[0].id
-          } else {
-            selectedCouponId.value = null
+          const keepExistingChoice = selectedCouponId.value && eligible.some(c => c.id === selectedCouponId.value)
+          if (!keepExistingChoice) {
+            if (eligible.length) {
+              eligible.sort(compareCouponPriority)
+              selectedCouponId.value = eligible[0].id
+            } else {
+              selectedCouponId.value = null
+            }
           }
         } catch {}
       }
@@ -2164,6 +2881,7 @@ export default {
         uni.showToast({ title: tableSessionClosed.value ? '\u672c\u684c\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u70b9\u9910' : (tableNo.value ? '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355' : '\u672a\u8bc6\u522b\u684c\u53f7\uff0c\u8bf7\u91cd\u65b0\u626b\u7801'), icon: 'none' })
         return
       }
+      clearStalePrepayOrderForPayLater()
       if (pendingOrderId.value) return confirmPay()
       submitOrder()
     }
@@ -2174,6 +2892,7 @@ export default {
     }
 
     const continuePendingPaymentIntent = async () => {
+      clearStalePrepayOrderForPayLater()
       if (!pendingPaymentIntent.value && !pendingOrderId.value) pendingPaymentIntent.value = createPaymentIntent()
       if (pendingOrderId.value) return confirmPay()
       return submitOrder()
@@ -2194,12 +2913,14 @@ export default {
           code,
           phone_code: phoneCode,
           agreement_accepted: true,
-        })
+          invite_code: uni.getStorageSync('invite_code') || '',
+        }, { authRedirect: false })
         if (res.code !== 200) {
           authActionStatus.value = 'idle'
-          uni.showToast({ title: '\u5df2\u52a0\u5165' + added + '\u4efd', icon: 'success', duration: 1200 })
+          uni.showToast({ title: res?.msg || '\u52a0\u5165\u4f1a\u5458\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none', duration: 1200 })
           return
         }
+        uni.removeStorageSync('invite_code')
         saveCustomerSession(res.data || {})
         await bindCurrentDiningParticipant()
         authActionStatus.value = 'submitting'
@@ -2219,10 +2940,10 @@ export default {
       }
     }
 
-    const submitOrder = async () => {
-      if (ordering.value || paying.value) return false
-      ordering.value = true
-      if (showCheckoutAuth.value) authActionStatus.value = 'submitting'
+    // performSubmitOrder \u62c6\u51fa\u6765\u662f\u4e3a\u4e86\u8ba9"\u672c\u684c\u8eab\u4efd\u5931\u6548\uff0c\u91cd\u5efa\u540e\u81ea\u52a8\u91cd\u8bd5\u4e00\u6b21"\u8fd9\u6761\u8def\u5f84\u80fd
+    // \u9012\u5f52\u8c03\u7528\u81ea\u5df1\u800c\u4e0d\u649e\u4e0a submitOrder \u81ea\u5df1\u7684 ordering.value \u91cd\u5165\u9501\uff08\u9501\u5728\u6574\u4e2a\u4e0b\u5355+\u652f\u4ed8
+    // \u671f\u95f4\u4e00\u76f4\u662f true\uff0c\u9012\u5f52\u8c03\u7528\u5916\u5c42 submitOrder \u4f1a\u88ab\u8fd9\u628a\u9501\u76f4\u63a5\u6321\u56de\u6765\uff09\u3002
+    const performSubmitOrder = async (isRetry = false) => {
       try {
         const sessionReady = await ensureDiningSession()
         if (!sessionReady || tableSessionClosed.value) throw new Error(tableSessionClosed.value ? '\u672c\u684c\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u70b9\u9910' : '\u672c\u684c\u70b9\u9910\u4f1a\u8bdd\u4e0d\u53ef\u7528\uff0c\u8bf7\u91cd\u65b0\u626b\u7801')
@@ -2232,24 +2953,35 @@ export default {
           total: totalPrice.value,
           remark: remark.value.trim() || undefined,
           coupon_id: selectedCouponId.value || undefined,
-          use_balance: useBalance.value && estimatedBalanceAvailable.value > 0,
           dining_session_id: diningSessionId.value || undefined,
           participant_token: diningParticipantToken.value || undefined,
           client_id: diningClientId.value || undefined,
+          request_id: ensureSubmitRequestId(),
           items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined })),
         }
         const res = await createOrder(payload, { authRedirect: false })
         const data = res?.data || {}
-        pendingOrderId.value = String(data.id || '')
+        pendingOrderId.value = String(data.id || data.order_id || '')
         orderNo.value = String(data.order_no || data.id || '').slice(-4)
         successItems.value = cartItems.value.map(i => ({ ...i }))
         successDiscount.value = Number(data.discount_amount ?? 0)
         payAmount.value = Number(data.pay_amount ?? data.total ?? finalPrice.value)
-        balanceAvailable.value = Number(data.balance_available ?? estimatedBalanceAvailable.value)
-        savePendingPaymentOrder()
+        paymentMode.value = normalizePaymentMode(data.payment_mode)
         if (!pendingOrderId.value) throw new Error('\u8ba2\u5355\u521b\u5efa\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5')
-        return await confirmPay()
+        if (data.need_payment !== false) {
+          savePendingPaymentOrder()
+          return await confirmPay()
+        }
+        _handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })
+        pendingPaymentIntent.value = null
+        return true
       } catch (err) {
+        // \u672c\u684c\u533f\u540d\u8eab\u4efd\u5931\u6548\uff08\u540e\u7aef\u7edf\u4e00\u8fd4\u56de 409\uff09\u4e0d\u662f\u4f1a\u5458\u767b\u5f55\u95ee\u9898\uff0c\u9759\u9ed8\u91cd\u5efa\u8eab\u4efd\u540e\u81ea\u52a8\u91cd\u8bd5
+        // \u4e00\u6b21\uff1b\u4ecd\u5931\u8d25\u624d\u8d70\u4e0b\u9762\u7684\u515c\u5e95\u63d0\u793a\uff0c\u4e0d\u4f1a\u5f39"\u7ee7\u7eed\u652f\u4ed8/\u6388\u6743"\u8fd9\u79cd\u4f1a\u5458\u4e13\u5c5e\u7684\u63aa\u8f9e\u3002
+        if (!isRetry && isDiningIdentityError(err)) {
+          const rebuilt = await ensureDiningSession(true)
+          if (rebuilt) return performSubmitOrder(true)
+        }
         if (isCheckoutAuthError(err)) {
           requireCheckoutAuth()
           return false
@@ -2259,6 +2991,15 @@ export default {
         const msg = rawMsg || '\u4e0b\u5355\u5931\u8d25\uff0c\u8bf7\u544a\u77e5\u670d\u52a1\u5458'
         uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
         return false
+      }
+    }
+
+    const submitOrder = async () => {
+      if (ordering.value || paying.value) return false
+      ordering.value = true
+      if (showCheckoutAuth.value) authActionStatus.value = 'submitting'
+      try {
+        return await performSubmitOrder()
       } finally {
         ordering.value = false
       }
@@ -2268,62 +3009,90 @@ export default {
       showCart.value = false
       orderId.value = pendingOrderId.value
       orderStatus.value = data.status || 'pending'
-      balanceDeducted.value = Number(data.balance_deducted ?? 0)
       successTotal.value = Number(data.total ?? payAmount.value)
-      if (balanceDeducted.value > 0 && bannerInfo.value) {
-        bannerInfo.value = { ...bannerInfo.value, balance: Math.max(0, bannerInfo.value.balance - balanceDeducted.value) }
-      }
       startStatusPoll(orderId.value)
       const now = new Date()
       const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
       myOrders.value.unshift({
         id: orderId.value, orderNo: orderNo.value, status: orderStatus.value,
+        paymentStatus: data.payment_status || '', paymentMode: normalizePaymentMode(data.payment_mode || paymentMode.value),
+        diningSessionId: diningSessionId.value || '', tableSessionId: diningSessionId.value || '',
         items: successItems.value, total: successTotal.value, createdAt: timeStr,
         createdTs: now.getTime(), table: tableNo.value,
       })
       saveMyOrders()
       syncDiningOrders().catch(() => {})
-      const c = data.coupon || null
-      earnedCoupon.value = c ? {
-        amount: Number(c.value ?? c.amount ?? 0),
-        threshold: Number(c.min_amount ?? c.threshold ?? 0),
-        validDays: Number(c.valid_days ?? 0),
-          name: c.name || '\u4f18\u60e0\u5238',
-      } : null
+      reminderRequested.value = false
+      applyRewardCoupon(data.coupon || null)
       cart.value = {}
       specCartItems.value = []
       selectedCouponId.value = null
       remark.value = ''
+      pendingSubmitRequestId.value = ''
       showSuccess.value = true
       clearPendingPaymentOrder()
-      console.log('[show_order_success]', { order_id: orderId.value, status: orderStatus.value })
+    }
+
+    // \u628a"\u540e\u7aef\u8fd4\u56de\u7684\u5956\u52b1\u5238"\u62d3\u6210 earnedCoupon \u7684\u5c55\u793a\u5f62\u72b6\uff1a\u6709\u771f\u5b9e\u5956\u52b1\u5238\u5c31\u7528\u5b83\uff0c
+    // \u6ca1\u6709\uff08c \u4e3a null\uff09\u5219\u56de\u9000\u5230\u672c\u5730\u7f13\u5b58\u7684\u5165\u4f1a\u6b22\u8fce\u5238\uff0c\u514d\u5f97\u652f\u4ed8\u5b8c\u6210\u90a3\u4e00\u523b\u4ec0\u4e48\u90fd\u4e0d\u5c55\u793a\u3002
+    const applyRewardCoupon = (c) => {
+      if (c) {
+        earnedCoupon.value = {
+          couponId: c.id || '',
+          amount: Number(c.value ?? c.amount ?? 0),
+          threshold: Number(c.min_amount ?? c.threshold ?? 0),
+          // \u540e\u7aef\u7ed9\u7684\u662f\u7edd\u5bf9\u8fc7\u671f\u65f6\u95f4 expired_at\uff0c\u4e0d\u662f\u76f8\u5bf9\u5929\u6570\uff0c
+          // \u76f4\u63a5\u5b58\u6210 expire_time \u65b9\u4fbf\u590d\u7528\u4e0b\u9762\u7684 couponValidityText\u3002
+          expire_time: c.expired_at || '',
+          name: c.name || '\u4f18\u60e0\u5238',
+          isSecondOrder: Boolean(c.is_second_order),
+        }
+        return true
+      }
+      const welcome = consumeWelcomeCoupon()
+      earnedCoupon.value = welcome ? {
+        couponId: welcome.id || '',
+        amount: Number(welcome.amount ?? welcome.value ?? 0),
+        threshold: Number(welcome.min_amount ?? welcome.threshold ?? 0),
+        expire_time: welcome.expired_at || '',
+        name: welcome.name || '\u65b0\u4eba\u4f18\u60e0\u5238',
+      } : null
+      return false
+    }
+
+    // \u771f\u5b9e\u5fae\u4fe1\u652f\u4ed8\u7684\u5956\u52b1\u5238\u662f\u5f02\u6b65\u53d1\u7684\uff08wxpay_notify \u56de\u8c03\u843d\u5e93\uff09\uff0c\u5ba2\u6237\u7aef requestPayment
+    // \u521a\u6210\u529f\u90a3\u4e00\u523b\u540e\u7aef\u672a\u5fc5\u5df2\u7ecf\u5904\u7406\u5b8c\uff0c\u6240\u4ee5\u5148\u7528\u56de\u9000\u6587\u6848\u5c55\u793a\uff0c\u518d\u5728\u540e\u53f0\u77ed\u8f6e\u8be2 /orders/my
+    // \u62ff\u5230\u771f\u5b9e\u53d1\u653e\u7684\u5956\u52b1\u5238\u540e\u8865\u4e0a\u53bb\u2014\u2014\u82e5\u7528\u6237\u5df2\u5173\u95ed\u6210\u529f\u9762\u677f\u6216\u5df2\u53bb\u770b\u5176\u4ed6\u8ba2\u5355\u5c31\u4e0d\u518d\u6539\u3002
+    const attachPaymentReward = async (id) => {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 900))
+        try {
+          const res = await getOrderStatus(id, diningParticipantToken.value)
+          const d = res?.data || {}
+          if (d.payment_status === 'paid') {
+            if (showSuccess.value && orderId.value === id && d.reward_coupon) {
+              applyRewardCoupon(d.reward_coupon)
+            }
+            return
+          }
+        } catch (e) { /* keep retrying */ }
+      }
     }
 
     const confirmPay = async () => {
       if (paying.value || !pendingOrderId.value) return false
-      if (await recoverPendingPaymentResult()) return true
       paying.value = true
-      if (showCheckoutAuth.value) authActionStatus.value = 'paying'
       try {
-        console.log('[ORDER_PAY_START]', {
-          order_id: pendingOrderId.value,
-          amount: actualPayAmount.value,
-          use_balance: useBalance.value
-        })
+        if (await recoverPendingPaymentResult()) return true
+        if (showCheckoutAuth.value) authActionStatus.value = 'paying'
         let jsCode = ''
         if (!uni.getStorageSync('customer_token')) {
           jsCode = await wxLogin()
         }
-        const res = await createWxPayOrder(pendingOrderId.value, useBalance.value, { authRedirect: false, js_code: jsCode })
+        const res = await createWxPayOrder(pendingOrderId.value, false, { authRedirect: false, js_code: jsCode })
         const data = res?.data || {}
-        console.log('[ORDER_PAY_RESPONSE]', {
-          order_id: pendingOrderId.value,
-          free: !!data.free,
-          has_pay_params: !!data.pay_params
-        })
 
         if (data.free) {
-          console.log('[ORDER_PAY_FREE_SUCCESS]', { order_id: pendingOrderId.value })
           _handlePaySuccess(data)
           pendingPaymentIntent.value = null
           return true
@@ -2331,11 +3100,9 @@ export default {
 
         const p = data.pay_params
         if (!p) {
-          console.log('[ORDER_PAY_PARAMS_MISSING]', { order_id: pendingOrderId.value, data })
           throw new Error('\u652f\u4ed8\u53c2\u6570\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u4e0b\u5355')
         }
 
-        console.log('[ORDER_REQUEST_PAYMENT_START]', { order_id: pendingOrderId.value })
         await uni.requestPayment({
           provider: 'wxpay',
           timeStamp: p.timeStamp,
@@ -2345,13 +3112,14 @@ export default {
           paySign: p.paySign,
         })
 
-        console.log('[ORDER_REQUEST_PAYMENT_SUCCESS]', { order_id: pendingOrderId.value })
+        const paidOrderId = pendingOrderId.value
         _handlePaySuccess({ ...data, total: payAmount.value })
         pendingPaymentIntent.value = null
+        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去轮询。
+        attachPaymentReward(paidOrderId)
         return true
 
       } catch (err) {
-        console.log('[ORDER_PAY_FAIL]', { order_id: pendingOrderId.value, error: err })
         if (isCheckoutAuthError(err)) {
           requireCheckoutAuth()
           return false
@@ -2381,31 +3149,96 @@ export default {
       successItems.value = []
       successTotal.value = 0
       successDiscount.value = 0
-      useBalance.value = false
-      balanceAvailable.value = 0
-      balanceDeducted.value = 0
       showSuccess.value = false
     }
 
-    const callWaiter = () => {
-      uni.vibrateShort({ type: 'heavy' })
-      uni.showToast({ title: '\u5df2\u901a\u77e5\u670d\u52a1\u5458\u7ed3\u8d26', icon: 'none', duration: 2000 })
+    const clearCheckoutRequest = () => {
+      if (!checkoutRequestedAt.value) return
+      checkoutRequestedAt.value = ''
+      requestTableCheckout({
+        tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
+        dining_session_id: tableSessionId.value,
+        participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') || '',
+        requested: false,
+      }).catch(() => {})
     }
 
-    const callWaiterBill = () => {
-      uni.vibrateShort({ type: 'heavy' })
-      uni.showModal({
-        title: '\u786e\u8ba4\u7ed3\u8d26',
-        content: '\u672c\u684c\u5408\u8ba1 \u00a5' + tableTotalSpent.value.toFixed(2) + '\uff0c\u8bf7\u786e\u8ba4\u5546\u5bb6\u5df2\u5b8c\u6210\u7ed3\u8d26\u3002',
-        confirmText: '\u786e\u8ba4\u7ed3\u8d26',
-        cancelText: '\u518d\u7b49\u7b49',
-        success: (res) => {
-          if (res.confirm) {
-            uni.showToast({ title: '\u5df2\u5b8c\u6210\u672c\u684c\u7528\u9910', icon: 'success', duration: 1200 })
-            finishOrdering()
-          }
+    const handleTableContinueOrder = async () => {
+      if (!canContinueOrder.value) {
+        uni.showToast({ title: '本桌账单已结束，不能继续加菜', icon: 'none' })
+        return
+      }
+      if (!tableSessionId.value) {
+        const ok = await ensureDiningSession(true)
+        if (!ok) {
+          uni.showToast({ title: '本桌点餐会话不可用，请重新扫码', icon: 'none' })
+          return
         }
+      }
+      // 顾客决定继续加菜，说明这一桌暂时不结账了，之前呼叫服务员的请求就该撤销，
+      // 不然等新点的菜也做完了，界面会立刻显示"已呼叫服务员"这种其实早就过期的状态。
+      clearCheckoutRequest()
+      persistDiningContext({
+        dining_session_id: tableSessionId.value,
+        participant_token: diningParticipantToken.value,
+        client_id: diningClientId.value,
       })
+      showOrders.value = false
+      showSuccess.value = false
+      activeTab.value = 'order'
+    }
+
+    const performTableCheckout = async (isRetry = false) => {
+      try {
+        // participant_token 有时会跟 session 状态不同步（比如缓存只留下了 session_id），
+        // 后端校验不到身份会直接 409，先补一次 ensureDiningSession 把它修复回来，
+        // 避免明明这一桌点单正常、结账却因为身份缺失而失败。
+        if (!diningParticipantToken.value && !uni.getStorageSync('dining_participant_token')) {
+          await ensureDiningSession()
+        }
+        const res = await requestTableCheckout({
+          tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
+          dining_session_id: tableSessionId.value,
+          participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') || '',
+          requested: true,
+        }, { authRedirect: false })
+        if (res?.code === 200) {
+          checkoutRequestedAt.value = res.data?.checkout_requested_at || new Date().toISOString()
+          uni.vibrateShort({ type: 'heavy' })
+          uni.showToast({ title: '已通知服务员，请稍候为您结账', icon: 'none', duration: 2000 })
+        } else {
+          uni.showToast({ title: res?.msg || '呼叫失败，请重试', icon: 'none' })
+        }
+      } catch (e) {
+        if (!isRetry && isDiningIdentityError(e)) {
+          const rebuilt = await ensureDiningSession(true)
+          if (rebuilt) return performTableCheckout(true)
+        }
+        uni.showToast({ title: '呼叫失败，请重试', icon: 'none' })
+      }
+    }
+
+    const handleTableCheckout = async () => {
+      if (tableCheckouting.value || checkoutRequested.value) return
+      if (isTableSettled.value) {
+        uni.showModal({
+          title: '本桌已结账',
+          content: '本次用餐账单已经结清，如需明细请联系服务员。',
+          showCancel: false,
+          confirmText: '知道了',
+        })
+        return
+      }
+      if (!tableSessionId.value) {
+        uni.showToast({ title: '缺少桌台账单信息，请重新加载', icon: 'none' })
+        return
+      }
+      tableCheckouting.value = true
+      try {
+        await performTableCheckout()
+      } finally {
+        tableCheckouting.value = false
+      }
     }
 
     const goCoupons = () => {
@@ -2413,7 +3246,14 @@ export default {
       uni.navigateTo({ url: '/subpkg-coupon/pages/list' })
     }
 
-    const loadMemberStatus = async () => {
+    const pickAvatarChar = (name) => {
+      const chars = Array.from(String(name || '').trim())
+      const ch = chars.find(c => /[一-龥a-zA-Z0-9]/.test(c))
+      if (!ch) return '会'
+      return /[a-z]/.test(ch) ? ch.toUpperCase() : ch
+    }
+
+    const loadMemberStatus = async (opts = {}) => {
       refreshCustomerAuthState()
       const token = uni.getStorageSync('customer_token')
       isCustomerLoggedIn.value = Boolean(token || uni.getStorageSync('customer_phone'))
@@ -2425,31 +3265,50 @@ export default {
       if (memberLoading.value) return
       memberLoading.value = true
       try {
-        const [profileRes, couponRes] = await Promise.all([
-          getMemberProfile(),
-          getCustomerCoupons('UNUSED').catch(() => null),
+        const [profileRes, couponRes, growthRes] = await Promise.all([
+          getMemberProfile({ authRedirect: opts.authRedirect !== false }),
+          getCustomerCoupons('UNUSED', { authRedirect: opts.authRedirect !== false }).catch(() => null),
+          getMembershipGrowth().catch(() => null),
         ])
         if (profileRes?.code === 200 && profileRes?.data) {
           const p = profileRes.data
+          const g = growthRes?.code === 200 ? (growthRes.data || {}) : {}
           isMember.value = !!(p.membership_level || p.is_member || p.member_card || p.membership_expire_at || p.level)
           const coupons = Array.isArray(couponRes?.data) ? couponRes.data : []
+          availableCoupons.value = coupons
           bannerInfo.value = {
-            nameChar: (p.name || '\u4f1a')[0],
+            nameChar: pickAvatarChar(p.name),
+            avatar: p.avatar || p.avatar_url || p.headimgurl || '',
+            memberNo: p.store_member_no ? String(p.store_member_no).padStart(6, '0') : '',
             levelLabel: p.level || p.membership_level || '\u666e\u901a\u4f1a\u5458',
+            levelCode: p.level_code || g.level_code || 'LV1',
             couponCount: coupons.length,
             coupons,
-            balance: Number(p.balance || 0),
             points: Number(p.points || 0),
-            growth: Number(p.growth || p.growth_value || p.growthValue || 0),
-            nextGrowth: Number(p.next_growth || p.nextGrowth || 0),
-            nextUpgradeAmount: Number(p.next_upgrade_amount || p.nextUpgradeAmount || 0),
+            // \u8fd9\u4e09\u4e2a\u5b57\u6bb5\u4e4b\u524d\u4ece\u672a\u88ab /v1/member/profile \u586b\u8fc7\uff0c
+            // \u8fdb\u5ea6\u6761\u6c38\u8fdc\u4e0d\u6e32\u67d3\uff0c\u73b0\u5728\u6539\u4ece\u4e0e growth.vue \u540c\u4e00\u4e2a
+            // /v1/member/membership \u53d6\u6570\uff0c\u907f\u514d\u4e24\u5904\u5404\u7b97\u4e00\u5957\u5bf9\u4e0d\u4e0a\u53f7\u3002
+            growth: Number(g.yearly_consumption || 0),
+            nextGrowth: Number(g.next_level?.threshold || 0),
+            nextUpgradeAmount: Math.max(0, Number(g.next_level?.threshold || 0) - Number(g.yearly_consumption || 0)),
           }
         }
-      } catch { /* 蹇界暐鍔犺浇澶辫触 */ }
+      } catch { }
       finally { memberLoading.value = false }
     }
 
     const entryCoupon = ref(null)   // { coupon_id, amount, threshold, expire_time }
+    const couponReminderTemplateId = ref('')   // 空字符串表示还没配置订阅消息模板，"提醒我"按钮不显示
+    const newCustomerCouponPreview = ref(null)   // { name, amount, min_amount, valid_days }，未登录也能看到的首单钩子数字
+    // 首单钩子文案：登录按钮、会员Tab、点餐页顶部三处统一读这一个 computed，
+    // 保证顾客登录前看到的数字和登录后弹出的"新人券"数字对得上，不会各写各的。
+    const newCustomerHookText = computed(() => {
+      const p = newCustomerCouponPreview.value
+      if (!p || !(p.amount > 0)) return '登录解锁会员专属优惠'
+      const amount = formatPrice(p.amount)
+      const min = Number(p.min_amount || 0)
+      return min > 0 ? `新客立减¥${amount}，满${min.toFixed(0)}元可用` : `新客立减¥${amount}，授权手机号立得`
+    })
 
     const loadShopSettings = async () => {
       if (!shopId.value) return
@@ -2458,21 +3317,44 @@ export default {
         if (res?.code === 200 && res?.data) {
           const d = res.data
           deliveryEnabled.value = !!d.delivery_enabled
+          paymentMode.value = normalizePaymentMode(d.payment_mode)
+          shopCreatedAt.value = d.created_at || d.create_time || d.createdAt || d.register_time || ''
           const realShopName = d.name || d.shop_name || d.tenant_name || ''
           if (realShopName) {
             shopName.value = realShopName
             uni.setStorageSync('tenant_name', realShopName)
             uni.setNavigationBarTitle({ title: realShopName + ' \u70b9\u9910' })
           }
+          shopLogo.value = d.logo || d.logo_url || ''
           if (Array.isArray(d.remark_chips) && d.remark_chips.length) {
             remarkChips.value = d.remark_chips
+          }
+          if (Array.isArray(d.order_remark_chips) && d.order_remark_chips.length) {
+            orderRemarkChips.value = d.order_remark_chips
           }
           if (Array.isArray(d.category_order) && d.category_order.length) {
             categoryOrder.value = d.category_order
           }
-          // 澶勭悊杩涘簵浼樻儬鍒?
           if (d.entry_coupon?.coupon_id) {
             entryCoupon.value = d.entry_coupon
+            // is_new 是后端算好的"这张是不是这次调用才发的"——同一天重复进店只会拿到
+            // 同一张已发过的进店券（is_new:false），不重复提示，只在真正新发时提醒一次，
+            // 不然这张后端已经在默默发放的券，顾客永远不知道自己刚刚薅到了。
+            if (d.entry_coupon.is_new) {
+              uni.showToast({
+                title: `已发放进店券 ¥${formatPrice(d.entry_coupon.amount)}，满${Number(d.entry_coupon.threshold || 0).toFixed(0)}元可用`,
+                icon: 'none',
+                duration: 3000,
+              })
+            }
+          }
+          newCustomerCouponPreview.value = d.new_customer_coupon_preview || null
+          couponReminderTemplateId.value = d.coupon_reminder_template_id || ''
+          if (d.is_open === false) {
+            storeClosed.value = true
+            closedNotice.value = d.closed_notice || d.business_hours || ''
+          } else {
+            storeClosed.value = false
           }
           if (d.lat && d.lng) loadDistance(d.lat, d.lng)
         }
@@ -2493,20 +3375,13 @@ export default {
         }
         const items = res?.data?.items || res?.data || []
         allDishes.value = Array.isArray(items) ? items.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
-        const shopInfo = res?.data?.shop || res?.data?.tenant || null
-        if (shopInfo && shopInfo.is_open === false) {
-          storeClosed.value = true
-          closedNotice.value = shopInfo.closed_notice || shopInfo.business_hours || ''
-        }
       } catch {
         loadError.value = true
         allDishes.value = []
       } finally {
         loading.value = false
-菜单加载完成后重置滚动状态
         currentScrollTop = 0
         if (categories.value.length) activeCategory.value = categories.value[0]
-        // DOM 鏇存柊鍚庣紦瀛樺垎绫讳綅缃?
         setTimeout(cacheSectionPositions, 400)
       }
     }
@@ -2516,42 +3391,49 @@ export default {
       if (showCart.value && totalCount.value <= 0) showCart.value = false
       resetPendingPayment()
     }, { deep: true })
-    watch([selectedCouponId, remark, useBalance], resetPendingPayment)
+    watch([selectedCouponId, remark], resetPendingPayment)
 
     return {
-      tableNo, shopId, shopName, tableDisplayText, orderModeDisplayText, showTableHint, todayActivity, orderMode, orderModeText, confirmationText, successText, specText,
+      tableNo, shopId, shopName, shopLogo, memberSinceText, tableDisplayText, orderModeDisplayText, showTableHint, todayActivity, orderMode, orderModeText, confirmationText, confirmPaymentLabel, authAmountLabel, successText, specText,
       loading, loadError, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
+      couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
+      showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
       paying, payAmount, confirmPay,
-      orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, merchantNote,
-      remark, remarkChips, toggleRemarkChip,
+      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, merchantNote,
+      startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll,
+      remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
+      showCouponPicker, couponPickerList, couponPickerAmount, couponPickerCondText, openCouponPicker, closeCouponPicker, pickCoupon,
+      couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
       openCart,
       activeCategory, scrollTarget, categoryScrollTarget, categoryScrollTop, dishScrollTopVal, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       successItems, successTotal,
-      categories, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
+      categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
       imageLoadFailed, detailImageFailed, markDishImageFailed, openProductDetail,
       cartCount, addToCart, removeFromCart, increaseCartItem, clearCart, specButtonText, dishOptionKindCount, optionCountText, openSpecSheet,
       cartItems, totalCount, totalPrice, cartBadgeText,
       switchCategory, switchOrderMode,
-      goCheckout, resetOrder, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, callWaiter, callWaiterBill, loadMenu,
-      myOrders, showOrders, showAllOrders, pendingOrderCount, tableTotalSpent, statusLabel, doCancelOrder,
-      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
-      orderItemName, orderItemQty, orderItemAmount, orderItemSpecText,
+      goCheckout, resetOrder, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
+      myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
+      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
+      tableAccountScrollInto, scrollTableAccountToTop,
+      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
+      orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
-      successDiscount, useBalance, balanceAvailable, balanceDeducted, actualPayAmount, estimatedBalanceAvailable, estimatedBalanceDeduction, wechatPayAmount, prepareHint, canSubmitOrder, payButtonText,
+      successDiscount, wechatPayAmount, canSubmitOrder, payButtonText,
       showReview, reviewRating, reviewContent, reviewHintText, closeReview, doSubmitReview,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, memberSavings, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
-      memberLevelLabel, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon, goBalanceDetail,
+      memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
       homeStatusDesc, homeOrderButtonText, homeCouponHint, canStartOrdering, featuredDish, featuredDishTag, canHomeAdd, homeLastOrderItems,
       handleHomeStartOrder, handleFeaturedAdd, handleHomeReorderItem, handleHomeReorderAll,
       loadMemberStatus, refreshCustomerAuthState, loadShopSettings,
-      deliveryEnabled, entryCoupon,
+      deliveryEnabled, entryCoupon, newCustomerCouponPreview, newCustomerHookText,
       showSpecSheet, specDish, specQty, selectedSpecs, specTotalPrice,
-      isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, selectedExtras, itemRemark, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
+      isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured, dishPlaceholderStyle,
       lastOrderItems, reorderItem, reorderAll,
       setupCategoryObserver, onDishScroll,
@@ -2568,25 +3450,40 @@ export default {
       this.restorePendingPaymentOrder()
       await this.ensureDiningSession(true)
       await this.syncDiningOrders()
+      this.startTablePresencePoll()
       await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
       if (options.openOrders === '1') this.showOrders = true
       this.refreshCustomerAuthState()
-      this.loadMemberStatus()
+      this.loadMemberStatus({ authRedirect: false })
       await this.loadShopSettings()
       await this.loadMenu()
     })()
   },
-  onShow: function () {
+  onShow() {
+    const focusTab = uni.getStorageSync('menu_focus_tab')
+    if (focusTab) {
+      this.activeTab = focusTab
+      uni.removeStorageSync('menu_focus_tab')
+    }
     if (this.refreshCustomerAuthState) this.refreshCustomerAuthState()
     if (this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
     if (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone')) {
-      this.loadMemberStatus()
+      this.loadMemberStatus({ authRedirect: false })
     }
+    if (this.orderId && !['settled', 'cancelled', 'rejected'].includes(this.orderStatus)) {
+      this.startStatusPoll(this.orderId)
+    }
+    this.startTablePresencePoll()
+  },
+  onHide: function () {
+    this.stopStatusPoll()
+    this.stopTablePresencePoll()
   },
   onUnload: function () {
     this.stopStatusPoll()
+    this.stopTablePresencePoll()
     if (this.setupCategoryObserver) {
-      
+
     }
   },
 }
@@ -2601,20 +3498,50 @@ export default {
   flex-direction: column;
 }
 
-/* 搴楅摵澶撮儴 */
+
 .shop-header {
-  height: calc(176rpx + env(safe-area-inset-top));
-  min-height: calc(176rpx + env(safe-area-inset-top));
-  max-height: calc(176rpx + env(safe-area-inset-top));
-  background: #07C160;
+  position: relative;
+  height: calc(220rpx + env(safe-area-inset-top));
+  min-height: calc(220rpx + env(safe-area-inset-top));
+  max-height: calc(220rpx + env(safe-area-inset-top));
+  background: var(--brand) url('/static/order/shop-cover-default.jpg') right bottom / cover no-repeat;
   padding: calc(28rpx + env(safe-area-inset-top)) 32rpx 24rpx;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 门店封面图目前是通用素材，不分商户；等 admin-h5 有了真正的封面上传入口，
+   这层叠加渐变可以继续用，只需要把 url() 换成商户自己的封面图。
+   background-position 用 right bottom：这张图的餐桌/菜品在右下方，居中裁剪
+   会把菜品裁掉一截、只剩空景。
+   这张图本身左侧就是渐变到浅色的留白（跟首页"立即点餐"卡片同一张风格的图），
+   之前又在上面叠了一层深绿色遮罩、文字还留白色——两层"提亮对比度"的手段叠加，
+   把照片本身糊成一片。首页卡片那次是对的做法：不加遮罩，直接把文字换成深色，
+   这里改成同一个做法，照片才能透出来，不然然会一直"雾蒙蒙"。 */
+
+.shop-header-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  height: 100%;
+  max-width: calc(100vw - 220rpx);
   box-sizing: border-box;
 }
 
+.shop-logo {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2rpx solid rgba(255,255,255,0.65);
+  background: rgba(255,255,255,0.15);
+}
+
 .shop-title-main {
-  width: 100%;
+  flex: 1;
   min-width: 0;
-  max-width: calc(100vw - 220rpx);
   box-sizing: border-box;
 }
 
@@ -2622,7 +3549,7 @@ export default {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  color: #fff;
+  color: #2b1c0f;
   font-size: 36rpx;
   font-weight: 600;
   line-height: 50rpx;
@@ -2642,7 +3569,7 @@ export default {
 }
 
 .shop-table-text {
-  color: #fff;
+  color: #2b1c0f;
   font-size: 28rpx;
   line-height: 40rpx;
   font-weight: 600;
@@ -2651,13 +3578,13 @@ export default {
 
 .shop-meta-dot {
   margin: 0 10rpx;
-  color: rgba(255,255,255,0.65);
+  color: rgba(58,38,18,0.6);
   font-size: 28rpx;
   line-height: 40rpx;
 }
 
 .shop-mode-text {
-  color: rgba(255,255,255,0.78);
+  color: rgba(58,38,18,0.78);
   font-size: 28rpx;
   line-height: 40rpx;
   font-weight: 500;
@@ -2666,7 +3593,7 @@ export default {
 
 .shop-meta-arrow {
   margin-left: 10rpx;
-  color: rgba(255,255,255,0.55);
+  color: rgba(58,38,18,0.55);
   font-size: 28rpx;
   line-height: 40rpx;
   font-weight: 500;
@@ -2679,6 +3606,56 @@ export default {
 .activity-text,
 .shop-meta { display: none; }
 
+.coupon-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  height: 68rpx;
+  padding: 0 32rpx;
+  background: linear-gradient(90deg, #fdf0dc, #fbe4bf);
+  box-sizing: border-box;
+}
+
+.coupon-bar-icon {
+  font-size: 26rpx;
+  line-height: 1;
+  color: #b5691f;
+}
+
+.coupon-bar-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #5a3c1e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-bar-amount {
+  color: #e0432a;
+  font-weight: 800;
+}
+
+.coupon-bar-arrow {
+  flex-shrink: 0;
+  color: rgba(90, 60, 30, 0.55);
+  font-size: 24rpx;
+  line-height: 1;
+}
+
+.new-customer-bar {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  line-height: normal;
+}
+.new-customer-bar::after { border: none; }
+.new-customer-bar[disabled] { opacity: .7; }
+
 
 .menu-body {
   display: flex;
@@ -2690,8 +3667,8 @@ export default {
 }
 
 .category-nav {
-  width: 156rpx;
-  flex: 0 0 156rpx;
+  width: 168rpx;
+  flex: 0 0 168rpx;
   background: #F6F7F8;
   overflow-x: hidden;
   overflow-y: auto;
@@ -2700,45 +3677,75 @@ export default {
 
 .cat-item {
   position: relative;
-  height: 96rpx;
-  min-height: 96rpx;
-  padding: 0 16rpx;
+  height: 108rpx;
+  min-height: 108rpx;
+  padding: 12rpx 10rpx 10rpx 14rpx;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6rpx;
+  text-align: center;
+  color: #6F7680;
+  background: transparent;
+}
+
+.cat-icon-wrap {
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  font-size: 28rpx;
-  line-height: 38rpx;
-  font-weight: 500;
-  color: #6F7680;
   background: transparent;
+  flex-shrink: 0;
+}
 
-  text {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    word-break: break-all;
-  }
+.cat-icon {
+  color: #9CA3AF;
+  font-size: 32rpx;
+  line-height: 36rpx;
+}
 
-  &.active {
-    background: #fff;
-    color: #07C160;
-    font-weight: 600;
-  }
+.cat-name {
+  max-width: 124rpx;
+  font-size: 24rpx;
+  line-height: 30rpx;
+  font-weight: 600;
+  color: #6F7680;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-  &.active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 6rpx;
-    height: 48rpx;
-    border-radius: 0 4rpx 4rpx 0;
-    background: #07C160;
-  }
+.cat-item.active {
+  background: #fff;
+}
+
+.cat-item.active .cat-icon-wrap {
+  background: var(--brand-light);
+}
+
+.cat-item.active .cat-icon,
+.cat-item.active .cat-name {
+  color: var(--brand);
+}
+
+.cat-item.active .cat-name {
+  font-weight: 800;
+}
+
+.cat-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx;
+  height: 52rpx;
+  border-radius: 0 4rpx 4rpx 0;
+  background: var(--brand);
 }
 
 .dish-scroll {
@@ -2746,7 +3753,7 @@ export default {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  background: #fff;
+  background: var(--bg-page);
   padding: 0;
   box-sizing: border-box;
 }
@@ -2758,7 +3765,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: transparent;
 }
 .cat-divider-line {
   flex: 1;
@@ -2766,12 +3773,30 @@ export default {
   height: 1rpx;
   background: #E7E9EC;
 }
+.cat-divider-main {
+  margin: 0 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.cat-divider-icon {
+  flex-shrink: 0;
+  font-size: 28rpx;
+  line-height: 32rpx;
+  color: var(--brand);
+}
+
 .cat-divider-text {
-  margin: 0 20rpx;
+  max-width: 168rpx;
   font-size: 26rpx;
-  color: #8A9099;
-  font-weight: 500;
+  color: var(--text-3);
+  font-weight: 600;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   letter-spacing: 0;
 }
 
@@ -2780,27 +3805,27 @@ export default {
   padding: 24rpx 0 16rpx;
   font-size: 24rpx;
   font-weight: 700;
-  color: #9ca3af;
+  color: var(--text-3);
 }
 
 .dish-item {
   display: flex;
   align-items: stretch;
-  width: 100%;
   min-width: 0;
   height: 236rpx;
   min-height: 236rpx;
   max-height: 236rpx;
+  margin: 0 20rpx 16rpx;
   padding: 20rpx 20rpx 20rpx 24rpx;
   box-sizing: border-box;
   background: #fff;
-  border-bottom: 0;
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
   position: relative;
   overflow: hidden;
   transition: background 120ms ease, opacity 120ms ease;
 }
 
-.dish-item::after { content: ""; position: absolute; left: 236rpx; right: 0; bottom: 0; height: 1rpx; background: #F0F1F2; }
 .dish-item:active { background: #f8faf9; }
 .dish-item--featured { border-left-color: transparent; }
 .dish-item--soldout { opacity: .76; }
@@ -2814,15 +3839,12 @@ export default {
   background: #F5F3EE;
   flex-shrink: 0;
   box-sizing: border-box;
+  box-shadow: 0 2rpx 8rpx rgba(17,24,39,0.08);
 }
 
 .dish-img { width: 100%; height: 100%; display: block; }
 .dish-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #F5F3EE; }
-.dish-placeholder-icon { position: relative; width: 62rpx; height: 62rpx; }
-.dish-placeholder-plate { position: absolute; left: 10rpx; top: 12rpx; width: 42rpx; height: 42rpx; border: 4rpx solid #C7C2B8; border-radius: 50%; box-sizing: border-box; background: rgba(255,255,255,.46); }
-.dish-placeholder-stick { position: absolute; top: 8rpx; width: 4rpx; height: 48rpx; border-radius: 999rpx; background: #C7C2B8; }
-.dish-placeholder-stick--left { left: 2rpx; }
-.dish-placeholder-stick--right { right: 2rpx; }
+.dish-placeholder-img { width: 60%; height: 60%; }
 .dish-soldout-mask { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(31,41,55,.42); }
 .dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: #fff; font-size: 24rpx; font-weight: 700; }
 .dish-emoji-wrap, .dish-emoji, .dish-initial, .dish-badge-top { display: none; }
@@ -2832,14 +3854,17 @@ export default {
   display: flex;
   align-items: center;
   gap: 12rpx;
-  padding: 16rpx 0 12rpx;
-  border-bottom: 1rpx solid #f0f0f0;
-  margin-bottom: 4rpx;
+  margin: 16rpx 20rpx 12rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 20rpx;
+  background: #fff;
+  box-shadow: var(--card-shadow);
+  box-sizing: border-box;
 }
 
 .reorder-label {
   font-size: 22rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -2860,7 +3885,7 @@ export default {
   gap: 6rpx;
   padding: 8rpx 16rpx;
   border-radius: 32rpx;
-  border: 1rpx solid #07C160;
+  border: 1rpx solid var(--brand);
   background: #f0fdf4;
   flex-shrink: 0;
 }
@@ -2876,14 +3901,14 @@ export default {
 
 .reorder-chip-add {
   font-size: 24rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 800;
   line-height: 1;
 }
 
 .reorder-all-btn {
   flex-shrink: 0;
-  background: #07C160;
+  background: var(--brand);
   border-radius: 28rpx;
   padding: 6rpx 18rpx;
 }
@@ -2912,7 +3937,7 @@ export default {
   background: linear-gradient(90deg, #fff7ed, #fef3c7);
   border-radius: 12rpx;
   padding: 14rpx 20rpx;
-  border-left: 4rpx solid #f59e0b;
+  border-left: 4rpx solid var(--warning);
 }
 
 .member-hint-text {
@@ -2937,37 +3962,43 @@ export default {
 }
 
 
-.dish-info { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 20rpx; box-sizing: border-box; overflow: hidden; }
-.dish-title-row { display: flex; align-items: flex-start; gap: 12rpx; min-width: 0; }
-.dish-name { flex: 1; min-width: 0; font-size: 32rpx; font-weight: 600; line-height: 44rpx; color: #171A1D; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-tags { display: flex; flex-shrink: 0; flex-wrap: nowrap; max-width: 112rpx; overflow: hidden; }
-.dish-tag { max-width: 112rpx; height: 36rpx; padding: 0 10rpx; border-radius: 8rpx; box-sizing: border-box; font-size: 20rpx; font-weight: 500; line-height: 36rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dish-info { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 18rpx; box-sizing: border-box; overflow: hidden; }
+.dish-title-row { display: flex; align-items: flex-start; gap: 8rpx; min-width: 0; }
+.dish-name { flex: 1; min-width: 0; font-size: 32rpx; font-weight: 600; line-height: 44rpx; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dish-tags { display: flex; flex-shrink: 0; flex-wrap: nowrap; max-width: 88rpx; overflow: hidden; }
+.dish-tag { max-width: 88rpx; height: 34rpx; padding: 0 8rpx; border-radius: 8rpx; box-sizing: border-box; font-size: 20rpx; font-weight: 500; line-height: 34rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dish-tag--strong { color: #078546; background: #e9f9f0; }
 .dish-tag--plain { display: none; }
 .dish-meta { flex: 1; min-width: 0; min-height: 0; padding-top: 6rpx; }
-.dish-desc { display: block; min-width: 0; font-size: 26rpx; color: #8A9099; line-height: 36rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dish-desc { display: block; min-width: 0; font-size: 26rpx; color: var(--text-3); line-height: 36rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dish-sales { display: block; min-width: 0; margin-top: 2rpx; margin-left: 0; font-size: 24rpx; line-height: 34rpx; color: #A8ADB4; font-weight: 400; }
 .dish-bottom-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0; margin-top: auto; min-width: 0; }
-.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; display: flex; align-items: baseline; color: #07C160; }
+.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; display: flex; align-items: baseline; color: var(--brand); }
 .dish-price-currency { flex-shrink: 0; font-size: 24rpx; font-weight: 700; line-height: 1; }
 .dish-price-amount { min-width: 0; font-size: 40rpx; font-weight: 700; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-price-suffix { flex-shrink: 0; margin-left: 2rpx; font-size: 22rpx; font-weight: 500; line-height: 1; color: #07C160; }
+.dish-price-suffix { flex-shrink: 0; margin-left: 2rpx; font-size: 22rpx; font-weight: 500; line-height: 1; color: var(--brand); }
 .dish-origin-price, .dish-save-badge, .member-price { display: none; }
-.dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; gap: 6rpx; margin-left: 12rpx; min-width: 64rpx; max-width: 200rpx; box-sizing: border-box; }
-.dish-qty-control { width: 200rpx; max-width: 200rpx; height: 68rpx; display: flex; align-items: center; justify-content: flex-end; gap: 6rpx; overflow: hidden; flex-shrink: 0; box-sizing: border-box; }
+.dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; margin-left: 6rpx; min-width: 60rpx; max-width: 176rpx; padding-right: 0; box-sizing: border-box; }
+.dish-qty-control { width: 164rpx; max-width: 164rpx; height: 58rpx; padding: 4rpx; display: flex; align-items: center; justify-content: space-between; gap: 0; overflow: hidden; flex-shrink: 0; box-sizing: border-box; border-radius: 29rpx; background: #F3F4F6; }
 .counter-touch { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
-.dish-counter > .counter-touch { width: 88rpx; height: 88rpx; }
-.dish-counter .counter-btn { width: 64rpx; height: 64rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
+.dish-qty-control .counter-touch { width: 50rpx; height: 50rpx; }
+.dish-counter > .counter-touch { width: 76rpx; height: 76rpx; }
+.dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
+.dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
+.dish-qty-control .counter-btn--pressing { animation: none; transform: none; }
 .dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
-.dish-counter .counter-btn.plus { background: #07C160; }
+.dish-counter .counter-btn .iconfont { font-size: 27rpx; font-weight: 400; line-height: 1; }
+.dish-counter .counter-btn.plus { background: var(--brand); }
 .dish-counter .counter-btn.plus text { color: #fff; }
-.dish-counter .counter-btn.minus { width: 60rpx; height: 60rpx; border: 2rpx solid #d7dde2; background: #fff; }
-.dish-counter .counter-btn.minus text { color: #5d6670; }
-.dish-counter .counter-num { width: 44rpx; min-width: 44rpx; text-align: center; font-size: 32rpx; line-height: 34rpx; font-weight: 600; color: #171A1D; }
+.dish-counter .counter-btn.minus { border: none; background: #E5E7EB; }
+.dish-qty-control .counter-btn.minus { background: #EAEDF1; }
+.dish-counter .counter-btn.minus text { color: #4B5563; }
+.dish-counter .counter-num { width: 36rpx; min-width: 36rpx; text-align: center; font-size: 30rpx; line-height: 32rpx; font-weight: 600; color: var(--text-1); }
+.dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
 .soldout-action { height: 60rpx; min-width: 104rpx; padding: 0 20rpx; border-radius: 30rpx; display: flex; align-items: center; justify-content: center; background: #eef1f4; box-sizing: border-box; flex-shrink: 0; }
 .soldout-action text { font-size: 24rpx; font-weight: 600; color: #9aa1aa; white-space: nowrap; }
 
-/* 鍔犲噺鎸夐挳 */
+
 .counter-btn {
   width: 72rpx;
   height: 72rpx;
@@ -2983,13 +4014,13 @@ export default {
   }
 
   &.plus {
-    background: #07C160;
+    background: var(--brand);
     text { color: #fff; }
   }
 
   &.minus {
     background: #f3f4f6;
-    text { color: #374151; }
+    text { color: var(--text-2); }
   }
 
   &.sm {
@@ -3002,24 +4033,30 @@ export default {
 .counter-num {
   font-size: 28rpx;
   font-weight: 800;
-  color: #111827;
+  color: var(--text-1);
   min-width: 32rpx;
   text-align: center;
 }
 
 
-.list-pad { height: calc(264rpx + env(safe-area-inset-bottom)); }
+.list-pad { height: calc(348rpx + env(safe-area-inset-bottom)); }
 
 .empty-menu {
   min-height: 520rpx;
-  padding: 120rpx 32rpx 32rpx;
+  padding: 80rpx 32rpx 32rpx;
   text-align: center;
   box-sizing: border-box;
 }
 
+.empty-menu-img {
+  width: 280rpx;
+  height: 280rpx;
+  margin: 0 auto 8rpx;
+}
+
 .empty-title {
   display: block;
-  color: #111827;
+  color: var(--text-1);
   font-size: 34rpx;
   font-weight: 800;
 }
@@ -3027,7 +4064,7 @@ export default {
 .empty-desc {
   display: block;
   margin-top: 14rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   font-size: 26rpx;
   line-height: 1.6;
 }
@@ -3040,7 +4077,7 @@ export default {
   padding: 0 36rpx;
   height: 72rpx;
   border-radius: 36rpx;
-  background: #07C160;
+  background: var(--brand);
   text { color: #fff; font-size: 28rpx; font-weight: 700; }
 }
 
@@ -3053,7 +4090,7 @@ export default {
   height: calc(100rpx + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: #fff;
-  border-top: 1rpx solid #f0f0f0;
+  border-top: 1rpx solid var(--border);
   display: flex;
   align-items: stretch;
   z-index: 300;
@@ -3062,23 +4099,36 @@ export default {
 .bn-item {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   position: relative;
 
-  &:active { opacity: 0.6; }
+  &:active { opacity: 0.72; }
 }
 
-.bn-label {
-  font-size: 30rpx;
-  color: #9ca3af;
-  font-weight: 500;
-  line-height: 1;
+.bn-icon {
+  display: block;
+  width: 60rpx;
+  height: 60rpx;
+  color: var(--text-3);
+  font-size: 56rpx;
+  line-height: 60rpx;
+  text-align: center;
+  transition: color 180ms ease-out, transform 180ms ease-out;
 }
 
-.bn-item.active .bn-label {
-  color: #07C160;
-  font-weight: 700;
+
+.bn-item.active .bn-icon {
+  color: var(--brand);
+  transform: translateY(-1rpx);
+  animation: tabLabelBounce 280ms var(--bounce-ease);
+}
+
+@keyframes tabLabelBounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
 }
 
 .bn-dot {
@@ -3088,7 +4138,7 @@ export default {
   width: 12rpx;
   height: 12rpx;
   border-radius: 50%;
-  background: #ef4444;
+  background: var(--danger);
 }
 
 
@@ -3119,72 +4169,85 @@ export default {
   left: 0;
   right: 0;
   bottom: calc(100rpx + env(safe-area-inset-bottom));
-  padding-top: calc(176rpx + env(safe-area-inset-top)); 
+  padding-top: calc(176rpx + env(safe-area-inset-top));
 }
 
 
 .card-tab.member-center {
   padding: 28rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
-  background: #F5F7F9;
+  background: var(--bg-page);
   display: flex;
   flex-direction: column;
   gap: 24rpx;
   box-sizing: border-box;
 }
-.member-identity-card { min-height: 172rpx; padding: 32rpx; border-radius: 36rpx; background: #fff; display: flex; align-items: flex-start; gap: 22rpx; box-sizing: border-box; }
-.member-avatar { width: 96rpx; height: 96rpx; border-radius: 50%; background: #E8F8EF; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.member-avatar text { color: #07C160; font-size: 36rpx; line-height: 48rpx; font-weight: 900; }
+@keyframes micBorderGlow { 0%, 100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 24rpx rgba(0,0,0,.22), 0 0 0 1px rgba(212,175,110,.28); } 50% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 26rpx rgba(0,0,0,.26), 0 0 0 1px rgba(232,202,160,.6); } }
+.member-identity-card { position: relative; padding: 30rpx 32rpx 26rpx; border-radius: 32rpx; background: linear-gradient(120deg,#15392a 0%,#0a2216 42%,#1c4530 100%); box-sizing: border-box; overflow: hidden; animation: micBorderGlow 3.2s ease-in-out infinite; }
+.member-identity-card::before { content:''; position: absolute; inset: 0; opacity: .5; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); pointer-events: none; }
+.mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }
+.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: rgba(232,202,160,.5); text-transform: uppercase; }
+.mic-body { position: relative; z-index: 1; margin-top: 20rpx; display: flex; align-items: center; gap: 22rpx; }
+.member-avatar { width: 100rpx; height: 100rpx; border-radius: 50%; background: #16311f; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+.member-avatar text { color: #f3e6cf; font-size: 34rpx; line-height: 48rpx; font-weight: 900; }
+.member-avatar-img { width: 100%; height: 100%; }
+.member-avatar-badge { width: 96%; height: 96%; animation: micBadgePulse 3.2s ease-in-out infinite; }
 .member-identity-main { flex: 1; min-width: 0; }
-.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #171A1D; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-growth-text { display: block; margin-top: 8rpx; font-size: 26rpx; line-height: 36rpx; color: #7D848E; }
-.member-level-pill { flex-shrink: 0; min-height: 48rpx; padding: 0 18rpx; border-radius: 24rpx; background: #E8F8EF; display: flex; align-items: center; justify-content: center; }
-.member-level-pill text { color: #087A3D; font-size: 23rpx; line-height: 32rpx; font-weight: 800; }
-.member-progress-wrap { margin-top: 24rpx; }
-.member-progress-track { height: 10rpx; border-radius: 999rpx; background: #EDF1F3; overflow: hidden; }
-.member-progress-fill { height: 100%; border-radius: 999rpx; background: #07C160; }
-.member-upgrade-text { display: block; margin-top: 10rpx; color: #07C160; font-size: 24rpx; line-height: 34rpx; font-weight: 700; }
+.mic-crest-row { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
+.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #f3e6cf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: rgba(232,202,160,.55); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
+@keyframes micBadgePulse { 0%, 100% { opacity: .85; } 50% { opacity: 1; text-shadow: 0 0 12rpx rgba(232,202,160,.9); } }
+.mic-chevron { position: relative; z-index: 1; color: rgba(232,202,160,.55); font-size: 28rpx; flex-shrink: 0; }
+.member-progress-wrap { position: relative; z-index: 1; margin-top: 22rpx; }
+.member-progress-track { height: 8rpx; border-radius: 999rpx; background: rgba(232,202,160,.16); overflow: hidden; }
+.member-progress-fill { height: 100%; border-radius: 999rpx; background: linear-gradient(90deg,#c9a668,#f3e6cf); }
+.member-upgrade-text { display: block; margin-top: 10rpx; color: rgba(232,202,160,.7); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
+.mic-footer { position: relative; z-index: 1; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid rgba(232,202,160,.16); display: flex; align-items: center; justify-content: space-between; }
+.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: rgba(232,202,160,.65); }
+.mic-since { font-size: 20rpx; color: rgba(232,202,160,.4); font-weight: 700; }
 .member-assets-card { min-height: 168rpx; background: #fff; border-radius: 32rpx; display: flex; align-items: stretch; padding: 28rpx 0; box-sizing: border-box; }
 .member-asset-item { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8rpx; }
 .member-asset-item:active { opacity: .72; }
-.member-asset-divider { width: 1rpx; margin: 12rpx 0; background: #EDF1F3; }
-.member-asset-value { color: #171A1D; font-size: 38rpx; line-height: 46rpx; font-weight: 900; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-asset-label { color: #171A1D; font-size: 26rpx; line-height: 36rpx; font-weight: 700; }
-.member-asset-hint { color: #8A9099; font-size: 22rpx; line-height: 32rpx; }
-.member-main-action-card { padding: 34rpx; border-radius: 36rpx; background: linear-gradient(135deg, #07C160 0%, #10A85A 100%); box-sizing: border-box; }
+.member-asset-divider { width: 1rpx; margin: 12rpx 0; background: var(--border); }
+.member-asset-value { color: var(--text-1); font-size: 38rpx; line-height: 46rpx; font-weight: 900; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-asset-label { color: var(--text-1); font-size: 26rpx; line-height: 36rpx; font-weight: 700; }
+.member-main-action-card { padding: 34rpx; border-radius: var(--radius-hero); background: var(--brand-gradient); box-sizing: border-box; }
 .member-action-title { display: block; color: #fff; font-size: 36rpx; line-height: 48rpx; font-weight: 900; }
-.member-action-desc { display: block; margin-top: 10rpx; color: rgba(255,255,255,.82); font-size: 26rpx; line-height: 36rpx; }
-.member-action-btn { margin-top: 28rpx; height: 96rpx; border-radius: 48rpx; background: #fff; display: flex; align-items: center; justify-content: center; }
+.member-action-btn { margin-top: 24rpx; height: 96rpx; border-radius: 48rpx; background: #fff; display: flex; align-items: center; justify-content: center; }
 .member-action-btn:active { transform: scale(.98); }
-.member-action-btn text { color: #07C160; font-size: 32rpx; line-height: 44rpx; font-weight: 900; }
+.member-action-btn text { color: var(--brand); font-size: 32rpx; line-height: 44rpx; font-weight: 900; }
 .member-section { display: flex; flex-direction: column; gap: 16rpx; }
-.member-section-title { color: #171A1D; font-size: 32rpx; line-height: 44rpx; font-weight: 900; }
+.member-section-title { color: var(--text-1); font-size: 32rpx; line-height: 44rpx; font-weight: 900; }
 .member-coupon-list { display: flex; flex-direction: column; gap: 16rpx; }
 .member-coupon-card { min-height: 132rpx; padding: 24rpx; border-radius: 28rpx; background: #fff; display: flex; align-items: center; gap: 20rpx; box-sizing: border-box; }
 .member-coupon-card:active { opacity: .74; }
-.member-coupon-value { width: 118rpx; flex-shrink: 0; color: #07C160; display: flex; align-items: baseline; justify-content: center; }
+.member-coupon-value { width: 118rpx; flex-shrink: 0; color: var(--brand); display: flex; align-items: baseline; justify-content: center; }
 .member-coupon-yen { font-size: 26rpx; line-height: 34rpx; font-weight: 900; }
 .member-coupon-amount { font-size: 48rpx; line-height: 56rpx; font-weight: 900; }
 .member-coupon-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8rpx; }
-.member-coupon-condition { color: #171A1D; font-size: 28rpx; line-height: 38rpx; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-coupon-time { color: #8A9099; font-size: 24rpx; line-height: 34rpx; }
-.member-coupon-use { height: 64rpx; padding: 0 24rpx; border-radius: 32rpx; background: #07C160; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.member-coupon-condition { color: var(--text-1); font-size: 28rpx; line-height: 38rpx; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-coupon-time { color: var(--text-3); font-size: 24rpx; line-height: 34rpx; }
+.member-coupon-use { height: 64rpx; padding: 0 24rpx; border-radius: 32rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .member-coupon-use text { color: #fff; font-size: 24rpx; line-height: 34rpx; font-weight: 800; }
 .member-service-card { background: #fff; border-radius: 32rpx; overflow: hidden; }
-.member-service-row { min-height: 96rpx; padding: 0 30rpx; display: flex; align-items: center; justify-content: space-between; color: #171A1D; font-size: 30rpx; line-height: 42rpx; font-weight: 800; box-sizing: border-box; }
-.member-service-row + .member-service-row { border-top: 1rpx solid #F0F2F4; }
+.member-service-row { min-height: 96rpx; padding: 0 30rpx; display: flex; align-items: center; gap: 20rpx; color: var(--text-1); font-size: 30rpx; line-height: 42rpx; font-weight: 800; box-sizing: border-box; }
+.member-service-row + .member-service-row { border-top: 1rpx solid var(--border); }
 .member-service-row:active { background: #F7F9FA; }
-.member-service-arrow { color: #B0B7C0; font-size: 34rpx; line-height: 42rpx; }
+.member-service-icon { width: 56rpx; height: 56rpx; border-radius: 16rpx; background: #E8F8EF; color: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.member-service-icon .iconfont { font-size: 28rpx; }
+.member-service-label { flex: 1; min-width: 0; }
+.member-service-arrow { color: #B0B7C0; font-size: 26rpx; line-height: 42rpx; flex-shrink: 0; }
 .card-tab-empty { padding: 120rpx 40rpx; text-align: center; }
-.cte-title { display: block; font-size: 32rpx; font-weight: 800; color: #111827; margin-bottom: 12rpx; }
-.cte-desc { display: block; font-size: 26rpx; color: #9ca3af; line-height: 1.6; }
-.cte-btn { margin-top: 32rpx; width: 100%; height: 96rpx; line-height: 96rpx; border-radius: 48rpx; background: #07C160; color: #fff; font-size: 30rpx; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; }
+.cte-title { display: block; font-size: 32rpx; font-weight: 800; color: var(--text-1); margin-bottom: 12rpx; }
+.cte-desc { display: block; font-size: 26rpx; color: var(--text-3); line-height: 1.6; }
+.cte-btn { margin-top: 32rpx; width: 100%; height: 96rpx; line-height: 96rpx; border-radius: 48rpx; background: var(--brand); color: #fff; font-size: 30rpx; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; }
 .cte-btn::after { border: 0; }
 .cte-btn[disabled] { opacity: .7; }
 .cte-btn-plain { background: #EEF2F5; color: #3F4650; }
 .cte-secondary { display: block; margin-top: 24rpx; color: #6B7280; font-size: 26rpx; line-height: 38rpx; }
 @media screen and (max-width: 340px) {
   .card-tab.member-center { padding-left: 24rpx; padding-right: 24rpx; }
-  .member-identity-card { padding: 28rpx; gap: 18rpx; }
+  .member-identity-card { padding: 26rpx 26rpx 22rpx; }
+  .mic-body { gap: 18rpx; }
   .member-level { font-size: 34rpx; }
   .member-asset-value { font-size: 34rpx; }
   .member-coupon-card { gap: 14rpx; padding: 22rpx; }
@@ -3192,8 +4255,121 @@ export default {
 }
 
 
+.coupon-nudge-bar {
+  position: fixed;
+  left: 20rpx;
+  right: 20rpx;
+  bottom: calc(248rpx + env(safe-area-inset-bottom) + env(safe-area-inset-bottom));
+  z-index: 319;
+  min-height: 76rpx;
+  padding: 12rpx 14rpx 12rpx 18rpx;
+  border-radius: 18rpx 18rpx 0 0;
+  background: #fff7e6;
+  border: 1rpx solid #ffe2ad;
+  box-shadow: 0 -6rpx 18rpx rgba(120, 75, 20, .08);
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  box-sizing: border-box;
+}
+
+.coupon-nudge-bar--done {
+  background: #ecfbf3;
+  border-color: #bdebd2;
+}
+
+.coupon-nudge-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.coupon-nudge-icon {
+  flex-shrink: 0;
+  width: 42rpx;
+  height: 42rpx;
+  border-radius: 50%;
+  background: #ffe9c7;
+  color: #d85a22;
+  font-size: 24rpx;
+  line-height: 42rpx;
+  text-align: center;
+}
+
+.coupon-nudge-bar--done .coupon-nudge-icon {
+  background: #dff7e9;
+  color: var(--brand);
+}
+
+.coupon-nudge-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.coupon-nudge-title {
+  color: #5a3c1e;
+  font-size: 25rpx;
+  line-height: 34rpx;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-nudge-bar--done .coupon-nudge-title {
+  color: #0f8f50;
+}
+
+.coupon-nudge-strong {
+  color: #ef3f24;
+  font-weight: 900;
+}
+
+.coupon-nudge-sub {
+  margin-top: 2rpx;
+  color: #9a6a21;
+  font-size: 20rpx;
+  line-height: 28rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-nudge-bar--done .coupon-nudge-sub {
+  color: #43a36b;
+}
+
+.coupon-nudge-action {
+  flex-shrink: 0;
+  height: 52rpx;
+  min-width: 112rpx;
+  padding: 0 20rpx;
+  border-radius: 26rpx;
+  background: #ff5a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.coupon-nudge-action text {
+  color: #fff;
+  font-size: 23rpx;
+  line-height: 32rpx;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.coupon-nudge-action--plain {
+  background: var(--brand);
+}
 .cart-bar {
   position: fixed;
+  z-index: 320;
   bottom: calc(100rpx + env(safe-area-inset-bottom));
   left: 0;
   right: 0;
@@ -3205,9 +4381,10 @@ export default {
   padding: 12rpx 24rpx;
   padding-bottom: calc(12rpx + env(safe-area-inset-bottom));
   background: #1f2937;
+  box-shadow: 0 -6rpx 20rpx rgba(0,0,0,0.18);
   box-sizing: border-box;
 
-  &.has-items { background: #111827; }
+  &.has-items { background: var(--text-1); }
 }
 
 .cart-main {
@@ -3229,34 +4406,16 @@ export default {
   justify-content: center;
   flex-shrink: 0;
 
-  .has-items & { background: #07C160; }
+  .has-items & { background: var(--brand); }
 }
 
-.cart-icon-svg {
-  width: 42rpx;
-  height: 40rpx;
-  position: relative;
-  &::before {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 32rpx;
-    border: 4rpx solid #fff;
-    border-radius: 6rpx;
-  }
-  &::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 10rpx;
-    right: 10rpx;
-    height: 18rpx;
-    border: 4rpx solid #fff;
-    border-bottom: none;
-    border-radius: 10rpx 10rpx 0 0;
-  }
+.cart-iconfont {
+  width: 48rpx;
+  height: 48rpx;
+  color: #fff;
+  font-size: 46rpx;
+  line-height: 48rpx;
+  text-align: center;
 }
 
 .cart-badge {
@@ -3314,7 +4473,8 @@ export default {
   height: 92rpx;
   padding: 0 48rpx;
   border-radius: 46rpx;
-  background: #07C160;
+  background: var(--brand);
+  box-shadow: 0 8rpx 24rpx rgba(7,193,96,0.35);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3325,20 +4485,21 @@ export default {
 
   &.disabled {
     background: #4B5362;
+    box-shadow: none;
     text { color: rgba(255,255,255,0.45); }
   }
 }
 
-.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: #07C160; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 140ms ease-out; text { color: #fff; font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
+.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 180ms var(--bounce-ease); text { color: #fff; font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
 .choose-option-btn:active { transform: scale(.97); }
-.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid #07C160; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: #07C160; font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
+.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: var(--brand); font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
 
 
 
 .mask {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 3100;
   background: rgba(0,0,0,0.5);
   display: flex;
   align-items: flex-end;
@@ -3356,59 +4517,53 @@ export default {
   flex-direction: column;
 }
 .order-confirm-head { flex-shrink: 0; display: grid; grid-template-columns: 1fr 64rpx; align-items: center; padding: 30rpx 28rpx 22rpx; background: #fff; border-bottom: 1rpx solid #edf0f2; }
-.order-confirm-title { font-size: 36rpx; font-weight: 900; color: #111827; }
-.order-confirm-close { width: 64rpx; height: 64rpx; display: flex; align-items: center; justify-content: center; color: #98a2b3; font-size: 34rpx; line-height: 1; }
+.order-confirm-title { font-size: 36rpx; font-weight: 900; color: var(--text-1); }
+.order-confirm-close { width: 64rpx; height: 64rpx; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 34rpx; line-height: 64rpx; text-align: center; }
 .order-confirm-content { flex: 1; min-height: 0; padding: 20rpx 24rpx 18rpx; box-sizing: border-box; }
 .order-confirm-bottom { flex-shrink: 0; padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom)); background: rgba(255,255,255,0.96); border-top: 1rpx solid #edf0f2; }
-.order-summary-card { padding: 28rpx 28rpx; border-radius: 24rpx; background: #ecfbf3; border: 1rpx solid #cbeedb; margin-bottom: 18rpx; }
+.order-summary-card { padding: 18rpx 24rpx; border-radius: var(--radius-card); background: #ecfbf3; border: 1rpx solid #cbeedb; margin-bottom: 18rpx; display: flex; align-items: center; gap: 14rpx; }
 .order-summary-card--missing { background: #fff7ed; border-color: #fed7aa; }
-.order-summary-topline { display: flex; align-items: center; justify-content: space-between; gap: 20rpx; }
-.summary-service { display: flex; align-items: center; gap: 18rpx; min-width: 0; }
-.summary-mode-pill { height: 50rpx; padding: 0 20rpx; border-radius: 999rpx; background: #10c469; display: flex; align-items: center; justify-content: center; flex-shrink: 0; text { color: #fff; font-size: 25rpx; font-weight: 900; } }
-.summary-table-line { display: flex; align-items: baseline; gap: 8rpx; min-width: 0; }
-.summary-table-label { font-size: 29rpx; color: #475569; font-weight: 800; }
-.summary-table-no { font-size: 46rpx; color: #0baa5a; font-weight: 900; line-height: 1; }
-.summary-table-tip { color: #9a6f22; font-size: 24rpx; font-weight: 800; flex-shrink: 0; }
-.order-summary-subline { display: flex; justify-content: space-between; align-items: center; gap: 16rpx; margin-top: 22rpx; padding-top: 20rpx; border-top: 1rpx solid rgba(16,196,105,.13); text { color: #667085; font-size: 25rpx; font-weight: 700; } }
-.confirm-card { background: #fff; border: 1rpx solid #eef1f3; border-radius: 24rpx; margin-bottom: 18rpx; overflow: hidden; }
+.summary-mode-pill { height: 46rpx; padding: 0 18rpx; border-radius: 999rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; text { color: #fff; font-size: 24rpx; font-weight: 900; } }
+.summary-table-no { font-size: 32rpx; color: var(--text-1); font-weight: 900; line-height: 1; }
+.summary-table-tip { color: #9a6f22; font-size: 24rpx; font-weight: 800; flex-shrink: 0; margin-left: auto; }
+.confirm-card { background: #fff; border: 1rpx solid #eef1f3; border-radius: var(--radius-card); margin-bottom: 18rpx; overflow: hidden; }
 .selected-items-summary { min-height: 118rpx; padding: 0 28rpx; display: flex; justify-content: space-between; align-items: center; gap: 18rpx; }
 .selected-items-title-wrap { display: flex; flex-direction: column; gap: 8rpx; min-width: 0; }
-.selected-items-title { color: #111827; font-size: 34rpx; font-weight: 900; }
-.selected-items-sub { color: #98a2b3; font-size: 24rpx; }
-.selected-items-action { display: flex; align-items: center; gap: 18rpx; flex-shrink: 0; color: #667085; }
-.selected-items-amount { color: #0baa5a; font-size: 34rpx; font-weight: 900; }
-.selected-items-toggle { color: #667085; font-size: 26rpx; }
+.confirm-title-line { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
+.confirm-title-icon { flex-shrink: 0; color: var(--brand); font-size: 30rpx; line-height: 34rpx; }
+.selected-items-title { color: var(--text-1); font-size: 34rpx; font-weight: 900; }
+.selected-items-action { display: flex; align-items: center; gap: 18rpx; flex-shrink: 0; color: var(--text-2); }
+.selected-items-amount { color: var(--brand); font-size: 34rpx; font-weight: 900; }
+.selected-items-toggle { color: var(--text-2); font-size: 26rpx; }
+.selected-items-toggle-icon { color: var(--text-3); font-size: 28rpx; line-height: 32rpx; }
 .cart-items-panel { border-top: 1rpx solid #edf0f2; padding: 0 0 8rpx; }
 .cart-items { max-height: 34vh; padding: 0 28rpx; box-sizing: border-box; }
 .cart-row { display: flex; align-items: center; gap: 16rpx; padding: 24rpx 0; border-bottom: 1rpx solid #edf0f2; }
-.cart-row-emoji { width: 38rpx; color: #cbd5e1; font-size: 32rpx; }
 .cart-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
-.cart-row-name { font-size: 31rpx; font-weight: 800; color: #111827; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cart-row-spec { font-size: 22rpx; color: #98a2b3; }
+.cart-row-name { font-size: 31rpx; font-weight: 800; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cart-row-spec { font-size: 22rpx; color: var(--text-3); }
 .cart-row-right { display: flex; align-items: center; gap: 14rpx; flex-shrink: 0; }
-.cart-row-price { min-width: 82rpx; text-align: right; font-size: 30rpx; font-weight: 900; color: #0baa5a; }
-.cart-clear-line { height: 74rpx; display: flex; align-items: center; justify-content: center; border-top: 1rpx solid #f5f7f8; text { color: #98a2b3; font-size: 26rpx; } }
+.cart-row-price { min-width: 82rpx; text-align: right; font-size: 30rpx; font-weight: 900; color: var(--brand); }
+.cart-clear-line { height: 58rpx; display: flex; align-items: center; justify-content: flex-end; gap: 6rpx; text { color: #c8ccd1; font-size: 23rpx; font-weight: 700; } .iconfont { color: #c8ccd1; font-size: 24rpx; line-height: 26rpx; } }
 .order-preference-section { padding: 26rpx 28rpx; }
 .order-preference-section .remark-chips { margin-bottom: 22rpx; }
 .order-preference-section .remark-chip { margin-right: 14rpx; margin-bottom: 14rpx; padding: 14rpx 24rpx; border-radius: 999rpx; border: 1rpx solid #dfe5e8; background: #fff; }
-.order-preference-section .remark-chip--on { border-color: #10c469; background: #ecfbf3; }
+.order-preference-section .remark-chip--on { border-color: var(--brand); background: #ecfbf3; }
 .order-preference-section .remark-row { border-top: 1rpx solid #edf0f2; padding-top: 22rpx; }
+.remark-label-wrap { display: flex; align-items: center; gap: 8rpx; flex-shrink: 0; }
+.remark-label-icon { color: var(--brand); font-size: 28rpx; line-height: 32rpx; }
 .price-summary-card { padding: 12rpx 28rpx 10rpx; }
 .price-row { min-height: 88rpx; display: flex; align-items: center; justify-content: space-between; gap: 18rpx; color: #475467; font-size: 29rpx; border-bottom: 1rpx solid #edf0f2; }
+.price-label-wrap { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
+.price-label-icon { flex-shrink: 0; color: var(--brand); font-size: 30rpx; line-height: 34rpx; }
 .price-row:last-child { border-bottom: 0; }
-.price-row--clickable { color: #111827; }
-.price-discount { color: #0baa5a; font-weight: 800; }
-.price-muted { color: #98a2b3; }
-.balance-row-left { display: flex; flex-direction: column; gap: 4rpx; }
-.balance-row-desc { color: #98a2b3; font-size: 22rpx; }
-.price-row--payable { min-height: 110rpx; color: #111827; font-size: 34rpx; font-weight: 900; }
-.price-row--payable text:last-child { color: #10c469; font-size: 52rpx; font-weight: 900; }
-.checkout-btn-full { height: 104rpx; border-radius: 28rpx; background: #10c469; display: flex; align-items: center; justify-content: center; box-shadow: 0 16rpx 32rpx rgba(16,196,105,0.22); text { color: #fff; font-size: 34rpx; font-weight: 900; } }
+.price-row--clickable { color: var(--text-1); }
+.price-discount { color: var(--brand); font-weight: 800; }
+.price-muted { color: var(--text-3); }
+.price-row--payable { min-height: 110rpx; color: var(--text-1); font-size: 34rpx; font-weight: 900; }
+.price-row--payable text:last-child { color: var(--brand); font-size: 52rpx; font-weight: 900; }
+.checkout-btn-full { height: 104rpx; border-radius: 28rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; gap: 10rpx; box-shadow: 0 16rpx 32rpx rgba(16,196,105,0.22); text { color: #fff; font-size: 34rpx; font-weight: 900; } .checkout-btn-icon { font-size: 34rpx; line-height: 38rpx; font-weight: 400; } }
 .checkout-btn-full--disabled { background: #cbd5e1; box-shadow: none; }
-.pbl-switch { width: 88rpx; height: 48rpx; border-radius: 24rpx; background: #d1d5db; position: relative; transition: background 0.2s; flex-shrink: 0; }
-.pbl-switch--on { background: #10c469; }
-.pbl-switch-thumb { position: absolute; top: 4rpx; left: 4rpx; width: 40rpx; height: 40rpx; border-radius: 50%; background: #fff; transition: left 0.2s; box-shadow: 0 2rpx 6rpx rgba(0,0,0,0.15); }
-.pbl-switch--on .pbl-switch-thumb { left: 44rpx; }
 
 .ht-shop-header {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx;
@@ -3423,14 +4578,14 @@ export default {
 
 .cte-btn {
   margin-top: 32rpx; padding: 24rpx 80rpx;
-  background: #07C160; border-radius: 16rpx;
+  background: var(--brand); border-radius: 16rpx;
   color: #fff; font-size: 30rpx; font-weight: 700;
 }
 
 
 .home-tab {
   padding: 32rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
-  background: #F5F7F9;
+  background: var(--bg-page);
   display: flex;
   flex-direction: column;
   gap: 28rpx;
@@ -3456,7 +4611,7 @@ export default {
   font-size: 40rpx;
   line-height: 50rpx;
   font-weight: 700;
-  color: #171A1D;
+  color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3466,7 +4621,7 @@ export default {
   margin-top: 10rpx;
   font-size: 26rpx;
   line-height: 36rpx;
-  color: #7D848E;
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3484,13 +4639,13 @@ export default {
   font-weight: 700;
 }
 .ht-status-badge--open { background: #E8F8EF; color: #087A3D; }
-.ht-status-badge--closed { background: #F1F3F5; color: #7D848E; }
+.ht-status-badge--closed { background: #F1F3F5; color: var(--text-3); }
 
 .ht-order-card {
   margin: 0;
   padding: 36rpx;
   border-radius: 36rpx;
-  background: #07C160;
+  background: var(--brand) url('/static/order/home-hero-bg.jpg') left center / cover no-repeat;
   color: #fff;
   box-sizing: border-box;
   transition: transform 120ms ease-out, opacity 120ms ease-out;
@@ -3502,7 +4657,7 @@ export default {
   display: block;
   font-size: 24rpx;
   line-height: 34rpx;
-  color: rgba(255,255,255,0.78);
+  color: rgba(58,38,18,0.75);
   font-weight: 600;
 }
 .ht-order-title {
@@ -3510,7 +4665,7 @@ export default {
   margin-top: 8rpx;
   font-size: 48rpx;
   line-height: 64rpx;
-  color: #fff;
+  color: #2b1c0f;
   font-weight: 800;
 }
 .ht-order-desc {
@@ -3518,14 +4673,14 @@ export default {
   margin-top: 12rpx;
   font-size: 28rpx;
   line-height: 40rpx;
-  color: rgba(255,255,255,0.82);
+  color: rgba(58,38,18,0.78);
 }
 .ht-order-coupon {
   display: block;
   margin-top: 8rpx;
   font-size: 24rpx;
   line-height: 34rpx;
-  color: rgba(255,255,255,0.8);
+  color: rgba(58,38,18,0.75);
 }
 .ht-order-btn {
   margin-top: 32rpx;
@@ -3538,9 +4693,9 @@ export default {
   justify-content: center;
   box-sizing: border-box;
 }
-.ht-order-btn text { color: #07C160; font-size: 34rpx; line-height: 48rpx; font-weight: 800; }
+.ht-order-btn text { color: var(--brand); font-size: 34rpx; line-height: 48rpx; font-weight: 800; }
 .ht-order-btn--disabled { background: rgba(255,255,255,0.82); }
-.ht-order-btn--disabled text { color: #7D848E; }
+.ht-order-btn--disabled text { color: var(--text-3); }
 
 .ht-section { display: flex; flex-direction: column; gap: 16rpx; }
 .ht-section-head { display: flex; flex-direction: column; gap: 4rpx; }
@@ -3551,19 +4706,19 @@ export default {
   font-size: 34rpx;
   line-height: 46rpx;
   font-weight: 800;
-  color: #171A1D;
+  color: var(--text-1);
 }
 .ht-section-sub {
   display: block;
   font-size: 24rpx;
   line-height: 34rpx;
-  color: #8A9099;
+  color: var(--text-3);
 }
 .ht-section-action {
   flex-shrink: 0;
   font-size: 26rpx;
   line-height: 38rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 700;
 }
 
@@ -3581,7 +4736,7 @@ export default {
   border-radius: 28rpx;
   overflow: hidden;
   flex-shrink: 0;
-  background: #F0F2F4;
+  background: var(--border);
 }
 .ht-feature-img { width: 100%; height: 100%; display: block; }
 .ht-feature-placeholder {
@@ -3590,14 +4745,11 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #F0F2F4;
+  background: var(--border);
 }
-.ht-feature-plate {
-  width: 64rpx;
-  height: 64rpx;
-  border-radius: 50%;
-  border: 6rpx solid #D0D5DD;
-  box-sizing: border-box;
+.ht-feature-placeholder-img {
+  width: 55%;
+  height: 55%;
 }
 .ht-feature-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .ht-feature-title-row { display: flex; align-items: center; gap: 12rpx; min-width: 0; }
@@ -3607,7 +4759,7 @@ export default {
   font-size: 36rpx;
   line-height: 48rpx;
   font-weight: 800;
-  color: #171A1D;
+  color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3627,14 +4779,14 @@ export default {
   margin-top: 10rpx;
   font-size: 26rpx;
   line-height: 38rpx;
-  color: #7D848E;
+  color: var(--text-3);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .ht-feature-bottom { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 16rpx; }
-.ht-feature-price { display: flex; align-items: baseline; min-width: 0; color: #07C160; }
+.ht-feature-price { display: flex; align-items: baseline; min-width: 0; color: var(--brand); }
 .ht-feature-yen { font-size: 28rpx; line-height: 36rpx; font-weight: 800; }
 .ht-feature-amount { font-size: 40rpx; line-height: 48rpx; font-weight: 900; }
 .ht-feature-suffix { margin-left: 4rpx; font-size: 24rpx; line-height: 34rpx; font-weight: 700; }
@@ -3643,7 +4795,7 @@ export default {
   height: 72rpx;
   padding: 0 30rpx;
   border-radius: 36rpx;
-  background: #07C160;
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3672,13 +4824,13 @@ export default {
   max-width: 220rpx;
   font-size: 26rpx;
   line-height: 36rpx;
-  color: #171A1D;
+  color: var(--text-1);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ht-last-add { color: #07C160; font-size: 30rpx; line-height: 36rpx; font-weight: 900; }
+.ht-last-add { color: var(--brand); font-size: 30rpx; line-height: 36rpx; font-weight: 900; }
 
 @media screen and (max-width: 340px) {
   .home-tab { padding-left: 24rpx; padding-right: 24rpx; }
@@ -3717,7 +4869,7 @@ export default {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
-  background: #07C160;
+  background: var(--brand);
   margin: 0 auto 20rpx;
   display: flex;
   align-items: center;
@@ -3736,13 +4888,13 @@ export default {
   display: block;
   font-size: 40rpx;
   font-weight: 900;
-  color: #111827;
+  color: var(--text-1);
   margin-bottom: 8rpx;
 }
 .success-subtitle {
   display: block;
   font-size: 26rpx;
-  color: #6b7280;
+  color: var(--text-3);
   margin-bottom: 4rpx;
 }
 .success-paid-amount-row {
@@ -3767,7 +4919,7 @@ export default {
 .success-saved-tip {
   display: block;
   font-size: 24rpx;
-  color: #07c160;
+  color: var(--brand);
   margin-bottom: 4rpx;
 }
 
@@ -3779,7 +4931,7 @@ export default {
 
 .success-meta {
   font-size: 24rpx;
-  color: #9ca3af;
+  color: var(--text-3);
 }
 
 
@@ -3794,7 +4946,7 @@ export default {
   background: #fef9c3;
 }
 .order-status-bar.preparing {
-  background: #07C160;
+  background: var(--brand);
   animation: status-pulse 1.5s ease-in-out infinite;
 }
 .order-status-bar.done {
@@ -3803,7 +4955,7 @@ export default {
 .order-status-bar.pending .order-status-text { color: #92400e; }
 .order-status-bar.preparing .order-status-text { color: #fff; font-size: 30rpx; }
 .order-status-bar.done .order-status-text { color: #78350f; font-size: 30rpx; }
-.order-status-text { font-size: 26rpx; font-weight: 700; color: #374151; }
+.order-status-text { font-size: 26rpx; font-weight: 700; color: var(--text-2); }
 
 @keyframes status-pulse {
   0%, 100% { opacity: 1; }
@@ -3841,19 +4993,19 @@ export default {
 .success-item-name {
   flex: 1;
   font-size: 28rpx;
-  color: #374151;
+  color: var(--text-2);
   font-weight: 600;
 }
 
 .success-item-qty {
   font-size: 24rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   font-weight: 400;
 }
 
 .success-item-price {
   font-size: 28rpx;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 700;
 }
 
@@ -3865,11 +5017,11 @@ export default {
 }
 .success-discount-label {
   font-size: 24rpx;
-  color: #6b7280;
+  color: var(--text-3);
 }
 .success-discount-val {
   font-size: 26rpx;
-  color: #ef4444;
+  color: var(--danger);
   font-weight: 600;
 }
 
@@ -3884,14 +5036,14 @@ export default {
 
 .success-total-label {
   font-size: 26rpx;
-  color: #374151;
+  color: var(--text-2);
   font-weight: 700;
 }
 
 .success-total-price {
   font-size: 36rpx;
   font-weight: 900;
-  color: #07C160;
+  color: var(--brand);
 }
 
 
@@ -3904,8 +5056,8 @@ export default {
 
 .success-btn-primary {
   height: 96rpx;
-  border-radius: 24rpx;
-  background: #07C160;
+  border-radius: var(--radius-card);
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3913,23 +5065,23 @@ export default {
 }
 .success-btn-secondary {
   height: 96rpx;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   background: #f1f5f9;
   border: 2rpx solid #e2e8f0;
   display: flex;
   align-items: center;
   justify-content: center;
-  text { color: #64748b; font-size: 30rpx; font-weight: 600; }
+  text { color: var(--text-3); font-size: 30rpx; font-weight: 600; }
 }
 
 .success-btn-primary.success-btn-secondary {
   background: #f1f5f9;
   border: 2rpx solid #e2e8f0;
-  text { color: #64748b; font-size: 30rpx; font-weight: 600; }
+  text { color: var(--text-3); font-size: 30rpx; font-weight: 600; }
 }
 
 .success-btn-settle {
-  background: linear-gradient(135deg, #07C160, #059952);
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
   box-shadow: 0 8rpx 24rpx rgba(7,193,96,0.35);
   text { font-size: 36rpx; }
 }
@@ -3939,7 +5091,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  text { color: #9ca3af; font-size: 28rpx; }
+  text { color: var(--text-3); font-size: 28rpx; }
 }
 .success-btn-call {
   height: 72rpx;
@@ -3949,11 +5101,11 @@ export default {
   align-items: center;
   justify-content: center;
   margin-top: 4rpx;
-  text { color: #6b7280; font-size: 26rpx; }
+  text { color: var(--text-3); font-size: 26rpx; }
 }
 
 .success-check--done {
-  background: linear-gradient(135deg, #f97316, #ef4444) !important;
+  background: linear-gradient(135deg, #f97316, var(--danger)) !important;
   animation: pulse-done 1s ease-in-out infinite;
 }
 
@@ -3970,12 +5122,12 @@ export default {
 .success-btn-half {
   flex: 1;
   height: 80rpx;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   border: 2rpx solid #e5e7eb;
   display: flex;
   align-items: center;
   justify-content: center;
-  text { color: #64748b; font-size: 28rpx; }
+  text { color: var(--text-3); font-size: 28rpx; }
 }
 
 
@@ -4021,7 +5173,7 @@ export default {
   min-width: 32rpx;
   height: 32rpx;
   border-radius: 16rpx;
-  background: #ef4444;
+  background: var(--danger);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4035,9 +5187,9 @@ export default {
   width: 100%;
   background: #fff;
   border-radius: 32rpx 32rpx 0 0;
-  padding: 0 0 calc(32rpx + env(safe-area-inset-bottom));
+  padding: 0 0 calc(24rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
-  max-height: 90vh;
+  max-height: 86vh;
   display: flex;
   flex-direction: column;
 }
@@ -4046,29 +5198,37 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 32rpx 40rpx 24rpx;
-  border-bottom: 2rpx solid #f1f5f9;
+  padding: 28rpx 36rpx 18rpx;
+  border-bottom: 0;
   flex-shrink: 0;
 }
 
 .orders-sheet-title {
-  font-size: 34rpx;
+  font-size: 36rpx;
   font-weight: 800;
-  color: #111827;
+  color: var(--text-1);
+  line-height: 1.2;
 }
 
 .orders-sheet-spent {
   display: block;
   font-size: 24rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 700;
   margin-top: 4rpx;
 }
 
 .orders-sheet-close {
+  width: 56rpx;
+  height: 56rpx;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: var(--text-3);
   font-size: 28rpx;
-  color: #9ca3af;
-  padding: 8rpx 16rpx;
 }
 
 .active-order-bar {
@@ -4076,7 +5236,7 @@ export default {
   padding: 18rpx 24rpx;
   border-radius: 16rpx;
   text-align: center;
-  &.preparing { background: #07C160; }
+  &.preparing { background: var(--brand); }
   &.done { background: #fbbf24; }
 }
 .active-order-text {
@@ -4087,12 +5247,14 @@ export default {
 
 .orders-list {
   flex: 1;
-  padding: 16rpx 32rpx;
+  width: 100%;
+  padding: 8rpx 32rpx 20rpx;
+  box-sizing: border-box;
 }
 
 .order-card {
   background: #f8fafc;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   padding: 24rpx;
   margin-bottom: 20rpx;
 }
@@ -4107,7 +5269,7 @@ export default {
 .order-card-no {
   font-size: 26rpx;
   font-weight: 700;
-  color: #374151;
+  color: var(--text-2);
 }
 
 .order-status-tag {
@@ -4130,12 +5292,12 @@ export default {
 .order-card-item-name {
   flex: 1;
   font-size: 26rpx;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .order-card-item-price {
   font-size: 26rpx;
-  color: #374151;
+  color: var(--text-2);
   font-weight: 600;
 }
 
@@ -4151,12 +5313,12 @@ export default {
 .order-card-total {
   font-size: 28rpx;
   font-weight: 800;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .order-card-time {
   font-size: 22rpx;
-  color: #9ca3af;
+  color: var(--text-3);
 }
 
 .order-card-cancel-row {
@@ -4171,18 +5333,21 @@ export default {
   padding: 10rpx 28rpx;
   border-radius: 20rpx;
   border: 1rpx solid #e5e7eb;
-  text { font-size: 24rpx; color: #9ca3af; }
+  text { font-size: 24rpx; color: var(--text-3); }
 }
 
 .order-status-entry {
   position: fixed;
   left: 32rpx;
   right: 32rpx;
-  bottom: calc(216rpx + env(safe-area-inset-bottom));
+  /* Must clear .cart-bar's real top edge: bottom(100rpx+safe) + height(148rpx+safe) = 248rpx + 2*safe.
+     The old 216rpx+safe undershot that by 32rpx+safe, so on devices with a home indicator
+     this bubble sat on top of (and hid) the checkout button below it. */
+  bottom: calc(268rpx + env(safe-area-inset-bottom) * 2);
   z-index: 850;
   min-height: 86rpx;
   padding: 14rpx 22rpx;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   background: rgba(23, 26, 29, 0.92);
   display: flex;
   align-items: center;
@@ -4194,7 +5359,7 @@ export default {
   width: 18rpx;
   height: 18rpx;
   border-radius: 50%;
-  background: #07C160;
+  background: var(--brand);
   flex-shrink: 0;
 }
 
@@ -4228,7 +5393,7 @@ export default {
   height: 34rpx;
   padding: 0 10rpx;
   border-radius: 17rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 22rpx;
   line-height: 34rpx;
@@ -4242,85 +5407,205 @@ export default {
   line-height: 1;
 }
 
-.orders-sheet {
-  max-height: 86vh;
-  padding: 0 0 calc(24rpx + env(safe-area-inset-bottom));
+.table-status-card {
+  padding: 30rpx;
+  border-radius: var(--radius-card);
+  border: 2rpx solid var(--order-status-border, #bae6fd);
+  background: var(--order-status-bg, #eff8ff);
+  box-sizing: border-box;
 }
 
-.orders-sheet-head {
-  padding: 28rpx 36rpx 18rpx;
-  border-bottom: 0;
+.table-status-card--canceled {
+  --order-status-main: #ef4444;
+  --order-status-soft: #fee2e2;
+  --order-status-bg: #fff1f2;
+  --order-status-border: #fecdd3;
 }
 
-.orders-sheet-title {
-  font-size: 36rpx;
-  line-height: 1.2;
+.table-status-card--paid {
+  --order-status-main: #0ea5e9;
+  --order-status-soft: #e0f2fe;
+  --order-status-bg: #eff8ff;
+  --order-status-border: #bae6fd;
 }
 
-.orders-sheet-close {
-  width: 56rpx;
-  height: 56rpx;
-  padding: 0;
+.table-status-card--accepted {
+  --order-status-main: #f59e0b;
+  --order-status-soft: #fef3c7;
+  --order-status-bg: #fffbeb;
+  --order-status-border: #fde68a;
+}
+
+.table-status-card--served,
+.table-status-card--completed {
+  --order-status-main: var(--brand);
+  --order-status-soft: #dcfce7;
+  --order-status-bg: #ecfdf5;
+  --order-status-border: #bbf7d0;
+}
+
+.table-status-top {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #f3f4f6;
-  color: #6b7280;
-}
-
-.orders-list {
-  padding: 8rpx 32rpx 20rpx;
-}
-
-.table-status-card {
-  padding: 26rpx;
-  border-radius: 24rpx;
-  background: #ecfff5;
-  border: 2rpx solid #b8f3d0;
-  display: flex;
   justify-content: space-between;
   gap: 20rpx;
-}
-
-.table-status-mode {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-  background: #07C160;
-  text { color: #fff; font-size: 24rpx; font-weight: 800; }
-}
-
-.table-status-no {
-  display: block;
-  margin-top: 14rpx;
-  font-size: 40rpx;
-  font-weight: 900;
-  color: #111827;
-}
-
-.table-status-copy {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  text-align: right;
   min-width: 0;
 }
 
-.table-status-main {
-  font-size: 30rpx;
+.table-status-badge {
+  height: 52rpx;
+  padding: 0 22rpx;
+  border-radius: 999rpx;
+  background: var(--order-status-main, var(--brand));
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  color: #fff;
+  font-size: 24rpx;
   font-weight: 900;
-  color: #07C160;
+  white-space: nowrap;
+}
+
+.table-status-badge-icon {
+  font-size: 24rpx;
+  line-height: 1;
+}
+
+.table-status-order-no {
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 24rpx;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-status-main {
+  display: block;
+  margin-top: 22rpx;
+  color: var(--order-status-main, var(--brand));
+  font-size: 42rpx;
+  line-height: 50rpx;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
 .table-status-sub {
-  margin-top: 8rpx;
+  display: block;
+  margin-top: 12rpx;
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 38rpx;
+  font-weight: 600;
+}
+
+.table-status-action {
+  margin-top: 20rpx;
+  min-height: 64rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 18rpx;
+  background: rgba(255,255,255,.72);
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  box-sizing: border-box;
+}
+
+.table-status-action-icon {
+  flex-shrink: 0;
+  color: var(--order-status-main, var(--brand));
+  font-size: 26rpx;
+  line-height: 1;
+}
+
+.table-status-action-text {
+  min-width: 0;
+  color: var(--order-status-main, var(--brand));
+  font-size: 26rpx;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-status-empty {
+  padding: 90rpx 40rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.table-status-empty-icon {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 50%;
+  background: #f3f5f7;
+  color: #b8bfc7;
+  font-size: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20rpx;
+}
+
+.table-status-empty-title {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: var(--text-1);
+}
+
+.table-status-empty-desc {
+  margin-top: 10rpx;
   font-size: 24rpx;
-  color: #64748b;
+  color: var(--text-3);
+}
+
+.order-core-strip {
+  margin-top: 16rpx;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10rpx;
+}
+
+.order-core-item {
+  min-width: 0;
+  height: 104rpx;
+  border-radius: 18rpx;
+  background: #f8fafb;
+  border: 1rpx solid #edf0f2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.order-core-icon {
+  color: var(--text-3);
+  font-size: 30rpx;
+  line-height: 1;
+}
+
+.order-core-icon--amount {
+  color: var(--brand);
+}
+
+.order-core-value {
+  max-width: 100%;
+  margin-top: 10rpx;
+  color: var(--text-1);
+  font-size: 26rpx;
+  line-height: 30rpx;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-core-value--amount {
+  color: var(--brand);
 }
 
 .order-progress-card,
@@ -4328,74 +5613,12 @@ export default {
 .history-orders-card {
   margin-top: 20rpx;
   padding: 24rpx;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   background: #fff;
   border: 2rpx solid #f1f5f9;
 }
 
-.order-progress-step {
-  position: relative;
-  display: flex;
-  gap: 18rpx;
-  padding-bottom: 24rpx;
-}
-
-.order-progress-step:last-child {
-  padding-bottom: 0;
-}
-
-.order-progress-step::after {
-  content: '';
-  position: absolute;
-  left: 11rpx;
-  top: 28rpx;
-  bottom: 2rpx;
-  width: 2rpx;
-  background: #e5e7eb;
-}
-
-.order-progress-step:last-child::after {
-  display: none;
-}
-
-.order-progress-step.done::after {
-  background: #07C160;
-}
-
-.order-progress-dot {
-  position: relative;
-  z-index: 1;
-  width: 24rpx;
-  height: 24rpx;
-  margin-top: 4rpx;
-  border-radius: 50%;
-  background: #d1d5db;
-}
-
-.order-progress-step.done .order-progress-dot,
-.order-progress-step.active .order-progress-dot {
-  background: #07C160;
-}
-
-.order-progress-title {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 800;
-  color: #9ca3af;
-}
-
-.order-progress-step.done .order-progress-title,
-.order-progress-step.active .order-progress-title {
-  color: #111827;
-}
-
-.order-progress-desc {
-  display: block;
-  margin-top: 4rpx;
-  font-size: 22rpx;
-  color: #94a3b8;
-}
-
+.order-progress-head,
 .current-order-head,
 .current-order-summary,
 .history-orders-head,
@@ -4406,32 +5629,134 @@ export default {
   align-items: center;
 }
 
+.order-progress-card-title {
+  font-size: 30rpx;
+  font-weight: 900;
+  color: var(--text-1);
+}
+
+.order-progress-card-sub {
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 23rpx;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-progress-steps {
+  margin-top: 24rpx;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8rpx;
+}
+
+.order-progress-step {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  color: var(--text-3);
+}
+
+.order-progress-dot {
+  position: relative;
+  z-index: 2;
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  background: #eef0f2;
+  color: #9aa1aa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+}
+
+.order-progress-line {
+  position: absolute;
+  z-index: 1;
+  top: 23rpx;
+  left: calc(50% + 28rpx);
+  right: calc(-50% + 28rpx);
+  height: 3rpx;
+  border-radius: 3rpx;
+  background: #e5e7eb;
+}
+
+.order-progress-step.done .order-progress-line {
+  background: var(--brand);
+}
+
+.order-progress-step.done .order-progress-dot,
+.order-progress-step.active .order-progress-dot {
+  background: var(--brand);
+  color: #fff;
+}
+
+.order-progress-step.active .order-progress-dot {
+  box-shadow: 0 0 0 8rpx #dcfce7;
+}
+
+.order-progress-title {
+  display: block;
+  width: 100%;
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  line-height: 30rpx;
+  font-weight: 800;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-progress-step.done .order-progress-title,
+.order-progress-step.active .order-progress-title {
+  color: var(--text-1);
+}
+
+.current-order-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.current-order-title-icon {
+  color: var(--brand);
+  font-size: 28rpx;
+  line-height: 1;
+}
+
 .current-order-title {
   display: block;
   font-size: 30rpx;
   font-weight: 900;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .current-order-no {
   display: block;
   margin-top: 4rpx;
   font-size: 24rpx;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .current-order-total {
   font-size: 36rpx;
   font-weight: 900;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .current-order-summary {
   margin-top: 20rpx;
   padding-top: 18rpx;
   border-top: 2rpx solid #f1f5f9;
-  text { font-size: 26rpx; color: #475569; }
-  text:first-child { color: #171A1D; font-weight: 900; }
+  text { font-size: 26rpx; color: var(--text-2); }
+  text:first-child { color: var(--text-1); font-weight: 900; }
 }
 
 .current-order-items {
@@ -4447,7 +5772,7 @@ export default {
   margin-top: 14rpx;
   padding: 18rpx 0 4rpx;
   border-top: 1rpx solid #f1f5f9;
-  text { font-size: 26rpx; color: #64748b; }
+  text { font-size: 26rpx; color: var(--text-3); }
 }
 
 .order-detail-row {
@@ -4473,34 +5798,34 @@ export default {
 
 .order-detail-name {
   font-size: 28rpx;
-  color: #171A1D;
+  color: var(--text-1);
   font-weight: 700;
 }
 
 .order-detail-spec {
   margin-top: 4rpx;
   font-size: 22rpx;
-  color: #8A9099;
+  color: var(--text-3);
 }
 
 .order-detail-qty {
   width: 72rpx;
   text-align: right;
   font-size: 26rpx;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .order-detail-amount {
   width: 110rpx;
   text-align: right;
   font-size: 26rpx;
-  color: #171A1D;
+  color: var(--text-1);
   font-weight: 800;
 }
 
 .history-orders-head {
-  text:first-child { font-size: 28rpx; font-weight: 800; color: #111827; }
-  text:last-child { font-size: 24rpx; color: #07C160; font-weight: 700; }
+  text:first-child { font-size: 28rpx; font-weight: 800; color: var(--text-1); }
+  text:last-child { font-size: 24rpx; color: var(--brand); font-weight: 700; }
 }
 
 .history-order-block {
@@ -4510,8 +5835,8 @@ export default {
 }
 
 .history-order-row {
-  text { font-size: 25rpx; color: #64748b; }
-  text:last-child { color: #111827; font-weight: 800; }
+  text { font-size: 25rpx; color: var(--text-3); }
+  text:last-child { color: var(--text-1); font-weight: 800; }
 }
 
 .history-order-items {
@@ -4523,9 +5848,9 @@ export default {
   justify-content: space-between;
   gap: 16rpx;
   padding: 8rpx 0;
-  text { font-size: 23rpx; color: #8A9099; }
+  text { font-size: 23rpx; color: var(--text-3); }
   text:first-child { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  text:last-child { color: #475569; font-weight: 700; }
+  text:last-child { color: var(--text-2); font-weight: 700; }
 }
 
 .orders-actions {
@@ -4534,7 +5859,6 @@ export default {
   background: #fff;
 }
 
-.orders-primary-btn,
 .orders-secondary-btn {
   height: 88rpx;
   border-radius: 999rpx;
@@ -4542,18 +5866,17 @@ export default {
   align-items: center;
   justify-content: center;
   text { font-size: 30rpx; font-weight: 900; }
-}
-
-.orders-primary-btn {
-  background: #07C160;
-  box-shadow: 0 12rpx 28rpx rgba(7, 193, 96, 0.22);
+  background: var(--brand);
   text { color: #fff; }
 }
 
-.orders-secondary-btn {
-  margin-top: 16rpx;
+.orders-secondary-btn--canceled {
+  background: var(--text-1);
+}
+
+.orders-secondary-btn--completed {
   background: #f3f5f7;
-  text { color: #374151; }
+  text { color: var(--text-2); }
 }
 
 .loading-mask {
@@ -4568,24 +5891,95 @@ export default {
   gap: 24rpx;
 }
 
-.loading-ring {
-  width: 72rpx;
-  height: 72rpx;
-  border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.loading-text { font-size: 28rpx; color: var(--text-3); }
+
+.skeleton-mask {
+  position: fixed;
+  top: calc(176rpx + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #fff;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton-nav {
+  width: 156rpx;
+  flex: 0 0 156rpx;
+  background: #F6F7F8;
+  padding-top: 20rpx;
+  box-sizing: border-box;
+}
 
-.loading-text { font-size: 28rpx; color: #9ca3af; }
+.skeleton-nav-item {
+  height: 36rpx;
+  margin: 0 28rpx 32rpx;
+  border-radius: 8rpx;
+}
+
+.skeleton-list {
+  flex: 1;
+  min-width: 0;
+  padding: 20rpx 20rpx 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.skeleton-dish {
+  display: flex;
+  align-items: flex-start;
+  height: 192rpx;
+  margin-bottom: 24rpx;
+}
+
+.skeleton-thumb {
+  width: 192rpx;
+  height: 192rpx;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+}
+
+.skeleton-lines {
+  flex: 1;
+  min-width: 0;
+  margin-left: 20rpx;
+  padding-top: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.skeleton-line {
+  height: 26rpx;
+  border-radius: 8rpx;
+}
+
+.skeleton-line--title { width: 55%; height: 32rpx; }
+.skeleton-line--desc { width: 85%; }
+.skeleton-line--price { width: 28%; height: 34rpx; margin-top: 36rpx; }
+
+.skeleton-nav-item,
+.skeleton-thumb,
+.skeleton-line {
+  background: linear-gradient(90deg, #edeff1 25%, #f7f8f9 37%, #edeff1 63%);
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+}
+
+@keyframes skeletonShimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
 
 .retry-btn {
   margin-top: 24rpx;
   padding: 16rpx 48rpx;
-  border-radius: 24rpx;
-  background: #07C160;
+  border-radius: var(--radius-card);
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4605,12 +5999,12 @@ export default {
 }
 .coupon-select-label {
   font-size: 26rpx;
-  color: #374151;
+  color: var(--text-2);
   font-weight: 600;
 }
 .coupon-select-tip {
   font-size: 24rpx;
-  color: #ef4444;
+  color: var(--danger);
   font-weight: 600;
 }
 .coupon-select-list {
@@ -4627,19 +6021,19 @@ export default {
   background: #fff;
 }
 .coupon-chip-item--on {
-  border-color: #07C160;
+  border-color: var(--brand);
   background: #f0fdf4;
-  .coupon-chip-amount { color: #07C160; }
+  .coupon-chip-amount { color: var(--brand); }
   .coupon-chip-min { color: #16a34a; }
 }
 .coupon-chip-amount {
   font-size: 30rpx;
   font-weight: 700;
-  color: #ef4444;
+  color: var(--danger);
 }
 .coupon-chip-min {
   font-size: 20rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   margin-top: 4rpx;
 }
 
@@ -4657,15 +6051,28 @@ export default {
   flex-direction: column;
   align-items: center;
 }
+.review-title-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  margin-bottom: 8rpx;
+}
+
+.review-title-icon {
+  color: var(--brand);
+  font-size: 34rpx;
+  line-height: 38rpx;
+}
+
 .review-title {
   font-size: 36rpx;
   font-weight: 700;
-  color: #111827;
-  margin-bottom: 8rpx;
+  color: var(--text-1);
 }
 .review-sub {
   font-size: 24rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   margin-bottom: 36rpx;
 }
 .review-stars {
@@ -4679,7 +6086,7 @@ export default {
   transition: color .15s;
 }
 .review-star--on {
-  color: #f59e0b;
+  color: var(--warning);
 }
 .review-hint-row {
   height: 36rpx;
@@ -4687,14 +6094,14 @@ export default {
 }
 .review-hint {
   font-size: 26rpx;
-  color: #f59e0b;
+  color: var(--warning);
   font-weight: 600;
 }
 .review-textarea {
   width: 100%;
   min-height: 120rpx;
   font-size: 26rpx;
-  color: #374151;
+  color: var(--text-2);
   background: #f8fafc;
   border: none;
   border-radius: 16rpx;
@@ -4715,13 +6122,13 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  text { font-size: 28rpx; color: #9ca3af; }
+  text { font-size: 28rpx; color: var(--text-3); }
 }
 .review-btn-submit {
   flex: 2;
   height: 88rpx;
   border-radius: 44rpx;
-  background: #07C160;
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4749,12 +6156,12 @@ export default {
   border-radius: 32rpx;
   border: 1rpx solid #e5e7eb;
   background: #f8fafc;
-  text { font-size: 24rpx; color: #64748b; }
+  text { font-size: 24rpx; color: var(--text-3); }
 }
 .remark-chip--on {
-  border-color: #07C160;
+  border-color: var(--brand);
   background: #f0fdf4;
-  text { color: #07C160; font-weight: 600; }
+  text { color: var(--brand); font-weight: 600; }
 }
 
 .remark-row {
@@ -4768,13 +6175,13 @@ export default {
 .remark-label {
   flex-shrink: 0;
   font-size: 26rpx;
-  color: #64748b;
+  color: var(--text-3);
 }
 
 .remark-input {
   flex: 1;
   font-size: 26rpx;
-  color: #111827;
+  color: var(--text-1);
   background: transparent;
 }
 
@@ -4783,7 +6190,7 @@ export default {
 
 .member-price {
   font-size: 24rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 600;
   margin-left: 8rpx;
 }
@@ -4792,7 +6199,7 @@ export default {
 .cart-row-spec {
   display: block;
   font-size: 22rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   margin-top: 4rpx;
 }
 
@@ -4825,7 +6232,7 @@ export default {
   height: 96rpx;
   border-radius: 48rpx;
   background: rgba(255, 255, 255, 0.72);
-  color: #535a63;
+  color: var(--text-2);
   font-size: 44rpx;
   font-weight: 800;
   display: flex;
@@ -4866,7 +6273,7 @@ export default {
 .spec-sheet-title {
   display: -webkit-box;
   padding-right: 88rpx;
-  color: #171a1d;
+  color: var(--text-1);
   font-size: 40rpx;
   font-weight: 700;
   line-height: 56rpx;
@@ -4886,15 +6293,18 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8a9099;
-  font-size: 44rpx;
-  line-height: 1;
+  color: var(--text-3);
+}
+
+.spec-sheet-close text {
+  font-size: 38rpx;
+  line-height: 44rpx;
 }
 
 .spec-sheet-desc {
   display: -webkit-box;
   margin-top: 8rpx;
-  color: #8a9099;
+  color: var(--text-3);
   font-size: 28rpx;
   line-height: 40rpx;
   overflow: hidden;
@@ -4907,7 +6317,7 @@ export default {
   display: flex;
   align-items: flex-end;
   margin-top: 16rpx;
-  color: #07c160;
+  color: var(--brand);
   line-height: 1;
 }
 
@@ -4942,22 +6352,36 @@ export default {
   margin-bottom: 20rpx;
 }
 
+.spec-group-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.spec-group-icon {
+  flex-shrink: 0;
+  color: var(--brand);
+  font-size: 28rpx;
+  line-height: 32rpx;
+}
+
 .spec-group-name {
-  color: #171a1d;
+  color: var(--text-1);
   font-size: 32rpx;
   font-weight: 600;
   line-height: 44rpx;
 }
 
 .spec-required {
-  color: #07c160;
+  color: var(--brand);
   font-size: 22rpx;
   font-weight: 400;
   line-height: 32rpx;
 }
 
 .spec-optional {
-  color: #a0a5ac;
+  color: var(--text-3);
   font-size: 24rpx;
   font-weight: 400;
   line-height: 34rpx;
@@ -4979,16 +6403,16 @@ export default {
   border: 1rpx solid transparent;
   border-radius: 36rpx;
   background: #f5f6f7;
-  color: #535a63;
+  color: var(--text-2);
   font-size: 28rpx;
   line-height: 40rpx;
   box-sizing: border-box;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 
   &--on {
-    border-color: #07c160;
+    border-color: var(--brand);
     background: #e8f9f0;
-    color: #07c160;
+    color: var(--brand);
     font-weight: 600;
   }
 }
@@ -4998,26 +6422,64 @@ export default {
 }
 
 .spec-price {
-  color: #8a9099;
+  color: var(--text-3);
   font-size: 24rpx;
   line-height: 34rpx;
-  .spec-option--on & { color: #07c160; }
+  .spec-option--on & { color: var(--brand); }
 }
 
 .spec-remark-block {
   margin-top: 32rpx;
 }
 
+.remark-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.remark-chip-option {
+  min-height: 64rpx;
+  display: flex;
+  align-items: center;
+  padding: 0 26rpx;
+  border: 1rpx solid transparent;
+  border-radius: 32rpx;
+  background: #f5f6f7;
+  color: var(--text-2);
+  font-size: 26rpx;
+  line-height: 36rpx;
+  box-sizing: border-box;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.remark-chip-option--on {
+  border-color: var(--brand);
+  background: #e8f9f0;
+  color: var(--brand);
+  font-weight: 600;
+}
+
+.item-remark-extra-toggle {
+  display: inline-block;
+  margin-top: 20rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+
 .item-remark-input {
   width: 100%;
   min-height: 152rpx;
+  margin-top: 20rpx;
   max-height: 176rpx;
   padding: 24rpx;
   border: 1rpx solid #e5e7ea;
   border-radius: 20rpx;
   background: #fff;
   box-sizing: border-box;
-  color: #171a1d;
+  color: var(--text-1);
   font-size: 28rpx;
   line-height: 40rpx;
 }
@@ -5063,11 +6525,11 @@ export default {
   width: 64rpx;
   height: 64rpx;
   background: #f5f6f7;
-  color: #535a63;
+  color: var(--text-2);
 }
 
 .spec-counter-row .counter-btn.plus {
-  background: #07c160;
+  background: var(--brand);
   color: #fff;
 }
 
@@ -5077,9 +6539,14 @@ export default {
   line-height: 1;
 }
 
+.spec-counter-row .counter-btn .iconfont {
+  font-size: 30rpx;
+  font-weight: 400;
+}
+
 .spec-counter-row .counter-num {
   width: 56rpx;
-  color: #171a1d;
+  color: var(--text-1);
   font-size: 32rpx;
   font-weight: 600;
   line-height: 44rpx;
@@ -5098,7 +6565,7 @@ export default {
   width: 100%;
   height: 100rpx;
   border-radius: 50rpx;
-  background: #07c160;
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5136,10 +6603,20 @@ export default {
   width: 100%;
 }
 
+.closed-icon-wrap {
+  width: 112rpx;
+  height: 112rpx;
+  margin: 0 auto 24rpx;
+  border-radius: 50%;
+  background: #F3F4F6;
+  color: #9aa1aa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .closed-icon {
-  font-size: 80rpx;
-  display: block;
-  margin-bottom: 20rpx;
+  font-size: 56rpx;
 }
 
 .closed-title {
@@ -5153,37 +6630,43 @@ export default {
 .closed-desc {
   display: block;
   font-size: 28rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   line-height: 1.6;
   margin-bottom: 40rpx;
 }
 
 .closed-btn {
   padding: 24rpx 0;
-  background: #f3f4f6;
+  background: var(--brand);
   border-radius: 20rpx;
   text {
     font-size: 30rpx;
-    color: #6b7280;
-    font-weight: 600;
+    color: #fff;
+    font-weight: 700;
   }
+}
+
+.closed-btn-plain {
+  margin-top: 16rpx;
+  background: #f3f4f6;
+  text { color: var(--text-3); font-weight: 600; }
 }
 
 .checkout-auth-mask { align-items: flex-end; }
 .checkout-auth-sheet { width: 100%; max-height: 55vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
 .checkout-auth-handle { width: 72rpx; height: 8rpx; border-radius: 999rpx; background: #e5e7eb; align-self: center; margin-bottom: 20rpx; }
-.checkout-auth-title { color: #111827; font-size: 38rpx; font-weight: 900; text-align: center; line-height: 1.25; }
-.checkout-auth-desc { margin-top: 12rpx; color: #475569; font-size: 27rpx; line-height: 1.55; text-align: center; }
+.checkout-auth-title { color: var(--text-1); font-size: 38rpx; font-weight: 900; text-align: center; line-height: 1.25; }
+.checkout-auth-desc { margin-top: 12rpx; color: var(--text-2); font-size: 27rpx; line-height: 1.55; text-align: center; }
 .checkout-auth-order { margin-top: 22rpx; padding: 22rpx 24rpx; border-radius: 22rpx; background: #f8fafb; border: 1rpx solid #edf0f2; }
-.checkout-auth-row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; color: #94a3b8; font-size: 26rpx; line-height: 1.5; }
+.checkout-auth-row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; color: var(--text-3); font-size: 26rpx; line-height: 1.5; }
 .checkout-auth-row + .checkout-auth-row { margin-top: 12rpx; }
-.checkout-auth-row text:last-child { color: #111827; font-weight: 800; text-align: right; max-width: 440rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.checkout-auth-row--amount text:last-child { color: #0aa65a; font-size: 32rpx; font-weight: 900; }
+.checkout-auth-row text:last-child { color: var(--text-1); font-weight: 800; text-align: right; max-width: 440rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checkout-auth-row--amount text:last-child { color: var(--brand); font-size: 32rpx; font-weight: 900; }
 .checkout-auth-auto { margin-top: 18rpx; padding: 18rpx 20rpx; border-radius: 18rpx; background: #ecfbf3; color: #0f8f50; font-size: 24rpx; line-height: 1.55; }
-.checkout-auth-primary { margin-top: 24rpx; height: 96rpx; border-radius: 24rpx; background: #16c76f; color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
+.checkout-auth-primary { margin-top: 24rpx; height: 96rpx; border-radius: var(--radius-card); background: #16c76f; color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
 .checkout-auth-primary[disabled] { opacity: .72; box-shadow: none; }
-.checkout-auth-cancel { height: 72rpx; display: flex; align-items: center; justify-content: center; color: #64748b; font-size: 28rpx; }
-.checkout-auth-member { display: block; color: #98a2b3; font-size: 22rpx; line-height: 1.45; text-align: center; margin-top: 2rpx; }
+.checkout-auth-cancel { height: 72rpx; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 28rpx; }
+.checkout-auth-member { display: block; color: var(--text-3); font-size: 22rpx; line-height: 1.45; text-align: center; margin-top: 2rpx; }
 .checkout-auth-privacy { display: block; color: #a8b1bd; font-size: 21rpx; line-height: 1.45; text-align: center; margin-top: 10rpx; }
 @keyframes authSheetIn { from { transform: translateY(24rpx); opacity: .92; } to { transform: translateY(0); opacity: 1; } }
 
@@ -5195,8 +6678,14 @@ export default {
   transition: transform 160ms ease-out;
 }
 
+.counter-btn .iconfont {
+  font-size: 30rpx;
+  font-weight: 400;
+  line-height: 1;
+}
+
 .counter-btn--pressing {
-  animation: addButtonPress 160ms ease-out;
+  animation: addButtonPress 220ms var(--bounce-ease);
 }
 
 .counter-num--pulse {
@@ -5236,7 +6725,8 @@ export default {
 
 @keyframes addButtonPress {
   0% { transform: scale(1); }
-  45% { transform: scale(.95); }
+  40% { transform: scale(.9); }
+  75% { transform: scale(1.08); }
   100% { transform: scale(1); }
 }
 
@@ -5268,10 +6758,461 @@ export default {
   .cart-icon-wrap,
   .cart-badge,
   .cart-price,
-  .checkout-btn {
+  .checkout-btn,
+  .choose-option-btn {
     transition-duration: 0ms;
     animation: none;
   }
+}
+
+.table-account-sheet {
+  background: #f6f7f8;
+  padding-bottom: 0;
+}
+
+.table-account-head {
+  position: relative;
+  justify-content: center;
+  min-height: 88rpx;
+}
+
+.table-account-back {
+  position: absolute;
+  left: 18rpx;
+  top: 12rpx;
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+.table-account-back text {
+  font-size: 34rpx;
+}
+
+.table-account-list {
+  max-height: calc(82vh - 176rpx - env(safe-area-inset-bottom));
+  padding: 0 24rpx 188rpx;
+  box-sizing: border-box;
+}
+
+.table-account-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18rpx 24rpx 20rpx;
+  text-align: center;
+}
+
+.table-account-status-icon {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 顶部大状态图标和下面每笔子订单的状态标签用同一套语义色：
+   active=还在等（下单/制作中），served=菜已上齐可以结账，settled=已结账/归档。 */
+.table-account-status-icon--active {
+  background: #fff7e6;
+  color: var(--warning);
+}
+
+.table-account-status-icon--served {
+  background: #ecfbf3;
+  color: var(--brand);
+}
+
+.table-account-status-icon--settled {
+  background: #f3f4f6;
+  color: var(--text-3);
+}
+
+.table-account-status-icon text {
+  font-size: 30rpx;
+}
+
+.table-account-status-title {
+  margin-top: 12rpx;
+  color: var(--text-1);
+  font-size: 44rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.table-account-status-desc {
+  margin-top: 8rpx;
+  color: var(--text-3);
+  font-size: 28rpx;
+  line-height: 1.45;
+}
+
+.table-account-status-note {
+  display: block;
+  margin-top: 4rpx;
+  color: var(--text-3);
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+.table-account-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 8rpx;
+  padding: 26rpx 28rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.table-account-summary-left,
+.table-account-summary-right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-account-table,
+.table-account-total {
+  color: var(--text-1);
+  font-size: 40rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.table-account-sub,
+.table-account-count {
+  margin-top: 8rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 1.4;
+}
+
+.table-account-summary-right {
+  flex-shrink: 0;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.table-account-total {
+  color: var(--brand);
+}
+
+.table-account-section {
+  margin-top: 18rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.table-account-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
+}
+
+.table-account-section-title {
+  color: var(--text-1);
+  font-size: 34rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.table-account-group + .table-account-group {
+  margin-top: 26rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid #eef1f3;
+}
+
+.table-account-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-bottom: 16rpx;
+}
+
+.table-account-group-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+/* 拼桌时标出"这一单是第几位点的"，纯展示编号，不关联真实身份 */
+.participant-badge {
+  flex-shrink: 0;
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+.table-account-group-time {
+  color: var(--text-2);
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+/* 服务员代客加的单也标出来，让顾客知道这道菜是谁帮加的，结账时不会觉得莫名其妙 */
+.table-account-staff-badge {
+  flex-shrink: 0;
+  color: #a21caf;
+  background: #fdf4ff;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+.table-account-group-discount {
+  flex-shrink: 0;
+  color: #ef4444;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.table-account-group-status {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
+.table-account-group-status--served {
+  color: var(--brand);
+}
+
+.table-account-group-status--settled {
+  color: var(--text-3);
+}
+
+.table-account-group-status--muted {
+  color: #9aa1aa;
+}
+
+.table-account-item {
+  min-height: 128rpx;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 12rpx 0;
+  box-sizing: border-box;
+}
+
+.table-account-item--muted {
+  opacity: .58;
+}
+
+.table-account-item-img-wrap,
+.table-account-item-img,
+.table-account-item-placeholder {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.table-account-item-placeholder {
+  background: #f2f4f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.table-account-item-placeholder text {
+  color: var(--text-3);
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+.table-account-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-account-item-name {
+  color: var(--text-1);
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-account-item-spec,
+.table-account-item-mark {
+  margin-top: 6rpx;
+  color: var(--text-3);
+  font-size: 25rpx;
+  line-height: 1.35;
+}
+
+.table-account-item-mark {
+  color: #9a6a21;
+}
+
+.table-account-item-qty {
+  flex-shrink: 0;
+  min-width: 52rpx;
+  color: var(--text-2);
+  font-size: 28rpx;
+  font-weight: 800;
+  text-align: right;
+}
+
+.table-account-item-amount {
+  flex-shrink: 0;
+  min-width: 118rpx;
+  color: var(--text-1);
+  font-size: 29rpx;
+  font-weight: 900;
+  text-align: right;
+}
+
+.table-account-empty {
+  padding: 56rpx 20rpx;
+  text-align: center;
+}
+
+.table-account-empty-title {
+  display: block;
+  color: var(--text-1);
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+.table-account-empty-desc {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.table-account-tip {
+  margin: 18rpx 0 0;
+  padding: 18rpx 22rpx;
+  border-radius: 18rpx;
+  background: #eef2f0;
+  color: var(--text-3);
+  font-size: 25rpx;
+  line-height: 1.45;
+}
+
+.table-account-retry {
+  width: 220rpx;
+  height: 76rpx;
+  margin: 24rpx auto 0;
+  border-radius: 38rpx;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.table-account-retry text {
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.table-account-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  gap: 18rpx;
+  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1rpx solid #edf0f2;
+  box-sizing: border-box;
+}
+
+.table-account-action {
+  height: 92rpx;
+  border-radius: 46rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.table-account-action text {
+  font-size: 29rpx;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.table-account-action--secondary {
+  flex: 0 0 236rpx;
+  border: 2rpx solid var(--brand);
+  background: #fff;
+  color: var(--brand);
+}
+
+.table-account-action--secondary text {
+  color: var(--brand);
+}
+
+.table-account-action--primary {
+  flex: 1;
+  min-width: 0;
+  background: var(--brand);
+  color: #fff;
+}
+
+.table-account-action--primary text {
+  color: #fff;
+}
+
+.table-account-action--ghost {
+  background: #f1f4f3;
+}
+
+.table-account-action--ghost text {
+  color: var(--text-2);
+}
+
+.table-account-action--disabled {
+  opacity: .5;
+}
+
+/* 餐后付款没有可点击的"去结账"——结账动作在商家手里，这里只是一句提示，
+   不能长得跟旁边的按钮一样可点，字号、字重都调低，允许换行。 */
+.table-account-action--info {
+  height: auto;
+  min-height: 92rpx;
+  background: #f6f7f8;
+  padding: 12rpx 20rpx;
+}
+
+.table-account-action--info text {
+  color: var(--text-2);
+  font-size: 24rpx;
+  font-weight: 600;
+  white-space: normal;
+  line-height: 1.4;
+  text-align: center;
 }
 
 /* Order success sheet */
@@ -5330,7 +7271,7 @@ export default {
   font-size: 46rpx;
   line-height: 1.2;
   font-weight: 900;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .success-sheet .success-paid-amount-row {
@@ -5350,7 +7291,7 @@ export default {
 .success-paid-label {
   display: block;
   margin-top: 4rpx;
-  color: #98a2b3;
+  color: var(--text-3);
   font-size: 23rpx;
 }
 
@@ -5377,7 +7318,7 @@ export default {
 }
 
 .success-sheet .order-status-text {
-  color: #0aa65a;
+  color: var(--brand);
   font-size: 27rpx;
   font-weight: 800;
   line-height: 1.55;
@@ -5385,6 +7326,119 @@ export default {
 
 .success-sheet .order-status-bar.warning .order-status-text {
   color: #9a6a21;
+}
+
+.earned-coupon-card {
+  position: relative;
+  margin-top: 20rpx;
+  padding: 34rpx 28rpx 28rpx;
+  border-radius: 24rpx;
+  text-align: center;
+  background: linear-gradient(160deg, #ff5a3c 0%, #ff2f1f 55%, #d81717 100%);
+  border: 2rpx solid rgba(255, 222, 150, 0.9);
+  box-shadow: 0 16rpx 40rpx -14rpx rgba(180, 20, 10, 0.45);
+  overflow: hidden;
+  animation: ec-card-in 0.5s cubic-bezier(0.22, 1.3, 0.4, 1) both;
+}
+
+.earned-coupon-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.5) 50%, transparent 58%);
+  transform: translateX(-140%);
+  animation: ec-shine 1s ease 0.45s 1;
+  pointer-events: none;
+}
+
+@keyframes ec-card-in {
+  0% { transform: scale(0.85); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+@keyframes ec-shine {
+  to { transform: translateX(140%); }
+}
+
+.ec-ribbon {
+  display: inline-block;
+  padding: 4rpx 20rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffe9c2;
+  font-size: 21rpx;
+  font-weight: 700;
+  margin-bottom: 14rpx;
+}
+
+.ec-amount-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+}
+
+.ec-currency {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #ffffff;
+  margin-right: 2rpx;
+}
+
+.ec-amount {
+  font-size: 68rpx;
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1;
+  text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
+}
+
+.ec-cond {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #ffe4d2;
+}
+
+.ec-divider {
+  width: 100%;
+  height: 1rpx;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 20rpx 0 18rpx;
+}
+
+.ec-title {
+  display: block;
+  font-size: 25rpx;
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.5;
+}
+
+.ec-deadline {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #ffe9c2;
+}
+
+.ec-remind-btn {
+  display: inline-block;
+  margin-top: 18rpx;
+  padding: 8rpx 22rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 999rpx;
+  font-size: 21rpx;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ec-remind-btn--done {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
 }
 
 .success-summary {
@@ -5406,12 +7460,12 @@ export default {
 }
 
 .success-summary-label {
-  color: #98a2b3;
+  color: var(--text-3);
   font-size: 27rpx;
 }
 
 .success-summary-value {
-  color: #111827;
+  color: var(--text-1);
   font-size: 29rpx;
   font-weight: 800;
   text-align: right;
@@ -5429,8 +7483,8 @@ export default {
 
 .success-sheet .success-btn-primary {
   height: 98rpx;
-  border-radius: 24rpx;
-  background: #10c469;
+  border-radius: var(--radius-card);
+  background: var(--brand);
   box-shadow: 0 12rpx 24rpx rgba(16,196,105,.18);
 }
 
@@ -5442,7 +7496,7 @@ export default {
 
 .success-sheet .success-btn-secondary {
   height: 94rpx;
-  border-radius: 24rpx;
+  border-radius: var(--radius-card);
   background: #fff;
   border: 1rpx solid #dfe5e8;
 }
@@ -5458,7 +7512,7 @@ export default {
 }
 
 .success-sheet .success-btn-ghost text {
-  color: #667085;
+  color: var(--text-2);
   font-size: 26rpx;
   font-weight: 700;
 }
@@ -5466,7 +7520,7 @@ export default {
 .success-safe-tip {
   display: block;
   margin: 16rpx 10rpx 0;
-  color: #98a2b3;
+  color: var(--text-3);
   font-size: 22rpx;
   line-height: 1.55;
 }
@@ -5488,9 +7542,229 @@ export default {
     animation: none;
   }
 }
+
+.welcome-mask {
+  align-items: center;
+  justify-content: center;
+  padding: 0 48rpx;
+  background: rgba(15, 23, 42, .58);
+}
+
+.welcome-coupon-sheet {
+  width: 100%;
+  max-width: 560rpx;
+  background: linear-gradient(160deg, #ff5a3c 0%, #ff2f1f 55%, #d81717 100%);
+  border: 2rpx solid rgba(255, 222, 150, 0.9);
+  border-radius: 32rpx;
+  padding: 48rpx 40rpx 36rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 16rpx 40rpx -14rpx rgba(180, 20, 10, 0.45);
+  animation: ec-card-in 0.5s cubic-bezier(0.22, 1.3, 0.4, 1) both;
+}
+
+.welcome-coupon-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.5) 50%, transparent 58%);
+  transform: translateX(-140%);
+  animation: ec-shine 1s ease 0.45s 1;
+  pointer-events: none;
+}
+
+.wc-ribbon {
+  display: inline-block;
+  padding: 4rpx 20rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffe9c2;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.wc-amount-row {
+  display: flex;
+  align-items: baseline;
+  margin-top: 22rpx;
+}
+
+.wc-currency {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #ffffff;
+  margin-right: 4rpx;
+}
+
+.wc-amount {
+  font-size: 88rpx;
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1;
+  text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
+}
+
+.wc-cond {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #ffe4d2;
+}
+
+.wc-divider {
+  width: 100%;
+  height: 1rpx;
+  background: rgba(255, 255, 255, 0.25);
+  margin: 24rpx 0 18rpx;
+}
+
+.wc-name {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.wc-btn {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 32rpx;
+  border-radius: 999rpx;
+  background: linear-gradient(180deg, #ffe9a8, #ffcf5c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  box-shadow: 0 10rpx 22rpx -10rpx rgba(255, 180, 40, 0.75);
+  text { color: #7a1f00; font-size: 30rpx; font-weight: 900; }
+}
+
+.wc-skip {
+  margin-top: 20rpx;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.coupon-picker-sheet {
+  width: 100%;
+  max-height: 76vh;
+  background: #fff;
+  border-radius: 32rpx 32rpx 0 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  animation: slide-up 0.25s ease;
+}
+
+.cp-head {
+  position: relative;
+  flex-shrink: 0;
+  padding: 28rpx 32rpx 18rpx;
+  text-align: center;
+}
+
+.cp-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--text-1);
+}
+
+.cp-close {
+  position: absolute;
+  right: 20rpx;
+  top: 16rpx;
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 34rpx;
+  line-height: 64rpx;
+  text-align: center;
+}
+
+.cp-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.cp-option {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 22rpx 20rpx;
+  margin-bottom: 16rpx;
+  border-radius: 20rpx;
+  border: 2rpx solid #edf0f2;
+  background: #fafbfc;
+  box-sizing: border-box;
+}
+
+.cp-option--on {
+  border-color: var(--brand);
+  background: #ecfbf3;
+}
+
+.cp-option--disabled {
+  opacity: .5;
+}
+
+.cp-option-amount {
+  flex-shrink: 0;
+  min-width: 108rpx;
+  text-align: center;
+  /* 券面额用红金色而不是品牌绿，跟"选中态"用色分开：绿色始终代表"这个选项被选中"，
+     红金色代表"这是一张券"，两套含义混用同一个颜色会互相干扰。 */
+  text { color: #ff3018; font-size: 40rpx; font-weight: 900; }
+}
+
+.cp-option-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.cp-option-name {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.cp-option-cond {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+.cp-radio-icon {
+  flex-shrink: 0;
+  width: 44rpx;
+  height: 44rpx;
+  color: #d7dce2;
+  font-size: 42rpx;
+  line-height: 44rpx;
+  text-align: center;
+}
+
+.cp-option--on .cp-radio-icon {
+  color: var(--brand);
+}
+
+.cp-empty {
+  padding: 64rpx 0;
+  text-align: center;
+  text { color: var(--text-3); font-size: 26rpx; }
+}
 </style>
-
-
 
 
 

@@ -3,14 +3,12 @@
 
     <!-- 加载态 -->
     <view v-if="loading" class="state-wrap">
-      <view class="loading-ring"></view>
-      <text class="state-text">正在加载优惠券</text>
+      <state-loading text="正在加载优惠券" />
     </view>
 
     <!-- 错误态 -->
     <view v-else-if="error" class="state-wrap">
-      <text class="state-text">{{ error }}</text>
-      <button class="btn-primary state-btn" @click="goBack">返回列表</button>
+      <state-error :title="error" retry-text="返回列表" @retry="goBack" />
     </view>
 
     <!-- 详情 -->
@@ -37,29 +35,21 @@
         <view class="steps">
           <view class="step-item">
             <view class="step-num">1</view>
-            <text class="step-text">点下面「出示给店员」</text>
+            <text class="step-text">在小程序里选好菜</text>
           </view>
           <view class="step-item">
             <view class="step-num">2</view>
-            <text class="step-text">让店员扫码，扫码失败就输入短券码</text>
+            <text class="step-text">结算时自动为您选中这张券</text>
           </view>
           <view class="step-item">
             <view class="step-num">3</view>
-            <text class="step-text">核销成功后享受优惠</text>
+            <text class="step-text">支付成功即自动核销，享受优惠</text>
           </view>
         </view>
       </view>
 
       <!-- 详细信息 -->
       <view class="card info-card">
-        <view class="info-row">
-          <text class="info-label">短券码</text>
-          <view class="info-value-wrap">
-            <text v-if="vcLoading" class="info-value hint">正在生成…</text>
-            <text v-else class="info-value code-val">{{ coupon.verify_code || '-' }}</text>
-          </view>
-        </view>
-        <view class="info-divider"></view>
         <view class="info-row">
           <text class="info-label">状态</text>
           <text class="info-value">{{ couponStatusText(coupon.status) }}</text>
@@ -76,8 +66,8 @@
         <button
           v-if="coupon.status === 'UNUSED'"
           class="btn-primary"
-          @click="goVerify"
-        >出示给店员</button>
+          @click="goOrder"
+        >去点餐</button>
         <button v-else class="btn-disabled">{{ couponStatusText(coupon.status) }}</button>
       </view>
 
@@ -88,34 +78,21 @@
 <script>
 import { ref } from 'vue'
 import { getCouponDetail } from '@/api/coupon'
-import { getCouponVerifyCode } from '@/api/verify'
 import { couponStatusText, formatDate, formatDateTime, formatMoney } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
 
 export default {
+  components: { StateLoading, StateError },
   setup() {
     const loading = ref(true)
     const coupon = ref(null)
     const error = ref('')
-    const vcLoading = ref(false)
 
     const couponAmount = (item) => formatMoney(item.value ?? item.amount ?? item.discount_amount ?? 0)
     const couponCondition = (item) => {
       const min = Number(item.min_amount ?? item.threshold_amount ?? 0)
       return min > 0 ? `满 ${formatMoney(min)} 可用` : '无门槛'
-    }
-
-    const loadVerifyCode = async (id) => {
-      vcLoading.value = true
-      try {
-        const res = await getCouponVerifyCode(id)
-        if (res.code === 200 && res.data?.verify_code) {
-          coupon.value = { ...coupon.value, verify_code: res.data.verify_code }
-        }
-      } catch (e) {
-        // 静默失败，用户可去核销页查看
-      } finally {
-        vcLoading.value = false
-      }
     }
 
     const loadCoupon = async (id) => {
@@ -130,9 +107,6 @@ export default {
         const res = await getCouponDetail(id)
         if (res.code === 200) {
           coupon.value = res.data
-          if (!coupon.value.verify_code && coupon.value.status === 'UNUSED') {
-            loadVerifyCode(id)
-          }
         } else {
           error.value = res.msg || '优惠券加载失败'
         }
@@ -143,16 +117,25 @@ export default {
       }
     }
 
-    const goVerify = () => uni.navigateTo({ url: `/subpkg-common/pages/verify-qr?coupon_id=${coupon.value.id}` })
+    // 去点餐：优惠券在结算时自动核销，不再需要店员扫码——回到点餐页并定位到"点餐"标签
+    const goOrder = () => {
+      try { uni.setStorageSync('menu_focus_tab', 'order') } catch (_) {}
+      const pages = getCurrentPages()
+      const idx = pages.findIndex(p => (p.route || '').indexOf('subpkg-order/pages/menu') !== -1)
+      if (idx >= 0) {
+        uni.navigateBack({ delta: pages.length - 1 - idx })
+      } else {
+        uni.showToast({ title: '请先扫桌台二维码点餐', icon: 'none' })
+      }
+    }
     const goBack = () => uni.navigateBack()
 
     return {
       loading,
       coupon,
       error,
-      vcLoading,
       loadCoupon,
-      goVerify,
+      goOrder,
       goBack,
       couponAmount,
       couponCondition,
@@ -190,32 +173,6 @@ export default {
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
 
-.state-text {
-  display: block;
-  margin-top: 24rpx;
-  color: #111;
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-}
-
-.state-btn {
-  margin-top: 32rpx;
-  width: 100%;
-}
-
-/* 加载环 */
-.loading-ring {
-  width: 72rpx;
-  height: 72rpx;
-  border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
 /* ── 内容区 ──────────────────────────────── */
 .content {
   padding-bottom: 32rpx;
@@ -228,15 +185,29 @@ export default {
   overflow: hidden;
 }
 
+/* 红金票券配色，右边缘打一个圆孔，呼应"撕票根"的实体票券质感，和列表页/领券卡片统一 */
 .ac-left {
   flex-shrink: 0;
   width: 220rpx;
-  background: #07C160;
+  background: linear-gradient(160deg, #ff5a3c, #ff2f1f 55%, #d81717);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 48rpx 16rpx;
+  position: relative;
+}
+
+.ac-left::after {
+  content: "";
+  position: absolute;
+  right: -10rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 50%;
+  background: #fff;
 }
 
 .ac-amount {
@@ -371,28 +342,12 @@ export default {
   font-size: 30rpx;
 }
 
-.info-value-wrap {
-  flex: 1;
-  text-align: right;
-}
-
 .info-value {
   color: #111;
   font-size: 30rpx;
   text-align: right;
 }
 
-.info-value.hint {
-  color: #999;
-  font-size: 26rpx;
-}
-
-.info-value.code-val {
-  color: #07C160;
-  font-size: 44rpx;
-  font-weight: bold;
-  letter-spacing: 6rpx;
-}
 
 /* ── 底部操作栏 ───────────────────────────── */
 .bottom-bar {

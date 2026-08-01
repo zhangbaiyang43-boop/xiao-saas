@@ -4,7 +4,7 @@
     <!-- 顶部绿色区 -->
     <view class="page-header">
       <text class="ph-title">我的优惠券</text>
-      <text class="ph-desc">付款前出示可用券，让店员扫码或输入短券码。</text>
+      <text class="ph-desc">去点餐，结算时自动为您用上最划算的一张。</text>
     </view>
 
     <!-- Tabs -->
@@ -19,21 +19,19 @@
 
     <!-- 加载态 -->
     <view v-if="loading" class="state-wrap">
-      <view class="loading-ring"></view>
-      <text class="state-text">正在加载优惠券</text>
+      <state-loading text="正在加载优惠券" />
     </view>
 
     <!-- 错误态 -->
     <view v-else-if="error" class="state-wrap">
-      <text class="state-text">{{ error }}</text>
-      <button class="btn-primary state-btn" @click="loadCoupons">刷新重试</button>
+      <state-error :title="error" retry-text="刷新重试" @retry="loadCoupons" />
     </view>
 
     <!-- 空态 -->
     <view v-else-if="!coupons.length" class="state-wrap">
-      <view class="empty-ticket-icon"><view class="eti-circle"></view></view>
-      <text class="state-text">{{ emptyTitle }}</text>
-      <text class="state-sub">入会、消费或商家发券后，这里会自动显示。</text>
+      <state-empty :title="emptyTitle" desc="入会、消费或商家发券后，这里会自动显示。">
+        <template #icon><view class="empty-ticket-icon"><view class="eti-circle"></view></view></template>
+      </state-empty>
     </view>
 
     <!-- 列表 -->
@@ -41,7 +39,7 @@
       <view
         v-for="coupon in coupons"
         :key="coupon.id"
-        :class="['coupon-card', { inactive: coupon.status !== 'UNUSED' }]"
+        :class="['coupon-card', 'tap-shrink', { inactive: coupon.status !== 'UNUSED' }]"
         @click="goDetail(coupon.id)"
       >
         <view class="cc-left">
@@ -57,8 +55,8 @@
           <button
             v-if="coupon.status === 'UNUSED'"
             class="btn-use"
-            @click.stop="goVerify(coupon.id)"
-          >出示给店员</button>
+            @click.stop="goOrder"
+          >去点餐</button>
           <text v-else class="cc-status">{{ couponStatusText(coupon.status) }}</text>
         </view>
         <text class="cc-arrow">›</text>
@@ -72,8 +70,12 @@
 import { computed, ref } from 'vue'
 import { getCustomerCoupons } from '@/api/coupon'
 import { couponStatusText, formatDate, formatMoney } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
+import StateEmpty from '@/components/state-empty/state-empty.vue'
 
 export default {
+  components: { StateLoading, StateError, StateEmpty },
   setup() {
     const activeTab = ref('UNUSED')
     const coupons = ref([])
@@ -131,7 +133,18 @@ export default {
     }
 
     const goDetail = (id) => uni.navigateTo({ url: `/subpkg-coupon/pages/detail?id=${id}` })
-    const goVerify = (id) => uni.navigateTo({ url: `/subpkg-common/pages/verify-qr?coupon_id=${id}` })
+
+    // 去点餐：优惠券在结算时自动核销，不再需要店员扫码——回到点餐页并定位到"点餐"标签
+    const goOrder = () => {
+      try { uni.setStorageSync('menu_focus_tab', 'order') } catch (_) {}
+      const pages = getCurrentPages()
+      const idx = pages.findIndex(p => (p.route || '').indexOf('subpkg-order/pages/menu') !== -1)
+      if (idx >= 0) {
+        uni.navigateBack({ delta: pages.length - 1 - idx })
+      } else {
+        uni.showToast({ title: '请先扫桌台二维码点餐', icon: 'none' })
+      }
+    }
 
     const isExpiringSoon = (coupon) => {
       if (coupon.status !== 'UNUSED') return false
@@ -151,7 +164,7 @@ export default {
       loadCoupons,
       switchTab,
       goDetail,
-      goVerify,
+      goOrder,
       couponAmount,
       couponCondition,
       couponStatusText,
@@ -234,64 +247,6 @@ export default {
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
 
-.state-icon {
-  font-size: 80rpx;
-  line-height: 1;
-}
-
-.state-text {
-  display: block;
-  margin-top: 24rpx;
-  color: #111;
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-}
-
-.state-sub {
-  display: block;
-  margin-top: 12rpx;
-  color: #999;
-  font-size: 26rpx;
-  text-align: center;
-  line-height: 1.6;
-}
-
-.state-btn {
-  margin-top: 32rpx;
-  width: 100%;
-}
-
-/* ── 通用按钮 ─────────────────────────────── */
-.btn-primary {
-  display: block;
-  height: 88rpx;
-  line-height: 88rpx;
-  background: #07C160;
-  color: #fff;
-  font-size: 32rpx;
-  font-weight: 600;
-  text-align: center;
-  border-radius: 24rpx;
-  border: none;
-  padding: 0;
-  box-sizing: border-box;
-
-  &::after { border: none; }
-}
-
-/* 加载环 */
-.loading-ring {
-  width: 72rpx;
-  height: 72rpx;
-  border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
-
 /* ── 优惠券列表 ───────────────────────────── */
 .coupon-list {
   padding: 24rpx 24rpx 32rpx;
@@ -309,16 +264,29 @@ export default {
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
 }
 
-/* 左侧金额面板 */
+/* 左侧金额面板：红金票券配色，右边缘打一个圆孔，呼应"撕票根"的实体票券质感 */
 .cc-left {
   flex-shrink: 0;
   width: 176rpx;
-  background: #07C160;
+  background: linear-gradient(160deg, #ff5a3c, #ff2f1f 55%, #d81717);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 28rpx 16rpx;
+  position: relative;
+}
+
+.cc-left::after {
+  content: "";
+  position: absolute;
+  right: -10rpx;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 50%;
+  background: #fff;
 }
 
 .coupon-card.inactive .cc-left {
@@ -420,11 +388,6 @@ export default {
   padding-right: 20rpx;
   color: #c8c9cc;
   font-size: 40rpx;
-}
-
-.coupon-card {
-  transition: transform 0.1s;
-  &:active { transform: scale(0.98); opacity: 0.85; }
 }
 
 .empty-ticket-icon {

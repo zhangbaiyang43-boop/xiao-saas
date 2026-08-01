@@ -31,7 +31,7 @@ import { createQueueTicket } from '@/api/queue'
 
 export default {
   setup() {
-    const tenantId = ref('1')
+    const tenantId = ref(uni.getStorageSync('tenant_id') || '')
     const partySize = ref('')
     const phone = ref('')
     const note = ref('')

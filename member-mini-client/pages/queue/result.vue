@@ -1,73 +1,56 @@
 <template>
   <view class="page">
-    <view class="result-card">
-      <text class="label">您的排位号</text>
-      <text class="queue-no">{{ ticket.queue_no || '-' }}</text>
-      <text class="status">{{ statusText(ticket.status) }}</text>
+    <view v-if="loading" class="state-card">
+      <view class="spinner"></view>
+      <text class="state-title">正在加载</text>
     </view>
 
-    <view class="info-grid">
-      <view class="info-card">
-        <text class="info-value">{{ ticket.ahead_count ?? aheadCount }}</text>
-        <text class="info-label">前方等待桌数</text>
+    <view v-else-if="error" class="state-card">
+      <text class="state-title">{{ error }}</text>
+      <button class="primary-btn" @click="load">重新加载</button>
+    </view>
+
+    <template v-else>
+      <view class="result-card">
+        <text class="label">您的排位号</text>
+        <text class="queue-no">{{ ticket.queue_no || '-' }}</text>
+        <text class="status">{{ statusText(ticket.status) }}</text>
       </view>
-      <view class="info-card">
-        <text class="info-value">{{ queueStatus.current_called || '暂无' }}</text>
-        <text class="info-label">当前叫号</text>
+
+      <view class="info-grid">
+        <view class="info-card">
+          <text class="info-value">{{ ticket.ahead_count ?? aheadCount }}</text>
+          <text class="info-label">前方等待桌数</text>
+        </view>
+        <view class="info-card">
+          <text class="info-value">{{ queueStatus.current_called || '暂无' }}</text>
+          <text class="info-label">当前叫号</text>
+        </view>
       </view>
-    </view>
 
-    <view class="notice-card">
-      <text class="notice-title">请留意前台叫号</text>
-      <text class="notice-text">过号请重新联系前台。排位信息刷新后仍会保留。</text>
-    </view>
+      <view class="notice-card">
+        <text class="notice-title">请留意前台叫号</text>
+        <text class="notice-text">过号请重新联系前台。排位信息刷新后仍会保留。</text>
+      </view>
 
-    <button class="primary-btn" @click="goStatus">查看排位状态</button>
+      <button class="primary-btn" @click="goStatus">查看排位状态</button>
+    </template>
   </view>
 </template>
 
 <script>
-import { ref } from 'vue'
-import { getQueueStatus, getQueueTickets } from '@/api/queue'
+import { useQueueTicket } from '@/utils/queue'
 
 export default {
   setup() {
-    const tenantId = ref('1')
-    const ticketId = ref('')
-    const ticket = ref({})
-    const queueStatus = ref({})
-    const aheadCount = ref(0)
+    const { tenantId, ticketId, ticket, queueStatus, aheadCount, loading, error, load } =
+      useQueueTicket({ aheadStatuses: ['waiting', 'called'] })
 
-    const unwrap = (res) => {
-      if (res?.success === false) throw new Error(res.message || '加载失败')
-      return res?.data || res
-    }
     const statusText = (status) => ({ waiting: '等待中', called: '已叫号', seated: '已入座', skipped: '已过号' }[status] || '等待中')
-
-    const load = async () => {
-      try {
-        const local = uni.getStorageSync('queue_ticket')
-        if (local) ticket.value = JSON.parse(local) || {}
-        const [statusRes, listRes] = await Promise.all([
-          getQueueStatus({ tenant_id: tenantId.value }),
-          getQueueTickets({ tenant_id: tenantId.value })
-        ])
-        queueStatus.value = unwrap(statusRes) || {}
-        const list = unwrap(listRes) || []
-        const current = list.find(item => String(item.id) === String(ticketId.value || ticket.value.id))
-        if (current) {
-          ticket.value = current
-          uni.setStorageSync('queue_ticket', JSON.stringify(current))
-        }
-        aheadCount.value = list.filter(item => item.queue_type === ticket.value.queue_type && ['waiting', 'called'].includes(item.status) && Number(item.id) !== Number(ticket.value.id)).length
-      } catch (err) {
-        uni.showToast({ title: err.message || '加载失败', icon: 'none' })
-      }
-    }
 
     const goStatus = () => uni.redirectTo({ url: `/pages/queue/index?id=${ticket.value.id || ''}` })
 
-    return { tenantId, ticketId, ticket, queueStatus, aheadCount, statusText, load, goStatus }
+    return { tenantId, ticketId, ticket, queueStatus, aheadCount, loading, error, statusText, load, goStatus }
   },
   onLoad(options) {
     if (options?.tenant_id) this.tenantId = String(options.tenant_id)
@@ -93,4 +76,13 @@ export default {
 .notice-title { color: #111827; font-size: 32rpx; font-weight: 900; }
 .notice-text { margin-top: 10rpx; color: #64748b; font-size: 26rpx; line-height: 1.5; }
 .primary-btn { width: 100%; height: 96rpx; margin-top: 28rpx; border-radius: 999rpx; background: #ff3d2e; color: #fff; font-size: 34rpx; font-weight: 900; }
+
+.state-card { margin-top: 120rpx; padding: 44rpx 32rpx; text-align: center; background: #fff; border-radius: 24rpx; box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08); }
+.state-title { display: block; color: #111827; font-size: 34rpx; font-weight: 900; }
+.spinner {
+  width: 64rpx; height: 64rpx; margin: 0 auto 24rpx;
+  border: 6rpx solid #fde2df; border-top-color: #ff3d2e; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

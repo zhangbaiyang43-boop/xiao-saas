@@ -1,13 +1,11 @@
 <template>
   <view class="page">
     <view v-if="loading" class="state-card">
-      <view class="spinner"></view>
-      <text class="state-title">正在加载会员卡</text>
+      <state-loading text="正在加载会员卡" />
     </view>
 
     <view v-else-if="error" class="state-card">
-      <text class="state-title">{{ error }}</text>
-      <button class="primary-btn" @click="loadProfile">刷新重试</button>
+      <state-error :title="error" retry-text="刷新重试" @retry="loadProfile" />
     </view>
 
     <view v-else>
@@ -24,11 +22,11 @@
       </view>
 
       <view class="menu-card">
-        <view class="menu-row" @click="go('/subpkg-coupon/pages/list')">
+        <view class="menu-row tap-shrink" @click="go('/subpkg-coupon/pages/list')">
           <text>查看我的优惠券</text>
           <text class="arrow">></text>
         </view>
-        <view class="menu-row" @click="go('/subpkg-common/pages/verify-qr')">
+        <view class="menu-row tap-shrink" @click="go('/subpkg-common/pages/verify-qr')">
           <text>出示给店员</text>
           <text class="arrow">></text>
         </view>
@@ -41,8 +39,11 @@
 import { ref } from 'vue'
 import { getMemberProfile } from '@/api/auth'
 import { formatPhone } from '@/utils'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
 
 export default {
+  components: { StateLoading, StateError },
   setup() {
     const loading = ref(false)
     const error = ref('')
@@ -99,21 +100,6 @@ export default {
   text-align: center;
 }
 
-.spinner {
-  width: 56rpx;
-  height: 56rpx;
-  margin: 0 auto 22rpx;
-  border: 6rpx solid #d1fae5;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.state-title,
 .label,
 .name,
 .phone,
@@ -121,12 +107,6 @@ export default {
 .tip-title,
 .tip-text {
   display: block;
-}
-
-.state-title {
-  color: #111827;
-  font-size: 32rpx;
-  font-weight: 800;
 }
 
 .member-card {
@@ -194,17 +174,6 @@ export default {
 
 .arrow {
   color: #94a3b8;
-}
-
-.primary-btn {
-  width: 100%;
-  height: 92rpx;
-  margin-top: 28rpx;
-  border-radius: 24rpx;
-  background: #07C160;
-  color: #fff;
-  font-size: 30rpx;
-  font-weight: 800;
 }
 </style>
 

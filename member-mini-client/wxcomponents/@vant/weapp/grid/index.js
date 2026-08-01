@@ -1,7 +1,9 @@
-import { VantComponent } from '../common/component';
-import { useChildren } from '../common/relation';
-VantComponent({
-    relation: useChildren('grid-item'),
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+var component_1 = require("../common/component");
+var relation_1 = require("../common/relation");
+(0, component_1.VantComponent)({
+    relation: (0, relation_1.useChildren)('grid-item'),
     props: {
         square: {
             type: Boolean,
@@ -46,8 +48,8 @@ VantComponent({
         },
     },
     methods: {
-        updateChildren() {
-            this.children.forEach((child) => {
+        updateChildren: function () {
+            this.children.forEach(function (child) {
                 child.updateStyle();
             });
         },

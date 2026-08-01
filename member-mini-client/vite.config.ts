@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
 import uni from '@dcloudio/vite-plugin-uni'
-import { cpSync, mkdirSync } from 'fs'
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 function copyVantPlugin() {
@@ -8,7 +8,7 @@ function copyVantPlugin() {
     name: 'copy-vant-weapp',
     closeBundle() {
       const root = process.cwd()
-      const src = join(root, 'node_modules/@vant/weapp/dist')
+      const src = join(root, 'node_modules/@vant/weapp/lib')
       const dst = join(root, 'dist/build/mp-weixin/miniprogram_npm/@vant/weapp')
       const components = [
         'button', 'cell', 'cell-group', 'grid', 'grid-item',
@@ -21,11 +21,22 @@ function copyVantPlugin() {
           cpSync(join(src, c), join(dst, c), { recursive: true, force: true })
         } catch (e) {}
       }
-      console.log('✓ @vant/weapp copied to dist')
+
+      const projectConfigPath = join(root, 'dist/build/mp-weixin/project.config.json')
+      try {
+        const projectConfig = JSON.parse(readFileSync(projectConfigPath, 'utf-8'))
+        projectConfig.setting = { ...(projectConfig.setting || {}), es6: false, newFeature: false }
+        writeFileSync(projectConfigPath, `${JSON.stringify(projectConfig, null, 2)}\n`)
+      } catch (e) {}
+
+      console.log('@vant/weapp copied to dist')
     },
   }
 }
 
 export default defineConfig({
+  build: {
+    target: 'es2015',
+  },
   plugins: [uni(), copyVantPlugin()],
 })

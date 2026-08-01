@@ -4,7 +4,7 @@
       <view class="entry-mark">开</view>
       <text class="entry-title">正在进入开心点单</text>
       <text class="entry-desc">{{ desc }}</text>
-      <button class="entry-primary" @click="goOrder">继续点餐</button>
+      <button class="entry-primary" @click="goOrder">{{ hasContext ? '继续点餐' : '扫码点餐' }}</button>
       <button class="entry-secondary" @click="goMine">我的</button>
     </view>
   </view>
@@ -13,6 +13,7 @@
 <script>
 import { ref } from 'vue'
 import '@/utils/route'
+import { scanStoreCode } from '@/utils/scan'
 
 const TABLE_TTL = 4 * 60 * 60 * 1000
 
@@ -49,16 +50,17 @@ export default {
   setup() {
     const desc = ref('正在根据当前门店打开页面')
     const redirecting = ref(false)
-
-    const resolveTarget = () => {
-      const menuUrl = buildMenuUrl()
-      return menuUrl || '/pages/mine/mine'
-    }
+    const hasContext = ref(false)
 
     const redirect = () => {
       if (redirecting.value) return
+      const url = buildMenuUrl()
+      hasContext.value = Boolean(url)
+      if (!url) {
+        desc.value = '请扫描桌上的点餐码进入门店'
+        return
+      }
       redirecting.value = true
-      const url = resolveTarget()
       setTimeout(() => {
         uni.reLaunch({
           url,
@@ -71,7 +73,12 @@ export default {
 
     const goOrder = () => {
       const menuUrl = buildMenuUrl()
-      uni.reLaunch({ url: menuUrl || '/pages/mine/mine' })
+      hasContext.value = Boolean(menuUrl)
+      if (!menuUrl) {
+        scanStoreCode()
+        return
+      }
+      uni.reLaunch({ url: menuUrl })
     }
 
     const goMine = () => {
@@ -80,6 +87,7 @@ export default {
 
     return {
       desc,
+      hasContext,
       redirect,
       goOrder,
       goMine

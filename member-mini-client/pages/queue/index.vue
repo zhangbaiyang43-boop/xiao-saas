@@ -1,6 +1,16 @@
 <template>
   <view class="page">
-    <view v-if="!ticket.id" class="empty-card">
+    <view v-if="loading && !ticket.id" class="state-card">
+      <view class="spinner"></view>
+      <text class="state-title">正在加载</text>
+    </view>
+
+    <view v-else-if="error && !ticket.id" class="state-card">
+      <text class="state-title">{{ error }}</text>
+      <button class="primary-btn" @click="load">重新加载</button>
+    </view>
+
+    <view v-else-if="!ticket.id" class="empty-card">
       <text class="empty-title">还没有排位号</text>
       <text class="empty-desc">请先到前台或扫码取号。</text>
       <button class="primary-btn" @click="goTake">去取号</button>
@@ -39,21 +49,13 @@
 </template>
 
 <script>
-import { computed, ref } from 'vue'
-import { getQueueStatus, getQueueTickets } from '@/api/queue'
+import { computed } from 'vue'
+import { useQueueTicket } from '@/utils/queue'
 
 export default {
   setup() {
-    const tenantId = ref('1')
-    const ticketId = ref('')
-    const ticket = ref({})
-    const queueStatus = ref({})
-    const aheadCount = ref(0)
-
-    const unwrap = (res) => {
-      if (res?.success === false) throw new Error(res.message || '加载失败')
-      return res?.data || res
-    }
+    const { tenantId, ticketId, ticket, queueStatus, aheadCount, loading, error, load } =
+      useQueueTicket({ aheadStatuses: ['waiting'] })
 
     const estimateMinutes = computed(() => `${aheadCount.value * 5}-${Math.max(aheadCount.value * 8, 5)}`)
     const stateTip = computed(() => {
@@ -63,29 +65,9 @@ export default {
       return '等待中'
     })
 
-    const load = async () => {
-      try {
-        const local = uni.getStorageSync('queue_ticket')
-        if (local) ticket.value = JSON.parse(local) || {}
-        const [statusRes, listRes] = await Promise.all([
-          getQueueStatus({ tenant_id: tenantId.value }),
-          getQueueTickets({ tenant_id: tenantId.value })
-        ])
-        queueStatus.value = unwrap(statusRes) || {}
-        const list = unwrap(listRes) || []
-        const current = list.find(item => String(item.id) === String(ticketId.value || ticket.value.id))
-        if (current) {
-          ticket.value = current
-          uni.setStorageSync('queue_ticket', JSON.stringify(current))
-        }
-        aheadCount.value = list.filter(item => item.queue_type === ticket.value.queue_type && item.status === 'waiting' && Number(item.id) !== Number(ticket.value.id)).length
-      } catch (err) {
-        uni.showToast({ title: err.message || '加载失败', icon: 'none' })
-      }
-    }
     const goTake = () => uni.navigateTo({ url: `/pages/queue/take?tenant_id=${tenantId.value}` })
 
-    return { tenantId, ticketId, ticket, queueStatus, aheadCount, estimateMinutes, stateTip, load, goTake }
+    return { tenantId, ticketId, ticket, queueStatus, aheadCount, loading, error, estimateMinutes, stateTip, load, goTake }
   },
   onLoad(options) {
     if (options?.tenant_id) this.tenantId = String(options.tenant_id)
@@ -100,7 +82,7 @@ export default {
 
 <style lang="scss">
 .page { min-height: 100vh; padding: 34rpx 28rpx; background: #f5f6fa; }
-.top-card, .status-list, .notice-card, .empty-card { background: #fff; border-radius: 24rpx; box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08); }
+.top-card, .status-list, .notice-card, .empty-card, .state-card { background: #fff; border-radius: 24rpx; box-shadow: 0 10rpx 26rpx rgba(15, 23, 42, 0.08); }
 .top-card { padding: 44rpx 28rpx; text-align: center; }
 .small-label, .queue-no, .state-text, .notice-title, .notice-text, .empty-title, .empty-desc { display: block; }
 .small-label { color: #64748b; font-size: 28rpx; }
@@ -118,4 +100,13 @@ export default {
 .empty-card { margin-top: 120rpx; padding: 44rpx 32rpx; text-align: center; }
 .empty-title { color: #111827; font-size: 38rpx; font-weight: 900; }
 .empty-desc { margin-top: 14rpx; color: #64748b; font-size: 28rpx; }
+
+.state-card { margin-top: 120rpx; padding: 44rpx 32rpx; text-align: center; }
+.state-title { display: block; color: #111827; font-size: 34rpx; font-weight: 900; }
+.spinner {
+  width: 64rpx; height: 64rpx; margin: 0 auto 24rpx;
+  border: 6rpx solid #fde2df; border-top-color: #ff3d2e; border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

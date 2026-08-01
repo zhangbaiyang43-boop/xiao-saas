@@ -1,19 +1,29 @@
 <template>
   <view class="page">
 
-    <!-- 加载态 -->
-    <view v-if="loading" class="state-wrap">
-      <view class="loading-ring"></view>
-      <text class="state-text">正在加载邀请数据</text>
+    <!-- 首次加载态：还没有任何数据时才整页占用 -->
+    <view v-if="initialLoading" class="state-wrap">
+      <state-loading text="正在加载邀请数据" />
+    </view>
+
+    <!-- 商户没开邀请奖励：可能是通过旧分享链接进来的，给个安静的提示，不展示一套
+         看起来在正常运作、其实点了也没用的邀请流程。 -->
+    <view v-else-if="rewardDisabled" class="state-wrap">
+      <state-empty icon="🔔" title="该店暂未开启邀请奖励" desc="活动可能已下线，稍后再来看看。" />
     </view>
 
     <view v-else class="content">
 
-      <!-- 顶部英雄卡 -->
+      <!-- 顶部英雄卡：先出，跟好友列表的加载互不影响 -->
       <view class="hero-card">
         <text class="hc-title">邀请朋友到店，双方得奖励</text>
         <text class="hc-desc">{{ summary.inviter_reward_text || '邀请朋友到店用券，朋友首次到店后，你们都能获得奖励。' }}</text>
-        <view class="stats-row">
+
+        <view v-if="summaryError" class="summary-error">
+          <text class="summary-error-text">{{ summaryError }}</text>
+          <text class="summary-retry-btn tap-shrink" @click="loadSummary">点击重试</text>
+        </view>
+        <view v-else class="stats-row">
           <view class="stat-item">
             <text class="stat-num">{{ summary.invited_count || 0 }}</text>
             <text class="stat-label">已邀请</text>
@@ -36,47 +46,57 @@
         </view>
       </view>
 
-      <!-- 邀请方式卡 -->
+      <!-- 邀请方式卡：分享按钮是真正的转化入口——99% 的人会直接点它转发出去，
+           邀请码本身没人会去手动念/输入，所以把视觉重点让给按钮，邀请码收成
+           底部一条不起眼的备用说明。 -->
       <view class="card invite-card">
         <text class="card-title">邀请好友入会</text>
-        <view class="code-box">
-          <text class="code-label">我的邀请码</text>
-          <text class="code-val">{{ summary.invite_code || '-' }}</text>
-        </view>
         <button class="btn-primary" open-type="share">邀请好友入会</button>
         <text class="card-tip">{{ summary.invitee_reward_text || '好友通过你的链接入会，首次到店核销后，双方均可获得奖励。' }}</text>
+        <view class="code-box-mini">
+          <text class="code-mini-label">链接打不开时，可以让朋友手动输入邀请码</text>
+          <text class="code-mini-val">{{ summary.invite_code || '-' }}</text>
+        </view>
       </view>
 
-      <!-- 好友记录卡 -->
+      <!-- 好友记录卡：独立的加载/错误态，不受英雄卡影响 -->
       <view class="card">
         <view class="card-header">
           <text class="card-title">好友记录</text>
-          <text class="refresh-btn" @click="loadData">刷新</text>
+          <text class="refresh-btn" @click="loadRecords">刷新</text>
         </view>
 
-        <view v-if="records.length === 0" class="empty-wrap">
-          <text class="empty-icon">🎁</text>
-          <text class="empty-text">暂无好友记录</text>
-          <text class="empty-sub">好友通过你的邀请入会后会显示在这里。</text>
+        <view v-if="recordsLoading" class="records-loading">
+          <state-loading text="正在加载好友记录" size="small" />
         </view>
 
-        <view v-for="item in records" :key="item.invitee_id" class="record-item">
-          <view class="ri-left">
-            <text class="ri-name">{{ item.invitee_name }}</text>
-            <view class="ri-meta-row">
-              <text class="ri-meta">加入：{{ item.joined_at || '-' }}</text>
-              <text v-if="item.has_visited" class="ri-meta visited-text">到店：{{ item.visited_at || '-' }}</text>
-            </view>
-          </view>
-          <view class="ri-right">
-            <view :class="['status-badge', item.has_visited ? 'badge-visited' : 'badge-pending']">
-              {{ item.has_visited ? '已到店' : '未到店' }}
-            </view>
-            <text :class="['ri-reward', item.reward_status === '奖励已发放' ? 'reward-done' : item.has_visited ? 'reward-pending' : 'reward-wait']">
-              {{ item.reward_status }}
-            </text>
-          </view>
+        <view v-else-if="recordsError" class="records-error">
+          <state-error :title="recordsError" retry-text="重试" @retry="loadRecords" />
         </view>
+
+        <view v-else-if="records.length === 0" class="empty-wrap">
+          <state-empty icon="🎁" title="暂无好友记录" desc="好友通过你的邀请入会后会显示在这里。" />
+        </view>
+
+        <template v-else>
+          <view v-for="item in records" :key="item.invitee_id" class="record-item">
+            <view class="ri-left">
+              <text class="ri-name">{{ item.invitee_name }}</text>
+              <view class="ri-meta-row">
+                <text class="ri-meta">加入：{{ item.joined_at || '-' }}</text>
+                <text v-if="item.has_visited" class="ri-meta visited-text">到店：{{ item.visited_at || '-' }}</text>
+              </view>
+            </view>
+            <view class="ri-right">
+              <view :class="['status-badge', item.has_visited ? 'badge-visited' : 'badge-pending']">
+                {{ item.has_visited ? '已到店' : '未到店' }}
+              </view>
+              <text :class="['ri-reward', item.reward_status === '奖励已发放' ? 'reward-done' : item.has_visited ? 'reward-pending' : 'reward-wait']">
+                {{ item.reward_status }}
+              </text>
+            </view>
+          </view>
+        </template>
 
       </view>
 
@@ -85,32 +105,59 @@
 </template>
 
 <script>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { getInviteRecords, getInviteSummary } from '@/api/invite'
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
+import StateEmpty from '@/components/state-empty/state-empty.vue'
 
 export default {
+  components: { StateLoading, StateError, StateEmpty },
   setup() {
-    const loading = ref(false)
+    const initialLoading = ref(true)
     const summary = ref({})
+    const summaryError = ref('')
     const records = ref([])
+    const recordsLoading = ref(false)
+    const recordsError = ref('')
+    // 严格等于 false 才算"确认关闭"——summary 还没加载成功时是 undefined，
+    // 不能把请求失败也误判成"该店没开这功能"，那种情况仍走原来的 summaryError 提示。
+    const rewardDisabled = computed(() => summary.value?.invite_reward_enabled === false)
 
-    const loadData = async () => {
-      loading.value = true
+    const loadSummary = async () => {
+      summaryError.value = ''
       try {
-        const [summaryRes, recordsRes] = await Promise.all([
-          getInviteSummary(),
-          getInviteRecords()
-        ])
-        if (summaryRes.code === 200) summary.value = summaryRes.data || {}
-        if (recordsRes.code === 200) records.value = Array.isArray(recordsRes.data) ? recordsRes.data : []
-      } catch (error) {
-        uni.showToast({ title: '邀请数据加载失败', icon: 'none' })
-      } finally {
-        loading.value = false
+        const res = await getInviteSummary()
+        if (res.code === 200) summary.value = res.data || {}
+        else summaryError.value = res.msg || '加载失败'
+      } catch (err) {
+        summaryError.value = '网络异常'
       }
     }
 
-    return { loading, summary, records, loadData }
+    const loadRecords = async () => {
+      recordsLoading.value = true
+      recordsError.value = ''
+      try {
+        const res = await getInviteRecords()
+        if (res.code === 200) records.value = Array.isArray(res.data) ? res.data : []
+        else recordsError.value = res.msg || '加载失败'
+      } catch (err) {
+        recordsError.value = '网络异常'
+      } finally {
+        recordsLoading.value = false
+      }
+    }
+
+    const loadData = async () => {
+      await Promise.all([loadSummary(), loadRecords()])
+      initialLoading.value = false
+    }
+
+    return {
+      initialLoading, summary, summaryError, records, recordsLoading, recordsError,
+      loadData, loadSummary, loadRecords, rewardDisabled
+    }
   },
   onShow() {
     this.loadData()
@@ -118,9 +165,16 @@ export default {
   onShareAppMessage() {
     const tenantId = this.summary.tenant_id || uni.getStorageSync('tenant_id') || ''
     const inviteCode = this.summary.invite_code || ''
+    const storeName = uni.getStorageSync('tenant_name') || ''
+    // 分享卡片才是真正的转化入口——对方不会先打开小程序看邀请页本身，只看聊天窗口里
+    // 这张卡片。之前没指定 imageUrl，微信会拿当前页面自动截图当封面，截出来的是
+    // "0 已邀请 0 已到店" 这种看起来像"没人用"的画面。这里换成专门做的静态封面图
+    // （不含具体券面额——各商户客单价不同，面额是动态算的，写死数字会跟实际发的券
+    // 对不上），标题带上店名，让对方一眼知道是"这家店在邀请我"而不是系统群发消息。
     return {
-      title: '我送你一张优惠券，到店可用',
-      path: `/pages/entry/index?tenant_id=${encodeURIComponent(tenantId)}&invite_code=${encodeURIComponent(inviteCode)}`
+      title: storeName ? `${storeName}请你来吃饭，到店立减` : '我送你一张优惠券，到店可用',
+      path: `/pages/entry/index?tenant_id=${encodeURIComponent(tenantId)}&invite_code=${encodeURIComponent(inviteCode)}`,
+      imageUrl: '/static/share/invite-card.png',
     }
   }
 }
@@ -142,25 +196,6 @@ export default {
   flex-direction: column;
   align-items: center;
 }
-
-.state-text {
-  display: block;
-  margin-top: 24rpx;
-  color: #111;
-  font-size: 32rpx;
-  font-weight: 600;
-}
-
-.loading-ring {
-  width: 72rpx;
-  height: 72rpx;
-  border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── 内容区 ──────────────────────────────── */
 .content {
@@ -224,6 +259,29 @@ export default {
   background: rgba(255, 255, 255, 0.3);
 }
 
+.summary-error {
+  margin-top: 32rpx;
+  padding: 24rpx 0;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 24rpx;
+  text-align: center;
+}
+
+.summary-error-text {
+  display: block;
+  color: #fff;
+  font-size: 26rpx;
+}
+
+.summary-retry-btn {
+  display: inline-block;
+  margin-top: 12rpx;
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 /* ── 通用卡片 ─────────────────────────────── */
 .card {
   margin: 24rpx 24rpx 0;
@@ -257,27 +315,28 @@ export default {
   margin-bottom: 24rpx;
 }
 
-.code-box {
-  margin-bottom: 28rpx;
-  padding: 28rpx;
+.code-box-mini {
+  margin-top: 20rpx;
+  padding: 16rpx 20rpx;
   background: #F7F8FA;
-  border-radius: 20rpx;
-  text-align: center;
+  border-radius: 12rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-.code-label {
-  display: block;
+.code-mini-label {
+  color: #B0B3BA;
+  font-size: 20rpx;
+  flex: 1;
+  margin-right: 12rpx;
+}
+
+.code-mini-val {
   color: #999;
-  font-size: 24rpx;
-}
-
-.code-val {
-  display: block;
-  margin-top: 12rpx;
-  color: #111;
-  font-size: 52rpx;
-  font-weight: bold;
-  letter-spacing: 8rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
 }
 
 /* ── 通用按钮 ─────────────────────────────── */
@@ -307,32 +366,27 @@ export default {
   line-height: 1.6;
 }
 
-/* ── 空态 ────────────────────────────────── */
-.empty-wrap {
+/* ── 好友记录加载 / 错误态 ─────────────────── */
+.records-loading {
   padding: 48rpx 0 16rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
-.empty-icon {
-  font-size: 72rpx;
-  line-height: 1;
+.records-error {
+  padding: 40rpx 0 16rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.empty-text {
-  display: block;
-  margin-top: 16rpx;
-  color: #333;
-  font-size: 30rpx;
-  font-weight: 600;
-}
-
-.empty-sub {
-  display: block;
-  margin-top: 8rpx;
-  color: #999;
-  font-size: 26rpx;
+/* ── 空态 ────────────────────────────────── */
+.empty-wrap {
+  padding: 48rpx 0 16rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 /* ── 好友记录 ─────────────────────────────── */

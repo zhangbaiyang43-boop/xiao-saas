@@ -1,0 +1,56 @@
+@import '@/static/iconfont/iconfont.css';
+
+// ─── Design tokens ────────────────────────────────────────────
+// 跟商家后台（admin-h5/src/styles/global.scss）用同一套命名和数值，
+// 两端是同一个品牌，不应该各存一份"差不多但不完全一样"的灰/绿。
+// 新增令牌前先看商家后台那份有没有同名的，没有必要不要另起名字。
+page {
+  --brand:           #07C160;
+  --brand-dark:      #059952;
+  --brand-light:     #e8f9f0;
+  --brand-gradient:  linear-gradient(135deg, #07C160 0%, #10A85A 100%);
+  --text-1:          #111827;
+  --text-2:          #4b5563;
+  --text-3:          #6b7280;   /* 跟商家后台同一次 WCAG AA 对比度修复保持一致，不要退回旧的浅灰 */
+  --bg-page:         #f5f6fa;
+  --bg-card:         #ffffff;
+  --border:          #f0f0f0;
+  --radius-card:     24rpx;     /* 750rpx 设计稿下约等于商家后台的 12px */
+  --radius-hero:     36rpx;
+  --success:         #059952;
+  --danger:          #ef4444;
+  --warning:         #f59e0b;
+  --card-shadow:     0 4rpx 16rpx rgba(17, 24, 39, 0.06);
+  --bounce-ease:     cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  background-color: var(--bg-page);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+// ─── 动效基础设施 ─────────────────────────────────────────────
+// 跟商家后台的 .tap-shrink 是同一个概念、同一个类名，手感要一致；
+// 回弹曲线（--bounce-ease，定义见上面 page{} 里）是点餐页 P0 修复时定下来的，
+// 其它页面做加购/切换类动效直接用 var(--bounce-ease)，不要各自再调一条新曲线。
+.tap-shrink {
+  transition: transform 0.15s ease, opacity 0.15s ease;
+  &:active {
+    transform: scale(0.96);
+    opacity: 0.85;
+  }
+}
+
+@keyframes bounceIn {
+  0% { transform: scale(1); }
+  40% { transform: scale(.9); }
+  75% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+// 卡片默认样式：新页面的卡片直接套这个类，不要每个页面自己重新写一遍
+// border-radius/box-shadow/background 的组合。
+.card-base {
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--card-shadow);
+  box-sizing: border-box;
+}
