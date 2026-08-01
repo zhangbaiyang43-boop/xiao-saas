@@ -201,9 +201,14 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
             return error_response(code=400, msg="微信登录失败，请重试")
 
         phone = (data.phone or "").strip()
+        # phone_verified 标记这个手机号是否经过微信 getPhoneNumber 验证——只有验证过的
+        # 手机号才能用来把当前微信身份自动绑定/顶替到一个已存在的会员账号上，否则任何
+        # 人只要知道受害者手机号，用自己的微信身份就能把对方账号接管了（P0）。
+        phone_verified = False
         if not phone and data.phone_code:
             try:
                 phone = await wechat_service.get_phone_number(data.phone_code)
+                phone_verified = bool(phone)
             except Exception as phone_error:
                 logger.warning(f"手机号获取失败 - error: {phone_error}")
                 return error_response(code=400, msg="手机号获取失败，请重试或手动输入手机号")
@@ -260,7 +265,31 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
 
         # Phone is the member account key in the MVP. The WeChat openid is only the login
         # credential and can be rebound when the same device switches to another phone.
+        #
+        # 但这个"顶号"能力必须只对手机号本人开放：如果当前微信身份（openid）本来就不是
+        # 这个账号的绑定身份，又是靠一个没经过微信验证的手填手机号才匹配上的，那就没有
+        # 任何证据证明操作者真的拥有这个手机号——必须拒绝，引导用户走"微信授权手机号"
+        # 验证流程，而不是直接把账号让出去。
         if phone_customer:
+            already_owns = bool(identity_customer_id) and identity_customer_id == phone_customer.id
+            if not phone_verified and not already_owns:
+                logger.warning(
+                    f"未验证手机号匹配到已有会员，拒绝自动绑定 - "
+                    f"phone_customer_id: {phone_customer.id}, openid: {openid}, phone: {data.phone}"
+                )
+                await operation_log_service.record(
+                    customer_id=phone_customer.id,
+                    action="miniapp_join_unverified_phone_rebind_blocked",
+                    source="miniapp",
+                    actor_type="customer",
+                    phone=data.phone,
+                    openid=openid,
+                    detail={
+                        "message": "手填手机号匹配到已有会员但未经微信验证，已拒绝绑定",
+                        "scene": data.scene,
+                    },
+                )
+                return error_response(code=409, msg="该手机号已绑定其他会员，请使用微信授权手机号完成登录")
             customer = phone_customer
             if customer.status != 1:
                 await operation_log_service.record(

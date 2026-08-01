@@ -150,27 +150,18 @@ class CustomerService(BaseService):
                 await self.db.refresh(customer)
                 return customer
             except IntegrityError as e:
-                # 唯一索引冲突：可能是 openid/phone 已存在的老用户，也可能是 store_member_no 并发撞号
+                # 唯一索引冲突：只有 (tenant_id, openid) 和 (tenant_id, store_member_no) 两个
+                # 唯一索引，phone 没有唯一约束，永远不可能是 IntegrityError 的真实成因。之前这里
+                # 有一段"按 phone 查已存在客户直接返回"的兜底逻辑——但既然 phone 冲突不可能触发
+                # IntegrityError，那段代码只会在无关的 store_member_no 并发撞号时被误触发：调用方
+                # 传入的 phone 只要凑巧匹配上另一个人的账号，就会把这次调用当成"找到老用户"直接
+                # 返回那个不相关的账号，调用方随后会把当前这个（可能是攻击者的）openid 身份绑定
+                # 上去——是账号顶号漏洞，不能留（P0）。真正的 openid 冲突恢复逻辑不受影响，见下方。
                 await self.db.rollback()
                 last_error = e
 
-                # 根据 openid 或 phone 查询已存在的客户
                 openid = kwargs.get('openid')
                 phone = kwargs.get('phone')
-
-                if phone:
-                    result = await self.db.execute(
-                        select(Customer).filter(
-                            Customer.tenant_id == tenant_id,
-                            Customer.phone == phone,
-                            Customer.status != -1
-                        )
-                    )
-                    existing = result.scalars().first()
-                    if existing:
-                        if existing.status == -1:
-                            return await self.restore_customer(existing, **kwargs)
-                        return existing
 
                 if openid:
                     result = await self.db.execute(
