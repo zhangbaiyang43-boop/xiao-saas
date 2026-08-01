@@ -109,5 +109,15 @@ class Settings(BaseSettings):
     def model_post_init(self, __context) -> None:
         if not self.WECHAT_APP_ and self.WECHAT_APP_ID:
             self.WECHAT_APP_ = self.WECHAT_APP_ID
+        # JWT_SECRET_KEY signs merchant/customer/super-admin tokens alike; the
+        # tutorial placeholder (with or without a "-change-in-production" suffix
+        # someone forgot to actually change) must never reach a running app,
+        # in any environment.
+        lowered_secret = self.JWT_SECRET_KEY.lower()
+        if "your-secret-key-here" in lowered_secret or "changeme" in lowered_secret:
+            raise RuntimeError(
+                "JWT_SECRET_KEY is still the default placeholder. Generate a real "
+                "secret (e.g. `openssl rand -hex 32`) and set it in .env."
+            )
 
 settings = Settings()

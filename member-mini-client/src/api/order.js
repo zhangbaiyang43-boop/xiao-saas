@@ -17,14 +17,14 @@ export const cancelOrder = (orderId, participantToken) => {
   return request({ url: `/v1/orders/${orderId}/cancel${query}`, method: 'POST' })
 }
 
-export const mockPayOrder = (orderId, useBalance = false) =>
-  request({ url: `/v1/orders/${orderId}/mock-pay`, method: 'POST', data: { use_balance: useBalance } })
+export const mockPayOrder = (orderId, useBalance = false, participantToken) =>
+  request({ url: `/v1/orders/${orderId}/mock-pay`, method: 'POST', data: { use_balance: useBalance, participant_token: participantToken || undefined } })
 
 export const createWxPayOrder = (orderId, useBalance = false, options = {}) =>
   request({
     url: `/v1/orders/${orderId}/pay`,
     method: 'POST',
-    data: { use_balance: useBalance, js_code: options.js_code || undefined },
+    data: { use_balance: useBalance, js_code: options.js_code || undefined, participant_token: options.participant_token || undefined },
     authRedirect: options.authRedirect
   })
 

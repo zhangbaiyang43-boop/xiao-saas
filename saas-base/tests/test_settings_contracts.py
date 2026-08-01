@@ -9,6 +9,7 @@ class SettingsContractsTest(unittest.TestCase):
     def test_settings_accept_lowercase_wework_env_and_ignore_extra_keys(self):
         content = "\n".join(
             [
+                "jwt_secret_key=test-only-secret-not-a-real-deployment-value-0123456789",
                 "wework_corp_id=ww-test",
                 "wework_agent_id=1000004",
                 "wework_secret=secret-test",

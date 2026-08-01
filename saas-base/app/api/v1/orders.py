@@ -116,7 +116,7 @@ class OrderCreate(PydanticBase):
 
 
 class MockPayBody(PydanticBase):
-    pass
+    participant_token: Optional[str] = None
 
 
 def _split_merchant_note_and_print_meta(raw_note: str | None) -> tuple[str | None, dict]:
@@ -1215,7 +1215,27 @@ async def mock_pay_order(
             return error_response(code=404, msg="order not found")
         if order.status != "pending_payment":
             return error_response(code=400, msg="该订单已支付或已取消")
-        if order.customer_id and (not customer_id or int(customer_id) != int(order.customer_id)):
+        # 归属校验：已登录订单核对 customer_id；匿名拼桌订单没有 customer_id，
+        # 必须靠 participant_token 核对身份，否则任何人拿到 order_id 就能替别人下单/免单。
+        if order.customer_id:
+            if not customer_id or int(customer_id) != int(order.customer_id):
+                return error_response(code=403, msg="forbidden")
+        elif order.participant_id:
+            from app.models.dining import DiningParticipant
+            from app.services.dining_session_service import hash_participant_token
+
+            owns_order = False
+            if body.participant_token:
+                participant_result = await db.execute(
+                    select(DiningParticipant).where(
+                        DiningParticipant.id == order.participant_id,
+                        DiningParticipant.guest_token_hash == hash_participant_token(body.participant_token),
+                    )
+                )
+                owns_order = participant_result.scalar_one_or_none() is not None
+            if not owns_order:
+                return error_response(code=403, msg="forbidden")
+        else:
             return error_response(code=403, msg="forbidden")
 
         coupon_data, _ = await _on_payment_success(order, db, payment_method="mock")
@@ -1236,6 +1256,7 @@ async def mock_pay_order(
 
 class WxPayBody(PydanticBase):
     js_code: Optional[str] = None
+    participant_token: Optional[str] = None
 
 
 @router.post("/orders/{order_id}/pay")
@@ -1263,7 +1284,30 @@ async def create_wxpay_order(
             raise HTTPException(status_code=400, detail={"success": False, "code": "PAYMENT_NOT_REQUIRED", "message": "该订单无需在线支付"})
         if order.status != "pending_payment":
             raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
-        if customer_id and order.customer_id and int(customer_id) != int(order.customer_id):
+        # 归属校验：已登录订单核对 customer_id；匿名拼桌订单没有 customer_id，
+        # 必须靠 participant_token 核对身份，否则任何人拿到 order_id 就能替别人发起支付/免单。
+        if order.customer_id:
+            if not customer_id or int(customer_id) != int(order.customer_id):
+                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+        elif order.participant_id:
+            from app.models.dining import DiningParticipant
+            from app.services.dining_session_service import hash_participant_token
+
+            owns_order = False
+            if body.participant_token:
+                participant_result = await db.execute(
+                    select(DiningParticipant).where(
+                        DiningParticipant.id == order.participant_id,
+                        DiningParticipant.guest_token_hash == hash_participant_token(body.participant_token),
+                    )
+                )
+                owns_order = participant_result.scalar_one_or_none() is not None
+            if not owns_order:
+                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+        else:
+            # 预付订单必须落到"已登录会员"或"本桌 dining participant"两种身份之一才能建
+            # 出来；如果两者都没有（比如绕开正常入口直接拿着 order_id 调接口），没有任何
+            # 凭证可核对，一律拒绝，不能让在线支付/免单在零身份的情况下被任何人触发。
             raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
 
         # Load merchant payment config

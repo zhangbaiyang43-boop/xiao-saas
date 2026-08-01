@@ -30,13 +30,14 @@ const QueueDisplay = () => import('../views/QueueDisplay.vue')
 const QueueStatus = () => import('../views/QueueStatus.vue')
 const More = () => import('../views/More.vue')
 const SuperAdmin = () => import('../views/SuperAdmin.vue')
-const H5Order = () => import('../views/H5Order.vue')
+// H5Order.vue（/h5/:shopId）已下线：这是早期独立于 dining_session/participant_token
+// 体系之外的匿名点餐入口，下的单没有任何身份凭证可供后续接口校验归属。正式点餐
+// 走小程序（member-mini-client）的桌台扫码流程，不要重新挂载这个路由。
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
-  { path: '/h5/:shopId', name: 'H5Order', component: H5Order },
   { path: '/queue/display', name: 'QueueDisplay', component: QueueDisplay },
   { path: '/queue/status', name: 'QueueStatus', component: QueueStatus },
   {

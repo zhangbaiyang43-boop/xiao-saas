@@ -3089,7 +3089,7 @@ export default {
         if (!uni.getStorageSync('customer_token')) {
           jsCode = await wxLogin()
         }
-        const res = await createWxPayOrder(pendingOrderId.value, false, { authRedirect: false, js_code: jsCode })
+        const res = await createWxPayOrder(pendingOrderId.value, false, { authRedirect: false, js_code: jsCode, participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') })
         const data = res?.data || {}
 
         if (data.free) {
