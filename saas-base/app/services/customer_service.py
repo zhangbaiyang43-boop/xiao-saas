@@ -285,8 +285,13 @@ class CustomerService(BaseService):
 
     async def merge_customers(self, source_customer_id, target_customer_id):
         from sqlalchemy.future import select
+        from app.models.consumption import Consumption
+        from app.models.coupon import Coupon
         from app.models.customer import Customer
         from app.models.customer_identity import CustomerIdentity
+        from app.models.member_account import MemberAccount
+        from app.models.point_ledger import PointLedger
+        from app.services.membership_service import MembershipService
 
         # P0 安全修复：必须限定在发起请求的商家自己的租户内，否则商家 A 的管理员
         # 只要猜到商家 B 的两个客户 ID，就能合并/破坏另一个商家的客户数据。
@@ -310,6 +315,40 @@ class CustomerService(BaseService):
             .where(CustomerIdentity.customer_id == source.id)
             .values(customer_id=target.id)
         )
+
+        # 之前合并只搬了登录身份（CustomerIdentity），会员资产（积分/储值余额/消费额/
+        # 等级）、优惠券、消费记录、积分流水全都没跟着走——source 一旦被下面设成停用，
+        # 这些资产实质上就"蒸发"了（挂在一条正常查询再也看不到的停用客户记录下）。
+        # MemberAccount 在 (tenant_id, customer_id) 上有唯一索引，不能像 identity 那样
+        # 直接改 customer_id 过户，只能把数值合并进 target 的账户，再把 source 的账户
+        # 行删掉，避免残留一份还有余额的"幽灵账户"。
+        membership_service = MembershipService(self.db)
+        membership_service.set_tenant_id(tenant_id)
+        target_account = await membership_service.ensure_account(target)
+
+        source_account_result = await self.db.execute(
+            select(MemberAccount).filter(
+                MemberAccount.tenant_id == tenant_id,
+                MemberAccount.customer_id == source.id,
+            ).with_for_update()
+        )
+        source_account = source_account_result.scalar_one_or_none()
+        if source_account:
+            target_account.points_balance = (target_account.points_balance or 0) + (source_account.points_balance or 0)
+            target_account.balance = (target_account.balance or 0) + (source_account.balance or 0)
+            target_account.total_consumption = (target_account.total_consumption or 0) + (source_account.total_consumption or 0)
+            target_account.yearly_consumption = (target_account.yearly_consumption or 0) + (source_account.yearly_consumption or 0)
+            new_level = membership_service.resolve_level(target_account.yearly_consumption, target.created_at)
+            target_account.level_code = new_level["code"]
+            target_account.level_name = new_level["name"]
+            await self.db.delete(source_account)
+
+        for model in (Coupon, Consumption, PointLedger):
+            await self.db.execute(
+                model.__table__.update()
+                .where(model.__table__.c.tenant_id == tenant_id, model.__table__.c.customer_id == source.id)
+                .values(customer_id=target.id)
+            )
 
         source.status = -1
         await self.db.commit()

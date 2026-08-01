@@ -337,6 +337,48 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
             logger.info(f"重绑 identity（已有会员）- customer_id: {customer.id}, openid: {openid}")
             customer = await update_join_customer_info(customer)
 
+        if not customer and identity_customer_id:
+            # 手机号没查到匹配（顾客换手机号了），但这个微信身份本来就有账号——必须复用
+            # 它，不能借口"手机号没查到"就当成新客户另建一个：那样会把老账号的积分/
+            # 等级/优惠券/消费记录全部撇下，顾客只是换个手机号登录，资产却"清零"了。
+            existing_customer = await customer_service.get_customer_any_status(identity_customer_id)
+            if existing_customer:
+                if existing_customer.status != 1:
+                    await operation_log_service.record(
+                        customer_id=existing_customer.id,
+                        action="miniapp_join_blocked_disabled",
+                        source="miniapp",
+                        actor_type="customer",
+                        phone=data.phone,
+                        openid=openid,
+                        detail={
+                            "message": "会员已停用，阻止小程序入会",
+                            "scene": data.scene,
+                            "matched_by": "identity",
+                            "blocked_customer_id": str(existing_customer.id),
+                        },
+                    )
+                    return error_response(code=403, msg="会员已停用，请联系商家")
+                logger.info(
+                    f"identity 找到已有会员（手机号已更换）- customer_id: {existing_customer.id}, "
+                    f"old_phone: {existing_customer.phone}, new_phone: {data.phone}"
+                )
+                await operation_log_service.record(
+                    customer_id=existing_customer.id,
+                    action="miniapp_phone_number_changed",
+                    source="miniapp",
+                    actor_type="customer",
+                    phone=data.phone,
+                    openid=openid,
+                    detail={
+                        "message": "同一微信身份填写了新手机号，已更新账号手机号并保留原有资产",
+                        "scene": data.scene,
+                        "old_phone": existing_customer.phone,
+                    },
+                )
+                customer = await update_join_customer_info(existing_customer)
+                is_new_customer = False
+
         if not customer:
             customer_openid = openid
             openid_customer = await customer_service.get_customer_by_openid_any_status(openid, tenant_id)

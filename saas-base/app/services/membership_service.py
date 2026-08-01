@@ -285,6 +285,23 @@ class MembershipService(BaseService):
         if not account:
             return None
 
+        # 幂等保护：同一笔消费的退款回滚只应该生效一次。之前完全没有这层检查——调用方
+        # 标记"这单已经退款过"的落库时机比这个函数内部提交要晚，中间这段窗口如果进程
+        # 崩溃/请求超时后客户端重试了取消/拒单，已经提交的扣款不会跟着回滚，重放会把
+        # 消费额和积分再扣一次。检查放在拿到账户行锁之后，跟并发的同一笔重放请求正确
+        # 串行；下面固定写一条 refund_reversal 流水当"已处理"标记，即使这笔消费当初
+        # 一分积分没赚到也写（不然 0 积分的消费永远没有标记可查，一样会被重放扣消费额）。
+        existing_reversal = await self.db.execute(
+            select(PointLedger.id).filter(
+                PointLedger.tenant_id == tenant_id,
+                PointLedger.customer_id == customer_id,
+                PointLedger.event_type == "refund_reversal",
+                PointLedger.ref_id == str(consumption_id or ""),
+            )
+        )
+        if existing_reversal.scalar_one_or_none():
+            return account
+
         ledger_result = await self.db.execute(
             select(func.coalesce(func.sum(PointLedger.points), 0)).filter(
                 PointLedger.tenant_id == tenant_id,
@@ -294,12 +311,16 @@ class MembershipService(BaseService):
             )
         )
         earned_points = int(ledger_result.scalar() or 0)
+        # 这笔消费当初记的积分，可能已经被"满额自动兑券"提前花掉了（见
+        # _maybe_reward_points_milestone）——退款时不能无条件倒扣当初赚了多少，只能扣
+        # 回账户里实际还剩的部分，否则 points_balance 会被扣成负数。
+        points_to_deduct = min(earned_points, int(account.points_balance or 0)) if earned_points > 0 else 0
 
         consume_amount = Decimal(str(amount or 0))
         account.total_consumption = MemberAccount.total_consumption - consume_amount
         account.yearly_consumption = MemberAccount.yearly_consumption - consume_amount
-        if earned_points:
-            account.points_balance = MemberAccount.points_balance - earned_points
+        if points_to_deduct:
+            account.points_balance = MemberAccount.points_balance - points_to_deduct
         await self.db.commit()
         await self.db.refresh(account)
 
@@ -314,21 +335,23 @@ class MembershipService(BaseService):
         await self.db.commit()
         await self.db.refresh(account)
 
-        if earned_points:
-            ledger = PointLedger(
-                tenant_id=tenant_id,
-                customer_id=account.customer_id,
-                member_id=account.member_id,
-                event_type="refund_reversal",
-                points=-earned_points,
-                balance_after=account.points_balance,
-                source_channel="STORE",
-                ref_id=str(consumption_id or ""),
-                expire_at=datetime.utcnow(),
-                remark="订单退款收回积分",
-            )
-            self.db.add(ledger)
-            await self.db.commit()
+        remark = "订单退款收回积分"
+        if 0 < points_to_deduct < earned_points:
+            remark = "订单退款收回积分（部分已被自动兑券消耗，仅收回剩余部分）"
+        ledger = PointLedger(
+            tenant_id=tenant_id,
+            customer_id=account.customer_id,
+            member_id=account.member_id,
+            event_type="refund_reversal",
+            points=-points_to_deduct,
+            balance_after=account.points_balance,
+            source_channel="STORE",
+            ref_id=str(consumption_id or ""),
+            expire_at=datetime.utcnow(),
+            remark=remark,
+        )
+        self.db.add(ledger)
+        await self.db.commit()
 
         return account
 
