@@ -369,6 +369,11 @@ class QueueService:
         if active_ticket:
             raise QueueCallBlocked(active_ticket)
 
+        # 加锁：两个前台同时点"叫下一号"时，不加锁会各自读到同一张最早的 waiting 号、
+        # 都把它改成 called 再各自提交——顾客看到同一个号被叫两次，真正排在后面的号
+        # 反而被跳过。加了 with_for_update() 之后，第二个请求会等第一个提交，再用
+        # 提交后的最新数据重新判断 status == "waiting"：这张票已经不是 waiting 了，
+        # 会自然往后找下一张真正还在等待的票，而不是撞车。
         result = await self.db.execute(
             select(QueueTicket).options(defer(QueueTicket.query_token))
             .where(
@@ -378,6 +383,7 @@ class QueueService:
             )
             .order_by(QueueTicket.created_at.asc())
             .limit(1)
+            .with_for_update()
         )
         ticket = result.scalar_one_or_none()
         if not ticket:

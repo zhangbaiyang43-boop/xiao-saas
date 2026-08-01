@@ -348,10 +348,27 @@ class DiningSessionService:
         )
         session = result.scalar_one_or_none()
         if session:
-            if session.last_activity_at and session.last_activity_at < now - timedelta(hours=SESSION_EXPIRE_HOURS):
-                session.status = "EXPIRED"
-                session.closed_at = now
-                session.active_key = None
+            is_stale = bool(
+                session.last_activity_at and session.last_activity_at < now - timedelta(hours=SESSION_EXPIRE_HOURS)
+            )
+            if is_stale:
+                # 静默把超过 12 小时没动静的桌台标成 EXPIRED 之前，先确认这一桌没有还没
+                # 走完结账流程的订单（哪怕只是"已出餐、等结账"）——不然这条订单挂在一个
+                # 已经过期关闭的 session 下，settle_table 只认 status=="OPEN"，以后再也
+                # 没有任何流程能捞到它，商家做了菜却收不到这笔钱，还完全不知道原因。
+                unsettled_result = await self.db.execute(
+                    select(func.count(Order.id)).where(
+                        Order.dining_session_id == session.id,
+                        Order.status.notin_(("settled", "cancelled", "rejected")),
+                    )
+                )
+                has_unsettled_orders = int(unsettled_result.scalar() or 0) > 0
+                if not has_unsettled_orders:
+                    session.status = "EXPIRED"
+                    session.closed_at = now
+                    session.active_key = None
+                else:
+                    return session
             else:
                 return session
 

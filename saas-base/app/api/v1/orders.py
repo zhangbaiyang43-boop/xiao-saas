@@ -572,7 +572,6 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
 
     real_total = 0.0
     order_items_data = []
-    stock_deductions = []  # [(dish, qty)]
     for item_in in body.items:
         if item_in.qty <= 0:
             return error_response(code=400, msg=f"商品数量必须大于0:{item_in.name}")
@@ -600,16 +599,17 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             base_name = str(dish.name or "")
             submitted_name = str(item_in.name or "").strip()
             name = submitted_name[:64] if submitted_name and submitted_name.startswith(base_name) else base_name
+            # 同一道菜在这一单里可能拆成好几行（比如同一道菜点了不同辣度），库存扣减必须
+            # 在这一行处理完就立刻生效，而不是等所有行都校验完再统一扣——SQLAlchemy 对
+            # 同一个 dish_id 的重复查询会拿到同一个已加锁的对象，如果扣减延后到循环外，
+            # 每一行各自拿着这道菜"还没扣减过"的库存去比较，加总起来就能绕过库存上限，
+            # 在单笔订单内造成超卖。
             if dish.stock is not None:
-                stock_deductions.append((dish, item_in.qty))
+                dish.stock -= item_in.qty
         else:
             return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}")
         real_total += unit_price * item_in.qty
         order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty))
-
-    # 扣减库存
-    for dish, qty in stock_deductions:
-        dish.stock = max(0, dish.stock - qty)
 
     # BUG-2: 建单时仅验证优惠券，不标记 USED，改为 LOCKED（支付时再核销）
     if body.coupon_id:
@@ -1251,8 +1251,8 @@ async def _refund_orphaned_wxpay_payment(order: Order, db: AsyncSession) -> dict
 
 
 async def _restore_order_stock(order: Order, db: AsyncSession) -> None:
-    """Give back whatever stock create_order deducted (see its stock_deductions loop) when
-    an order ends up cancelled/rejected/timed-out without ever being fulfilled -- otherwise
+    """Give back whatever stock create_order deducted (see its item loop, dish.stock -=)
+    when an order ends up cancelled/rejected/timed-out without ever being fulfilled -- otherwise
     a dish that was never actually cooked/sold stays wrongly marked "sold out" forever, and
     the shortfall only grows with every abandoned order. Locks each MenuItem row first so a
     concurrent order for the same dish can't race the restore.
@@ -2021,11 +2021,17 @@ async def list_orders(
         # "yesterday" blocking settle-table today. Always surface still-open
         # orders regardless of created_at, or they become invisible in this
         # list while still blocking checkout (same class of bug as the
-        # pending_payment table-grouping fix above).
+        # pending_payment table-grouping fix above). "done" orders don't block
+        # settle_table (they get finalized during closing), but they still
+        # haven't been paid/settled yet -- surface those across days too, or a
+        # table that finished cooking right before an idle dining_session
+        # rolled over to a new day silently drops out of the merchant's
+        # default view with no indication anything is owed.
         query = query.where(
             or_(
                 and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
                 Order.status.in_(TABLE_CLOSE_BLOCKING_STATUSES),
+                Order.status == "done",
             )
         )
 
