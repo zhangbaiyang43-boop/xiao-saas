@@ -32,3 +32,4 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+saas-base/static/
