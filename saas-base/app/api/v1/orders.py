@@ -437,13 +437,18 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         from app.models.dining import DiningParticipant, DiningSession
         from app.services.dining_session_service import hash_participant_token
 
+        # 加行锁跟 settle_table 的锁互斥，防止"结账"和"追加点单"并发时，这边拿着还没
+        # 提交的旧快照（session 还是 OPEN）继续挂单，等结账那边先提交、这边才提交，
+        # 挂出来的这条新订单就落在一个已经结完账关闭的 session 下——以后任何结账逻辑
+        # 都不会再找到它，商家做了这道菜却收不到这笔钱。加锁后这个查询会等 settle_table
+        # 的事务提交，然后用最新数据重新判断 status == "OPEN"，过期了就走下面的 404。
         session_result = await db.execute(
             select(DiningSession).where(
                 DiningSession.id == int(body.dining_session_id),
                 DiningSession.tenant_id == tenant_id,
                 DiningSession.table_no == (body.table or ""),
                 DiningSession.status == "OPEN",
-            )
+            ).with_for_update()
         )
         session = session_result.scalar_one_or_none()
         if not session:
@@ -511,6 +516,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         recovered = await _recover_wxpay_order_if_paid(stale, db)
         if recovered:
             continue
+        await _restore_order_stock(stale, db)
         stale.status = "cancelled"
         if stale.coupon_id:
             stale_coupon = await db.get(Coupon, stale.coupon_id)
@@ -1244,6 +1250,35 @@ async def _refund_orphaned_wxpay_payment(order: Order, db: AsyncSession) -> dict
     return {"success": True, "amount": float(order.refund_amount), "error": None}
 
 
+async def _restore_order_stock(order: Order, db: AsyncSession) -> None:
+    """Give back whatever stock create_order deducted (see its stock_deductions loop) when
+    an order ends up cancelled/rejected/timed-out without ever being fulfilled -- otherwise
+    a dish that was never actually cooked/sold stays wrongly marked "sold out" forever, and
+    the shortfall only grows with every abandoned order. Locks each MenuItem row first so a
+    concurrent order for the same dish can't race the restore.
+
+    Must be called with `order` already locked (with_for_update) in the current transaction,
+    before the order's status is flipped away from pending_payment/pending.
+    """
+    from app.models.menu_item import MenuItem
+
+    items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+    order_items = items_result.scalars().all()
+    qty_by_dish_id: dict = {}
+    for item in order_items:
+        if item.dish_id:
+            qty_by_dish_id[item.dish_id] = qty_by_dish_id.get(item.dish_id, 0) + item.qty
+    if not qty_by_dish_id:
+        return
+
+    dishes_result = await db.execute(
+        select(MenuItem).where(MenuItem.id.in_(qty_by_dish_id.keys())).with_for_update()
+    )
+    for dish in dishes_result.scalars().all():
+        if dish.stock is not None:
+            dish.stock = dish.stock + qty_by_dish_id.get(dish.id, 0)
+
+
 @router.post("/orders/{order_id}/mock-pay")
 async def mock_pay_order(
     order_id: str,
@@ -1641,6 +1676,8 @@ async def update_order_status(
             return error_response(code=502, msg=f"操作失败，退款处理异常，请稍后重试：{refund_result['error']}")
     if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) != "paid":
         await _unlock_order_coupon_if_locked(order, db)
+    if body.status in ("rejected", "cancelled"):
+        await _restore_order_stock(order, db)
 
     order.status = body.status
     if body.status == "done" and not getattr(order, "served_at", None):
@@ -1884,6 +1921,7 @@ async def cancel_order(
         if not refund_result["success"]:
             await db.rollback()
             return error_response(code=502, msg=f"取消失败，退款处理异常，请稍后重试或联系客服：{refund_result['error']}")
+    await _restore_order_stock(order, db)
     order.status = "cancelled"
     # P0 修复：恢复被 LOCKED 的优惠券
     if order.coupon_id:
