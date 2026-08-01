@@ -917,7 +917,9 @@ async def _print_paid_order_ticket(
                 raise RuntimeError(result.get("code") or result.get("error") or "PRINT_PROVIDER_FAILED")
             provider_task_id = result.get("provider_task_id")
         elif tenant_obj and tenant_obj.feieyun_sn and tenant_obj.feieyun_key:
-            ticket = build_order_ticket(order)
+            items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+            order_items = list(items_result.scalars().all())
+            ticket = build_order_ticket(order, order_items)
             result = await print_order(tenant_obj.feieyun_sn, tenant_obj.feieyun_key, ticket)
             if result is not True:
                 raise RuntimeError("FEIEYUN_PRINT_FAILED")
@@ -1194,6 +1196,54 @@ async def _refund_order_payment(order: Order, db: AsyncSession, reason: str) -> 
     return {"success": True, "amount": refunded_amount, "error": None}
 
 
+async def _refund_orphaned_wxpay_payment(order: Order, db: AsyncSession) -> dict:
+    """WeChat confirms a payment succeeded for an order that's already cancelled/rejected
+    locally (see wxpay_notify) -- the callback arrived after cancel_order/update_order_status
+    had already committed the terminal state, so _on_payment_success never ran for this order:
+    no points, no consumption tracking, no coupon issuance, no kitchen ticket. There is nothing
+    on our side to reverse, only the money that actually landed in the merchant's WeChat
+    account to send back. Deliberately does not touch order.status or print anything -- the
+    kitchen was already told this order is off.
+
+    Must be called with `order` already locked (with_for_update) in the current transaction.
+    """
+    total_fen = max(1, round(float(order.total or 0) * 100))
+    try:
+        from app.models.tenant import Tenant
+        from app.services.wxpay_service import WxPayService
+
+        tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
+        tenant = tenant_result.scalar_one_or_none()
+        svc = WxPayService(tenant) if tenant else None
+        if not svc or not svc.enabled:
+            raise RuntimeError("merchant wxpay not configured, cannot auto-refund")
+        await svc.refund(
+            out_trade_no=str(order.id),
+            out_refund_no=f"RF{order.id}",
+            refund_fen=total_fen,
+            total_fen=total_fen,
+            reason="race_with_cancel_auto_refund",
+        )
+    except Exception as exc:
+        order.refund_status = "failed"
+        order.refund_error = str(exc)[:500]
+        logger.error(
+            "[WXPAY_NOTIFY_RACE_AUTO_REFUND_FAILED] order_id=%s error=%s -- needs manual refund",
+            order.id, exc,
+        )
+        return {"success": False, "amount": 0.0, "error": str(exc)}
+
+    order.refund_status = "success"
+    order.refund_amount = float(order.total or 0)
+    order.refunded_at = datetime.now(timezone.utc)
+    order.refund_error = None
+    logger.error(
+        "[WXPAY_NOTIFY_RACE_AUTO_REFUNDED] order_id=%s amount=%s order_status=%s",
+        order.id, order.refund_amount, order.status,
+    )
+    return {"success": True, "amount": float(order.refund_amount), "error": None}
+
+
 @router.post("/orders/{order_id}/mock-pay")
 async def mock_pay_order(
     order_id: str,
@@ -1453,7 +1503,14 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
 
         result = await db.execute(select(Order).where(Order.id == int(out_trade_no)).with_for_update())
         order = result.scalar_one_or_none()
-        if not order or order.status != "pending_payment":
+        if not order:
+            return {"code": "SUCCESS", "message": "ok"}
+        # pending_payment 是正常路径；cancelled/rejected 是"顾客/商家取消跟这次回调赛跑，
+        # 取消先落地"的窗口——之前这两种情况在这里被一并静默丢弃，导致钱已经从顾客账户
+        # 划走、商户微信账户也确实收到了，但订单永远停在"已取消"，没有任何机制会再去
+        # 发现或退还这笔钱。其余终态（paid 之后的 pending/done/settled 等）维持原样丢弃，
+        # 那些要么是已经处理过的重复回调，要么不属于这里要处理的场景。
+        if order.status not in ("pending_payment", "cancelled", "rejected"):
             return {"code": "SUCCESS", "message": "ok"}
         if matched_tenant and str(order.tenant_id) != str(matched_tenant.tenant_id):
             logger.warning(
@@ -1475,9 +1532,24 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
                 )
                 return {"code": "FAIL", "message": "amount mismatch"}
 
-        await _on_payment_success(order, db, payment_method="wxpay")
+        if order.status == "pending_payment":
+            await _on_payment_success(order, db, payment_method="wxpay")
+            await db.commit()
+            logger.info(f"微信支付回调成功: order_id={out_trade_no}")
+            return {"code": "SUCCESS", "message": "ok"}
+
+        # order.status in ("cancelled", "rejected"): raced with a cancel/reject that already
+        # committed before this callback arrived. Don't resurrect the order or print a
+        # kitchen ticket -- just get the customer's money back automatically.
+        if getattr(order, "refund_status", None) == "success":
+            return {"code": "SUCCESS", "message": "ok"}  # already reconciled by a prior retry
+        logger.error(
+            "[WXPAY_NOTIFY_RACE_WITH_CANCEL] order_id=%s order_status=%s -- WeChat confirmed "
+            "payment after this order was already %s locally; auto-refunding instead of fulfilling",
+            out_trade_no, order.status, order.status,
+        )
+        await _refund_orphaned_wxpay_payment(order, db)
         await db.commit()
-        logger.info(f"微信支付回调成功: order_id={out_trade_no}")
         return {"code": "SUCCESS", "message": "ok"}
 
     except Exception as e:
@@ -1549,6 +1621,18 @@ async def update_order_status(
         )
     if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
         return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
+
+    # 拒单/取消前先跟微信核实一下：顾客可能刚好在微信那边已经付款成功、回调只是还没
+    # 送达，直接放行拒单会导致钱已经进商户账户但订单却显示已拒绝/已取消，没人会再去
+    # 处理这笔钱（跟 cancel_order 的同一处理）。
+    if (
+        body.status in ("rejected", "cancelled")
+        and current_status == "pending_payment"
+        and getattr(order, "payment_mode", "prepay") == "prepay"
+    ):
+        if await _recover_wxpay_order_if_paid(order, db):
+            await db.commit()
+            return error_response(code=409, msg="订单已支付，请刷新查看最新状态")
 
     if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) == "paid":
         refund_result = await _refund_order_payment(order, db, reason=f"merchant_{body.status}")
@@ -1787,6 +1871,12 @@ async def cancel_order(
             owns_order = participant_result.scalar_one_or_none() is not None
         if not owns_order:
             return error_response(code=403, msg="forbidden")
+    # 取消前先跟微信核实一下：如果顾客刚好在微信那边已经付款成功、回调只是还没送达，
+    # 直接放行取消会导致钱已经进商户账户但订单却显示已取消——没人会再去处理这笔钱。
+    if order.status == "pending_payment" and getattr(order, "payment_mode", "prepay") == "prepay":
+        if await _recover_wxpay_order_if_paid(order, db):
+            await db.commit()
+            return error_response(code=400, msg="订单已支付，请刷新查看最新状态")
     if order.status not in ("pending_payment", "pending"):
         return error_response(code=400, msg="订单已支付或已完成，无法取消")
     if getattr(order, "payment_status", None) == "paid":

@@ -47,8 +47,12 @@ async def print_order(sn: str, key: str, content: str, times: int = 1) -> bool:
         return False
 
 
-def build_order_ticket(order) -> str:
-    """把订单对象格式化为小票文本（ESC 指令 + 纯文本）。"""
+def build_order_ticket(order, order_items) -> str:
+    """把订单对象格式化为小票文本（ESC 指令 + 纯文本）。
+
+    order_items 是查出来的 OrderItem 行（.name/.qty/.price 属性，不是 dict）——Order
+    模型本身没有 items 关系/属性，之前这里用 getattr(order, "items", None) 永远拿到
+    空列表，导致飞鹅云小票从不包含任何菜品明细。"""
     lines = []
     lines.append("<CB>新订单</CB>")   # 居中加粗标题
     lines.append(f"桌号：{getattr(order, 'table_no', '') or '—'}")
@@ -56,19 +60,8 @@ def build_order_ticket(order) -> str:
     lines.append(f"来源：{'H5点餐' if getattr(order, 'source', '') == 'h5' else '小程序'}")
     lines.append("--------------------------------")
 
-    items = getattr(order, "items", None) or []
-    if isinstance(items, str):
-        import json
-        try:
-            items = json.loads(items)
-        except Exception:
-            items = []
-
-    for item in items:
-        name = item.get("name", "")
-        qty = item.get("quantity", item.get("qty", 1))
-        price = item.get("price", 0)
-        lines.append(f"{name}  x{qty}  ¥{float(price):.1f}")
+    for item in order_items or []:
+        lines.append(f"{item.name}  x{item.qty}  ¥{float(item.price):.1f}")
 
     lines.append("--------------------------------")
     remark = getattr(order, "remark", "") or ""

@@ -241,7 +241,7 @@ def install_stubs():
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.models.tenant_config"].TenantConfig = FakeTenantConfig
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
-    modules["app.services.feieyun_service"].build_order_ticket = lambda order: "ticket"
+    modules["app.services.feieyun_service"].build_order_ticket = lambda order, order_items: "ticket"
     modules["app.services.feieyun_service"].print_order = lambda *args: True
     modules["app.services.kuaimai_service"].KUAIMAI_ORDER_TEMPLATE_ID = "1634998374"
     modules["app.services.kuaimai_service"].KuaimaiPrintError = KuaimaiPrintError

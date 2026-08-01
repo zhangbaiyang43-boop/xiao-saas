@@ -53,8 +53,16 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
 
     def test_duplicate_callbacks_are_blocked_before_asset_mutation(self):
         notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
-        self.assertIn('if not order or order.status != "pending_payment"', notify_source)
-        self.assertLess(notify_source.index('order.status != "pending_payment"'), notify_source.index("_on_payment_success"))
+        # _on_payment_success (the only place that mutates coupon/points/consumption assets)
+        # must be gated behind an explicit order.status == "pending_payment" check, so a
+        # retried/duplicate WeChat callback for an order that's already been processed (paid,
+        # or reconciled via the cancelled/rejected auto-refund path below) never mutates
+        # assets a second time.
+        self.assertIn('if order.status == "pending_payment":', notify_source)
+        self.assertLess(
+            notify_source.index('if order.status == "pending_payment":'),
+            notify_source.index("_on_payment_success"),
+        )
 
     def test_coupon_asset_queries_are_tenant_scoped(self):
         success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
