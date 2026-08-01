@@ -38,6 +38,25 @@ class EntranceCodeService(BaseService):
             return "pickup"
         return "dine_in"
 
+    async def _validate_coupon_template_id(self, coupon_template_id) -> int | None:
+        if coupon_template_id in (None, ""):
+            return None
+        tenant_id = self.require_tenant_id()
+        try:
+            template_id = int(coupon_template_id)
+        except (TypeError, ValueError):
+            raise ValueError("优惠券模板不存在")
+
+        result = await self.db.execute(
+            select(CouponTemplate.id).filter(
+                CouponTemplate.id == template_id,
+                CouponTemplate.tenant_id == tenant_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise ValueError("优惠券模板不存在")
+        return template_id
+
     async def create_entrance_code(
         self,
         name: str,
@@ -54,6 +73,7 @@ class EntranceCodeService(BaseService):
         staff_id: int | None = None,
     ) -> EntranceCode:
         tenant_id = self.require_tenant_id()
+        coupon_template_id = await self._validate_coupon_template_id(coupon_template_id)
         scene = await self._generate_scene()
         resolved_target_page = target_page or self._resolve_target_page(entry_type)
         resolved_order_mode = order_mode or self._resolve_order_mode(entry_type)

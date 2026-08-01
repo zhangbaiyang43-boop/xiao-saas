@@ -1,12 +1,9 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.pagination import build_page, normalize_pagination
 from app.core.response import RespVo, error_response, success_response
-from app.core.tenant_context import TenantContext
 from app.services.channel_entry_service import ChannelEntryService
 
 router = APIRouter(prefix="/api/v1/channel-entries", tags=["渠道入口管理"])
@@ -47,11 +44,15 @@ async def list_entries(
 
     from app.models.coupon_template import CouponTemplate
     from sqlalchemy.future import select
+
     coupon_ids = [e.coupon_template_id for e in entries if e.coupon_template_id]
     coupon_map = {}
     if coupon_ids:
         result = await db.execute(
-            select(CouponTemplate.id, CouponTemplate.name).filter(CouponTemplate.id.in_(coupon_ids))
+            select(CouponTemplate.id, CouponTemplate.name).filter(
+                CouponTemplate.id.in_(coupon_ids),
+                CouponTemplate.tenant_id == entries[0].tenant_id,
+            )
         )
         for row in result.all():
             coupon_map[row[0]] = row[1]
@@ -82,8 +83,12 @@ async def get_entry(
     if entry.coupon_template_id:
         from app.models.coupon_template import CouponTemplate
         from sqlalchemy.future import select
+
         result = await db.execute(
-            select(CouponTemplate.name).filter(CouponTemplate.id == entry.coupon_template_id)
+            select(CouponTemplate.name).filter(
+                CouponTemplate.id == entry.coupon_template_id,
+                CouponTemplate.tenant_id == entry.tenant_id,
+            )
         )
         coupon_name = result.scalar_one_or_none()
 
@@ -97,17 +102,20 @@ async def create_entry(
     db: AsyncSession = Depends(get_db),
 ):
     service = ChannelEntryService(db)
-    entry = await service.create_entry(
-        name=data.get("name"),
-        channel_code=data.get("channel_code"),
-        landing_title=data.get("landing_title"),
-        landing_subtitle=data.get("landing_subtitle"),
-        cover_image=data.get("cover_image"),
-        coupon_template_id=data.get("coupon_template_id"),
-        mini_program_qrcode_url=data.get("mini_program_qrcode_url"),
-        status=data.get("status", 1),
-    )
-    return success_response(data=serialize_entry(entry), msg="建成功")
+    try:
+        entry = await service.create_entry(
+            name=data.get("name"),
+            channel_code=data.get("channel_code"),
+            landing_title=data.get("landing_title"),
+            landing_subtitle=data.get("landing_subtitle"),
+            cover_image=data.get("cover_image"),
+            coupon_template_id=data.get("coupon_template_id"),
+            mini_program_qrcode_url=data.get("mini_program_qrcode_url"),
+            status=data.get("status", 1),
+        )
+    except ValueError as exc:
+        return error_response(code=400, msg=str(exc))
+    return success_response(data=serialize_entry(entry), msg="创建成功")
 
 
 @router.put("/{entry_id}", response_model=RespVo)
@@ -118,15 +126,18 @@ async def update_entry(
     db: AsyncSession = Depends(get_db),
 ):
     service = ChannelEntryService(db)
-    entry = await service.update_entry(
-        entry_id,
-        name=data.get("name"),
-        landing_title=data.get("landing_title"),
-        landing_subtitle=data.get("landing_subtitle"),
-        cover_image=data.get("cover_image"),
-        coupon_template_id=data.get("coupon_template_id"),
-        status=data.get("status"),
-    )
+    try:
+        entry = await service.update_entry(
+            entry_id,
+            name=data.get("name"),
+            landing_title=data.get("landing_title"),
+            landing_subtitle=data.get("landing_subtitle"),
+            cover_image=data.get("cover_image"),
+            coupon_template_id=data.get("coupon_template_id"),
+            status=data.get("status"),
+        )
+    except ValueError as exc:
+        return error_response(code=400, msg=str(exc))
     if not entry:
         return error_response(code=404, msg="渠道入口不存在")
     return success_response(data=serialize_entry(entry), msg="更新成功")

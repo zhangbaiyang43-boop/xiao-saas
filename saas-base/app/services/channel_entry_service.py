@@ -1,12 +1,9 @@
 import json
-import secrets
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.future import select
 
-from app.config import settings
 from app.models.channel_entry import ChannelEntry, ChannelEntryVisitLog
 from app.models.coupon_template import CouponTemplate
 from app.services.base_service import BaseService
@@ -58,6 +55,25 @@ class ChannelEntryService(BaseService):
         result = await self.db.execute(select(ChannelEntry).filter(ChannelEntry.h5_url == h5_url))
         return result.scalar_one_or_none()
 
+    async def _validate_coupon_template_id(self, coupon_template_id) -> int | None:
+        if coupon_template_id in (None, ""):
+            return None
+        tenant_id = self.require_tenant_id()
+        try:
+            template_id = int(coupon_template_id)
+        except (TypeError, ValueError):
+            raise ValueError("coupon_template_id is invalid")
+
+        result = await self.db.execute(
+            select(CouponTemplate.id).filter(
+                CouponTemplate.id == template_id,
+                CouponTemplate.tenant_id == tenant_id,
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise ValueError("coupon_template_id does not belong to current tenant")
+        return template_id
+
     async def create_entry(
         self,
         name: str,
@@ -70,12 +86,13 @@ class ChannelEntryService(BaseService):
         status: int = 1,
     ) -> ChannelEntry:
         tenant_id = self.require_tenant_id()
+        coupon_template_id = await self._validate_coupon_template_id(coupon_template_id)
 
         entry_id = generate_snowflake_id()
         h5_url = QRCodeService.generate_h5_url(
             QRCodeService.get_h5_base_url(),
             entry_id,
-            channel_code
+            channel_code,
         )
 
         qrcode_file_name = f"{entry_id}.png"
@@ -125,7 +142,7 @@ class ChannelEntryService(BaseService):
         if cover_image is not None:
             entry.cover_image = cover_image
         if coupon_template_id is not None:
-            entry.coupon_template_id = coupon_template_id
+            entry.coupon_template_id = await self._validate_coupon_template_id(coupon_template_id)
         if status is not None:
             entry.status = status
 
@@ -196,7 +213,10 @@ class ChannelEntryService(BaseService):
         coupon_template = None
         if entry.coupon_template_id:
             result = await self.db.execute(
-                select(CouponTemplate).filter(CouponTemplate.id == entry.coupon_template_id)
+                select(CouponTemplate).filter(
+                    CouponTemplate.id == entry.coupon_template_id,
+                    CouponTemplate.tenant_id == entry.tenant_id,
+                )
             )
             template = result.scalar_one_or_none()
             if template and template.status == 1:

@@ -151,19 +151,22 @@ async def create_entrance_code(data: CreateEntranceCodeRequest, db=Depends(get_d
     """Create a new entrance code."""
     from app.services.entrance_code_service import EntranceCodeService
     
-    item = await EntranceCodeService(db).create_entrance_code(
-        name=data.name,
-        channel=data.channel,
-        coupon_template_id=data.coupon_template_id,
-        page=data.page,
-        env_version=data.env_version,
-        table_no=data.table_no,
-        entry_type=data.entry_type,
-        order_mode=data.order_mode,
-        table_id=data.table_id,
-        target_page=data.target_page,
-        zone_type=data.zone_type,
-    )
+    try:
+        item = await EntranceCodeService(db).create_entrance_code(
+            name=data.name,
+            channel=data.channel,
+            coupon_template_id=data.coupon_template_id,
+            page=data.page,
+            env_version=data.env_version,
+            table_no=data.table_no,
+            entry_type=data.entry_type,
+            order_mode=data.order_mode,
+            table_id=data.table_id,
+            target_page=data.target_page,
+            zone_type=data.zone_type,
+        )
+    except ValueError as exc:
+        return error_response(code=404, msg=str(exc))
     return success_response(data=EntranceCodeResponse.model_validate(item))
 
 
