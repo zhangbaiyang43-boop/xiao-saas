@@ -7,6 +7,7 @@ from app.core.rate_limiter import join_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.security import create_customer_access_token
 from app.core.tenant_context import TenantContext
+from app.core.time_utils import to_utc_iso
 from app.core.logger import logger
 from app.config import settings
 from app.schemas.miniapp import EntryJoinRequest, MiniAppLoginRequest
@@ -59,8 +60,8 @@ async def serialize_member_profile(customer, member_account, coupon_count):
         "available_coupon_count": coupon_count.get("UNUSED", 0),
         "used_coupon_count": coupon_count.get("USED", 0),
         "expired_coupon_count": coupon_count.get("EXPIRED", 0),
-        "created_at": customer.created_at.isoformat() if customer.created_at else None,
-        "last_consume_time": customer.last_consume_time.isoformat() if customer.last_consume_time else None,
+        "created_at": to_utc_iso(customer.created_at),
+        "last_consume_time": to_utc_iso(customer.last_consume_time),
     }
 
 
@@ -78,9 +79,9 @@ async def serialize_coupon(coupon, template):
         "value": template.value if template else 0,
         "min_amount": template.min_amount if template else 0,
         "status": status,
-        "expire_time": coupon.expire_time.isoformat() if coupon.expire_time else None,
-        "use_time": coupon.use_time.isoformat() if coupon.use_time else None,
-        "created_at": coupon.created_at.isoformat() if coupon.created_at else None,
+        "expire_time": to_utc_iso(coupon.expire_time),
+        "use_time": to_utc_iso(coupon.use_time),
+        "created_at": to_utc_iso(coupon.created_at),
     }
 
 
@@ -92,7 +93,7 @@ async def serialize_point_log(ledger):
         "balance_after": ledger.balance_after,
         "remark": ledger.remark or "",
         "source_channel": ledger.source_channel,
-        "created_at": ledger.created_at.isoformat() if ledger.created_at else None,
+        "created_at": to_utc_iso(ledger.created_at),
     }
 
 
@@ -446,7 +447,7 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
                 "name": template.name if template else "新人券",
                 "amount": float(template.value) if template else 0,
                 "min_amount": float(template.min_amount) if template else 0,
-                "expired_at": existing_welcome_coupon.expire_time.isoformat() if existing_welcome_coupon.expire_time else None,
+                "expired_at": to_utc_iso(existing_welcome_coupon.expire_time),
             }
             logger.info(f"已有新人券，跳过发放 - customer_id: {customer.id}, coupon_id: {existing_welcome_coupon.id}")
         else:
@@ -603,7 +604,7 @@ async def member_commission_records(
                     "level": item.level,
                     "commission_amount": float(item.commission_amount or 0),
                     "status": item.status,
-                    "created_at": item.created_at.isoformat() if item.created_at else None,
+                    "created_at": to_utc_iso(item.created_at),
                 }
                 for item in records
             ],
@@ -735,7 +736,7 @@ async def coupon_verify_code(request: Request, coupon_id: int, db: AsyncSession 
         "name": template.name if template else "优惠券",
         "value": template.value if template else 0,
         "min_amount": template.min_amount if template else 0,
-        "expire_time": coupon.expire_time.isoformat() if coupon.expire_time else None,
+        "expire_time": to_utc_iso(coupon.expire_time),
     }, msg="ok")
 
 
@@ -826,7 +827,7 @@ async def member_coupon_detail(request: Request, coupon_id: int, db: AsyncSessio
         "value": float(template.value or 0) if template else 0,
         "min_amount": float(template.min_amount or 0) if template else 0,
         "status": coupon.status,
-        "expire_time": coupon.expire_time.isoformat() if coupon.expire_time else None,
-        "created_at": coupon.created_at.isoformat() if coupon.created_at else None,
-        "used_at": coupon.use_time.isoformat() if coupon.use_time else None,
+        "expire_time": to_utc_iso(coupon.expire_time),
+        "created_at": to_utc_iso(coupon.created_at),
+        "used_at": to_utc_iso(coupon.use_time),
     }, msg="ok")

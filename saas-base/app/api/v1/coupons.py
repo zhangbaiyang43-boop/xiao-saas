@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.pagination import build_page, normalize_pagination
 from app.core.response import RespVo, error_response, success_response
+from app.core.time_utils import to_utc_iso
 from app.schemas.coupon import RecallCouponRequest, SendCouponsRequest
 from app.services.coupon_service import CouponService
 from app.services.customer_service import CustomerService
@@ -53,13 +54,13 @@ async def serialize_coupon_record(
             "customer_phone": (customer.phone if customer else "") or identity_phone,
             "code": coupon.code,
             "status": coupon.status,
-            "use_time": coupon.use_time.isoformat() if coupon.use_time else None,
-            "expire_time": coupon.expire_time.isoformat() if coupon.expire_time else None,
-            "revoke_time": coupon.revoke_time.isoformat() if coupon.revoke_time else None,
+            "use_time": to_utc_iso(coupon.use_time),
+            "expire_time": to_utc_iso(coupon.expire_time),
+            "revoke_time": to_utc_iso(coupon.revoke_time),
             "revoke_reason": coupon.revoke_reason or "",
             "abnormal_reason": coupon.abnormal_reason or "",
-            "created_at": coupon.created_at.isoformat() if coupon.created_at else None,
-            "updated_at": coupon.updated_at.isoformat() if coupon.updated_at else None,
+            "created_at": to_utc_iso(coupon.created_at),
+            "updated_at": to_utc_iso(coupon.updated_at),
         }
     except Exception as e:
         print(f"Error serializing coupon record: {e}")

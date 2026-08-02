@@ -120,42 +120,52 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     )
 
 
-async def _stale_order_cleanup_loop():
-    """Clean stale unpaid orders and restore locked coupons."""
-    import asyncio
+STALE_ORDER_CLEANUP_TIMEOUT_MINUTES = 15
+
+
+async def _stale_order_cleanup_once():
+    """Run one pass of the stale-order cleanup. Split out from the loop below so it's
+    directly callable from tests instead of having to drive the infinite loop's sleeps."""
     from datetime import datetime as _dt, timedelta
     from app.core.database import AsyncSessionLocal
     from app.models.order import Order
     from app.models.coupon import Coupon as _Coupon
     from sqlalchemy.future import select as _select
 
+    threshold = _dt.utcnow() - timedelta(minutes=STALE_ORDER_CLEANUP_TIMEOUT_MINUTES)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            _select(Order).where(
+                Order.status == "pending_payment",
+                Order.created_at < threshold,
+            )
+        )
+        stale = result.scalars().all()
+        if stale:
+            from app.api.v1.orders import _recover_wxpay_order_if_paid, _restore_order_stock
+        for o in stale:
+            recovered = await _recover_wxpay_order_if_paid(o, db)
+            if recovered:
+                continue
+            await _restore_order_stock(o, db)
+            o.status = "cancelled"
+            if o.coupon_id:
+                coupon = await db.get(_Coupon, o.coupon_id)
+                if coupon and coupon.status == "LOCKED":
+                    coupon.status = "UNUSED"
+        if stale:
+            await db.commit()
+
+
+async def _stale_order_cleanup_loop():
+    """Clean stale unpaid orders and restore locked coupons."""
+    import asyncio
+
     INTERVAL = 300  # 5分钟
-    TIMEOUT_MINUTES = 15
     await asyncio.sleep(10)  # 等待应用完全启动
     while True:
         try:
-            threshold = _dt.utcnow() - timedelta(minutes=TIMEOUT_MINUTES)
-            async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    _select(Order).where(
-                        Order.status == "pending_payment",
-                        Order.created_at < threshold,
-                    )
-                )
-                stale = result.scalars().all()
-                if stale:
-                    from app.api.v1.orders import _recover_wxpay_order_if_paid
-                for o in stale:
-                    recovered = await _recover_wxpay_order_if_paid(o, db)
-                    if recovered:
-                        continue
-                    o.status = "cancelled"
-                    if o.coupon_id:
-                        coupon = await db.get(_Coupon, o.coupon_id)
-                        if coupon and coupon.status == "LOCKED":
-                            coupon.status = "UNUSED"
-                if stale:
-                    await db.commit()
+            await _stale_order_cleanup_once()
         except Exception:
             pass
         await asyncio.sleep(INTERVAL)

@@ -12,6 +12,7 @@ from app.services.anti_fraud_service import AntiFraudService
 from app.utils.id_generator import generate_coupon_code, generate_snowflake_id
 from app.core.logger import logger
 from app.core.lock import try_acquire_lock, redis_lock
+from app.core.time_utils import to_utc_iso
 
 from app.services.base_service import BaseService
 
@@ -318,7 +319,7 @@ class CouponService(BaseService):
             "coupon_id": str(existing.id),
             "amount": float(tpl.value) if tpl else 0,
             "threshold": float(tpl.min_amount) if tpl else 0,
-            "expire_time": existing.expire_time.isoformat() if existing.expire_time else None,
+            "expire_time": to_utc_iso(existing.expire_time),
             "is_new": False,
         }
 
@@ -358,7 +359,7 @@ class CouponService(BaseService):
                     "coupon_id": sent["id"],
                     "amount": amount,
                     "threshold": threshold,
-                    "expire_time": sent.get("expire_time").isoformat() if sent.get("expire_time") else None,
+                    "expire_time": to_utc_iso(sent.get("expire_time")),
                     "is_new": True,
                 }
             return None

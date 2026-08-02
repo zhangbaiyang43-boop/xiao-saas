@@ -4,7 +4,7 @@ import hmac
 import json
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.config import settings
@@ -86,7 +86,12 @@ class AntiFraudService:
 
     @staticmethod
     def today_key() -> str:
-        return datetime.utcnow().strftime("%Y%m%d")
+        # 每日发放/核销限额是按商户"今天"算的，商户全在北京时间（UTC+8）运营。用
+        # datetime.utcnow() 直接拼日期会按 UTC 自然日切割——北京时间 07:59 用满当日
+        # 额度，08:01（UTC 跨日）额度立刻重置，两分钟内能拿到近两倍额度；反过来晚上
+        # 23:00 用满的要等到北京时间次日 8 点才重置，比商家/顾客理解的"过零点重置"
+        # 多锁 8 小时。
+        return (datetime.utcnow() + timedelta(hours=8)).strftime("%Y%m%d")
 
     @staticmethod
     async def _incr_with_ttl(key: str, ttl_seconds: int) -> int:
