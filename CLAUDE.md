@@ -38,6 +38,13 @@ behavior — the user has explicitly authorized always-on auto-commit-and-push f
 - **`cp -r src dst` nests one level deep if `dst` already exists** — this bit us twice (once with
   `static/`, once conceptually with the venv). Before copying a directory into a path that a fresh
   `git checkout` may have already recreated, check whether `dst` exists first.
+- **Production COS bucket is `poster-system-1253573799`** (`COS_BUCKET` in the server's `.env`).
+  Confirmed in the Tencent Cloud console: 基础图片处理/数据万象 is already enabled on this bucket
+  and 原图保护 is off, so the `imageMogr2/thumbnail/{size}x/format/webp` query-param thumbnails
+  appended in `member-mini-client` (`dishImage()` in `menu.vue`) work without any extra "样式"
+  setup — the raw-query-param access pattern is the default-supported one. If dish images are
+  ever migrated to a different bucket, re-check this setting on the new bucket; it's per-bucket,
+  not account-wide.
 
 ## Standard deployment recipe (once code is on GitHub)
 
