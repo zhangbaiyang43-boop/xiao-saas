@@ -83,7 +83,7 @@
           </div>
           <div class="table-tile-state">{{ tableStatusText(table) || '已结账' }}</div>
           <div class="table-tile-total">¥{{ table.total.toFixed(2) }}</div>
-          <div class="table-tile-count">{{ table.orders.length }} 单</div>
+          <div class="table-tile-count">{{ table.orders.length }} 单<template v-if="table.pickupNo"> · {{ table.pickupNo }}号牌</template></div>
         </div>
       </div>
 
@@ -102,6 +102,12 @@
               <span class="table-state" :class="{ 'table-state--urgent': selectedTable.canSettle && selectedTable.checkoutRequestedAt }">{{ tableStatusText(selectedTable) }}</span>
             </div>
             <span class="table-total">¥{{ selectedTable.total.toFixed(2) }}</span>
+          </div>
+
+          <!-- 取餐牌号：管的是这一桌这一次吃饭，不是某一单菜，一桌填一次，后面的加单自动共享 -->
+          <div class="merchant-note-row" style="padding:8px 16px;margin:0;border-bottom:1px solid var(--border)">
+            <input v-model="selectedTablePickupNoDraft" class="merchant-note-input" placeholder="这一桌的取餐牌号（如：07）" maxlength="16" @keyup.enter="sendTablePickupNo(selectedTable)" />
+            <button class="merchant-note-send" @click="sendTablePickupNo(selectedTable)">登记</button>
           </div>
 
           <!-- 订单列表 -->
@@ -138,10 +144,6 @@
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
-            </div>
-            <div v-if="!['cancelled','rejected'].includes(order.status)" class="merchant-note-row">
-              <input v-model="order.pickup_no_draft" class="merchant-note-input" placeholder="取餐牌号（如：07）" maxlength="16" @keyup.enter="sendPickupNo(order)" />
-              <button class="merchant-note-send" @click="sendPickupNo(order)">登记</button>
             </div>
             <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
               <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言（如：招牌菜品已售完，换成了清蒸鱼）" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
@@ -456,6 +458,7 @@ const orders = ref([])
 const reviewsMap = ref({}) // order_id -> review
 const view = ref('table')
 const selectedTableKey = ref(null)
+const selectedTablePickupNoDraft = ref('')
 const showTableDetail = ref(false)
 const showSettleDialog = ref(false)
 const settlingTable = ref(null)
@@ -795,6 +798,7 @@ const tableGroups = computed(() => {
   }
   return Object.values(map).map(t => ({
     ...t,
+    pickupNo: t.orders.find(o => o.pickup_no)?.pickup_no || null,
     pendingOrders: t.orders.filter(o => o.status === 'pending'),
     preparingOrders: t.orders.filter(o => o.status === 'preparing'),
     canSettle: t.orders.length > 0 && t.orders.every(o => ['done', 'settled'].includes(o.status)) && t.orders.some(o => o.status === 'done') && t.pendingPaymentOrders.length === 0,
@@ -815,6 +819,7 @@ const visibleTableGroups = computed(() => tableGroups.value.filter(t => !t.isSet
 const selectedTable = computed(() => tableGroups.value.find(t => t.groupKey === selectedTableKey.value) || null)
 function openTableDetail(table) {
   selectedTableKey.value = table.groupKey
+  selectedTablePickupNoDraft.value = table.orders.find(o => o.pickup_no)?.pickup_no || ''
   showTableDetail.value = true
 }
 
@@ -889,14 +894,40 @@ async function sendMerchantNote(order) {
   } catch { message.error('发送失败') }
 }
 
+// 牌子管的是这一桌这一次吃饭，不是某一单菜：登记接口会把这个号同步给同一个桌台会话下的
+// 所有订单，这里把返回的 order_ids 应用回本地列表，同一桌其它订单（包括加单）立刻跟着更新，
+// 不用等下一次轮询刷新才看到。
+function applyPickupNoToOrders(pickupNo, orderIds) {
+  const idSet = new Set((orderIds || []).map(String))
+  for (const o of orders.value) {
+    if (idSet.has(String(o.id))) {
+      o.pickup_no = pickupNo || ''
+      o.pickup_no_draft = pickupNo || ''
+    }
+  }
+}
+
 async function sendPickupNo(order) {
   const value = order.pickup_no_draft.trim()
   if (!value || value === order.pickup_no) return
   try {
     const res = await updateOrderPickupNo(order.id, value)
     if (res.code === 200) {
-      order.pickup_no = value
+      applyPickupNoToOrders(res.data.pickup_no, res.data.order_ids)
       message.success('取餐牌号已登记')
+    } else message.error(res.msg || '登记失败')
+  } catch { message.error('登记失败') }
+}
+
+async function sendTablePickupNo(table) {
+  const value = selectedTablePickupNoDraft.value.trim()
+  const anyOrder = table?.orders?.[0]
+  if (!value || !anyOrder) return
+  try {
+    const res = await updateOrderPickupNo(anyOrder.id, value)
+    if (res.code === 200) {
+      applyPickupNoToOrders(res.data.pickup_no, res.data.order_ids)
+      message.success('取餐牌号已登记，这一桌后面加单会自动带上')
     } else message.error(res.msg || '登记失败')
   } catch { message.error('登记失败') }
 }

@@ -14,6 +14,13 @@ class DiningSession(BaseModel):
     closed_at = Column(DateTime, nullable=True)
     closed_by = Column(String(64), nullable=True)
     checkout_requested_at = Column(DateTime, nullable=True)
+    # 这一次开桌期间前台发给顾客的实体取餐牌号。挂在会话上而不是单个 Order 上，是因为
+    # 一桌吃饭期间会有多次加单（同一个 dining_session_id 下好几张 Order），牌子只发一次、
+    # 管的是"这一桌这次吃饭"而不是"这一单菜"，放在 Order 上会导致前台在每一单里都要
+    # 重复填同一个号。Order.pickup_no 仍然保留，作为打印小票时读取的快照字段，创建/
+    # 登记时从这里同步过去，见 app/api/v1/orders.py 里 create_order 和
+    # update_order_pickup_no。
+    pickup_no = Column(String(16), nullable=True)
 
     __table_args__ = (
         Index("ux_dining_session_active_key", "active_key", unique=True),

@@ -402,6 +402,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     dining_participant_id = None
     order_type = None
     parent_order_id = None
+    session_for_pickup = None  # 解析出来的 DiningSession，用来读/写这一桌共享的取餐牌号
     if is_staff_order:
         merchant_tenant_id = getattr(request.state, "tenant_id", None)
         if not merchant_tenant_id or merchant_tenant_id != tenant_id:
@@ -422,6 +423,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             return error_response(code=400, msg=str(exc))
 
         dining_session_id = session.id
+        session_for_pickup = session
         existing_order_result = await db.execute(
             select(Order)
             .where(
@@ -455,6 +457,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         session = session_result.scalar_one_or_none()
         if not session:
             return error_response(code=400, msg="dining session not found")
+        session_for_pickup = session
 
         participant_filters = [
             DiningParticipant.tenant_id == tenant_id,
@@ -650,6 +653,14 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
 
     final_total = max(real_total - float(coupon_discount), 0)
 
+    # 取餐牌号跟着"这一桌这次吃饭"走，不是跟着"这一单"走：显式传了就用显式的（顺便把这个
+    # 号同步成这一桌接下来所有加单共享的值），没传就继承这一桌已经登记过的号，避免同一桌
+    # 每加一单都要前台重新填一遍。
+    explicit_pickup_no = (body.pickup_no or "").strip()[:16] or None
+    if explicit_pickup_no and session_for_pickup is not None:
+        session_for_pickup.pickup_no = explicit_pickup_no
+    resolved_pickup_no = explicit_pickup_no or (session_for_pickup.pickup_no if session_for_pickup else None)
+
     order = Order(
         tenant_id=tenant_id,
         customer_id=customer_id,
@@ -668,7 +679,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         discount_amount=float(coupon_discount) if coupon_discount > 0 else None,
         source="staff" if is_staff_order else (body.source or "miniprogram"),
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
-        pickup_no=(body.pickup_no or "").strip()[:16] or None,
+        pickup_no=resolved_pickup_no,
         client_request_id=request_id,
     )
     db.add(order)
@@ -1827,7 +1838,10 @@ async def update_order_pickup_no(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """前台把实体取餐牌号登记到这一单上（顾客到店核实付款、领牌子的时候填）。"""
+    """前台把实体取餐牌号登记到这一桌（顾客到店核实付款、领牌子的时候填）。牌子管的是"这一次
+    开桌"而不是"这一单菜"，所以落地到这单所在的 DiningSession 上，并同步给这一桌当前所有
+    未取消/拒单的订单——前台只需要在任意一单上填一次，同一桌后面的加单不用再重复填。没有
+    会话的单（比如没有走桌台流程的订单）就还是只更新这一单自己。"""
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
@@ -1838,9 +1852,37 @@ async def update_order_pickup_no(
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
-    order.pickup_no = body.pickup_no.strip()[:16] or None
+
+    pickup_no = body.pickup_no.strip()[:16] or None
+    affected_ids = [order.id]
+
+    if order.dining_session_id:
+        from app.models.dining import DiningSession
+
+        session = await db.get(DiningSession, order.dining_session_id)
+        if session:
+            session.pickup_no = pickup_no
+            siblings_result = await db.execute(
+                select(Order).where(
+                    Order.tenant_id == tenant_id,
+                    Order.dining_session_id == session.id,
+                    Order.status.notin_(["cancelled", "rejected"]),
+                )
+            )
+            siblings = siblings_result.scalars().all()
+            for sibling in siblings:
+                sibling.pickup_no = pickup_no
+            affected_ids = [o.id for o in siblings] or affected_ids
+        else:
+            order.pickup_no = pickup_no
+    else:
+        order.pickup_no = pickup_no
+
     await db.commit()
-    return success_response(data={"id": str(order.id), "pickup_no": order.pickup_no}, msg="取餐牌号已更新")
+    return success_response(
+        data={"pickup_no": pickup_no, "order_ids": [str(i) for i in affected_ids]},
+        msg="取餐牌号已更新",
+    )
 
 
 class OrderReprintBody(PydanticBase):
