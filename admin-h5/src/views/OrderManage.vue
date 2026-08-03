@@ -112,6 +112,7 @@
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
+                <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
               </div>
               <div style="text-align:right">
@@ -137,6 +138,10 @@
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
+            </div>
+            <div v-if="!['cancelled','rejected'].includes(order.status)" class="merchant-note-row">
+              <input v-model="order.pickup_no_draft" class="merchant-note-input" placeholder="取餐牌号（如：07）" maxlength="16" @keyup.enter="sendPickupNo(order)" />
+              <button class="merchant-note-send" @click="sendPickupNo(order)">登记</button>
             </div>
             <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
               <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言（如：招牌菜品已售完，换成了清蒸鱼）" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
@@ -235,6 +240,7 @@
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status) }}</a-tag>
               <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
+              <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
             </div>
             <div style="text-align:right">
@@ -260,6 +266,10 @@
             <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
             <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
+          </div>
+          <div v-if="!['cancelled','rejected'].includes(order.status)" class="merchant-note-row">
+            <input v-model="order.pickup_no_draft" class="merchant-note-input" placeholder="取餐牌号（如：07）" maxlength="16" @keyup.enter="sendPickupNo(order)" />
+            <button class="merchant-note-send" @click="sendPickupNo(order)">登记</button>
           </div>
           <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
             <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
@@ -406,6 +416,7 @@
         </template>
       </div>
       <div style="position:absolute;left:0;right:0;bottom:0;background:var(--bg-card);border-top:1px solid var(--border);padding:10px 16px 16px">
+        <a-input v-model:value="staffPickupNo" placeholder="可选：发给顾客的取餐牌号（如：07）" maxlength="16" style="margin-bottom:10px" />
         <a-input v-model:value="staffNote" placeholder="可选：备注是谁加的（如：前台-老王）" maxlength="64" style="margin-bottom:10px" />
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <span style="font-size:13px;color:var(--text-2)">共 {{ staffCartCount }} 件</span>
@@ -423,7 +434,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, updateMerchantNote, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, updateOrderStatus, updateMerchantNote, updateOrderPickupNo, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
 
 function decodeJwtPayload(token) {
@@ -465,6 +476,7 @@ const staffMenuLoading = ref(false)
 const staffMenuLoaded = ref(false)
 const staffCart = ref({}) // dish_id -> qty
 const staffNote = ref('')
+const staffPickupNo = ref('')
 const staffSubmitting = ref(false)
 
 // 新开一桌：不能让店员手打桌号（容易跟顾客自己扫码用的桌号对不上，同一张桌子
@@ -574,10 +586,12 @@ async function submitStaffOrder() {
       items,
       total: staffCartTotal.value,
       staff_note: staffNote.value.trim() || undefined,
+      pickup_no: staffPickupNo.value.trim() || undefined,
     })
     if (res.code === 200) {
       message.success('已提交，同步到这一桌的账单里了')
       staffOrderVisible.value = false
+      staffPickupNo.value = ''
       await loadOrders()
     } else {
       message.error(res.msg || '提交失败')
@@ -656,6 +670,8 @@ async function loadOrders(pollMeta = {}) {
       remark: o.remark || '',
       source: o.source || 'miniprogram',
       staffNote: o.staff_note || '',
+      pickup_no: o.pickup_no || '',
+      pickup_no_draft: o.pickup_no || '',
       merchant_note: o.merchant_note || '',
       merchant_note_draft: o.merchant_note || '',
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
@@ -871,6 +887,18 @@ async function sendMerchantNote(order) {
       message.success('留言已发送，顾客查看订单时可看到')
     } else message.error(res.msg || '发送失败')
   } catch { message.error('发送失败') }
+}
+
+async function sendPickupNo(order) {
+  const value = order.pickup_no_draft.trim()
+  if (!value || value === order.pickup_no) return
+  try {
+    const res = await updateOrderPickupNo(order.id, value)
+    if (res.code === 200) {
+      order.pickup_no = value
+      message.success('取餐牌号已登记')
+    } else message.error(res.msg || '登记失败')
+  } catch { message.error('登记失败') }
 }
 
 async function rejectOrder(order) {

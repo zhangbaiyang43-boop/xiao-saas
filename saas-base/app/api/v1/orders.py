@@ -112,6 +112,7 @@ class OrderCreate(PydanticBase):
     client_id: Optional[str] = None
     source: Optional[str] = "miniprogram"
     staff_note: Optional[str] = None
+    pickup_no: Optional[str] = None  # 代客加单时前台已经知道要发哪个取餐牌号，可以直接带上
     request_id: Optional[str] = None  # 幂等键：同一次提交的双击/弱网重试携带同一个值，重复提交返回同一张订单
 
 
@@ -298,6 +299,7 @@ def serialize_order(order: Order, order_items: list, checkout_requested_at: str 
         "parent_order_id": str(order.parent_order_id) if getattr(order, "parent_order_id", None) else None,
         "source": getattr(order, "source", "miniprogram"),
         "staff_note": getattr(order, "staff_note", None),
+        "pickup_no": getattr(order, "pickup_no", None),
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "items": [
             {
@@ -666,6 +668,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         discount_amount=float(coupon_discount) if coupon_discount > 0 else None,
         source="staff" if is_staff_order else (body.source or "miniprogram"),
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
+        pickup_no=(body.pickup_no or "").strip()[:16] or None,
         client_request_id=request_id,
     )
     db.add(order)
@@ -1811,6 +1814,33 @@ async def settle_table(
     )
 class MerchantNoteUpdate(PydanticBase):
     note: str = ""
+
+
+class OrderPickupNoUpdate(PydanticBase):
+    pickup_no: str = ""
+
+
+@router.patch("/orders/{order_id}/pickup-no")
+async def update_order_pickup_no(
+    order_id: str,
+    body: OrderPickupNoUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """前台把实体取餐牌号登记到这一单上（顾客到店核实付款、领牌子的时候填）。"""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    token_type = getattr(request.state, "token_type", None)
+    if not tenant_id or token_type != "merchant":
+        return error_response(code=401, msg="请先登录")
+    result = await db.execute(
+        select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        return error_response(code=404, msg="order not found")
+    order.pickup_no = body.pickup_no.strip()[:16] or None
+    await db.commit()
+    return success_response(data={"id": str(order.id), "pickup_no": order.pickup_no}, msg="取餐牌号已更新")
 
 
 class OrderReprintBody(PydanticBase):

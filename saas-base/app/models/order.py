@@ -34,6 +34,11 @@ class Order(BaseModel):
     completed_at = Column(DateTime, nullable=True)
     source = Column(String(16), nullable=False, default="miniprogram")   # miniprogram | h5 | staff
     staff_note = Column(String(64), nullable=True)  # 服务员代客加单时的可选备注（如"前台-老王"），不关联账号，仅展示
+    # 前台发给顾客的实体取餐牌号（如"07"）。跟 table_no 不是一回事——牌子是跟着顾客走的
+    # 临时凭证，不代表固定桌位，不能塞进 table_no/DiningSession（那边靠 table_no 做
+    # 会话查重，牌子号在一天内会被反复重复使用，会把不相关的顾客错误合并进同一桌账）。
+    # 这里只是一个展示用的自由文本字段，牌子池子的实际调度仍由前台人工管理。
+    pickup_no = Column(String(16), nullable=True)
     # 支付成功后实际发放的首单/复购/第二单奖励券快照（JSON 字符串），供客户端在
     # 微信支付异步回调落库后，通过轮询 /orders/my 把这个奖励拿回来展示——微信支付的
     # 真实发券发生在 wxpay_notify 这个服务器对服务器回调里，回调结果不会回到小程序端。

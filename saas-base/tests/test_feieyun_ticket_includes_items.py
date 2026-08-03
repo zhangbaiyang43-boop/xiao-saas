@@ -44,6 +44,16 @@ class FeieyunTicketIncludesItemsTest(unittest.TestCase):
         ticket = build_order_ticket(order, None)
         self.assertIn("合计：¥45.50", ticket)
 
+    def test_pickup_no_is_printed_when_set(self):
+        order = self._order(pickup_no="07")
+        ticket = build_order_ticket(order, [])
+        self.assertIn("取餐号：07", ticket)
+
+    def test_no_pickup_no_line_when_not_assigned_yet(self):
+        order = self._order()
+        ticket = build_order_ticket(order, [])
+        self.assertNotIn("取餐号", ticket)
+
 
 if __name__ == "__main__":
     unittest.main()
