@@ -1351,6 +1351,7 @@ export default {
     const authActionStatus = ref('idle')
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
+    const paymentFailed = ref(false)  // 上一次点"去支付"真的失败了（不是用户取消）——按钮要明确提示这是在重试，不能让用户猜要不要再点一次
     const payAmount = ref(0)
     const pendingOrderId = ref('')
     const showReview = ref(false)
@@ -2026,6 +2027,7 @@ export default {
     const clearPendingPaymentOrder = () => {
       try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
       pendingOrderId.value = ''
+      paymentFailed.value = false
     }
 
     const clearStalePrepayOrderForPayLater = () => {
@@ -2288,6 +2290,7 @@ export default {
       if (paying.value) return confirmationText.paying
       if (tableSessionClosed.value) return '\u672c\u684c\u5df2\u7ed3\u675f'
       if (!canSubmitOrder.value) return confirmationText.unavailable
+      if (paymentFailed.value && pendingOrderId.value) return '\u91cd\u65b0\u652f\u4ed8'
       if (paymentMode.value === 'table_account') return confirmationText.submitTableAccount
       if (paymentMode.value === 'postpay') return confirmationText.submitOrder
       return confirmationText.payNow + ' ' + confirmationText.currency + wechatPayAmount.value.toFixed(2)
@@ -2316,6 +2319,7 @@ export default {
       if (ordering.value || paying.value) return
       pendingOrderId.value = ''
       pendingPaymentIntent.value = null
+      paymentFailed.value = false
     }
     const toggleRemarkChip = (chip) => {
       if (remark.value.includes(chip)) {
@@ -2379,7 +2383,14 @@ export default {
         if (d.category && !raw.includes(d.category)) raw.push(d.category)
       }
       const order = categoryOrder.value
-      let sorted = order.length ? order.filter(c => raw.includes(c)) : [...raw]
+      let sorted
+      if (order.length) {
+        sorted = order.filter(c => raw.includes(c))
+      } else {
+        // 商家没配置分类顺序时，按点餐习惯给个默认顺序，而不是菜品在数据库里出现的原始
+        // 顺序（等于商家后台录入顺序直接透传给顾客）；商家一旦自己配置过就完全尊重商家。
+        sorted = [...raw].sort((a, b) => categoryOrderWeight(a) - categoryOrderWeight(b))
+      }
       raw.forEach(c => { if (!sorted.includes(c)) sorted.push(c) })
       const hasRecommended = allDishes.value.some(d => {
         const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
@@ -2416,6 +2427,16 @@ export default {
       if (/\u997a\u5b50/.test(text)) return 'icon-jiaozi'
       if (/\u751c\u54c1/.test(text)) return 'icon-tianpin'
       return 'icon-chadian'
+    }
+
+    // \u5546\u5bb6\u6ca1\u6709\u5728\u540e\u53f0\u624b\u52a8\u914d\u597d\u5206\u7c7b\u987a\u5e8f\u65f6\uff0c\u4e4b\u524d\u662f\u6309\u83dc\u54c1\u5728\u6570\u636e\u5e93\u91cc\u51fa\u73b0\u7684\u539f\u59cb\u987a\u5e8f\u6392\u5206\u7c7b
+    // sidebar\u2014\u2014\u672c\u8d28\u4e0a\u662f\u5546\u5bb6\u540e\u53f0\u7684\u5f55\u5165\u987a\u5e8f\u76f4\u63a5\u900f\u4f20\u5230\u987e\u5ba2\u70b9\u9910\u754c\u9762\uff0c\u4e0d\u662f\u70b9\u9910\u4e60\u60ef\u7684\u987a\u5e8f\u3002
+    // \u8fd9\u91cc\u7ed9\u51e0\u4e2a\u5e38\u89c1\u5f52\u4e00\u5316\u540e\u7684\u5206\u7c7b\u4e00\u4e2a\u9ed8\u8ba4\u6743\u91cd\uff0c\u547d\u4e2d\u4e0d\u4e86\u7684\u5206\u7c7b\uff08\u6743\u91cd99\uff09\u6392\u5728\u6700\u540e\uff0c
+    // \u4e00\u65e6\u5546\u5bb6\u81ea\u5df1\u914d\u7f6e\u8fc7 category_order\uff0c\u8fd9\u4e2a\u9ed8\u8ba4\u6743\u91cd\u5b8c\u5168\u4e0d\u751f\u6548\uff0c\u4e0d\u8986\u76d6\u5546\u5bb6\u7684\u9009\u62e9\u3002
+    const CATEGORY_DEFAULT_WEIGHT = { '\u62db\u724c': 1, '\u6c64\u54c1': 2, '\u4e3b\u98df': 3, '\u996e\u54c1': 4, '\u70b9\u5fc3': 5 }
+    const categoryOrderWeight = (cat) => {
+      if (normalizeCategoryText(cat) === RECOMMEND_CAT) return 0
+      return CATEGORY_DEFAULT_WEIGHT[categoryDisplayName(cat)] ?? 99
     }
 
     const dishesByCategory = (cat) => {
@@ -2974,6 +2995,7 @@ export default {
         const res = await createOrder(payload, { authRedirect: false })
         const data = res?.data || {}
         pendingOrderId.value = String(data.id || data.order_id || '')
+        paymentFailed.value = false
         orderNo.value = String(data.order_no || data.id || '').slice(-4)
         successItems.value = cartItems.value.map(i => ({ ...i }))
         successDiscount.value = Number(data.discount_amount ?? 0)
@@ -3094,6 +3116,7 @@ export default {
     const confirmPay = async () => {
       if (paying.value || !pendingOrderId.value) return false
       paying.value = true
+      paymentFailed.value = false
       try {
         if (await recoverPendingPaymentResult()) return true
         if (showCheckoutAuth.value) authActionStatus.value = 'paying'
@@ -3138,6 +3161,7 @@ export default {
         }
         if (await recoverPendingPaymentResult({ showDetail: true })) return true
         const msg = err?.errMsg || err?.message || '\u652f\u4ed8\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5'
+        paymentFailed.value = true
         if (String(msg).includes('cancel')) {
           uni.showToast({ title: '\u5df2\u53d6\u6d88\u652f\u4ed8', icon: 'none' })
         } else {

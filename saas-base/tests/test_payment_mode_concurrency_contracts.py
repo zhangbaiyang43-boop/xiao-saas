@@ -68,7 +68,7 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         reprint_source = function_source(ORDERS_SOURCE, "reprint_order_ticket")
         print_source = function_source(ORDERS_SOURCE, "_print_paid_order_ticket")
         self.assertIn('allowed, reason = can_reprint_order(order, print_type=print_type)', reprint_source)
-        self.assertIn('_print_paid_order_ticket(order, db, manual=True, reason="manual_reprint")', reprint_source)
+        self.assertIn('_print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator=tenant_id)', reprint_source)
         self.assertNotIn('payment_status = "paid"', reprint_source)
         self.assertNotIn('payment_method =', reprint_source)
         self.assertIn('select(Order).where(Order.id == order.id).with_for_update()', print_source)

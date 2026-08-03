@@ -123,6 +123,7 @@ export const mockPayOrder = (id) => request.post(`/v1/orders/${id}/mock-pay`)
 export const createWxPayOrder = (id, data = {}) => request.post(`/v1/orders/${id}/pay`, data)
 export const updateMerchantNote = (id, note) => request.patch(`/v1/orders/${id}/note`, { note })
 export const updateOrderPickupNo = (id, pickup_no) => request.patch(`/v1/orders/${id}/pickup-no`, { pickup_no })
+export const reprintOrder = (id, print_type = 'kitchen') => request.post(`/v1/orders/${id}/reprint`, { print_type })
 export const settleTable = (table_no) => request.post('/v1/orders/settle-table', { table_no })
 export const getReviews = () => request.get('/v1/orders/reviews')
 

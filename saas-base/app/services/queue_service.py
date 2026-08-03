@@ -264,8 +264,9 @@ async def print_queue_ticket(db: AsyncSession, ticket: QueueTicket, ahead_count:
             logger.warning("[PRINT_TEST_CALL_PROVIDER] provider=feieyun")
             from app.services.feieyun_service import print_order
 
-            success = await print_order(tenant.feieyun_sn, tenant.feieyun_key, content)
-            logger.warning("[PRINT_TEST_PROVIDER_RESULT] success=%s", success)
+            print_result = await print_order(tenant.feieyun_sn, tenant.feieyun_key, content)
+            success = print_result == "success"
+            logger.warning("[PRINT_TEST_PROVIDER_RESULT] success=%s result=%s", success, print_result)
             return {"success": success, "provider": "feieyun"}
         logger.warning("[PRINT_TEST_PROVIDER_RESULT] provider=None config incomplete")
         return {"success": False, "error": "printer config incomplete"}

@@ -119,6 +119,8 @@
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
                 <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
+                <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
+                <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
               </div>
               <div style="text-align:right">
@@ -144,6 +146,7 @@
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
+              <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
             </div>
             <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
               <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言（如：招牌菜品已售完，换成了清蒸鱼）" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
@@ -243,6 +246,8 @@
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status) }}</a-tag>
               <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
               <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
+              <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
+              <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
             </div>
             <div style="text-align:right">
@@ -268,6 +273,7 @@
             <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
             <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
+            <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
           </div>
           <div v-if="!['cancelled','rejected'].includes(order.status)" class="merchant-note-row">
             <input v-model="order.pickup_no_draft" class="merchant-note-input" placeholder="取餐牌号（如：07）" maxlength="16" @keyup.enter="sendPickupNo(order)" />
@@ -436,7 +442,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, updateMerchantNote, updateOrderPickupNo, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, updateOrderStatus, updateMerchantNote, updateOrderPickupNo, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
 
 function decodeJwtPayload(token) {
@@ -677,10 +683,12 @@ async function loadOrders(pollMeta = {}) {
       pickup_no_draft: o.pickup_no || '',
       merchant_note: o.merchant_note || '',
       merchant_note_draft: o.merchant_note || '',
+      printStatus: o.print_status || null,
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
       items: Array.isArray(o.items) ? o.items : [],
       paymentMethodText: paymentMethodText(o.payment_method, o.payment_status),
       updating: false,
+      reprinting: false,
     }))
   } catch {
     pollFailCount.value++
@@ -952,6 +960,20 @@ async function finishOrder(order) {
     else message.error(res.msg || '操作失败，请刷新页面重试')
   }
   catch { message.error('操作失败') } finally { order.updating = false }
+}
+
+async function reprintOrderTicket(order) {
+  order.reprinting = true
+  try {
+    const res = await reprintOrder(order.id)
+    if (res.code === 200) {
+      order.printStatus = res.data?.print_status || null
+      if (order.printStatus === 'printed') message.success('已重新打印')
+      else message.warning('打印结果仍未知，请核实小票机是否已出票')
+    } else {
+      message.error(res.msg || '补打失败')
+    }
+  } catch { message.error('补打失败') } finally { order.reprinting = false }
 }
 
 async function acceptTableOrders(table) {

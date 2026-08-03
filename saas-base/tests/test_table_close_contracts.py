@@ -78,6 +78,12 @@ class TableCloseContractsTest(unittest.TestCase):
         # 本桌身份的建立/缓存判断收敛到 utils/dining.js 的 resolveDiningIdentity 共享实现
         # （entry/index.vue 和 menu.vue 都走这一份，不再各自维护），menu.vue 的
         # ensureDiningSession 只是薄封装，负责把结果同步进组件自己的响应式状态。
+        #
+        # onLoad 里这个调用不再传 force:true（P0 性能修复：entry 页扫码进来时已经
+        # force 刷新过一次并写进缓存，menu.vue 不用再重复打一次一模一样的请求）——
+        # 重新扫一张不同的桌码时之所以还能正确建立新会话，靠的不是这个 force 参数，
+        # 是 resolveDiningIdentity 里的 staleForOtherTable 判断：缓存记录的桌号跟
+        # 当前桌号对不上就自动判定缓存不可信、发起真实请求，这条判断在上面已经断言过。
         self.assertIn("const ensureDiningSession = async (force = false)", MENU_SOURCE)
         self.assertIn("resolveDiningIdentity", MENU_SOURCE)
         self.assertIn(
@@ -85,7 +91,7 @@ class TableCloseContractsTest(unittest.TestCase):
             DINING_UTIL_SOURCE,
         )
         self.assertIn("tableSessionClosed.value = false", MENU_SOURCE)
-        self.assertIn("await this.ensureDiningSession(true)", MENU_SOURCE)
+        self.assertIn("await this.ensureDiningSession(false)", MENU_SOURCE)
         self.assertNotIn("if (!tableSessionClosed.value && sessionStatus === 'OPEN') tableSessionClosedNotice", MENU_SOURCE)
 
     def test_next_table_scan_creates_new_session_after_active_key_cleared(self):

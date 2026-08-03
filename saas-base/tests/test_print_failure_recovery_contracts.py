@@ -356,6 +356,63 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         self.assertTrue(data["print_manual_reprint"])
         self.assertEqual(data["print_provider_task_id"], "task_manual")
 
+    def _feieyun_db(self):
+        order = FakeOrder()
+        config = FakeTenantConfig()
+        config.business_info = {}  # no printer_provider -> falls through to the feieyun branch
+        db = FakeDB(order, config=config)
+        db.tenant.feieyun_sn = "SN001"
+        db.tenant.feieyun_key = "KEY001"
+        return order, db
+
+    def test_feieyun_definite_failure_is_marked_failed(self):
+        order, db = self._feieyun_db()
+
+        async def fake_print_order(*args, **kwargs):
+            return "failed"
+
+        sys.modules["app.services.feieyun_service"].print_order = fake_print_order
+
+        result = asyncio.run(self.module._print_paid_order_ticket(order, db, reason="payment_success"))
+        data = self.module.serialize_order(order, db.items)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(data["print_status"], "failed")
+
+    def test_feieyun_timeout_result_is_marked_unknown_not_failed(self):
+        # P1-3: feieyun's API has no idempotency/external-order-id support (confirmed against
+        # its open-platform docs), so a request that times out could have actually printed.
+        # Treating that the same as a definite failure would let the merchant-list auto-retry
+        # (which only fires on status=="failed") reprint a ticket that already went out.
+        order, db = self._feieyun_db()
+
+        async def fake_print_order(*args, **kwargs):
+            return "unknown"
+
+        sys.modules["app.services.feieyun_service"].print_order = fake_print_order
+
+        result = asyncio.run(self.module._print_paid_order_ticket(order, db, reason="payment_success"))
+        data = self.module.serialize_order(order, db.items)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(data["print_status"], "unknown")
+        self.assertNotEqual(data["print_status"], "failed")  # must not be auto-retry eligible
+
+    def test_manual_reprint_records_operator_and_timestamp(self):
+        order, db = self._feieyun_db()
+
+        async def fake_print_order(*args, **kwargs):
+            return "success"
+
+        sys.modules["app.services.feieyun_service"].print_order = fake_print_order
+
+        asyncio.run(self.module._print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator="tenant_1"))
+        data = self.module.serialize_order(order, db.items)
+
+        self.assertEqual(data["print_manual_reprint_by"], "tenant_1")
+        self.assertIsNotNone(data["print_manual_reprint_at"])
+
     def test_list_orders_contains_recovery_trigger(self):
         source = MODULE_PATH.read_text(encoding="utf-8-sig")
         self.assertIn('print_meta.get("status") == "failed"', source)

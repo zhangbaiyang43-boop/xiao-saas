@@ -161,6 +161,8 @@ def _db_print_status_to_meta_status(order: Order) -> str | None:
         return "printed"
     if status == "FAILED":
         return "failed"
+    if status == "UNKNOWN":
+        return "unknown"
     return None
 
 def _mark_order_print_state(order: Order, status: str, printed_at=None) -> None:
@@ -184,6 +186,8 @@ def _serialize_print_meta(order: Order) -> dict:
         "print_error": meta.get("last_error") if meta else None,
         "print_provider_task_id": meta.get("provider_task_id") if meta else None,
         "print_manual_reprint": bool(meta.get("manual_reprint")) if meta else False,
+        "print_manual_reprint_by": meta.get("manual_reprint_by") if meta else None,
+        "print_manual_reprint_at": meta.get("manual_reprint_at") if meta else None,
         "print_last_reason": meta.get("last_reason") if meta else None,
     }
 
@@ -782,12 +786,18 @@ async def _recover_wxpay_order_if_paid(order: Order, db: AsyncSession) -> bool:
         logger.warning("[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s", getattr(order, "id", ""), exc)
         return False
 
+class PrintResultUnknownError(RuntimeError):
+    """飞鹅云请求超时/网络异常导致没拿到响应——不知道这次到底有没有打印成功，跟"服务端
+    明确说打印失败"是两码事，调用方必须分开处理（不能自动重试，见 print_order 的说明）。"""
+
+
 async def _print_paid_order_ticket(
     order: Order,
     db: AsyncSession,
     *,
     manual: bool = False,
     reason: str = "auto",
+    operator: str | None = None,
 ) -> dict:
     """Print an order ticket and persist recoverable print state in existing order metadata."""
     if not order:
@@ -847,6 +857,9 @@ async def _print_paid_order_ticket(
         "last_reason": reason,
         "manual_reprint": bool(meta.get("manual_reprint")) or manual,
     })
+    if manual and operator:
+        meta["manual_reprint_by"] = operator
+        meta["manual_reprint_at"] = datetime.now(timezone.utc).isoformat()
     _mark_order_print_state(order, "PENDING")
     _set_print_meta(order, meta)
     await db.flush()
@@ -941,7 +954,9 @@ async def _print_paid_order_ticket(
             order_items = list(items_result.scalars().all())
             ticket = build_order_ticket(order, order_items)
             result = await print_order(tenant_obj.feieyun_sn, tenant_obj.feieyun_key, ticket)
-            if result is not True:
+            if result == "unknown":
+                raise PrintResultUnknownError("FEIEYUN_PRINT_RESULT_UNKNOWN")
+            if result != "success":
                 raise RuntimeError("FEIEYUN_PRINT_FAILED")
         else:
             raise RuntimeError("PRINTER_CONFIG_INCOMPLETE")
@@ -966,25 +981,33 @@ async def _print_paid_order_ticket(
         )
         return {"success": True, "status": "printed", "attempts": meta.get("attempts"), "provider_task_id": provider_task_id}
     except Exception as exc:
+        # 结果不明（网络超时/异常，没拿到打印服务商的响应）和明确失败（服务商回了响应说没
+        # 打印成功）分开处理："失败"允许后续自动重试（merchant_list_recovery 那条路），
+        # "未知"绝不能自动重试——如果这次其实已经打印成功了，自动重试会造成重复出票，
+        # 必须交给能实际看到打印机的人来判断要不要手动补打。
+        is_unknown = isinstance(exc, PrintResultUnknownError)
+        status_label = "unknown" if is_unknown else "failed"
+        db_status = "UNKNOWN" if is_unknown else "FAILED"
         error_code = getattr(exc, "code", None) or str(exc) or type(exc).__name__
         meta.update({
-            "status": "failed",
+            "status": status_label,
             "last_error_code": error_code,
             "last_error": str(exc),
             "failed_at": datetime.now(timezone.utc).isoformat(),
             "manual_reprint": bool(meta.get("manual_reprint")) or manual,
         })
-        _mark_order_print_state(order, "FAILED")
+        _mark_order_print_state(order, db_status)
         _set_print_meta(order, meta)
         logger.warning(
-            "[PRINT_ORDER_FAILED_RECOVERABLE] order_id=%s attempts=%s error_code=%s manual=%s reason=%s",
+            "[PRINT_ORDER_%s_RECOVERABLE] order_id=%s attempts=%s error_code=%s manual=%s reason=%s",
+            db_status,
             order.id,
             meta.get("attempts"),
             error_code,
             manual,
             reason,
         )
-        return {"success": False, "status": "failed", "attempts": meta.get("attempts"), "code": error_code}
+        return {"success": False, "status": status_label, "attempts": meta.get("attempts"), "code": error_code}
 
 async def _on_payment_success(
     order: Order,
@@ -1935,7 +1958,7 @@ async def reprint_order_ticket(
     allowed, reason = can_reprint_order(order, print_type=print_type)
     if not allowed:
         return error_response(code=400, msg=reason or "order cannot reprint")
-    print_result = await _print_paid_order_ticket(order, db, manual=True, reason="manual_reprint")
+    print_result = await _print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator=tenant_id)
     await db.commit()
     await db.refresh(order)
     return success_response(

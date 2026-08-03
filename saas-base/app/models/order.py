@@ -23,7 +23,7 @@ class Order(BaseModel):
     payment_mode = Column(String(32), nullable=False, default="prepay")  # prepay | postpay | table_account
     payment_method = Column(String(16), nullable=True)   # mock | wxpay | balance
     payment_time = Column(String(32), nullable=True)     # ISO string，避免加列类型迁移
-    print_status = Column(String(16), nullable=False, default="PENDING")  # PENDING | SUCCESS | FAILED
+    print_status = Column(String(16), nullable=False, default="PENDING")  # PENDING | SUCCESS | FAILED | UNKNOWN
     printed_at = Column(DateTime, nullable=True)
     balance_deduct_requested = Column(Numeric(10, 2), nullable=True)  # 本单预定用于抵扣的余额，供微信回调核销
     refund_status = Column(String(16), nullable=True)  # None | processing | success | failed
