@@ -22,6 +22,11 @@
       </div>
     </div>
 
+    <!-- 提醒已开启但浏览器把声音挂起了——不点这里，新订单来了也听不到 -->
+    <div v-if="audioNeedsUnlock" class="unlock-audio-banner tap-shrink" @click="unlockAudio">
+      <span class="live-dot" />提醒还没生效，点这里立即解锁
+    </div>
+
     <!-- 统计数字 -->
     <div class="section-block animate-in">
       <a-card :bordered="false" :body-style="{ padding: '12px 0' }">
@@ -128,6 +133,7 @@
                 <div v-if="order.discount_amount" style="font-size:11px;color:#ef4444;margin-top:2px">优惠 -¥{{ Number(order.discount_amount).toFixed(2) }}</div>
               </div>
             </div>
+            <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
             <div class="order-items">
               <div v-for="(item, idx) in order.items" :key="idx" class="order-item-row">
                 <span class="order-item-name">{{ item.name }}</span>
@@ -462,7 +468,9 @@ function getCurrentTenantId() {
 const loading = ref(false)
 const orders = ref([])
 const reviewsMap = ref({}) // order_id -> review
-const view = ref('table')
+// 默认打开"订单列表"而不是"桌台视图"——按桌视图要点开桌子详情抽屉才能看到接单/出餐
+// 按钮，多了一步；订单列表按钮直接在卡片上。桌台视图还在，需要看整桌汇总时手动切过去。
+const view = ref('list')
 const selectedTableKey = ref(null)
 const selectedTablePickupNoDraft = ref('')
 const showTableDetail = ref(false)
@@ -611,7 +619,14 @@ async function submitStaffOrder() {
     staffSubmitting.value = false
   }
 }
-const alertEnabled = ref(localStorage.getItem('orderAlertEnabled') === '1')
+// 提醒默认开启（老板从没手动关过就不该让他自己去找这个开关）；只有明确点过"关闭"
+// 才尊重这个选择，'0' 和"从没设置过"是两回事，不能混着当"关闭"处理。
+const _alertPref = localStorage.getItem('orderAlertEnabled')
+const alertEnabled = ref(_alertPref === null ? true : _alertPref === '1')
+if (_alertPref === null) localStorage.setItem('orderAlertEnabled', '1')
+// 提醒开着但浏览器把声音挂起了（自动播放限制）——不能让这个状态对老板完全隐身，
+// 界面上要有一个明显的"点这里解锁"提示，而不是让他以为提醒在正常工作。
+const audioNeedsUnlock = ref(false)
 let prevPendingCount = null
 let audioCtx = null
 
@@ -657,6 +672,16 @@ function disableAlert() {
   message.info('提醒已关闭')
 }
 
+function unlockAudio() {
+  if (!audioCtx) return
+  try {
+    audioCtx.resume()
+    _beep(audioCtx, 880, 0)
+    audioNeedsUnlock.value = false
+    message.success('提醒已解锁，有新订单会响铃')
+  } catch {}
+}
+
 async function loadOrders(pollMeta = {}) {
   loading.value = true
   try {
@@ -684,6 +709,7 @@ async function loadOrders(pollMeta = {}) {
       merchant_note: o.merchant_note || '',
       merchant_note_draft: o.merchant_note || '',
       printStatus: o.print_status || null,
+      createdAt: o.created_at || '',
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
       items: Array.isArray(o.items) ? o.items : [],
       paymentMethodText: paymentMethodText(o.payment_method, o.payment_status),
@@ -776,7 +802,9 @@ const sortedOrders = computed(() => {
       o.items.some(item => (item.name || '').includes(q))
     )
   }
-  return [...list].sort((a, b) => (p[a.status] ?? 9) - (p[b.status] ?? 9))
+  // 状态优先级不变（待接单永远最先看到）；同一优先级内之前是接口原始顺序，现在按
+  // 下单时间从早到晚排——不然高峰期同时来好几单待接单，老板看不出该先做哪个。
+  return [...list].sort((a, b) => (p[a.status] ?? 9) - (p[b.status] ?? 9) || a.createdAt.localeCompare(b.createdAt))
 })
 
 const LIST_PAGE_SIZE = 20
@@ -1041,9 +1069,14 @@ onMounted(async () => {
     idleInterval: 30000,
     immediate: false,
   })
-  // 如果之前已开启提醒，静默恢复 AudioContext（等用户下次点击页面时自动解锁）
+  // 如果之前已开启提醒，静默恢复 AudioContext——但不能只是"等用户下次点击页面时自动
+  // 解锁"就完事，那个时机对老板不可见，他会以为提醒在正常工作。这里主动检测一下：
+  // 挂起了就把 audioNeedsUnlock 打开，界面上露出一个明确的"点这里解锁"提示。
   if (alertEnabled.value) {
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)() } catch {}
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      if (audioCtx.state === 'suspended') audioNeedsUnlock.value = true
+    } catch {}
   }
 })
 onBeforeUnmount(() => {
@@ -1073,6 +1106,23 @@ onBeforeUnmount(() => {
   border: 1px solid #bbf7d0;
   border-radius: 20px;
   padding: 3px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.unlock-audio-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 16px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 10px 12px;
   cursor: pointer;
   user-select: none;
 }
@@ -1285,6 +1335,34 @@ onBeforeUnmount(() => {
   color: #92400e !important;
   background: #fffbeb !important;
   border-color: #fde68a !important;
+}
+/* 待接单/备餐中/已完成/已结账/已取消这 5 个之前共用组件库默认灰色，只能靠读文字分辨——
+   现在每个状态一个专属颜色：待接单最紧急用红，备餐中进行中用蓝，已完成可结账用绿，
+   已结账/已取消是"事情结束了"用浅灰区分开，不跟前面几个抢注意力。 */
+.tag-pending {
+  color: #dc2626 !important;
+  background: #fef2f2 !important;
+  border-color: #fecaca !important;
+}
+.tag-preparing {
+  color: #2563eb !important;
+  background: #eff6ff !important;
+  border-color: #bfdbfe !important;
+}
+.tag-done {
+  color: #16a34a !important;
+  background: #f0fdf4 !important;
+  border-color: #bbf7d0 !important;
+}
+.tag-settled {
+  color: #6b7280 !important;
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+}
+.tag-cancelled {
+  color: #9ca3af !important;
+  background: #f9fafb !important;
+  border-color: #e5e7eb !important;
 }
 .order-row--pending-payment {
   background: #fffbeb;
