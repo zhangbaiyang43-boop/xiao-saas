@@ -3490,10 +3490,10 @@ export default {
       // \u83dc\u5355\u80fd\u4e0d\u80fd\u663e\u793a\u53ea\u53d6\u51b3\u4e8e shopId\uff08\u4e0a\u9762\u5df2\u7ecf\u540c\u6b65\u8bbe\u597d\uff09\uff0c\u8ddf\u672c\u684c\u8eab\u4efd/\u684c\u53f0\u8ba2\u5355/
       // \u5f85\u652f\u4ed8\u6062\u590d\u5b8c\u5168\u65e0\u5173\u2014\u2014\u8fd9\u6761\u94fe\u548c\u4e0b\u9762\u90a3\u6761"\u8eab\u4efd\u2192\u684c\u53f0\u540c\u6b65\u2192\u5f85\u652f\u4ed8\u6062\u590d"\u7684\u94fe\u8def
       // \u5e76\u884c\u8dd1\uff0c\u4e0d\u518d\u8ba9\u83dc\u5355\u7b49\u4e00\u4e2a\u8ddf\u5b83\u65e0\u5173\u7684\u94fe\u8def\u3002
-      const menuReady = (async () => {
-        await this.loadShopSettings()
-        await this.loadMenu()
-      })()
+      // loadShopSettings（门店信息/分类顺序）和 loadMenu（菜品列表）互不依赖对方的返回
+      // 数据，之前写成先后 await 纯粹是顺序问题——两者互相独立就应该并行发起，少等一次
+      // 网络往返。
+      const menuReady = Promise.all([this.loadShopSettings(), this.loadMenu()])
 
       const sessionReady = (async () => {
         // entry \u9875\u626b\u7801\u8fdb\u6765\u65f6\u5df2\u7ecf\u5f3a\u5236\u5237\u65b0\u8fc7\u4e00\u6b21\u8eab\u4efd\u5e76\u5199\u8fdb\u672c\u5730\u7f13\u5b58\uff08resolveTableSession

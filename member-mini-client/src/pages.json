@@ -161,7 +161,7 @@
   "preloadRule": {
     "pages/index/index": {
       "network": "all",
-      "packages": ["subpkg-member", "subpkg-coupon", "subpkg-common"]
+      "packages": ["subpkg-order", "subpkg-member", "subpkg-coupon", "subpkg-common"]
     }
   },
   "globalStyle": {
