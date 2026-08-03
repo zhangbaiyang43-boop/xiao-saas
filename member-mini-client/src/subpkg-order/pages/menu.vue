@@ -102,6 +102,7 @@
                 class="dish-img"
                 :src="dishImage(dish)"
                 mode="aspectFill"
+                lazy-load
                 @error="markDishImageFailed(dish.id)"
               />
               <view v-else class="dish-placeholder">
@@ -918,7 +919,7 @@
           <image
             v-if="dishImage(specDish) && !detailImageFailed"
             class="spec-detail-img"
-            :src="dishImage(specDish)"
+            :src="dishImage(specDish, 750)"
             mode="aspectFill"
             @error="detailImageFailed = true"
           />
@@ -2427,7 +2428,18 @@ export default {
       return allDishes.value.filter((d) => d.category === cat)
     }
 
-    const dishImage = (dish) => dish.image_url || dish.image || dish.cover_image || ''
+    // 存量菜品图片是商家直接传的原图（可能几MB），在服务端加处理管线之前上传的图都是这样，
+    // 重新上传前没法改变已经存在 COS 上的文件本身。用 COS 万象缩略图参数在"读"的时候按需
+    // 裁一份小图，不用等商家重新上传就能立刻覆盖全部存量图片；只对 http(s) 的 COS 图片链接
+    // 生效，本地占位图/相对路径原样返回。size 是缩略图目标宽度（像素），列表小图和详情大图
+    // 用不同的值，没必要都按详情图的尺寸下载。
+    const withCosThumbnail = (url, size) => {
+      if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return url
+      const sep = url.includes('?') ? '&' : '?'
+      return `${url}${sep}imageMogr2/thumbnail/${size}x/format/webp`
+    }
+
+    const dishImage = (dish, size = 240) => withCosThumbnail(dish.image_url || dish.image || dish.cover_image || '', size)
 
     const dishTags = (dish) => {
       if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
@@ -3448,15 +3460,31 @@ export default {
       uni.setNavigationBarTitle({ title: this.shopName + ' \u70b9\u9910' })
       this.loadMyOrders()
       this.restorePendingPaymentOrder()
-      await this.ensureDiningSession(true)
-      await this.syncDiningOrders()
-      this.startTablePresencePoll()
-      await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
-      if (options.openOrders === '1') this.showOrders = true
       this.refreshCustomerAuthState()
       this.loadMemberStatus({ authRedirect: false })
-      await this.loadShopSettings()
-      await this.loadMenu()
+
+      // \u83dc\u5355\u80fd\u4e0d\u80fd\u663e\u793a\u53ea\u53d6\u51b3\u4e8e shopId\uff08\u4e0a\u9762\u5df2\u7ecf\u540c\u6b65\u8bbe\u597d\uff09\uff0c\u8ddf\u672c\u684c\u8eab\u4efd/\u684c\u53f0\u8ba2\u5355/
+      // \u5f85\u652f\u4ed8\u6062\u590d\u5b8c\u5168\u65e0\u5173\u2014\u2014\u8fd9\u6761\u94fe\u548c\u4e0b\u9762\u90a3\u6761"\u8eab\u4efd\u2192\u684c\u53f0\u540c\u6b65\u2192\u5f85\u652f\u4ed8\u6062\u590d"\u7684\u94fe\u8def
+      // \u5e76\u884c\u8dd1\uff0c\u4e0d\u518d\u8ba9\u83dc\u5355\u7b49\u4e00\u4e2a\u8ddf\u5b83\u65e0\u5173\u7684\u94fe\u8def\u3002
+      const menuReady = (async () => {
+        await this.loadShopSettings()
+        await this.loadMenu()
+      })()
+
+      const sessionReady = (async () => {
+        // entry \u9875\u626b\u7801\u8fdb\u6765\u65f6\u5df2\u7ecf\u5f3a\u5236\u5237\u65b0\u8fc7\u4e00\u6b21\u8eab\u4efd\u5e76\u5199\u8fdb\u672c\u5730\u7f13\u5b58\uff08resolveTableSession
+        // \u91cc\u7684 force:true\uff09\uff0c\u8fd9\u91cc\u4e0d\u518d\u4f20 force\u2014\u2014ensureDiningSession \u5185\u90e8\u7684
+        // resolveDiningIdentity \u4f1a\u81ea\u5df1\u5224\u65ad\u7f13\u5b58\u662f\u5426\u53ef\u4fe1\uff08\u684c\u53f7\u5bf9\u4e0d\u5bf9\u5f97\u4e0a\u3001\u6709\u6ca1\u6709
+        // session/token\uff09\uff0c\u7f13\u5b58\u4e0d\u53ef\u4fe1\u65f6\u4f9d\u7136\u4f1a\u81ea\u52a8\u53d1\u771f\u5b9e\u8bf7\u6c42\uff0c\u4e0d\u4f1a\u5e26\u7740\u8fc7\u671f\u8eab\u4efd"\u88f8\u5954"\uff0c
+        // \u4f46\u53ef\u4fe1\u65f6\u5c31\u7701\u6389\u4e00\u6b21\u53c2\u6570\u5b8c\u5168\u76f8\u540c\u7684\u91cd\u590d\u7f51\u7edc\u5f80\u8fd4\u3002
+        await this.ensureDiningSession(false)
+        await this.syncDiningOrders()
+        this.startTablePresencePoll()
+        await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
+        if (options.openOrders === '1') this.showOrders = true
+      })()
+
+      await Promise.all([menuReady, sessionReady])
     })()
   },
   onShow() {

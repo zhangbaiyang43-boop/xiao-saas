@@ -157,6 +157,58 @@ async def _stale_order_cleanup_once():
             await db.commit()
 
 
+PENDING_PAYMENT_RECONCILE_AFTER_SECONDS = 90
+PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS = 60
+
+
+async def _pending_payment_reconcile_once():
+    """只负责把"实际已经支付成功、但微信 webhook 还没落地"的订单尽快捞出来补票（触发
+    _on_payment_success，含厨房出票），不做任何取消/退库存动作——刻意跟
+    _stale_order_cleanup_once 分开，是因为"确认一笔钱是不是真的到账了"和"确定顾客真的
+    没付款、可以取消退库存"这两件事该有的响应速度天差地别：前者应该几十秒就查一次，
+    后者必须留足够长的等待窗口（15分钟）避免误伤正在正常支付中的顾客。这两件事之前共用
+    同一个 15 分钟阈值，意味着顾客付款成功但 webhook 丢失时，厨房最坏要等 15 分钟才会
+    补上这张票——直接命中"不能漏单"这条要求。一个门店在任意时刻处于 pending_payment
+    的订单数量通常是个位数，_recover_wxpay_order_if_paid 内部只有查到真的支付成功才会
+    有副作用，所以更高频地跑这个检查成本可以忽略。"""
+    from datetime import datetime as _dt, timedelta
+    from app.core.database import AsyncSessionLocal
+    from app.models.order import Order
+    from sqlalchemy.future import select as _select
+
+    threshold = _dt.utcnow() - timedelta(seconds=PENDING_PAYMENT_RECONCILE_AFTER_SECONDS)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            _select(Order).where(
+                Order.status == "pending_payment",
+                Order.created_at < threshold,
+            )
+        )
+        pending = result.scalars().all()
+        if not pending:
+            return
+        from app.api.v1.orders import _recover_wxpay_order_if_paid
+
+        recovered_any = False
+        for o in pending:
+            if await _recover_wxpay_order_if_paid(o, db):
+                recovered_any = True
+        if recovered_any:
+            await db.commit()
+
+
+async def _pending_payment_reconcile_loop():
+    import asyncio
+
+    await asyncio.sleep(10)  # 等待应用完全启动
+    while True:
+        try:
+            await _pending_payment_reconcile_once()
+        except Exception:
+            pass
+        await asyncio.sleep(PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS)
+
+
 async def _stale_order_cleanup_loop():
     """Clean stale unpaid orders and restore locked coupons."""
     import asyncio
@@ -316,6 +368,10 @@ async def startup():
 
     # 启动超时订单后台清理任务
     asyncio.create_task(_stale_order_cleanup_loop())
+
+    # 更高频地确认"已支付但 webhook 未到"的订单，不等 15 分钟的取消阈值——见
+    # _pending_payment_reconcile_once 上的注释
+    asyncio.create_task(_pending_payment_reconcile_loop())
 
     # 启动老客召回自动发券任务
     asyncio.create_task(_marketing_recall_loop())
