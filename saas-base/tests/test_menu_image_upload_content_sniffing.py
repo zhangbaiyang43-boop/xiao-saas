@@ -17,6 +17,13 @@ JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 32
 HTML_MASQUERADING_AS_PNG = b"<html><body><script>alert(document.cookie)</script></body></html>"
 
 
+def _real_png_bytes() -> bytes:
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (10, 10), color=(255, 0, 0)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def make_request():
     request = Request(
         {
@@ -82,18 +89,35 @@ class UploadMenuImageEndpointTest(unittest.IsolatedAsyncioTestCase):
         mock_upload_image.assert_not_called()
 
     @patch("app.core.cos.upload_image")
-    async def test_real_png_is_uploaded_with_sniffed_content_type_not_client_header(self, mock_upload_image):
-        mock_upload_image.return_value = "https://example.cos.myqcloud.com/dish_images/abc.png"
+    async def test_bytes_with_valid_magic_header_but_undecodable_are_rejected(self, mock_upload_image):
+        # PNG_BYTES passes the magic-bytes sniff (real PNG signature) but isn't a decodable
+        # image (just zero padding after the header). Pillow decode failure must reject the
+        # upload outright, not fall back to uploading the raw bytes -- a fallback here would
+        # defeat both this check and the sniff that ran before it.
+        upload = make_upload("dish.png", PNG_BYTES, "image/png")
+        result = await upload_menu_image(make_request(), file=upload)
+
+        self.assertEqual(result.code, 400)
+        mock_upload_image.assert_not_called()
+
+    @patch("app.core.cos.upload_image")
+    async def test_real_image_is_processed_and_uploaded_as_webp(self, mock_upload_image):
+        mock_upload_image.return_value = "https://example.cos.myqcloud.com/dish_images/abc.webp"
         # Client claims a spoofed Content-Type; the real bytes are a legitimate PNG. The
-        # server must derive Content-Type from the sniffed bytes, not trust this header.
-        upload = make_upload("dish.png", PNG_BYTES, "text/html")
+        # server must decode/re-encode the real bytes and always upload as WebP, regardless
+        # of the original format or the client-supplied header.
+        upload = make_upload("dish.png", _real_png_bytes(), "text/html")
         result = await upload_menu_image(make_request(), file=upload)
 
         self.assertEqual(result.code, 200)
         mock_upload_image.assert_called_once()
-        _, kwargs = mock_upload_image.call_args
-        called_content_type = mock_upload_image.call_args.args[2] if len(mock_upload_image.call_args.args) > 2 else kwargs.get("content_type")
-        self.assertEqual(called_content_type, "image/png")
+        args, kwargs = mock_upload_image.call_args
+        uploaded_bytes = args[0] if args else kwargs.get("file_bytes")
+        uploaded_filename = args[1] if len(args) > 1 else kwargs.get("filename")
+        uploaded_content_type = args[2] if len(args) > 2 else kwargs.get("content_type")
+        self.assertTrue(uploaded_filename.endswith(".webp"))
+        self.assertEqual(uploaded_content_type, "image/webp")
+        self.assertNotEqual(uploaded_bytes, _real_png_bytes())
 
 
 if __name__ == "__main__":

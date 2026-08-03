@@ -323,12 +323,16 @@ async def upload_menu_image(
     content = await file.read()
     if len(content) > 3 * 1024 * 1024:
         return error_response(code=400, msg="图片不能超过 3MB")
-    content_type = _sniff_image_content_type(content)
-    if not content_type:
+    if not _sniff_image_content_type(content):
         return error_response(code=400, msg="文件内容不是有效图片")
+    from starlette.concurrency import run_in_threadpool
+    from app.core.cos import process_image, upload_image
     try:
-        from app.core.cos import upload_image
-        url = upload_image(content, file.filename or f"dish.{ext}", content_type)
+        processed = await run_in_threadpool(process_image, content)
+    except ValueError:
+        return error_response(code=400, msg="图片内容无效或已损坏")
+    try:
+        url = upload_image(processed, "dish.webp", "image/webp")
         return success_response(data={"url": url}, msg="上传成功")
     except Exception as e:
         return error_response(code=500, msg=f"上传失败：{str(e)}")
