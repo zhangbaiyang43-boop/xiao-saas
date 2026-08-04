@@ -349,18 +349,25 @@
     <view v-show="activeTab === 'mine'" class="tab-scroll tab-mine-redirect">
     </view>
 
-    <!-- 之前的条件是"只要这一桌有过订单就显示"，不看订单是不是已经结束——结完账之后这条
-    横幅还会一直占着购物车栏正上方的位置，显示"本桌订单已完成"，不会自动让开。改成看
-    pendingOrderCount（已经在下面 count 角标里用的同一个 computed，过滤掉了
-    settled/cancelled/rejected 这几个终态），订单真正结束后横幅自动收起。 -->
-    <view v-if="activeTab === 'order' && pendingOrderCount > 0" class="order-status-entry" @click="viewOrderDetail">
-      <view class="order-status-entry-dot"></view>
-      <view class="order-status-entry-copy">
-        <text class="order-status-entry-title">查看本桌订单</text>
-        <text class="order-status-entry-desc">{{ tableOrderStatusTitle }}</text>
-      </view>
-      <text v-if="pendingOrderCount > 0" class="order-status-entry-count">{{ pendingOrderCount }}</text>
-      <text class="order-status-entry-arrow iconfont icon-roundright"></text>
+    <!-- 悬浮气泡，参考美团/饿了么外卖的订单进度气泡：贴边可拖动，不占横向空间，用图标+
+    颜色传达状态，点开看详情。只在订单还没到 settled/cancelled/rejected 终态时出现
+    （复用 pendingOrderCount，跟结账后自动收起是同一个判断）。 -->
+    <movable-area v-if="activeTab === 'order' && pendingOrderCount > 0" class="order-bubble-area">
+      <movable-view
+        class="order-bubble"
+        :class="['order-bubble--' + tableOrderStatusTone, { 'order-bubble--pulse': orderStatusJustChanged }]"
+        direction="vertical"
+        damping="30"
+        @click="viewOrderDetail"
+      >
+        <text class="order-bubble-icon iconfont" :class="tableOrderStatusIcon"></text>
+        <text v-if="pendingOrderCount > 1" class="order-bubble-count">{{ pendingOrderCount }}</text>
+      </movable-view>
+    </movable-area>
+
+    <!-- 气泡是新交互，第一次出现时给一次性提示，点开或几秒后自动消失，不会反复打扰 -->
+    <view v-if="showOrderBubbleHint" class="order-bubble-hint" @click="dismissOrderBubbleHint">
+      <text>点这里随时看订单进度</text>
     </view>
 
 
@@ -2167,7 +2174,40 @@ export default {
       showSuccess.value = false
       refreshAllOrderStatuses()
       showOrders.value = true
+      dismissOrderBubbleHint()
     }
+
+    // 悬浮气泡的状态变化提示："订单进了新阶段"这件事本身用一次短暂的放大动画传达，
+    // 不用常驻文字——tableOrderStatusTone 变了就短暂加一个类触发动画，动画结束后
+    // 自动摘掉，不需要判断具体变到了哪个状态。
+    const orderStatusJustChanged = ref(false)
+    let orderStatusChangeTimer = null
+    watch(tableOrderStatusTone, (val, oldVal) => {
+      if (!oldVal || val === oldVal) return
+      orderStatusJustChanged.value = false
+      nextTick(() => {
+        orderStatusJustChanged.value = true
+        clearTimeout(orderStatusChangeTimer)
+        orderStatusChangeTimer = setTimeout(() => { orderStatusJustChanged.value = false }, 700)
+      })
+    })
+
+    // 气泡是新交互，怕顾客第一次看不懂这是什么——只在这一桌第一次出现气泡时提示一句，
+    // 点了气泡或点了提示本身都会关掉，且用 storage 记一下，同一个顾客不会反复看到。
+    const showOrderBubbleHint = ref(false)
+    let orderBubbleHintTimer = null
+    const dismissOrderBubbleHint = () => {
+      showOrderBubbleHint.value = false
+      clearTimeout(orderBubbleHintTimer)
+    }
+    watch(pendingOrderCount, (val, oldVal) => {
+      if (val > 0 && !oldVal && !uni.getStorageSync('order_bubble_hint_shown')) {
+        showOrderBubbleHint.value = true
+        uni.setStorageSync('order_bubble_hint_shown', '1')
+        orderBubbleHintTimer = setTimeout(dismissOrderBubbleHint, 4000)
+      }
+    })
+
     function startStatusPoll(id) {
       stopStatusPoll()
       statusPollTimer = setInterval(() => {
@@ -3447,7 +3487,8 @@ export default {
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       tableAccountScrollInto, scrollTableAccountToTop,
-      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
+      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
+      orderStatusJustChanged, showOrderBubbleHint, dismissOrderBubbleHint,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
@@ -5381,75 +5422,85 @@ export default {
   text { font-size: 24rpx; color: var(--text-3); }
 }
 
-.order-status-entry {
+/* 悬浮气泡：贴右边，垂直方向可拖动，纵向范围从头图下方到购物车栏上方，跟旧横幅一样
+   要避开 cart-bar 的安全区，算法沿用旧横幅注释里验证过的那套 268rpx + 2*safe。 */
+.order-bubble-area {
   position: fixed;
-  left: 32rpx;
-  right: 32rpx;
-  /* Must clear .cart-bar's real top edge: bottom(100rpx+safe) + height(148rpx+safe) = 248rpx + 2*safe.
-     The old 216rpx+safe undershot that by 32rpx+safe, so on devices with a home indicator
-     this bubble sat on top of (and hid) the checkout button below it. */
+  right: 20rpx;
+  top: 320rpx;
   bottom: calc(268rpx + env(safe-area-inset-bottom) * 2);
+  width: 112rpx;
   z-index: 850;
-  min-height: 86rpx;
-  padding: 14rpx 22rpx;
-  border-radius: var(--radius-card);
-  background: rgba(23, 26, 29, 0.92);
+}
+
+.order-bubble {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
   display: flex;
   align-items: center;
-  gap: 16rpx;
+  justify-content: center;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22);
+  animation: order-bubble-in 0.25s ease-out both;
+}
+
+@keyframes order-bubble-in {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.order-bubble--pulse {
+  animation: order-bubble-pulse 0.7s ease-out;
+}
+
+@keyframes order-bubble-pulse {
+  0% { transform: scale(1); box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22); }
+  40% { transform: scale(1.18); box-shadow: 0 0 0 16rpx rgba(255, 255, 255, 0); }
+  100% { transform: scale(1); box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22); }
+}
+
+.order-bubble--paid { background: #0ea5e9; }
+.order-bubble--preparing { background: #f59e0b; }
+.order-bubble--served { background: var(--brand); }
+.order-bubble--canceled { background: #ef4444; }
+.order-bubble--settled { background: #9ca3af; }
+.order-bubble--empty { background: #9ca3af; }
+
+.order-bubble-icon {
+  color: #fff;
+  font-size: 44rpx;
+}
+
+.order-bubble-count {
+  position: absolute;
+  top: -6rpx;
+  right: -6rpx;
+  min-width: 32rpx;
+  height: 32rpx;
+  padding: 0 8rpx;
+  border-radius: 16rpx;
+  background: #ef4444;
+  border: 2rpx solid #fff;
+  color: #fff;
+  font-size: 20rpx;
+  line-height: 28rpx;
+  text-align: center;
+  font-weight: 800;
   box-sizing: border-box;
 }
 
-.order-status-entry-dot {
-  width: 18rpx;
-  height: 18rpx;
-  border-radius: 50%;
-  background: var(--brand);
-  flex-shrink: 0;
-}
-
-.order-status-entry-copy {
-  flex: 1;
-  min-width: 0;
-}
-
-.order-status-entry-title,
-.order-status-entry-desc {
-  display: block;
-  overflow: hidden;
+.order-bubble-hint {
+  position: fixed;
+  right: 24rpx;
+  bottom: calc(392rpx + env(safe-area-inset-bottom) * 2);
+  z-index: 851;
+  padding: 12rpx 20rpx;
+  border-radius: 30rpx;
+  background: rgba(23, 26, 29, 0.92);
+  color: #fff;
+  font-size: 22rpx;
   white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.order-status-entry-title {
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 800;
-}
-
-.order-status-entry-desc {
-  margin-top: 2rpx;
-  color: rgba(255,255,255,0.68);
-  font-size: 22rpx;
-}
-
-.order-status-entry-count {
-  min-width: 34rpx;
-  height: 34rpx;
-  padding: 0 10rpx;
-  border-radius: 17rpx;
-  background: var(--brand);
-  color: #fff;
-  font-size: 22rpx;
-  line-height: 34rpx;
-  text-align: center;
-  font-weight: 800;
-}
-
-.order-status-entry-arrow {
-  color: rgba(255,255,255,0.8);
-  font-size: 36rpx;
-  line-height: 1;
+  animation: order-bubble-in 0.25s ease-out both;
 }
 
 .table-status-card {
