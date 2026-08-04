@@ -573,6 +573,9 @@ export default {
 
     // 连点头像 5 次进性能自测页——这是给开发/测试用的入口，不该在正式界面上留一个
     // "性能统计"入口给顾客看，藏在一个顾客不会误触的手势后面，2 秒内点不满 5 次就重新计数。
+    // 每次点击都给个轻提示：这个手势本身完全无视觉反馈，点中没点中、还差几次全靠猜，
+    // 排查起来跟"到底有没有生效"分不清——干脆每次点都报进度，最后跳转失败也报出来
+    // （小程序页面栈超过10层 navigateTo 会静默失败），不再有"点了但不知道有没有用"的状态。
     let avatarTapCount = 0
     let avatarTapTimer = null
     const handleAvatarMultiTap = () => {
@@ -582,8 +585,15 @@ export default {
       if (avatarTapCount >= 5) {
         avatarTapCount = 0
         clearTimeout(avatarTapTimer)
-        uni.navigateTo({ url: '/subpkg-common/pages/perf-debug' })
+        uni.navigateTo({
+          url: '/subpkg-common/pages/perf-debug',
+          fail: (err) => {
+            uni.showToast({ title: '跳转失败：' + (err?.errMsg || '未知原因'), icon: 'none', duration: 2500 })
+          },
+        })
+        return
       }
+      uni.showToast({ title: `再点 ${5 - avatarTapCount} 次进性能自测`, icon: 'none', duration: 700 })
     }
 
     return {
