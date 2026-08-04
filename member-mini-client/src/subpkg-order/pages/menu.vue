@@ -2818,63 +2818,7 @@ export default {
       categoryVisibleStart = Math.max(0, idx - 2)
       categoryScrollTop.value = categoryVisibleStart * categoryItemHeight
     }
-    let currentScrollTop = 0
     let ignoreScroll = false
-    let sectionTops = []
-
-    // 现在有两个地方会发起"测量分类位置"：菜单刚加载完 400ms 后一次，分类顺序真的
-    // 变了之后再一次（见下面的 watch）。两轮都是异步的，谁先发起不等于谁先回调完成——
-    // 如果旧顺序那一轮因为要重试而回调得比新顺序那一轮晚，就会用旧顺序的测量结果把
-    // 新顺序的结果覆盖掉，产生错位，甚至让 activeCategory 停在一个已经不存在于当前
-    // 顺序里的分类上（侧栏因此谁都不高亮）。用一个版本号解决："这一轮测量开始时是第几
-    // 轮"，回调时如果已经有更新的一轮发起过了，这轮结果就作废，不管它测得准不准，
-    // 都不能覆盖更新的那轮。
-    let sectionCacheGen = 0
-    const cacheSectionPositions = (retry = 0, gen = null) => {
-      if (gen === null) gen = ++sectionCacheGen
-      const cats = categories.value
-      if (!cats.length) return
-      const query = uni.createSelectorQuery()
-      query.select('.dish-scroll').boundingClientRect()
-      cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
-      query.exec((res) => {
-        if (gen !== sectionCacheGen) return
-        // res[0] 是滚动容器，res[1..n] 依次对应每个分类锚点。这里要求两件事都成立才
-        // 采信这次测量结果：① 每个分类锚点都测到了（不是 null）；② 滚动容器本身量出
-        // 来的高度是个正常正数，不是 0。第②条堵的是：有的情况下滚动容器还没真正排版
-        // 铺开时，select().boundingClientRect() 不会返回 null，而是返回一个 top/height
-        // 全是 0 的"空壳"对象，只判断"有没有返回对象"堵不住这种情况。
-        const svRect = res[0]
-        const allMeasured = svRect && svRect.height > 0
-          && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
-        if (!allMeasured) {
-          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1, gen), 300)
-          return
-        }
-        const svTop = svRect.top
-        sectionTops = cats.map((cat, i) => ({
-          cat,
-          top: Math.max(0, res[i + 1].top - svTop + currentScrollTop),
-        }))
-        if (currentScrollTop < 10 && cats.length) {
-          activeCategory.value = cats[0]
-        }
-      })
-    }
-
-    // categories 的排序依赖 categoryOrder（商家在后台配置的分类顺序），而 categoryOrder
-    // 是 loadShopSettings 拿到的，跟 loadMenu 是并行发起的两个独立请求（互不等待，为了
-    // 让菜单尽快显示）——如果 loadMenu 先回来，categories 会先按"没有商家自定义顺序"
-    // 的默认权重排一遍并缓存位置；等 loadShopSettings 稍后回来、categoryOrder 有值了，
-    // categories 会按商家真正配置的顺序重新计算、模板也会跟着重新渲染，但缓存的位置
-    // （sectionTops）不会跟着自动刷新，还停留在重排之前的旧顺序上——分类的顺序变了，
-    // 但每个分类对应第几个位置这份缓存没变，等于货不对板，滚动判断的分类会跟屏幕上
-    // 实际显示的对不上。这里监听 categories 的内容变化（不只是引用变化），一旦真的
-    // 重新排过序就重新测一次位置。
-    watch(
-      () => categories.value.join(''),
-      () => { nextTick(() => cacheSectionPositions()) }
-    )
 
     const switchCategory = (cat) => {
       activeCategory.value = cat
@@ -2887,22 +2831,37 @@ export default {
     }
 
 
+    // 之前的做法是缓存每个分类锚点的位置，滚动时拿当前 scrollTop 去跟缓存比对——问题是
+    // 分类顺序会在页面加载过程中动态变化（商家配置的分类顺序是另一个跟菜单并行加载的
+    // 请求，可能比菜单晚到），缓存跟真实布局之间必然存在时间差，这几轮修复下来一直在
+    // 堵不同的时机漏洞，本身就说明"缓存一份随时可能过期的快照"这个思路跟"分类顺序会
+    // 动态变化"这个前提是矛盾的。改成不缓存任何东西：每次滚动（节流后）都直接现场查一次
+    // 真实的 DOM 布局，问到的永远是当下的真相，不存在"缓存没跟上"这类问题。
     let scrollThrottleTimer = null
-    const onDishScroll = (e) => {
-      currentScrollTop = e.detail.scrollTop
-      if (ignoreScroll || !sectionTops.length) return
+    const onDishScroll = () => {
+      if (ignoreScroll) return
       if (scrollThrottleTimer) return
       scrollThrottleTimer = setTimeout(() => {
         scrollThrottleTimer = null
-        let current = sectionTops[0].cat
-        for (const s of sectionTops) {
-          if (s.top <= currentScrollTop + 30) current = s.cat
-        }
-        if (current !== activeCategory.value) {
-          activeCategory.value = current
-          syncCategoryVisible(current)
-        }
-      }, 100)
+        const cats = categories.value
+        if (!cats.length) return
+        const query = uni.createSelectorQuery()
+        query.select('.dish-scroll').boundingClientRect()
+        cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
+        query.exec((res) => {
+          const svRect = res[0]
+          if (!svRect || svRect.height <= 0) return
+          let current = cats[0]
+          for (let i = 0; i < cats.length; i++) {
+            const r = res[i + 1]
+            if (r && typeof r.top === 'number' && (r.top - svRect.top) <= 30) current = cats[i]
+          }
+          if (current !== activeCategory.value) {
+            activeCategory.value = current
+            syncCategoryVisible(current)
+          }
+        })
+      }, 150)
     }
 
     const setupCategoryObserver = () => {}
@@ -3448,9 +3407,7 @@ export default {
         allDishes.value = []
       } finally {
         loading.value = false
-        currentScrollTop = 0
         if (categories.value.length) activeCategory.value = categories.value[0]
-        setTimeout(cacheSectionPositions, 400)
       }
     }
 
