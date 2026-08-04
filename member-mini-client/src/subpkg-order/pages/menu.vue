@@ -1024,42 +1024,12 @@
     </view>
 
 
-    <view v-if="showReview" class="mask review-mask" @click.self="closeReview">
-      <view class="review-card">
-        <view class="review-title-line"><text class="review-title-icon iconfont icon-evaluate"></text><text class="review-title">评价本次用餐</text></view>
-        <text class="review-sub">您的反馈会帮助门店做得更好</text>
-        <view class="review-stars">
-          <text
-            v-for="n in 5"
-            :key="n"
-            class="review-star"
-            :class="reviewRating >= n ? 'review-star--on' : ''"
-            @click="reviewRating = n"
-          >★</text>
-        </view>
-        <view class="review-hint-row">
-          <text class="review-hint">{{ reviewHintText }}</text>
-        </view>
-        <textarea
-          v-model="reviewContent"
-          class="review-textarea"
-          placeholder="\u53ef\u9009\uff1a\u5199\u4e0b\u4f60\u7684\u7528\u9910\u611f\u53d7"
-          maxlength="100"
-          auto-height
-        />
-        <view class="review-actions">
-          <view class="review-btn-skip" @click="closeReview"><text>暂不评价</text></view>
-          <view class="review-btn-submit" :class="reviewRating === 0 ? 'review-btn-submit--disabled' : ''" @click="doSubmitReview"><text>提交评价</text></view>
-        </view>
-      </view>
-    </view>
-
   </view>
 </template>
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
-import { getMenuItems, getShopInfo, createOrder, cancelOrder, submitReview, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
+import { getMenuItems, getShopInfo, createOrder, cancelOrder, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
 import { getMemberProfile, getMembershipGrowth, joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
@@ -1362,14 +1332,6 @@ export default {
     const paymentFailed = ref(false)  // 上一次点"去支付"真的失败了（不是用户取消）——按钮要明确提示这是在重试，不能让用户猜要不要再点一次
     const payAmount = ref(0)
     const pendingOrderId = ref('')
-    const showReview = ref(false)
-    const reviewRating = ref(0)
-    const reviewContent = ref('')
-    const reviewOrderId = ref('')
-    const reviewHintText = computed(() => {
-      const hints = ['', '\u5f88\u4e0d\u6ee1\u610f', '\u8fd8\u9700\u6539\u8fdb', '\u4e00\u822c', '\u6ee1\u610f', '\u975e\u5e38\u6ee1\u610f']
-      return hints[reviewRating.value] || ''
-    })
     let statusPollTimer = null
     let tablePresencePollTimer = null
 
@@ -1967,22 +1929,6 @@ export default {
           }
         }
       })
-    }
-
-    const closeReview = () => { showReview.value = false }
-
-    const doSubmitReview = async () => {
-      if (reviewRating.value === 0) return
-      try {
-        await submitReview(reviewOrderId.value, {
-          rating: reviewRating.value,
-          content: reviewContent.value.trim() || undefined,
-        })
-        showReview.value = false
-        uni.showToast({ title: '\u611f\u8c22\u60a8\u7684\u8bc4\u4ef7', icon: 'none', duration: 2000 })
-      } catch {
-        uni.showToast({ title: '\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
-      }
     }
 
     function saveMyOrders() {
@@ -3464,7 +3410,6 @@ export default {
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       successDiscount, wechatPayAmount, canSubmitOrder, payButtonText,
-      showReview, reviewRating, reviewContent, reviewHintText, closeReview, doSubmitReview,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, memberSavings, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
       memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
@@ -6030,106 +5975,6 @@ export default {
   margin-top: 4rpx;
 }
 
-
-.review-mask {
-  align-items: center;
-  justify-content: center;
-}
-.review-card {
-  background: #fff;
-  border-radius: 32rpx;
-  padding: 56rpx 48rpx 40rpx;
-  width: 620rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-.review-title-line {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  margin-bottom: 8rpx;
-}
-
-.review-title-icon {
-  color: var(--brand);
-  font-size: 34rpx;
-  line-height: 38rpx;
-}
-
-.review-title {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: var(--text-1);
-}
-.review-sub {
-  font-size: 24rpx;
-  color: var(--text-3);
-  margin-bottom: 36rpx;
-}
-.review-stars {
-  display: flex;
-  gap: 16rpx;
-  margin-bottom: 20rpx;
-}
-.review-star {
-  font-size: 64rpx;
-  color: #e5e7eb;
-  transition: color .15s;
-}
-.review-star--on {
-  color: var(--warning);
-}
-.review-hint-row {
-  height: 36rpx;
-  margin-bottom: 24rpx;
-}
-.review-hint {
-  font-size: 26rpx;
-  color: var(--warning);
-  font-weight: 600;
-}
-.review-textarea {
-  width: 100%;
-  min-height: 120rpx;
-  font-size: 26rpx;
-  color: var(--text-2);
-  background: #f8fafc;
-  border: none;
-  border-radius: 16rpx;
-  padding: 20rpx 24rpx;
-  box-sizing: border-box;
-  margin-bottom: 32rpx;
-}
-.review-actions {
-  display: flex;
-  gap: 20rpx;
-  width: 100%;
-}
-.review-btn-skip {
-  flex: 1;
-  height: 88rpx;
-  border-radius: 44rpx;
-  border: 1rpx solid #e5e7eb;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text { font-size: 28rpx; color: var(--text-3); }
-}
-.review-btn-submit {
-  flex: 2;
-  height: 88rpx;
-  border-radius: 44rpx;
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text { font-size: 28rpx; color: #fff; font-weight: 700; }
-}
-.review-btn-submit--disabled {
-  background: #d1d5db;
-}
 
 .remark-section {
   border-top: 1rpx solid #f3f4f6;
