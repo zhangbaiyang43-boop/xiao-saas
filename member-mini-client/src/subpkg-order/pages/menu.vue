@@ -3782,7 +3782,14 @@ export default {
   flex: 1;
   width: 100%;
   min-width: 0;
-  overflow: hidden;
+  /* 不能设 overflow:hidden——小程序的渲染引擎会把 overflow:hidden 祖先当成"裁剪边界"，
+     连它里面 position:fixed 的弹层（确认订单、优惠券选择等）也一起裁掉，跟标准浏览器里
+     position:fixed 应该完全无视祖先 overflow 裁剪的行为不一样。这些弹层要铺满到屏幕最
+     底部，一旦被 menu-body 自己的高度边界裁掉，最下面的按钮就会看不见（这次反馈的问题）。
+     侧栏分类和菜品列表各自已经自己声明了 overflow-y:auto，靠的是 min-height:0 这个
+     flex 属性让它们在受限布局里能正常滚动，不依赖 menu-body 自己的 overflow，去掉它
+     不影响任何滚动区域。 */
+  overflow: visible;
   min-height: 0;
 }
 
