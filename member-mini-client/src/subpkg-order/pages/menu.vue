@@ -3357,21 +3357,47 @@ export default {
       }
     }
 
+    // 第2批：菜单按 tenant_id 存本地缓存，带一个 version（后端用这批菜品自己的 updated_at
+    // 取最大值算出来，零额外查询开销）。有缓存就先用缓存秒出首屏，跳过骨架屏，网络请求
+    // 照常在后台发；version 没变就什么都不用换（不折腾已经在渲染的列表），变了才替换成
+    // 新数据并顺手更新缓存。第一次进店没有缓存，行为跟以前完全一样（骨架屏等到网络回来）。
+    const menuCacheKey = () => 'menu_cache_' + (shopId.value || '')
+    const readMenuCache = () => {
+      try {
+        const cached = uni.getStorageSync(menuCacheKey())
+        return cached && Array.isArray(cached.items) ? cached : null
+      } catch { return null }
+    }
+    const writeMenuCache = (items, version) => {
+      try { uni.setStorageSync(menuCacheKey(), { items, version, cachedAt: Date.now() }) } catch {}
+    }
+
     const loadMenu = async () => {
-      loading.value = true
+      const cached = readMenuCache()
+      const hadCacheHit = Boolean(cached && cached.items.length)
+      if (hadCacheHit) {
+        allDishes.value = cached.items
+        if (categories.value.length) activeCategory.value = categories.value[0]
+      }
+      loading.value = !hadCacheHit
       loadError.value = false
       try {
         const res = await getMenuItems(shopId.value)
         if (res?.code !== 200) {
-          loadError.value = true
-          allDishes.value = []
+          if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
           return
         }
-        const items = res?.data?.items || res?.data || []
-        allDishes.value = Array.isArray(items) ? items.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
+        const payload = res?.data || {}
+        const rawItems = Array.isArray(payload) ? payload : (payload.items || [])
+        const version = Array.isArray(payload) ? '' : (payload.version || '')
+        const mapped = Array.isArray(rawItems) ? rawItems.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
+        if (!hadCacheHit || version !== cached.version) {
+          allDishes.value = mapped
+          if (categories.value.length) activeCategory.value = categories.value[0]
+        }
+        if (version) writeMenuCache(mapped, version)
       } catch {
-        loadError.value = true
-        allDishes.value = []
+        if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
       } finally {
         loading.value = false
         if (categories.value.length) activeCategory.value = categories.value[0]

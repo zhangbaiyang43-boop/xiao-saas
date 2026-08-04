@@ -197,7 +197,15 @@ async def list_menu_items(
     result = await db.execute(query.order_by(MenuItem.sort_order, MenuItem.id))
     items = result.scalars().all()
     specs_map = await load_menu_specs(db, tenant_id)
-    return success_response(data=[serialize_item(i, specs_map) for i in items])
+    # version 给客户端做"先用本地缓存秒出首屏、再拿这个字段跟缓存比对要不要换"用的——
+    # 不是单独一次查询算出来的，就是这批已经查出来的菜品自己的 updated_at 取最大值，
+    # 零额外开销。菜单没变过就是空列表，用 "0" 占位，不影响比对逻辑（缓存的 version
+    # 只要不是 "0" 且跟这次不一样就会被换掉；本来就没缓存过也无所谓）。
+    version = max((i.updated_at for i in items), default=None)
+    return success_response(data={
+        "items": [serialize_item(i, specs_map) for i in items],
+        "version": version.isoformat() if version else "0",
+    })
 
 
 @router.post("/menu/items")
