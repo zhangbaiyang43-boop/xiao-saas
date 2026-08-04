@@ -349,7 +349,11 @@
     <view v-show="activeTab === 'mine'" class="tab-scroll tab-mine-redirect">
     </view>
 
-    <view v-if="activeTab === 'order' && myOrders.length" class="order-status-entry" @click="viewOrderDetail">
+    <!-- 之前的条件是"只要这一桌有过订单就显示"，不看订单是不是已经结束——结完账之后这条
+    横幅还会一直占着购物车栏正上方的位置，显示"本桌订单已完成"，不会自动让开。改成看
+    pendingOrderCount（已经在下面 count 角标里用的同一个 computed，过滤掉了
+    settled/cancelled/rejected 这几个终态），订单真正结束后横幅自动收起。 -->
+    <view v-if="activeTab === 'order' && pendingOrderCount > 0" class="order-status-entry" @click="viewOrderDetail">
       <view class="order-status-entry-dot"></view>
       <view class="order-status-entry-copy">
         <text class="order-status-entry-title">查看本桌订单</text>
