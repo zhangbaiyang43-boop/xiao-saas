@@ -2,16 +2,15 @@
   <view v-if="visible">
     <!-- 可拖区域：明确像素高宽，供贴边与纵向 clamp 使用；pointer-events 透传给气泡本身。 -->
     <view class="ob-area" :style="{ top: topRpx + 'rpx', height: areaHeightPx + 'px' }">
-      <!-- 拖动/贴边全部走 WXS（UI 线程 setStyle），逻辑层只注入边界与接收 tap/snap 结果 -->
       <view
         class="ob-view"
+        :class="{ 'ob-view--snapping': snapping }"
         :style="viewStyle"
-        :prop="dragProp"
-        :change:prop="drag.onPropChange"
-        @touchstart="drag.touchstart"
-        @touchmove="drag.touchmove"
-        @touchend="drag.touchend"
-        @touchcancel="drag.touchend"
+        @touchstart.stop.prevent="onTouchStart"
+        @touchmove.stop.prevent="onTouchMove"
+        @touchend.stop="onTouchEnd"
+        @touchcancel.stop="onTouchEnd"
+        @transitionend="onSnapTransitionEnd"
       >
         <view class="ob-bubble" :class="['ob-bubble--' + tone, { 'ob-bubble--pulse': justChanged }]">
           <text class="ob-icon iconfont" :class="icon"></text>
@@ -34,16 +33,16 @@
   </view>
 </template>
 
-<script module="drag" lang="wxs" src="./order-bubble-drag.wxs"></script>
-
 <script>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const HINT_STORAGE_KEY = 'order_bubble_hint_shown'
 const BUBBLE_WIDTH_RPX = 190
 const BUBBLE_HEIGHT_RPX = 84
 const REST_MARGIN_RPX = 20
-// 客如云默认：贴左 + 可拖区偏上，不挡底栏
+const TAP_SLOP_PX = 5
+const SNAP_MS = 260
+// 默认贴左、偏上（对齐客如云「已下单」浮条），不挡底部购物车
 const DEFAULT_Y_RATIO = 0.2
 
 export default {
@@ -61,40 +60,40 @@ export default {
     bottomClearRpx: { type: Number, default: 160 },
   },
   emits: ['click'],
-  setup(props) {
+  setup(props, { emit }) {
     const pxPerRpx = ref(1)
     const areaWidthPx = ref(0)
     const areaHeightPx = ref(0)
     const bubbleWidthPx = computed(() => BUBBLE_WIDTH_RPX * pxPerRpx.value)
     const bubbleHeightPx = computed(() => BUBBLE_HEIGHT_RPX * pxPerRpx.value)
 
-    // 逻辑层只保留「默认/落盘」坐标；拖动过程中的实时位置由 WXS 持有，不再每帧 setData。
+    // 位置只由 transform 驱动：拖动时无 transition 跟手；松手后一次性改目标 X，
+    // 交给 CSS cubic-bezier 在 UI 线程插值，避免 movable-view 的 x/y ↔ change 回环卡顿。
     const posX = ref(0)
     const posY = ref(0)
-    const dragSeed = ref(0)
-    const geometryReady = ref(false)
+    const snapping = ref(false)
+    const dragging = ref(false)
+
+    let startTouchX = 0
+    let startTouchY = 0
+    let startPosX = 0
+    let startPosY = 0
+    let moved = false
+    let snapTimer = null
+    let activeTouchId = null
 
     const viewStyle = computed(() => ({
       width: `${bubbleWidthPx.value}px`,
       height: `${bubbleHeightPx.value}px`,
+      transform: `translate3d(${posX.value}px, ${posY.value}px, 0)`,
     }))
 
-    const restMarginPx = () => REST_MARGIN_RPX * pxPerRpx.value
-    const maxPosY = () => Math.max(0, areaHeightPx.value - bubbleHeightPx.value)
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 
-    const dragProp = computed(() => {
-      if (!geometryReady.value) return ''
-      return JSON.stringify({
-        areaW: areaWidthPx.value,
-        areaH: areaHeightPx.value,
-        bubbleW: bubbleWidthPx.value,
-        bubbleH: bubbleHeightPx.value,
-        margin: restMarginPx(),
-        x: posX.value,
-        y: posY.value,
-        seed: dragSeed.value,
-      })
-    })
+    const maxPosX = () => Math.max(0, areaWidthPx.value - bubbleWidthPx.value)
+    const maxPosY = () => Math.max(0, areaHeightPx.value - bubbleHeightPx.value)
+    const restMarginPx = () => REST_MARGIN_RPX * pxPerRpx.value
+    const restMaxX = () => Math.max(0, areaWidthPx.value - bubbleWidthPx.value - restMarginPx())
 
     const setupGeometry = () => {
       try {
@@ -105,22 +104,86 @@ export default {
         const bottomClearPx = props.bottomClearRpx * pxPerRpx.value + safeBottomPx * 2
         areaWidthPx.value = info.windowWidth
         areaHeightPx.value = Math.max(0, info.windowHeight - topPx - bottomClearPx)
-        const margin = restMarginPx()
-        posX.value = margin
+        posX.value = restMarginPx()
         posY.value = Math.max(0, Math.min(maxPosY(), areaHeightPx.value * DEFAULT_Y_RATIO))
-        geometryReady.value = true
-        dragSeed.value += 1
       } catch {}
     }
 
     onMounted(setupGeometry)
 
-    // v-if 重挂载时 bump seed，让 WXS 把已有位置重新刷到新节点上
-    watch(() => props.visible, (val, oldVal) => {
-      if (val && !oldVal && geometryReady.value) {
-        dragSeed.value += 1
+    const onTouchStart = (e) => {
+      if (snapping.value) return
+      const touch = e.touches?.[0]
+      if (!touch) return
+      activeTouchId = touch.identifier
+      startTouchX = touch.clientX
+      startTouchY = touch.clientY
+      startPosX = posX.value
+      startPosY = posY.value
+      moved = false
+      dragging.value = true
+      snapping.value = false
+      clearTimeout(snapTimer)
+    }
+
+    const onTouchMove = (e) => {
+      if (!dragging.value) return
+      const touch = findTouch(e.touches, activeTouchId) || e.touches?.[0]
+      if (!touch) return
+      const dx = touch.clientX - startTouchX
+      const dy = touch.clientY - startTouchY
+      if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) moved = true
+      posX.value = clamp(startPosX + dx, 0, maxPosX())
+      posY.value = clamp(startPosY + dy, 0, maxPosY())
+    }
+
+    const onTouchEnd = (e) => {
+      if (!dragging.value) return
+      // 多指时忽略非当前手指的结束事件
+      if (e.changedTouches?.length && activeTouchId != null) {
+        const ended = findTouch(e.changedTouches, activeTouchId)
+        if (!ended) return
       }
-    })
+      dragging.value = false
+      activeTouchId = null
+      if (!moved) {
+        onClick()
+        return
+      }
+      snapToNearestEdge()
+    }
+
+    function findTouch(list, id) {
+      if (!list || id == null) return null
+      for (let i = 0; i < list.length; i += 1) {
+        if (list[i].identifier === id) return list[i]
+      }
+      return null
+    }
+
+    function snapToNearestEdge() {
+      const nearLeft = posX.value < maxPosX() / 2
+      const targetX = nearLeft ? restMarginPx() : restMaxX()
+      if (Math.abs(targetX - posX.value) < 0.5) {
+        snapping.value = false
+        return
+      }
+      snapping.value = true
+      // 等 --snapping 的 transition 挂上后再写目标位，避免首帧瞬移。
+      nextTick(() => { posX.value = targetX })
+      clearTimeout(snapTimer)
+      snapTimer = setTimeout(() => { snapping.value = false }, SNAP_MS + 40)
+    }
+
+    const onSnapTransitionEnd = () => {
+      snapping.value = false
+      clearTimeout(snapTimer)
+    }
+
+    const onClick = () => {
+      dismissHint()
+      emit('click')
+    }
 
     // 首次提示
     const showHint = ref(false)
@@ -129,7 +192,6 @@ export default {
       showHint.value = false
       clearTimeout(hintTimer)
     }
-
     const hintBottomRpx = computed(() => props.bottomClearRpx + BUBBLE_HEIGHT_RPX + 40)
 
     watch(() => props.visible, (val, oldVal) => {
@@ -171,26 +233,15 @@ export default {
       clearTimeout(hintTimer)
       clearTimeout(pulseTimer)
       clearTimeout(calloutTimer)
+      clearTimeout(snapTimer)
     })
 
     return {
-      areaHeightPx, viewStyle, dragProp, dragSeed,
-      posX, posY,
+      areaHeightPx, viewStyle, snapping,
+      onTouchStart, onTouchMove, onTouchEnd, onSnapTransitionEnd,
       showHint, dismissHint, hintBottomRpx,
       justChanged, showChangeCallout,
     }
-  },
-  methods: {
-    // 微信 WXS callMethod 走这里（比 setup 返回值更稳）
-    onWxsTap() {
-      if (typeof this.dismissHint === 'function') this.dismissHint()
-      this.$emit('click')
-    },
-    onWxsSnapEnd(detail) {
-      if (!detail) return
-      if (typeof detail.x === 'number') this.posX = detail.x
-      if (typeof detail.y === 'number') this.posY = detail.y
-    },
   },
 }
 </script>
@@ -211,8 +262,13 @@ export default {
   top: 0;
   pointer-events: auto;
   will-change: transform;
+  // 拖动跟手：无过渡；仅在 --snapping 时开 UI 线程补间
   transition: none;
   z-index: 1;
+}
+
+.ob-view--snapping {
+  transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ob-bubble {
