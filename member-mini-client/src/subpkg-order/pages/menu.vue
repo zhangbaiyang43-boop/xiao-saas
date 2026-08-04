@@ -2822,25 +2822,33 @@ export default {
     let ignoreScroll = false
     let sectionTops = []
 
-    const cacheSectionPositions = (retry = 0) => {
+    // 现在有两个地方会发起"测量分类位置"：菜单刚加载完 400ms 后一次，分类顺序真的
+    // 变了之后再一次（见下面的 watch）。两轮都是异步的，谁先发起不等于谁先回调完成——
+    // 如果旧顺序那一轮因为要重试而回调得比新顺序那一轮晚，就会用旧顺序的测量结果把
+    // 新顺序的结果覆盖掉，产生错位，甚至让 activeCategory 停在一个已经不存在于当前
+    // 顺序里的分类上（侧栏因此谁都不高亮）。用一个版本号解决："这一轮测量开始时是第几
+    // 轮"，回调时如果已经有更新的一轮发起过了，这轮结果就作废，不管它测得准不准，
+    // 都不能覆盖更新的那轮。
+    let sectionCacheGen = 0
+    const cacheSectionPositions = (retry = 0, gen = null) => {
+      if (gen === null) gen = ++sectionCacheGen
       const cats = categories.value
       if (!cats.length) return
       const query = uni.createSelectorQuery()
       query.select('.dish-scroll').boundingClientRect()
       cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
       query.exec((res) => {
+        if (gen !== sectionCacheGen) return
         // res[0] 是滚动容器，res[1..n] 依次对应每个分类锚点。这里要求两件事都成立才
         // 采信这次测量结果：① 每个分类锚点都测到了（不是 null）；② 滚动容器本身量出
-        // 来的高度是个正常正数，不是 0。第②条是这次真正要堵的口子——有的情况下滚动
-        // 容器还没真正排版铺开时，select().boundingClientRect() 不会返回 null，而是
-        // 返回一个 top/height 全是 0 的"空壳"对象，之前只判断"有没有返回对象"堵不住
-        // 这种情况，结果所有分类的位置全被当成挤在 0 附近，不管滚多远，"从后往前找最
-        // 后一个已经滚过去的分类"这个算法永远命中最后一个分类——这正是这次反馈的现象。
+        // 来的高度是个正常正数，不是 0。第②条堵的是：有的情况下滚动容器还没真正排版
+        // 铺开时，select().boundingClientRect() 不会返回 null，而是返回一个 top/height
+        // 全是 0 的"空壳"对象，只判断"有没有返回对象"堵不住这种情况。
         const svRect = res[0]
         const allMeasured = svRect && svRect.height > 0
           && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
         if (!allMeasured) {
-          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1), 300)
+          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1, gen), 300)
           return
         }
         const svTop = svRect.top
