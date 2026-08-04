@@ -489,8 +489,14 @@
           </view>
 
           <view class="confirm-card order-preference-section">
-            <view class="remark-label-wrap"><text class="remark-label-icon iconfont icon-edit"></text><text class="remark-label">{{ confirmationText.orderRemark }}</text></view>
-            <view v-if="orderRemarkChips.length" class="remark-chips">
+            <view class="remark-summary-row" @click="toggleOrderRemarkExpanded">
+              <view class="remark-label-wrap"><text class="remark-label-icon iconfont icon-edit"></text><text class="remark-label">{{ confirmationText.orderRemark }}</text></view>
+              <view class="remark-summary-action">
+                <text class="remark-summary-text">{{ orderRemarkSummary }}</text>
+                <text :class="['remark-summary-toggle-icon', 'iconfont', orderRemarkExpanded ? 'icon-pullup' : 'icon-unfold']"></text>
+              </view>
+            </view>
+            <view v-if="orderRemarkExpanded && orderRemarkChips.length" class="remark-chips">
               <view
                 v-for="chip in orderRemarkChips"
                 :key="chip"
@@ -499,7 +505,7 @@
                 @click="toggleRemarkChip(chip)"
               ><text>{{ chip }}</text></view>
             </view>
-            <view class="remark-row order-remark-row">
+            <view v-if="orderRemarkExpanded" class="remark-row order-remark-row">
               <text v-if="!showOrderRemarkExtra" class="item-remark-extra-toggle" @click="showOrderRemarkExtra = true">+ 其他要求</text>
               <input v-else class="remark-input" v-model="remark" :placeholder="confirmationText.orderRemarkPlaceholder" placeholder-class="remark-placeholder" maxlength="60" />
             </view>
@@ -1201,7 +1207,7 @@ export default {
       selectedItems: '\u5df2\u9009\u5546\u54c1', clear: '\u6e05\u7a7a\u5df2\u9009\u5546\u54c1',
       remark: '\u5907\u6ce8', remarkPlaceholder: '\u5176\u4ed6\u8981\u6c42\u2026', goodsAmount: '\u5546\u54c1\u91d1\u989d', coupon: '\u4f18\u60e0\u5238', couponAvailable: '\u5f20\u53ef\u7528', couponNone: '\u6682\u65e0\u53ef\u7528', noThreshold: '\u65e0\u95e8\u69db', thresholdPrefix: '\u6ee1',
       payable: '\u5e94\u4ed8\u91d1\u989d', wechatPay: '\u5fae\u4fe1\u652f\u4ed8', tableAccount: '\u684c\u53f0\u8d26\u5355', postpay: '\u9910\u540e\u4ed8\u6b3e', payNow: '\u7acb\u5373\u652f\u4ed8', submitTableAccount: '\u63d0\u4ea4\u5230\u684c\u53f0\u8d26\u5355', submitOrder: '\u63d0\u4ea4\u8ba2\u5355',
-      orderRemark: '\u6574\u5355\u5907\u6ce8', orderRemarkPlaceholder: '\u4f8b\u5982\uff1a\u4e00\u8d77\u4e0a\u83dc\u3001\u5168\u90e8\u6253\u5305\u3001\u9700\u8981\u513f\u7ae5\u9910\u5177', unavailable: '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355', confirming: '\u6b63\u5728\u786e\u8ba4\u8ba2\u5355\u2026', paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026', currency: '\u00a5', close: 'x', arrow: '>'
+      orderRemark: '\u6574\u5355\u5907\u6ce8', orderRemarkPlaceholder: '\u4f8b\u5982\uff1a\u4e00\u8d77\u4e0a\u83dc\u3001\u5168\u90e8\u6253\u5305\u3001\u9700\u8981\u513f\u7ae5\u9910\u5177', orderRemarkEmpty: '\u65e0', unavailable: '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355', confirming: '\u6b63\u5728\u786e\u8ba4\u8ba2\u5355\u2026', paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026', currency: '\u00a5', close: 'x', arrow: '>'
     }
     const successText = {
       title: '\u4e0b\u5355\u6210\u529f',
@@ -2181,6 +2187,12 @@ export default {
       orderRemarkChips.value.forEach((chip) => { text = text.split(chip).join('') })
       return text.replace(/\s+/g, ' ').trim()
     })
+    // 整单备注默认折叠成一行，跟"已选商品"用同一个模式（menu.vue 里 toggleItemsExpanded
+    // 那一行），避免5个chip换行铺开撑高确认单、跟价格支付这些核心信息抢视觉权重。
+    // 折叠态靠这句摘要保留可见性，不会出现"以为选了、其实没点开"的问题。
+    const orderRemarkExpanded = ref(false)
+    const toggleOrderRemarkExpanded = () => { orderRemarkExpanded.value = !orderRemarkExpanded.value }
+    const orderRemarkSummary = computed(() => remark.value.trim() || confirmationText.orderRemarkEmpty)
     const deliveryEnabled = ref(false)
     const availableCoupons = ref([])
     const selectedCouponId = ref(null)
@@ -3389,6 +3401,7 @@ export default {
       orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, merchantNote,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll,
       remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,
+      orderRemarkExpanded, toggleOrderRemarkExpanded, orderRemarkSummary,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       showCouponPicker, couponPickerList, couponPickerAmount, couponPickerCondText, openCouponPicker, closeCouponPicker, pickCoupon,
       couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
@@ -4554,7 +4567,11 @@ export default {
 .cart-row-price { min-width: 82rpx; text-align: right; font-size: 30rpx; font-weight: 900; color: var(--brand); }
 .cart-clear-line { height: 58rpx; display: flex; align-items: center; justify-content: flex-end; gap: 6rpx; text { color: #c8ccd1; font-size: 23rpx; font-weight: 700; } .iconfont { color: #c8ccd1; font-size: 24rpx; line-height: 26rpx; } }
 .order-preference-section { padding: 26rpx 28rpx; }
-.order-preference-section .remark-chips { margin-bottom: 22rpx; }
+.remark-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 18rpx; }
+.remark-summary-action { display: flex; align-items: center; gap: 10rpx; min-width: 0; flex-shrink: 0; max-width: 60%; }
+.remark-summary-text { color: var(--text-3); font-size: 26rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remark-summary-toggle-icon { color: var(--text-3); font-size: 26rpx; line-height: 30rpx; flex-shrink: 0; }
+.order-preference-section .remark-chips { margin-top: 22rpx; margin-bottom: 22rpx; }
 .order-preference-section .remark-chip { margin-right: 14rpx; margin-bottom: 14rpx; padding: 14rpx 24rpx; border-radius: 999rpx; border: 1rpx solid #dfe5e8; background: #fff; }
 .order-preference-section .remark-chip--on { border-color: var(--brand); background: #ecfbf3; }
 .order-preference-section .remark-row { border-top: 1rpx solid #edf0f2; padding-top: 22rpx; }
