@@ -2822,24 +2822,28 @@ export default {
     let ignoreScroll = false
     let sectionTops = []
 
-    const cacheSectionPositions = (retry = 0, isCorrectionPass = false) => {
+    const cacheSectionPositions = (retry = 0) => {
       const cats = categories.value
       if (!cats.length) return
       const query = uni.createSelectorQuery()
       query.select('.dish-scroll').boundingClientRect()
       cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
       query.exec((res) => {
-        // res[0] 是滚动容器，res[1..n] 依次对应每个分类锚点。之前只检查 res[0] 存在就
-        // 往下算，任何一个分类锚点还没渲染出来量不到（比如排在后面的分类内容还没铺开），
-        // 就用 ?? 0 把它的位置当成"在最顶部"——这会让滚动一点点就被判定成已经滚到了
-        // 那个分类，正是"往下滚一点直接跳到最后一个分类"这个 bug 的成因。改成要求
-        // 所有分类锚点都量到了才缓存，量不全就重试，不再用 0 兜底一个没量到的位置。
-        const allMeasured = res[0] && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
+        // res[0] 是滚动容器，res[1..n] 依次对应每个分类锚点。这里要求两件事都成立才
+        // 采信这次测量结果：① 每个分类锚点都测到了（不是 null）；② 滚动容器本身量出
+        // 来的高度是个正常正数，不是 0。第②条是这次真正要堵的口子——有的情况下滚动
+        // 容器还没真正排版铺开时，select().boundingClientRect() 不会返回 null，而是
+        // 返回一个 top/height 全是 0 的"空壳"对象，之前只判断"有没有返回对象"堵不住
+        // 这种情况，结果所有分类的位置全被当成挤在 0 附近，不管滚多远，"从后往前找最
+        // 后一个已经滚过去的分类"这个算法永远命中最后一个分类——这正是这次反馈的现象。
+        const svRect = res[0]
+        const allMeasured = svRect && svRect.height > 0
+          && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
         if (!allMeasured) {
-          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1, isCorrectionPass), 300)
+          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1), 300)
           return
         }
-        const svTop = res[0].top
+        const svTop = svRect.top
         sectionTops = cats.map((cat, i) => ({
           cat,
           top: Math.max(0, res[i + 1].top - svTop + currentScrollTop),
@@ -2847,11 +2851,6 @@ export default {
         if (currentScrollTop < 10 && cats.length) {
           activeCategory.value = cats[0]
         }
-        // 第一次量到的位置未必是最终布局——跟菜单并行加载的东西（比如"再来一单"这条
-        // 依赖订单状态才决定显不显示的横条）有可能在第一次缓存之后才把内容再顶一截，
-        // 让缓存的位置跟实际偏了一截，滚动到某个分类时侧栏还停在上一个没跟上。缓存成
-        // 功后再自我校正一次，不管第一次准不准，都能把这类漂移修正回来。
-        if (!isCorrectionPass) setTimeout(() => cacheSectionPositions(0, true), 900)
       })
     }
 
