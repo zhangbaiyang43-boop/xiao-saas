@@ -1,5 +1,17 @@
 <template>
   <view class="mine-page">
+    <order-bubble
+      :visible="Boolean(activeTableOrder)"
+      :tone="bubbleTone"
+      :icon="bubbleIcon"
+      :badge="bubbleBadge"
+      :action-text="bubbleActionText"
+      :count="activeTableOrders.length"
+      :top-rpx="200"
+      :bottom-clear-rpx="160"
+      @click="openRecentOrder"
+    />
+
     <view v-if="loading" class="state-card">
       <state-loading />
     </view>
@@ -129,12 +141,14 @@
 <script>
 import { computed, ref } from 'vue'
 import { getMemberProfile, entryJoin } from '@/api/auth'
-import { getShopInfo } from '@/api/order'
+import { getShopInfo, getOrderStatus } from '@/api/order'
 import { clearCustomerSession, saveCustomerSession } from '@/utils/auth'
 import { scanStoreCode } from '@/utils/scan'
 import { formatMoney, formatPhone } from '@/utils'
+import { normalizeOrderStatus, orderStatusTone, orderStatusIcon, orderStatusBadge, orderStatusNextAction } from '@/utils/orderStatus'
 import StateLoading from '@/components/state-loading/state-loading.vue'
 import StateError from '@/components/state-error/state-error.vue'
+import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
@@ -167,7 +181,7 @@ const formatOrderTime = (value) => {
 }
 
 export default {
-  components: { StateLoading, StateError },
+  components: { StateLoading, StateError, OrderBubble },
   setup() {
     const customer = ref({})
     const loading = ref(false)
@@ -235,6 +249,69 @@ export default {
       if (!table) return ''
       return `${table}桌 · 堂食`
     })
+
+    // 悬浮订单气泡：跟点餐页(menu.vue)共用同一份 my_orders_<shop>_<table> 本地缓存和
+    // /v1/orders/my 轮询，这样顾客点完餐切到"我的"页面逛的时候，气泡还能继续跟着走，
+    // 不会因为离开点餐页就看不到备餐进度。这里只做展示态的读取和刷新，真正的下单/
+    // 取消等写操作还是在 menu.vue 里发生。
+    const tableOrders = ref([])
+    const tableOrdersStorageKey = () => {
+      const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+      const table = currentTableNo.value
+      return shop && table ? `my_orders_${shop}_${table}` : ''
+    }
+    const loadTableOrders = () => {
+      const key = tableOrdersStorageKey()
+      if (!key) { tableOrders.value = []; return }
+      try {
+        const raw = uni.getStorageSync(key)
+        tableOrders.value = raw ? JSON.parse(raw) : []
+      } catch (e) { tableOrders.value = [] }
+    }
+    const saveTableOrders = () => {
+      const key = tableOrdersStorageKey()
+      if (!key) return
+      try { uni.setStorageSync(key, JSON.stringify(tableOrders.value)) } catch (e) {}
+    }
+    const activeTableOrders = computed(() =>
+      tableOrders.value.filter(o => !['cancelled', 'rejected', 'settled'].includes(normalizeOrderStatus(o.status)))
+    )
+    const activeTableOrder = computed(() => {
+      if (!activeTableOrders.value.length) return null
+      const rank = (o) => (['pending', 'preparing'].includes(normalizeOrderStatus(o.status)) ? 0 : 1)
+      return [...activeTableOrders.value].sort((a, b) => rank(a) - rank(b))[0]
+    })
+    const bubbleTone = computed(() => orderStatusTone(activeTableOrder.value?.status))
+    const bubbleIcon = computed(() => orderStatusIcon(bubbleTone.value))
+    const bubbleBadge = computed(() => orderStatusBadge(bubbleTone.value))
+    const bubbleActionText = computed(() => orderStatusNextAction(bubbleTone.value))
+
+    let orderBubblePollTimer = null
+    const pollActiveTableOrder = () => {
+      const order = activeTableOrder.value
+      if (!order) return
+      const participantToken = uni.getStorageSync('dining_participant_token') || ''
+      getOrderStatus(order.id, participantToken).then((body) => {
+        if (body.code === 200) {
+          const newStatus = body.data?.status || order.status
+          const rec = tableOrders.value.find(o => o.id === order.id)
+          if (rec && rec.status !== newStatus) {
+            rec.status = newStatus
+            saveTableOrders()
+          }
+        }
+      }).catch(() => {})
+    }
+    const startOrderBubblePoll = () => {
+      stopOrderBubblePoll()
+      loadTableOrders()
+      if (!activeTableOrder.value) return
+      pollActiveTableOrder()
+      orderBubblePollTimer = setInterval(pollActiveTableOrder, 15000)
+    }
+    const stopOrderBubblePoll = () => {
+      if (orderBubblePollTimer) { clearInterval(orderBubblePollTimer); orderBubblePollTimer = null }
+    }
 
     const storePhone = computed(() =>
       customer.value.shop_phone ||
@@ -532,11 +609,26 @@ export default {
       openAgreement,
       statusLabel,
       formatMoney,
-      formatPhone
+      formatPhone,
+      activeTableOrder,
+      activeTableOrders,
+      bubbleTone,
+      bubbleIcon,
+      bubbleBadge,
+      bubbleActionText,
+      startOrderBubblePoll,
+      stopOrderBubblePoll
     }
   },
   onShow() {
     this.loadProfile()
+    this.startOrderBubblePoll()
+  },
+  onHide() {
+    this.stopOrderBubblePoll()
+  },
+  onUnload() {
+    this.stopOrderBubblePoll()
   }
 }
 </script>
