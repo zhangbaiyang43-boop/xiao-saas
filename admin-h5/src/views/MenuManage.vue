@@ -623,7 +623,11 @@ const categories = computed(() => {
   // 按 categoryOrder 排序，未配置的分类追加到末尾
   const order = categoryOrder.value
   if (!order.length) return raw
-  const sorted = order.filter(c => raw.includes(c))
+  // 去重：category_order 里同一个分类出现两次的话（历史脏数据/排序抽屉曾经没做去重），
+  // 小程序端 menu.vue 是按这个数组下标生成分类锚点 id 的，重复项会导致点分类跳错、
+  // 滚动定位错乱——这里和排序抽屉的 openCatSort 都要保证吐出去的数组不带重复。
+  const seen = new Set()
+  const sorted = order.filter(c => raw.includes(c) && !seen.has(c) && seen.add(c))
   raw.forEach(c => { if (!sorted.includes(c)) sorted.push(c) })
   return sorted
 })
@@ -836,9 +840,11 @@ async function loadCategoryOrder() {
 // 分类排序抽屉里的临时列表（用于编辑）
 const editingOrder = ref([])
 function openCatSort() {
-  // 合并已有顺序 + 当前实际分类（新增的会追加到末尾）
+  // 合并已有顺序 + 当前实际分类（新增的会追加到末尾）；顺便把已保存顺序里可能存在的
+  // 重复项去掉，不然点一次"保存"就把脏数据原样写回去了。
   const current = categories.value
-  const saved = categoryOrder.value.filter(c => current.includes(c))
+  const seenSaved = new Set()
+  const saved = categoryOrder.value.filter(c => current.includes(c) && !seenSaved.has(c) && seenSaved.add(c))
   current.forEach(c => { if (!saved.includes(c)) saved.push(c) })
   editingOrder.value = saved
   showCatSort.value = true

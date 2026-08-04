@@ -2394,7 +2394,13 @@ export default {
       const order = categoryOrder.value
       let sorted
       if (order.length) {
-        sorted = order.filter(c => raw.includes(c))
+        // 分类锚点 id（cat-nav-N / cat-sec-N）都是按数组下标生成的，如果 order 里同一个分类
+        // 出现了两次（商家后台保存过脏数据，或旧版本排序抽屉没做去重），这里再用 filter 不去重
+        // 的话，categories 数组会带着重复项：indexOf(cat) 永远只会命中第一次出现的下标，
+        // 点击排在后面的那个重名分类会跳到前面那个的位置——这正是点分类跳错、滚动时中间
+        // 分类被跳过的根因，跟去重后 sidebar/正文两个 v-for 是否还共用同一份数组无关。
+        const seen = new Set()
+        sorted = order.filter(c => raw.includes(c) && !seen.has(c) && seen.add(c))
       } else {
         // 商家没配置分类顺序时，按点餐习惯给个默认顺序，而不是菜品在数据库里出现的原始
         // 顺序（等于商家后台录入顺序直接透传给顾客）；商家一旦自己配置过就完全尊重商家。
