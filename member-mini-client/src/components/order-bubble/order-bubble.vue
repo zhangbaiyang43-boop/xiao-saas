@@ -12,8 +12,6 @@
         :y="y"
         :style="{ width: bubbleWidthPx + 'px', height: bubbleHeightPx + 'px' }"
         @change="onChange"
-        @touchstart="onTouchStart"
-        @touchend="onTouchEnd"
         @click="onClick"
       >
         <view class="ob-bubble" :class="['ob-bubble--' + tone, { 'ob-bubble--pulse': justChanged }]">
@@ -89,14 +87,20 @@ export default {
 
     // movable-view 拖动过程中把实时位置同步回 x/y，松手后如果只改 x 做贴边动画、
     // 不同步 y，movable-view 会用我们这边缓存的旧 y 值去插值，导致贴边瞬间垂直方向跳一下。
+    //
+    // 贴边判定不靠 touchend——movable-view 自己接管了拖拽手势，直接绑在它上面的
+    // touchend 不保证会被派发（这也是上一版"松手不贴边"的根因）。change 事件在拖拽
+    // 过程中会连续触发，只要连续 120ms 没收到新的 change，就说明手指已经松开，
+    // 这个判断只依赖 movable-view 一定会发的事件，比等 touchend 可靠。
+    let dragEndTimer = null
     const onChange = (e) => {
       x.value = e.detail.x
       y.value = e.detail.y
+      clearTimeout(dragEndTimer)
+      dragEndTimer = setTimeout(snapToNearestEdge, 120)
     }
 
-    const onTouchStart = () => {}
-
-    const onTouchEnd = () => {
+    function snapToNearestEdge() {
       const marginPx = REST_MARGIN_RPX * pxPerRpx.value
       const maxX = Math.max(0, areaWidthPx.value - bubbleWidthPx.value - marginPx)
       const nearLeft = x.value < (areaWidthPx.value - bubbleWidthPx.value) / 2
@@ -152,11 +156,12 @@ export default {
       clearTimeout(hintTimer)
       clearTimeout(pulseTimer)
       clearTimeout(calloutTimer)
+      clearTimeout(dragEndTimer)
     })
 
     return {
       areaHeightPx, bubbleWidthPx, bubbleHeightPx, x, y,
-      onChange, onTouchStart, onTouchEnd, onClick,
+      onChange, onClick,
       showHint, dismissHint, hintBottomRpx,
       justChanged, showChangeCallout,
     }
