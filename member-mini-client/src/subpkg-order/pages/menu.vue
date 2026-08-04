@@ -2829,14 +2829,20 @@ export default {
       query.select('.dish-scroll').boundingClientRect()
       cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
       query.exec((res) => {
-        if (!res[0]) {
+        // res[0] 是滚动容器，res[1..n] 依次对应每个分类锚点。之前只检查 res[0] 存在就
+        // 往下算，任何一个分类锚点还没渲染出来量不到（比如排在后面的分类内容还没铺开），
+        // 就用 ?? 0 把它的位置当成"在最顶部"——这会让滚动一点点就被判定成已经滚到了
+        // 那个分类，正是"往下滚一点直接跳到最后一个分类"这个 bug 的成因。改成要求
+        // 所有分类锚点都量到了才缓存，量不全就重试，不再用 0 兜底一个没量到的位置。
+        const allMeasured = res[0] && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
+        if (!allMeasured) {
           if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1), 300)
           return
         }
         const svTop = res[0].top
         sectionTops = cats.map((cat, i) => ({
           cat,
-          top: Math.max(0, (res[i + 1]?.top ?? 0) - svTop + currentScrollTop),
+          top: Math.max(0, res[i + 1].top - svTop + currentScrollTop),
         }))
         if (currentScrollTop < 10 && cats.length) {
           activeCategory.value = cats[0]
