@@ -57,7 +57,10 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
 
     def test_table_account_settlement_locks_session_and_settles_all_done_orders(self):
         settle_source = function_source(ORDERS_SOURCE, "settle_table")
-        self.assertIn('DiningSession.status == "OPEN"', settle_source)
+        # 会话查找按"这一桌还有没到终态的订单"来找，不再要求 DiningSession.status=="OPEN"——
+        # 这样历史上出现过的"会话被标成 CLOSED/EXPIRED 但订单还卡在 done"这种不一致数据，
+        # 下一次点结账也能被这里捞到并带回正轨，而不是永远 404（见 orders.py 里的注释）。
+        self.assertIn('Order.status.notin_(("settled", "cancelled", "rejected"))', settle_source)
         self.assertIn('.with_for_update()', settle_source)
         self.assertIn('TABLE_CLOSE_BLOCKING_STATUSES', settle_source)
         self.assertIn('settlement_orders = [o for o in table_orders if o.status == "done"]', settle_source)

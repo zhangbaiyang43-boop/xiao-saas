@@ -1765,12 +1765,31 @@ async def settle_table(
 
     from app.models.dining import DiningSession
 
-    session_result = await db.execute(
-        select(DiningSession).where(
+    # 找"这一桌还有活儿要处理"的会话，按订单状态找，不按 DiningSession.status=="OPEN" 找。
+    # 历史上出现过会话被标成 CLOSED/EXPIRED，订单却还卡在 done 没跟着推进到 settled 的情况
+    # （旧版本结账联动没做全，或者过期扫描踩中竞态）——一旦发生，这一桌就再也找不到
+    # status=="OPEN" 的会话，桌台视图上却因为订单还是 done 状态、一直显示"可结账"，
+    # 商家怎么点都是这句"本桌没有进行中的会话"，成了清不掉的幽灵桌台。改成按这一桌名下
+    # 还有没到终态(settled/cancelled/rejected)订单的那个会话来找，不管它自己的 status
+    # 字段写的是什么——找到了照常走后面"有没有卡着的订单"这一关，正常结账；这样哪怕历史
+    # 数据已经出现过这种不一致，下一次点结账也能把它带回正轨，不需要人工修数据库。
+    non_terminal_result = await db.execute(
+        select(Order.dining_session_id)
+        .join(DiningSession, DiningSession.id == Order.dining_session_id)
+        .where(
             DiningSession.tenant_id == tenant_id,
             DiningSession.table_no == table_no,
-            DiningSession.status == "OPEN",
-        ).with_for_update()
+            Order.status.notin_(("settled", "cancelled", "rejected")),
+        )
+        .order_by(DiningSession.created_at.desc())
+        .limit(1)
+    )
+    session_id = non_terminal_result.scalar_one_or_none()
+    if not session_id:
+        return error_response(code=404, msg="本桌没有进行中的会话")
+
+    session_result = await db.execute(
+        select(DiningSession).where(DiningSession.id == session_id).with_for_update()
     )
     active_session = session_result.scalar_one_or_none()
     if not active_session:
