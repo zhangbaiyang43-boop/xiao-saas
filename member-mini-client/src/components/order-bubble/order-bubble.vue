@@ -42,8 +42,10 @@ const BUBBLE_HEIGHT_RPX = 84
 const REST_MARGIN_RPX = 20
 const TAP_SLOP_PX = 5
 const SNAP_MS = 260
-// 默认贴左、偏上（对齐客如云「已下单」浮条），不挡底部购物车
-const DEFAULT_Y_RATIO = 0.2
+// 默认贴左、贴近可拖区域底部——正好停在调用页面通过 bottomClearRpx 预留出的
+// 购物车栏/tabbar 上方，不挡住它们，但视觉上"就在旁边"，用户一眼能看出气泡和
+// 底部操作栏是一组。仍然可以随手拖到屏幕任意位置。
+const DEFAULT_Y_RATIO = 1
 
 export default {
   name: 'OrderBubble',
