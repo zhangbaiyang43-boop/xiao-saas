@@ -3132,21 +3132,6 @@ export default {
         paying.value = false
       }
     }
-    const resetOrder = () => {
-      stopStatusPoll()
-      cart.value = {}
-      specCartItems.value = []
-      remark.value = ''
-      selectedCouponId.value = null
-      earnedCoupon.value = null
-      orderNo.value = ''
-      orderId.value = ''
-      orderStatus.value = data.status || 'pending'
-      successItems.value = []
-      successTotal.value = 0
-      successDiscount.value = 0
-      showSuccess.value = false
-    }
 
     const clearCheckoutRequest = () => {
       if (!checkoutRequestedAt.value) return
@@ -3409,7 +3394,7 @@ export default {
       cartCount, addToCart, removeFromCart, increaseCartItem, clearCart, specButtonText, dishOptionKindCount, optionCountText, openSpecSheet,
       cartItems, totalCount, totalPrice, cartBadgeText,
       switchCategory, switchOrderMode,
-      goCheckout, resetOrder, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
+      goCheckout, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       tableAccountScrollInto, scrollTableAccountToTop,
