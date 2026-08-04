@@ -2822,7 +2822,7 @@ export default {
     let ignoreScroll = false
     let sectionTops = []
 
-    const cacheSectionPositions = (retry = 0) => {
+    const cacheSectionPositions = (retry = 0, isCorrectionPass = false) => {
       const cats = categories.value
       if (!cats.length) return
       const query = uni.createSelectorQuery()
@@ -2836,7 +2836,7 @@ export default {
         // 所有分类锚点都量到了才缓存，量不全就重试，不再用 0 兜底一个没量到的位置。
         const allMeasured = res[0] && cats.every((_, i) => res[i + 1] && typeof res[i + 1].top === 'number')
         if (!allMeasured) {
-          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1), 300)
+          if (retry < 5) setTimeout(() => cacheSectionPositions(retry + 1, isCorrectionPass), 300)
           return
         }
         const svTop = res[0].top
@@ -2847,6 +2847,11 @@ export default {
         if (currentScrollTop < 10 && cats.length) {
           activeCategory.value = cats[0]
         }
+        // 第一次量到的位置未必是最终布局——跟菜单并行加载的东西（比如"再来一单"这条
+        // 依赖订单状态才决定显不显示的横条）有可能在第一次缓存之后才把内容再顶一截，
+        // 让缓存的位置跟实际偏了一截，滚动到某个分类时侧栏还停在上一个没跟上。缓存成
+        // 功后再自我校正一次，不管第一次准不准，都能把这类漂移修正回来。
+        if (!isCorrectionPass) setTimeout(() => cacheSectionPositions(0, true), 900)
       })
     }
 
