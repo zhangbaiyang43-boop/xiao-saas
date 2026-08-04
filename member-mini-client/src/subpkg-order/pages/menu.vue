@@ -351,17 +351,26 @@
 
     <!-- 悬浮气泡，参考美团/饿了么外卖的订单进度气泡：贴边可拖动，不占横向空间，用图标+
     颜色传达状态，点开看详情。只在订单还没到 settled/cancelled/rejected 终态时出现
-    （复用 pendingOrderCount，跟结账后自动收起是同一个判断）。 -->
-    <movable-area v-if="activeTab === 'order' && pendingOrderCount > 0" class="order-bubble-area">
+    （复用 pendingOrderCount，跟结账后自动收起是同一个判断）。
+    movable-area 的可拖动范围必须用明确的像素高度，不能靠 top+bottom 这种"两头卡位置、
+    中间自动撑开"的写法——拖动组件是靠这个容器的具体尺寸数字算"能拖多远"的，写法模糊
+    量不出正确范围就会拖不动。orderBubbleAreaHeight/orderBubbleY 是用真实屏幕尺寸算出来
+    的像素值，气泡默认停靠在贴近购物车栏的位置，不是拖动范围的起点。
+    视觉效果的按压缩放不能加在 movable-view 本身——它内部是用 transform:translate 来定位
+    的，直接在它上面加 transform:scale 会把定位的 translate 顶掉，按一下气泡就飞到左上角。
+    所以按压反馈加在里面这层 order-bubble 子元素上，movable-view 只管拖动，不管视觉。 -->
+    <movable-area v-if="activeTab === 'order' && pendingOrderCount > 0" class="order-bubble-area" :style="{ height: orderBubbleAreaHeight + 'px' }">
       <movable-view
-        class="order-bubble"
-        :class="['order-bubble--' + tableOrderStatusTone, { 'order-bubble--pulse': orderStatusJustChanged }]"
+        class="order-bubble-view"
         direction="vertical"
         damping="30"
+        :y="orderBubbleY"
         @click="viewOrderDetail"
       >
-        <text class="order-bubble-icon iconfont" :class="tableOrderStatusIcon"></text>
-        <text v-if="pendingOrderCount > 1" class="order-bubble-count">{{ pendingOrderCount }}</text>
+        <view class="order-bubble" :class="['order-bubble--' + tableOrderStatusTone, { 'order-bubble--pulse': orderStatusJustChanged }]">
+          <text class="order-bubble-icon iconfont" :class="tableOrderStatusIcon"></text>
+          <text v-if="pendingOrderCount > 1" class="order-bubble-count">{{ pendingOrderCount }}</text>
+        </view>
       </movable-view>
     </movable-area>
 
@@ -2208,6 +2217,31 @@ export default {
       }
     })
 
+    // 悬浮气泡的可拖动范围——用真实屏幕尺寸算出像素高度，不用 CSS top+bottom 那种模糊
+    // 写法（拖不动的根因）。默认位置贴近拖动范围底部（靠近购物车栏），不是范围起点
+    // （之前"气泡出现在右上角"的根因）。屏幕尺寸在一次会话里不会变，算一次存住就够。
+    const ORDER_BUBBLE_TOP_RPX = 320
+    const ORDER_BUBBLE_SIZE_RPX = 112
+    const ORDER_BUBBLE_BOTTOM_CLEAR_RPX = 268
+    const ORDER_BUBBLE_REST_MARGIN_RPX = 20
+    const orderBubbleAreaHeight = ref(0)
+    const orderBubbleY = ref(0)
+    const setupOrderBubbleGeometry = () => {
+      try {
+        const info = uni.getSystemInfoSync()
+        const pxPerRpx = info.windowWidth / 750
+        const safeBottomPx = Math.max(0, (info.screenHeight || info.windowHeight) - (info.safeArea?.bottom || info.windowHeight))
+        const topPx = ORDER_BUBBLE_TOP_RPX * pxPerRpx
+        const bottomClearPx = ORDER_BUBBLE_BOTTOM_CLEAR_RPX * pxPerRpx + safeBottomPx * 2
+        const areaHeightPx = Math.max(0, info.windowHeight - topPx - bottomClearPx)
+        orderBubbleAreaHeight.value = areaHeightPx
+        const bubbleSizePx = ORDER_BUBBLE_SIZE_RPX * pxPerRpx
+        const marginPx = ORDER_BUBBLE_REST_MARGIN_RPX * pxPerRpx
+        orderBubbleY.value = Math.max(0, areaHeightPx - bubbleSizePx - marginPx)
+      } catch {}
+    }
+    setupOrderBubbleGeometry()
+
     function startStatusPoll(id) {
       stopStatusPoll()
       statusPollTimer = setInterval(() => {
@@ -3488,7 +3522,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       tableAccountScrollInto, scrollTableAccountToTop,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
-      orderStatusJustChanged, showOrderBubbleHint, dismissOrderBubbleHint,
+      orderStatusJustChanged, showOrderBubbleHint, dismissOrderBubbleHint, orderBubbleAreaHeight, orderBubbleY,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
@@ -5422,26 +5456,47 @@ export default {
   text { font-size: 24rpx; color: var(--text-3); }
 }
 
-/* 悬浮气泡：贴右边，垂直方向可拖动，纵向范围从头图下方到购物车栏上方，跟旧横幅一样
-   要避开 cart-bar 的安全区，算法沿用旧横幅注释里验证过的那套 268rpx + 2*safe。 */
+/* 悬浮气泡：贴右边，垂直方向可拖动。movable-area 的高度由 orderBubbleAreaHeight（JS 用
+   真实屏幕尺寸算出的像素值）通过内联样式设置——写死的 min-height 只是拖动组件还没算出
+   数字之前的兜底，不是真正生效的那个值。 */
 .order-bubble-area {
   position: fixed;
   right: 20rpx;
   top: 320rpx;
-  bottom: calc(268rpx + env(safe-area-inset-bottom) * 2);
   width: 112rpx;
+  min-height: 200rpx;
   z-index: 850;
 }
 
+/* movable-view 自己只负责拖动定位（内部用 transform:translate 实现），不放任何视觉
+   样式在它身上——按压缩放这类会用到 transform 的效果，加在它上面会把定位用的
+   translate 顶掉，按一下气泡就飞去左上角。视觉全部放在里面这层 .order-bubble 子元素。 */
+.order-bubble-view {
+  width: 112rpx;
+  height: 112rpx;
+}
+
 .order-bubble {
+  position: relative;
   width: 112rpx;
   height: 112rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+  border: 4rpx solid rgba(255, 255, 255, 0.92);
+  /* 两层阴影叠加：贴合阴影（近、实）+ 环境阴影（远、散），是常见悬浮按钮的标准做法，
+     单层阴影会显得扁平。 */
+  box-shadow:
+    0 2rpx 6rpx rgba(0, 0, 0, 0.16),
+    0 10rpx 28rpx rgba(0, 0, 0, 0.20);
+  transition: transform 0.12s ease-out;
   animation: order-bubble-in 0.25s ease-out both;
+}
+
+.order-bubble:active {
+  transform: scale(0.92);
 }
 
 @keyframes order-bubble-in {
@@ -5454,21 +5509,22 @@ export default {
 }
 
 @keyframes order-bubble-pulse {
-  0% { transform: scale(1); box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22); }
+  0% { transform: scale(1); }
   40% { transform: scale(1.18); box-shadow: 0 0 0 16rpx rgba(255, 255, 255, 0); }
-  100% { transform: scale(1); box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.22); }
+  100% { transform: scale(1); }
 }
 
-.order-bubble--paid { background: #0ea5e9; }
-.order-bubble--preparing { background: #f59e0b; }
-.order-bubble--served { background: var(--brand); }
-.order-bubble--canceled { background: #ef4444; }
-.order-bubble--settled { background: #9ca3af; }
-.order-bubble--empty { background: #9ca3af; }
+.order-bubble--paid { background: linear-gradient(145deg, #38bdf8, #0ea5e9); }
+.order-bubble--preparing { background: linear-gradient(145deg, #fbbf24, #f59e0b); }
+.order-bubble--served { background: linear-gradient(145deg, #34d399, var(--brand)); }
+.order-bubble--canceled { background: linear-gradient(145deg, #f87171, #ef4444); }
+.order-bubble--settled { background: linear-gradient(145deg, #cbd5e1, #9ca3af); }
+.order-bubble--empty { background: linear-gradient(145deg, #cbd5e1, #9ca3af); }
 
 .order-bubble-icon {
   color: #fff;
   font-size: 44rpx;
+  text-shadow: 0 2rpx 4rpx rgba(0, 0, 0, 0.12);
 }
 
 .order-bubble-count {
