@@ -184,7 +184,7 @@
 
           <!-- 桌台操作 -->
           <div v-if="canStaffOrder && !selectedTable.isSettled" class="table-actions">
-            <a-button :loading="selectedTable.updating" @click="openStaffOrder(selectedTable.tableNo)" class="order-action-btn">
+            <a-button :loading="selectedTable.updating" @click="openStaffOrder(selectedTable.tableNo, selectedTable.groupKey)" class="order-action-btn">
               + 代客加单
             </a-button>
           </div>
@@ -374,8 +374,8 @@
             v-for="table in visibleTableGroups"
             :key="table.groupKey"
             class="table-tile"
-            :class="[`table-tile--${tableTagClass(table)}`, { 'table-tile--selected': staffOrderTable === table.tableNo }]"
-            @click="staffOrderTable = table.tableNo"
+            :class="[`table-tile--${tableTagClass(table)}`, { 'table-tile--selected': staffOrderSelectedKey === table.groupKey }]"
+            @click="staffOrderTable = table.tableNo; staffOrderSelectedKey = table.groupKey"
           >
             <div class="table-tile-top">
               <span class="table-tile-no">桌{{ table.tableNo }}</span>
@@ -393,8 +393,8 @@
               :key="item.id"
               type="button"
               class="staff-new-table-chip tap-shrink"
-              :class="{ 'staff-new-table-chip--selected': staffOrderTable === item.table_no }"
-              @click="staffOrderTable = item.table_no"
+              :class="{ 'staff-new-table-chip--selected': staffOrderSelectedKey === 'new:' + item.table_no }"
+              @click="staffOrderTable = item.table_no; staffOrderSelectedKey = 'new:' + item.table_no"
             >桌{{ item.table_no }}</button>
           </div>
         </template>
@@ -420,7 +420,9 @@
         </template>
       </div>
       <div style="position:absolute;left:0;right:0;bottom:0;background:var(--bg-card);border-top:1px solid var(--border);padding:10px 16px 16px">
-        <a-input v-model:value="staffPickupNo" placeholder="可选：发给顾客的取餐牌号（如：07）" maxlength="16" style="margin-bottom:10px" />
+        <div style="margin-bottom:10px">
+          <PickupNoPicker :model-value="staffPickupNo" placeholder="可选：取餐牌号" @pick="(n) => staffPickupNo = n" />
+        </div>
         <a-input v-model:value="staffNote" placeholder="可选：备注是谁加的（如：前台-老王）" maxlength="64" style="margin-bottom:10px" />
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <span style="font-size:13px;color:var(--text-2)">共 {{ staffCartCount }} 件</span>
@@ -479,6 +481,10 @@ const paymentMode = ref('')
 const canStaffOrder = computed(() => ['postpay', 'table_account'].includes(paymentMode.value))
 const staffOrderVisible = ref(false)
 const staffOrderTable = ref('')
+// 同一个桌号可能同时挂着好几张卡片（历史遗留的桌台会话），选中态不能只按桌号字符串
+// 判断——不然点一张就会把所有同桌号的卡片一起点亮。这里单独记一个"具体点中了哪张卡"，
+// 已有桌台用它的 groupKey，"新开一桌"用 'new:'+桌号 前缀，互不冲突。
+const staffOrderSelectedKey = ref('')
 const staffMenuItems = ref([])
 const staffMenuLoading = ref(false)
 const staffMenuLoaded = ref(false)
@@ -571,10 +577,12 @@ function staffCartRemove(dish) {
   staffCart.value = next
 }
 
-async function openStaffOrder(tableNo) {
+async function openStaffOrder(tableNo, groupKey) {
   staffOrderTable.value = tableNo || ''
+  staffOrderSelectedKey.value = groupKey || ''
   staffCart.value = {}
   staffNote.value = ''
+  staffPickupNo.value = ''
   staffOrderVisible.value = true
   await Promise.all([ensureStaffMenuLoaded(), ensureStaffNewTablesLoaded()])
 }
