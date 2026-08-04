@@ -450,6 +450,7 @@ import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
 import { getOrders, updateOrderStatus, updateMerchantNote, updateOrderPickupNo, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
+import { useOrderAlert } from '../composables/useOrderAlert'
 
 function decodeJwtPayload(token) {
   try {
@@ -619,68 +620,10 @@ async function submitStaffOrder() {
     staffSubmitting.value = false
   }
 }
-// 提醒默认开启（老板从没手动关过就不该让他自己去找这个开关）；只有明确点过"关闭"
-// 才尊重这个选择，'0' 和"从没设置过"是两回事，不能混着当"关闭"处理。
-const _alertPref = localStorage.getItem('orderAlertEnabled')
-const alertEnabled = ref(_alertPref === null ? true : _alertPref === '1')
-if (_alertPref === null) localStorage.setItem('orderAlertEnabled', '1')
-// 提醒开着但浏览器把声音挂起了（自动播放限制）——不能让这个状态对老板完全隐身，
-// 界面上要有一个明显的"点这里解锁"提示，而不是让他以为提醒在正常工作。
-const audioNeedsUnlock = ref(false)
-let prevPendingCount = null
-let audioCtx = null
-
-function _beep(ctx, freq, startOffset) {
-  const gain = ctx.createGain()
-  gain.connect(ctx.destination)
-  const osc = ctx.createOscillator()
-  osc.connect(gain)
-  osc.frequency.value = freq
-  gain.gain.setValueAtTime(0.4, ctx.currentTime + startOffset)
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startOffset + 0.25)
-  osc.start(ctx.currentTime + startOffset)
-  osc.stop(ctx.currentTime + startOffset + 0.27)
-}
-
-function playNewOrderBeep() {
-  if (!alertEnabled.value || !audioCtx) return
-  try {
-    if (audioCtx.state === 'suspended') audioCtx.resume()
-    _beep(audioCtx, 880, 0)
-    _beep(audioCtx, 880, 0.3)
-    _beep(audioCtx, 1100, 0.6)
-  } catch {}
-}
-
-function enableAlert() {
-  try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-    // 初始化播放一声确认音，同时解锁 AudioContext
-    _beep(audioCtx, 880, 0)
-    _beep(audioCtx, 1100, 0.25)
-    alertEnabled.value = true
-    localStorage.setItem('orderAlertEnabled', '1')
-    message.success('接单提醒已开启，有新订单会响铃')
-  } catch {
-    message.error('当前浏览器不支持语音提醒')
-  }
-}
-
-function disableAlert() {
-  alertEnabled.value = false
-  localStorage.setItem('orderAlertEnabled', '0')
-  message.info('提醒已关闭')
-}
-
-function unlockAudio() {
-  if (!audioCtx) return
-  try {
-    audioCtx.resume()
-    _beep(audioCtx, 880, 0)
-    audioNeedsUnlock.value = false
-    message.success('提醒已解锁，有新订单会响铃')
-  } catch {}
-}
+// 提醒的开关/解锁状态是模块级单例（见 useOrderAlert.js），不是这个组件自己的 ref——
+// 后台切 Tab 不带 keep-alive，OrderManage.vue 会被反复卸载重建，状态挂在组件实例上
+// 的话，AudioContext 每次都要重新解锁一遍。
+const { alertEnabled, audioNeedsUnlock, enableAlert, disableAlert, unlockAudio, ensureAlertProbed, noteNewPendingCount } = useOrderAlert()
 
 async function loadOrders(pollMeta = {}) {
   loading.value = true
@@ -690,8 +633,7 @@ async function loadOrders(pollMeta = {}) {
     const raw = res?.data?.data || res?.data || []
     const uniqueOrders = Array.from(new Map((Array.isArray(raw) ? raw : []).map(o => [String(o.id), o])).values())
     const newPending = uniqueOrders.filter(o => o.status === 'pending').length
-    if (prevPendingCount !== null && newPending > prevPendingCount) playNewOrderBeep()
-    prevPendingCount = newPending
+    noteNewPendingCount(newPending)
     orders.value = uniqueOrders.map(o => ({
       id: String(o.id),
       table: o.table_no || '-',
@@ -1069,15 +1011,9 @@ onMounted(async () => {
     idleInterval: 30000,
     immediate: false,
   })
-  // 如果之前已开启提醒，静默恢复 AudioContext——但不能只是"等用户下次点击页面时自动
-  // 解锁"就完事，那个时机对老板不可见，他会以为提醒在正常工作。这里主动检测一下：
-  // 挂起了就把 audioNeedsUnlock 打开，界面上露出一个明确的"点这里解锁"提示。
-  if (alertEnabled.value) {
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-      if (audioCtx.state === 'suspended') audioNeedsUnlock.value = true
-    } catch {}
-  }
+  // 探测一次 AudioContext 是不是被浏览器挂起了；具体的"只探测一次"逻辑在
+  // useOrderAlert.js 里，这里每次挂载都调用没关系，真正解锁过之后它自己会跳过。
+  ensureAlertProbed()
 })
 onBeforeUnmount(() => {
   pollingManager.stop('orders:today')
