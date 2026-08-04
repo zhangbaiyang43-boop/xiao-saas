@@ -1,18 +1,16 @@
 <template>
   <view v-if="visible">
-    <!-- movable-area 必须有明确的像素高/宽，拖动组件靠这个容器的具体尺寸算"能拖多远"——
-    写成 CSS 百分比或 top+bottom 撑开那种模糊写法量不出范围，会拖不动（menu.vue 踩过这个坑）。
-    areaHeightPx 用真实屏幕尺寸算出来，宽度直接用 windowWidth，允许左右贴边。 -->
-    <movable-area class="ob-area" :style="{ top: topRpx + 'rpx', height: areaHeightPx + 'px' }">
-      <movable-view
+    <!-- 可拖区域：明确像素高宽，供贴边与纵向 clamp 使用；pointer-events 透传给气泡本身。 -->
+    <view class="ob-area" :style="{ top: topRpx + 'rpx', height: areaHeightPx + 'px' }">
+      <view
         class="ob-view"
-        direction="all"
-        damping="30"
-        :x="x"
-        :y="y"
-        :style="{ width: bubbleWidthPx + 'px', height: bubbleHeightPx + 'px' }"
-        @change="onChange"
-        @click="onClick"
+        :class="{ 'ob-view--snapping': snapping }"
+        :style="viewStyle"
+        @touchstart.stop.prevent="onTouchStart"
+        @touchmove.stop.prevent="onTouchMove"
+        @touchend.stop="onTouchEnd"
+        @touchcancel.stop="onTouchEnd"
+        @transitionend="onSnapTransitionEnd"
       >
         <view class="ob-bubble" :class="['ob-bubble--' + tone, { 'ob-bubble--pulse': justChanged }]">
           <text class="ob-icon iconfont" :class="icon"></text>
@@ -24,8 +22,8 @@
         <view v-if="showChangeCallout" class="ob-callout">
           <text>{{ actionText }}</text>
         </view>
-      </movable-view>
-    </movable-area>
+      </view>
+    </view>
 
     <!-- 首次出现气泡这种新交互时的一次性提示，点了或几秒后自动消失，用 storage 记一下
     不会反复打扰；storage key 是全局共享的，不管气泡先在哪个页面出现，全应用只提示一次。 -->
@@ -36,12 +34,14 @@
 </template>
 
 <script>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const HINT_STORAGE_KEY = 'order_bubble_hint_shown'
 const BUBBLE_WIDTH_RPX = 190
 const BUBBLE_HEIGHT_RPX = 84
 const REST_MARGIN_RPX = 20
+const TAP_SLOP_PX = 5
+const SNAP_MS = 260
 
 export default {
   name: 'OrderBubble',
@@ -65,8 +65,33 @@ export default {
     const bubbleWidthPx = computed(() => BUBBLE_WIDTH_RPX * pxPerRpx.value)
     const bubbleHeightPx = computed(() => BUBBLE_HEIGHT_RPX * pxPerRpx.value)
 
-    const x = ref(0)
-    const y = ref(0)
+    // 位置只由 transform 驱动：拖动时无 transition 跟手；松手后一次性改目标 X，
+    // 交给 CSS cubic-bezier 在 UI 线程插值，避免 movable-view 的 x/y ↔ change 回环卡顿。
+    const posX = ref(0)
+    const posY = ref(0)
+    const snapping = ref(false)
+    const dragging = ref(false)
+
+    let startTouchX = 0
+    let startTouchY = 0
+    let startPosX = 0
+    let startPosY = 0
+    let moved = false
+    let snapTimer = null
+    let activeTouchId = null
+
+    const viewStyle = computed(() => ({
+      width: `${bubbleWidthPx.value}px`,
+      height: `${bubbleHeightPx.value}px`,
+      transform: `translate3d(${posX.value}px, ${posY.value}px, 0)`,
+    }))
+
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+    const maxPosX = () => Math.max(0, areaWidthPx.value - bubbleWidthPx.value)
+    const maxPosY = () => Math.max(0, areaHeightPx.value - bubbleHeightPx.value)
+    const restMarginPx = () => REST_MARGIN_RPX * pxPerRpx.value
+    const restMaxX = () => Math.max(0, areaWidthPx.value - bubbleWidthPx.value - restMarginPx())
 
     const setupGeometry = () => {
       try {
@@ -77,34 +102,80 @@ export default {
         const bottomClearPx = props.bottomClearRpx * pxPerRpx.value + safeBottomPx * 2
         areaWidthPx.value = info.windowWidth
         areaHeightPx.value = Math.max(0, info.windowHeight - topPx - bottomClearPx)
-        const marginPx = REST_MARGIN_RPX * pxPerRpx.value
-        x.value = Math.max(0, areaWidthPx.value - bubbleWidthPx.value - marginPx)
-        y.value = Math.max(0, areaHeightPx.value - bubbleHeightPx.value - marginPx)
+        posX.value = restMaxX()
+        posY.value = Math.max(0, maxPosY() - restMarginPx())
       } catch {}
     }
 
     onMounted(setupGeometry)
 
-    // movable-view 拖动过程中把实时位置同步回 x/y，松手后如果只改 x 做贴边动画、
-    // 不同步 y，movable-view 会用我们这边缓存的旧 y 值去插值，导致贴边瞬间垂直方向跳一下。
-    //
-    // 贴边判定不靠 touchend——movable-view 自己接管了拖拽手势，直接绑在它上面的
-    // touchend 不保证会被派发（这也是上一版"松手不贴边"的根因）。change 事件在拖拽
-    // 过程中会连续触发，只要连续 120ms 没收到新的 change，就说明手指已经松开，
-    // 这个判断只依赖 movable-view 一定会发的事件，比等 touchend 可靠。
-    let dragEndTimer = null
-    const onChange = (e) => {
-      x.value = e.detail.x
-      y.value = e.detail.y
-      clearTimeout(dragEndTimer)
-      dragEndTimer = setTimeout(snapToNearestEdge, 120)
+    const onTouchStart = (e) => {
+      if (snapping.value) return
+      const touch = e.touches?.[0]
+      if (!touch) return
+      activeTouchId = touch.identifier
+      startTouchX = touch.clientX
+      startTouchY = touch.clientY
+      startPosX = posX.value
+      startPosY = posY.value
+      moved = false
+      dragging.value = true
+      snapping.value = false
+      clearTimeout(snapTimer)
+    }
+
+    const onTouchMove = (e) => {
+      if (!dragging.value) return
+      const touch = findTouch(e.touches, activeTouchId) || e.touches?.[0]
+      if (!touch) return
+      const dx = touch.clientX - startTouchX
+      const dy = touch.clientY - startTouchY
+      if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) moved = true
+      posX.value = clamp(startPosX + dx, 0, maxPosX())
+      posY.value = clamp(startPosY + dy, 0, maxPosY())
+    }
+
+    const onTouchEnd = (e) => {
+      if (!dragging.value) return
+      // 多指时忽略非当前手指的结束事件
+      if (e.changedTouches?.length && activeTouchId != null) {
+        const ended = findTouch(e.changedTouches, activeTouchId)
+        if (!ended) return
+      }
+      dragging.value = false
+      activeTouchId = null
+      if (!moved) {
+        onClick()
+        return
+      }
+      snapToNearestEdge()
+    }
+
+    function findTouch(list, id) {
+      if (!list || id == null) return null
+      for (let i = 0; i < list.length; i += 1) {
+        if (list[i].identifier === id) return list[i]
+      }
+      return null
     }
 
     function snapToNearestEdge() {
-      const marginPx = REST_MARGIN_RPX * pxPerRpx.value
-      const maxX = Math.max(0, areaWidthPx.value - bubbleWidthPx.value - marginPx)
-      const nearLeft = x.value < (areaWidthPx.value - bubbleWidthPx.value) / 2
-      x.value = nearLeft ? marginPx : maxX
+      const nearLeft = posX.value < maxPosX() / 2
+      const targetX = nearLeft ? restMarginPx() : restMaxX()
+      if (Math.abs(targetX - posX.value) < 0.5) {
+        snapping.value = false
+        return
+      }
+      snapping.value = true
+      // 等 --snapping 的 transition 挂上后再写目标位，避免首帧瞬移。
+      nextTick(() => { posX.value = targetX })
+      clearTimeout(snapTimer)
+      snapTimer = setTimeout(() => { snapping.value = false }, SNAP_MS + 40)
+    }
+
+    const onSnapTransitionEnd = () => {
+      snapping.value = false
+      clearTimeout(snapTimer)
     }
 
     const onClick = () => {
@@ -141,7 +212,11 @@ export default {
       showChangeCallout.value = false
       clearTimeout(pulseTimer)
       clearTimeout(calloutTimer)
-      requestAnimationFrame ? requestAnimationFrame(triggerChangeFeedback) : triggerChangeFeedback()
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(triggerChangeFeedback)
+      } else {
+        triggerChangeFeedback()
+      }
     })
     function triggerChangeFeedback() {
       justChanged.value = true
@@ -156,12 +231,12 @@ export default {
       clearTimeout(hintTimer)
       clearTimeout(pulseTimer)
       clearTimeout(calloutTimer)
-      clearTimeout(dragEndTimer)
+      clearTimeout(snapTimer)
     })
 
     return {
-      areaHeightPx, bubbleWidthPx, bubbleHeightPx, x, y,
-      onChange, onClick,
+      areaHeightPx, viewStyle, snapping,
+      onTouchStart, onTouchMove, onTouchEnd, onSnapTransitionEnd,
       showHint, dismissHint, hintBottomRpx,
       justChanged, showChangeCallout,
     }
@@ -176,10 +251,22 @@ export default {
   width: 100%;
   z-index: 850;
   pointer-events: none;
+  overflow: visible;
 }
 
 .ob-view {
+  position: absolute;
+  left: 0;
+  top: 0;
   pointer-events: auto;
+  will-change: transform;
+  // 拖动跟手：无过渡；仅在 --snapping 时开 UI 线程补间
+  transition: none;
+  z-index: 1;
+}
+
+.ob-view--snapping {
+  transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .ob-bubble {
