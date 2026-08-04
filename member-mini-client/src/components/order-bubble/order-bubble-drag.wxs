@@ -1,0 +1,154 @@
+// UI 线程拖拽/贴边：touchmove 只在这里改 transform，不回逻辑层，避免一顿一顿。
+var TAP_SLOP = 5
+var SNAP_MS = 260
+var SNAP_EASING = 'transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1)'
+
+function clamp(v, min, max) {
+  if (v < min) return min
+  if (v > max) return max
+  return v
+}
+
+function maxXOf(state) {
+  var v = state.areaW - state.bubbleW
+  return v > 0 ? v : 0
+}
+
+function maxYOf(state) {
+  var v = state.areaH - state.bubbleH
+  return v > 0 ? v : 0
+}
+
+function restLeft(state) {
+  return state.margin
+}
+
+function restRight(state) {
+  var v = maxXOf(state) - state.margin
+  return v > 0 ? v : 0
+}
+
+function viewOf(event, ownerInstance) {
+  if (event && event.instance) return event.instance
+  return ownerInstance.selectComponent('.ob-view')
+}
+
+function applyTransform(node, x, y, withTransition) {
+  if (!node) return
+  node.setStyle({
+    transition: withTransition ? SNAP_EASING : 'none',
+    transform: 'translate3d(' + x + 'px,' + y + 'px,0)'
+  })
+}
+
+function readProp(raw) {
+  if (raw == null) return null
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch (e) {
+      return null
+    }
+  }
+  return raw
+}
+
+function onPropChange(newValue, oldValue, ownerInstance, instance) {
+  var prop = readProp(newValue)
+  if (!prop) return
+
+  var state = ownerInstance.getState()
+  state.areaW = +prop.areaW || 0
+  state.areaH = +prop.areaH || 0
+  state.bubbleW = +prop.bubbleW || 0
+  state.bubbleH = +prop.bubbleH || 0
+  state.margin = +prop.margin || 0
+
+  var seed = prop.seed
+  if (!state.inited || state.seed !== seed) {
+    state.x = +prop.x || 0
+    state.y = +prop.y || 0
+    state.seed = seed
+    state.inited = true
+  }
+
+  state.x = clamp(state.x, 0, maxXOf(state))
+  state.y = clamp(state.y, 0, maxYOf(state))
+
+  var node = instance || ownerInstance.selectComponent('.ob-view')
+  applyTransform(node, state.x, state.y, false)
+}
+
+function touchstart(event, ownerInstance) {
+  var state = ownerInstance.getState()
+  if (!state.inited) return
+
+  var touch = event.touches[0] || event.changedTouches[0]
+  if (!touch) return
+
+  if (state.snapTimer) {
+    clearTimeout(state.snapTimer)
+    state.snapTimer = null
+  }
+
+  state.dragging = true
+  state.moved = false
+  state.startPageX = touch.pageX
+  state.startPageY = touch.pageY
+  state.startX = state.x
+  state.startY = state.y
+
+  var node = viewOf(event, ownerInstance)
+  applyTransform(node, state.x, state.y, false)
+}
+
+function touchmove(event, ownerInstance) {
+  var state = ownerInstance.getState()
+  if (!state.dragging) return false
+
+  var touch = event.touches[0] || event.changedTouches[0]
+  if (!touch) return false
+
+  var dx = touch.pageX - state.startPageX
+  var dy = touch.pageY - state.startPageY
+  if (dx > TAP_SLOP || dx < -TAP_SLOP || dy > TAP_SLOP || dy < -TAP_SLOP) {
+    state.moved = true
+  }
+
+  state.x = clamp(state.startX + dx, 0, maxXOf(state))
+  state.y = clamp(state.startY + dy, 0, maxYOf(state))
+
+  applyTransform(viewOf(event, ownerInstance), state.x, state.y, false)
+  return false
+}
+
+function touchend(event, ownerInstance) {
+  var state = ownerInstance.getState()
+  if (!state.dragging) return
+
+  state.dragging = false
+  var node = viewOf(event, ownerInstance)
+
+  if (!state.moved) {
+    ownerInstance.callMethod('onWxsTap')
+    return
+  }
+
+  var targetX = state.x < maxXOf(state) / 2 ? restLeft(state) : restRight(state)
+  state.x = targetX
+  applyTransform(node, state.x, state.y, true)
+
+  if (state.snapTimer) clearTimeout(state.snapTimer)
+  state.snapTimer = setTimeout(function () {
+    applyTransform(node, state.x, state.y, false)
+    state.snapTimer = null
+    ownerInstance.callMethod('onWxsSnapEnd', { x: state.x, y: state.y })
+  }, SNAP_MS + 20)
+}
+
+module.exports = {
+  onPropChange: onPropChange,
+  touchstart: touchstart,
+  touchmove: touchmove,
+  touchend: touchend
+}
