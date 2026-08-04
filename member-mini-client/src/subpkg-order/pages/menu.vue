@@ -2844,34 +2844,41 @@ export default {
       orderMode.value = mode
     }
 
-    const openCart = async () => {
-      // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段——
-      // 目前这段里卡着一次 await loadShopSettings()（第1批要去掉的那个），先测出
-      // 现状耗时，等改完再对比才知道有没有真的变快。
+    // 第1批：优惠券列表原来只在 openCart 里现拉，拆成独立函数——进菜单页空闲时机先拉一次
+    // 打底（见 onLoad 里的调用），openCart 不用等它了；同时还是 openCart 时机也顺手调用
+    // 一次刷新（不 await），保证券状态不会因为顾客在菜单页停留太久而过期不准。
+    const refreshAvailableCoupons = async () => {
+      if (!uni.getStorageSync('customer_token')) return
+      try {
+        const res = await getCustomerCoupons('UNUSED')
+        const now = Date.now()
+        const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
+        availableCoupons.value = list
+        const eligible = list.filter(c => totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0))
+        const keepExistingChoice = selectedCouponId.value && eligible.some(c => c.id === selectedCouponId.value)
+        if (!keepExistingChoice) {
+          if (eligible.length) {
+            eligible.sort(compareCouponPriority)
+            selectedCouponId.value = eligible[0].id
+          } else {
+            selectedCouponId.value = null
+          }
+        }
+      } catch {}
+    }
+
+    const openCart = () => {
+      // 第1批：openCart 不再 await 任何网络请求——loadShopSettings 在 onLoad 已经拉过一次，
+      // 这里只是顺手刷新，不该让购物车面板等它才显示；优惠券同理，正常情况下已经被
+      // onLoad 里的预拉垫过底了，这里再刷新一次只是保证不过期，不等它。
+      // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段。
       const _openCartStartedAt = Date.now()
       pendingSubmitRequestId.value = ''
-      await loadShopSettings()
+      loadShopSettings().catch(() => {})
       showCart.value = true
       recordSample('cart_open', Date.now() - _openCartStartedAt)
       itemsExpanded.value = totalCount.value <= 1
-      if (uni.getStorageSync('customer_token')) {
-        try {
-          const res = await getCustomerCoupons('UNUSED')
-          const now = Date.now()
-          const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
-          availableCoupons.value = list
-          const eligible = list.filter(c => totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0))
-          const keepExistingChoice = selectedCouponId.value && eligible.some(c => c.id === selectedCouponId.value)
-          if (!keepExistingChoice) {
-            if (eligible.length) {
-              eligible.sort(compareCouponPriority)
-              selectedCouponId.value = eligible[0].id
-            } else {
-              selectedCouponId.value = null
-            }
-          }
-        } catch {}
-      }
+      refreshAvailableCoupons()
     }
 
     const goCheckout = () => {
@@ -3392,7 +3399,7 @@ export default {
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       showCouponPicker, couponPickerList, couponPickerAmount, couponPickerCondText, openCouponPicker, closeCouponPicker, pickCoupon,
       couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
-      openCart,
+      openCart, refreshAvailableCoupons,
       activeCategory, scrollTarget, categoryScrollTarget, categoryScrollTop, dishScrollTopVal, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       successItems, successTotal,
       categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
@@ -3449,6 +3456,10 @@ export default {
       menuReady.then(() => {
         const startedAt = consumeStart('scan_to_interactive')
         if (startedAt) recordSample('scan_to_interactive', Date.now() - startedAt)
+        // 第1批：优惠券预拉，别等顾客点开购物车才现拉。故意错开一点延迟，把带宽/CPU
+        // 优先让给刚刚渲染出来的菜单，不跟首屏抢；顾客通常也要选几件商品才会点开购物车，
+        // 这点延迟基本感觉不到。
+        setTimeout(() => { this.refreshAvailableCoupons() }, 800)
       })
 
       const sessionReady = (async () => {

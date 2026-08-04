@@ -18,7 +18,7 @@
 import { ref } from 'vue'
 import { resolveEntranceCode } from '@/api/auth'
 import { clearCustomerSession } from '@/utils/auth'
-import { resolveDiningIdentity } from '@/utils/dining'
+import { resolveDiningIdentity, getOrCreateDiningClientId, persistDiningContext } from '@/utils/dining'
 
 const text = {
   retry: '重新识别',
@@ -181,7 +181,10 @@ export default {
       const parsed = parseOptions(options)
       try {
         if (parsed.scene) {
-          const res = await resolveEntranceCode(parsed.scene)
+          // 带上 client_id：后端识别到是桌码场景时会顺带把这一桌的会话建好一起返回，
+          // 省掉下面单独再调一次 resolveTableSession 的网络往返。老后端/非桌码场景不会
+          // 返回 dining_session_id，走后面的 fallback，行为不变。
+          const res = await resolveEntranceCode(parsed.scene, { clientId: getOrCreateDiningClientId() })
           if (res.code !== 200) {
             error.value = res.msg || '桌码识别失败'
             errorDesc.value = '请联系门店工作人员处理'
@@ -211,7 +214,20 @@ export default {
             return
           }
           saveContext(ctx)
-          await resolveTableSession(ctx)
+          if (data.dining_session_id && data.participant_token) {
+            // 会话已经在入口码解析这一次请求里建好了，直接落存储，不用再单独跑一次
+            // resolveTableSession（那里面还会额外判断缓存新鲜度，这里是刚拿到的最新结果，
+            // 不存在"缓存过期"这个问题）。
+            persistDiningContext({
+              dining_session_id: data.dining_session_id,
+              participant_id: data.participant_id,
+              participant_token: data.participant_token,
+              client_id: data.client_id,
+              table_no: ctx.table,
+            })
+          } else {
+            await resolveTableSession(ctx)
+          }
           await routeToMenu(ctx)
           return
         }

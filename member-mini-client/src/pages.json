@@ -165,6 +165,10 @@
     }
   ],
   "preloadRule": {
+    "pages/entry/index": {
+      "network": "all",
+      "packages": ["subpkg-order", "subpkg-member", "subpkg-coupon", "subpkg-common"]
+    },
     "pages/index/index": {
       "network": "all",
       "packages": ["subpkg-order", "subpkg-member", "subpkg-coupon", "subpkg-common"]

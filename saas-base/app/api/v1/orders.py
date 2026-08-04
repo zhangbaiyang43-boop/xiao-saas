@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, datetime, timezone
 import json
 from typing import List, Optional
@@ -730,11 +731,16 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         order_items.append(oi)
 
     await db.flush()
-    if pay_later_mode:
-        await _print_paid_order_ticket(order, db, reason="order_created_pay_later")
-
     await db.commit()
     await db.refresh(order)
+    # 出票挪到 commit 之后、且不 await——顾客提交订单不该等一次第三方打印机 API。
+    # 必须在 commit 之后才调度：后台任务用的是独立 session，提前调度会因为这笔订单
+    # 在别的 session 里还看不见（还没提交）而被 _print_paid_order_ticket 误判成
+    # "订单不存在/还没付款"，直接跳过打印。
+    if pay_later_mode:
+        _spawn_background_print_task(
+            _print_paid_order_ticket_background(order.id, str(order.tenant_id), reason="order_created_pay_later")
+        )
 
     order_data = serialize_order(order, order_items)
     return success_response(
@@ -1008,6 +1014,58 @@ async def _print_paid_order_ticket(
             reason,
         )
         return {"success": False, "status": status_label, "attempts": meta.get("attempts"), "code": error_code}
+
+
+# asyncio.create_task() 返回的 Task 如果没有任何地方存着强引用，理论上可能在下一次
+# 事件循环切换时被垃圾回收掉、任务莫名其妙就没跑完——这是 asyncio 官方文档专门强调过的
+# 坑（"Save a reference to the result of this function"）。对于打印这种失败了也不会有人
+# 立刻发现的后台任务，这个坑一旦踩中会很难查，所以这里维护一个模块级的引用集合，任务
+# 跑完自动从集合里摘掉。
+_background_print_tasks: set = set()
+
+
+def _spawn_background_print_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_print_tasks.add(task)
+    task.add_done_callback(_background_print_tasks.discard)
+
+
+async def _print_paid_order_ticket_background(order_id: int, tenant_id: str, *, reason: str) -> None:
+    """给顾客下单请求用的"不等打印机"版本。第三方云打印 API（飞鹅云/快麦）慢一点，
+    顾客提交订单这个动作就跟着慢——打印本来就是"尽力而为、失败可恢复"的旁路副作用
+    （见 _print_paid_order_ticket 里已有的说明和失败重试机制），没道理让它卡在顾客
+    的请求-响应周期里。
+
+    必须用独立的 DB session，不能复用调用方传进来的那个：调用方的请求早就返回了，
+    它的 session 这时候可能已经关闭；而且这个函数是在调用方 commit 之后才被调度的
+    （见 create_order 里的调用位置），这里重新按 order_id 查一次，保证读到的是已经
+    落库的最新状态，不会因为事务可见性问题误判成"订单还不存在/还没付款"。
+
+    session 工厂放函数体内 import（而不是模块顶部）：这个模块的打印失败恢复测试
+    （test_print_failure_recovery_contracts.py）用一个手搭的 sys.modules 假环境加载
+    这个文件，只桩了 app.core.database.get_db，模块顶部多 import 一个新符号会让那些
+    测试在 import 这一步就直接炸掉——跟文件里其它服务依赖（Tenant/TenantConfig 等）
+    延迟到函数体内 import 是同一个理由，不是我随手加的风格不一致。
+    """
+    from app.core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as bg_db:
+        try:
+            TenantContext.set_tenant_id(tenant_id)
+            order_result = await bg_db.execute(
+                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+            )
+            order = order_result.scalar_one_or_none()
+            if not order:
+                return
+            await _print_paid_order_ticket(order, bg_db, reason=reason)
+            await bg_db.commit()
+        except Exception as exc:
+            logger.warning(
+                "[PRINT_BACKGROUND_TASK_FAILED] order_id=%s reason=%s error=%s",
+                order_id, reason, exc,
+            )
+
 
 async def _on_payment_success(
     order: Order,

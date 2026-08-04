@@ -81,7 +81,10 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn("confirmPaymentLabel", MINIAPP_MENU_SOURCE)
         self.assertIn("submitTableAccount", MINIAPP_MENU_SOURCE)
         self.assertIn("authSheetText.confirmSubmit", MINIAPP_MENU_SOURCE)
-        self.assertLess(MINIAPP_MENU_SOURCE.index("await loadShopSettings()"), MINIAPP_MENU_SOURCE.index("showCart.value = true"))
+        # 性能优化第1批：openCart 不再等 loadShopSettings 才显示购物车——那份数据
+        # onLoad 时已经拉过一次了，这里只是顺手刷新，不该卡住购物车面板的展示。
+        self.assertNotIn("await loadShopSettings()", MINIAPP_MENU_SOURCE)
+        self.assertIn("loadShopSettings().catch(() => {})", MINIAPP_MENU_SOURCE)
 
     def test_pay_later_clears_stale_prepay_before_checkout(self):
         self.assertIn("clearStalePrepayOrderForPayLater", MINIAPP_MENU_SOURCE)

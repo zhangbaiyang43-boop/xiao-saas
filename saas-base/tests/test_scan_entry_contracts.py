@@ -71,7 +71,9 @@ class ScanEntryContractsTest(unittest.TestCase):
                     self.assertNotIn(f"shop={other}", target)
 
     def test_frontend_entry_page_persists_scene_tenant_table_and_routes_to_menu(self):
-        self.assertIn("resolveEntranceCode(parsed.scene)", ENTRY_SOURCE)
+        # 带上 client_id 让后端有机会把桌台会话跟入口码解析结果一起返回，省一次网络
+        # 往返（见 resolveTableSession 那个 else 分支，没拿到会话数据时行为不变）。
+        self.assertIn("resolveEntranceCode(parsed.scene, { clientId: getOrCreateDiningClientId() })", ENTRY_SOURCE)
         self.assertIn("uni.setStorageSync('entrance_scene', ctx.scene)", ENTRY_SOURCE)
         self.assertIn("uni.setStorageSync('tenant_id', ctx.tenant_id)", ENTRY_SOURCE)
         self.assertIn("uni.setStorageSync('table_no', ctx.table)", ENTRY_SOURCE)

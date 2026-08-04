@@ -51,9 +51,16 @@ export const bindPhone = (phone, code) => {
   })
 }
 
-export const resolveEntranceCode = (scene) => {
+// clientId/participantToken 是可选的——带上之后，后端会顺手把这一桌的会话一起建好、
+// 跟入口码解析结果一起返回，省掉扫码进店时"先解析入口码、再单独建会话"这两次串行网络
+// 往返。不带这两个参数（或者后端识别不到 entry_type=='table'）时行为不变，返回结果里
+// 就不会有 dining_session_id 这些字段，调用方要退回去单独调 resolveDiningSession。
+export const resolveEntranceCode = (scene, { clientId, participantToken } = {}) => {
+  const params = [`scene=${encodeURIComponent(scene)}`]
+  if (clientId) params.push(`client_id=${encodeURIComponent(clientId)}`)
+  if (participantToken) params.push(`participant_token=${encodeURIComponent(participantToken)}`)
   return request({
-    url: `/v1/entrance-codes/resolve?scene=${encodeURIComponent(scene)}`,
+    url: `/v1/entrance-codes/resolve?${params.join('&')}`,
     method: 'GET'
   })
 }

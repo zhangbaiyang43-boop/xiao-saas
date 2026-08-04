@@ -19,7 +19,13 @@ router = APIRouter(prefix="/api/v1/entrance-codes", tags=["入口码"])
 
 
 @router.get("/resolve", response_model=RespVo)
-async def resolve_entrance_code(scene: str, request: Request, db=Depends(get_db)):
+async def resolve_entrance_code(
+    scene: str,
+    request: Request,
+    db=Depends(get_db),
+    client_id: str | None = None,
+    participant_token: str | None = None,
+):
     service = EntranceCodeService(db)
     
     entrance_code = await service.get_by_scene(scene)
@@ -109,6 +115,40 @@ async def resolve_entrance_code(scene: str, request: Request, db=Depends(get_db)
             staff_invite_code = staff.invite_code
             staff_name = staff.name
 
+    # 扫桌码进店，顾客十有八九马上就要建本桌身份（entry/index.vue 之前是先拿这个接口的
+    # 结果、再单独调一次 /dining-sessions/resolve，两次串行网络往返）。这里顺带把会话建好，
+    # 一起吐给前端，省掉扫码到进菜单页之间的一次网络往返。只在 entry_type=="table" 且前端
+    # 带了 client_id 时才做——没带 client_id 说明前端还是没升级到能合并请求的版本，或者
+    # 这次入口本来就不是桌码场景，两种情况都不该在这里硬凑一个身份出来。
+    # 会话建立失败（比如桌台过期扫描踩到竞态）不能连累入口码识别本身失败：吞掉异常，
+    # 前端拿不到这几个字段时会自动退回到单独调用 /dining-sessions/resolve 的老路径。
+    dining_session_data = {}
+    if entry_type == "table" and table_no and client_id:
+        try:
+            from app.services.dining_session_service import DiningSessionService
+
+            customer_id = getattr(request.state, "customer_id", None)
+            openid = getattr(request.state, "openid", None)
+            session_data = await DiningSessionService(db).resolve_session(
+                tenant_id=item.tenant_id,
+                table_no=table_no,
+                client_id=client_id,
+                participant_token=participant_token,
+                customer_id=int(customer_id) if customer_id else None,
+                openid=openid,
+            )
+            await db.commit()
+            dining_session_data = {
+                "dining_session_id": session_data["dining_session_id"],
+                "participant_id": session_data["participant_id"],
+                "participant_token": session_data["participant_token"],
+                "client_id": session_data["client_id"],
+                "session_status": session_data["session_status"],
+            }
+        except Exception as exc:
+            await db.rollback()
+            logger.warning(f"[ENTRY_RESOLVE_SESSION_MERGE_FAILED] scene={scene} tenant_id={item.tenant_id} table_no={table_no} error={exc}")
+
     return success_response(
         data={
             "scene": item.scene,
@@ -123,6 +163,7 @@ async def resolve_entrance_code(scene: str, request: Request, db=Depends(get_db)
             "status": item.status,
             "invite_code": staff_invite_code,
             "staff_name": staff_name,
+            **dining_session_data,
         },
         msg="识别成功",
     )
