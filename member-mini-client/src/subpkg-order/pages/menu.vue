@@ -2854,6 +2854,20 @@ export default {
       })
     }
 
+    // categories 的排序依赖 categoryOrder（商家在后台配置的分类顺序），而 categoryOrder
+    // 是 loadShopSettings 拿到的，跟 loadMenu 是并行发起的两个独立请求（互不等待，为了
+    // 让菜单尽快显示）——如果 loadMenu 先回来，categories 会先按"没有商家自定义顺序"
+    // 的默认权重排一遍并缓存位置；等 loadShopSettings 稍后回来、categoryOrder 有值了，
+    // categories 会按商家真正配置的顺序重新计算、模板也会跟着重新渲染，但缓存的位置
+    // （sectionTops）不会跟着自动刷新，还停留在重排之前的旧顺序上——分类的顺序变了，
+    // 但每个分类对应第几个位置这份缓存没变，等于货不对板，滚动判断的分类会跟屏幕上
+    // 实际显示的对不上。这里监听 categories 的内容变化（不只是引用变化），一旦真的
+    // 重新排过序就重新测一次位置。
+    watch(
+      () => categories.value.join(''),
+      () => { nextTick(() => cacheSectionPositions()) }
+    )
+
     const switchCategory = (cat) => {
       activeCategory.value = cat
       ignoreScroll = true
