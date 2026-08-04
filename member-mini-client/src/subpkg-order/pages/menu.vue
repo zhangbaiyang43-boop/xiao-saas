@@ -1041,6 +1041,7 @@ import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
 import { getMemberProfile, getMembershipGrowth, joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
+import { consumeStart, recordSample } from '@/utils/perf'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
@@ -2844,9 +2845,14 @@ export default {
     }
 
     const openCart = async () => {
+      // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段——
+      // 目前这段里卡着一次 await loadShopSettings()（第1批要去掉的那个），先测出
+      // 现状耗时，等改完再对比才知道有没有真的变快。
+      const _openCartStartedAt = Date.now()
       pendingSubmitRequestId.value = ''
       await loadShopSettings()
       showCart.value = true
+      recordSample('cart_open', Date.now() - _openCartStartedAt)
       itemsExpanded.value = totalCount.value <= 1
       if (uni.getStorageSync('customer_token')) {
         try {
@@ -3437,6 +3443,13 @@ export default {
       // 数据，之前写成先后 await 纯粹是顺序问题——两者互相独立就应该并行发起，少等一次
       // 网络往返。
       const menuReady = Promise.all([this.loadShopSettings(), this.loadMenu()])
+      // 第0批性能埋点："扫码到首屏可交互"到这里就算数——菜单数据齐了、顾客能开始点菜了，
+      // 不用等 sessionReady（本桌身份/历史订单同步）一起完成，那些不影响首屏能不能点餐。
+      // 非扫码进来的场景（比如从"我的"页正常打开）consumeStart 拿不到起点，直接跳过。
+      menuReady.then(() => {
+        const startedAt = consumeStart('scan_to_interactive')
+        if (startedAt) recordSample('scan_to_interactive', Date.now() - startedAt)
+      })
 
       const sessionReady = (async () => {
         // entry \u9875\u626b\u7801\u8fdb\u6765\u65f6\u5df2\u7ecf\u5f3a\u5236\u5237\u65b0\u8fc7\u4e00\u6b21\u8eab\u4efd\u5e76\u5199\u8fdb\u672c\u5730\u7f13\u5b58\uff08resolveTableSession

@@ -28,8 +28,9 @@
             class="identity-avatar"
             :src="customerAvatar"
             mode="aspectFill"
+            @click="handleAvatarMultiTap"
           />
-          <view v-else class="identity-avatar identity-avatar-default">
+          <view v-else class="identity-avatar identity-avatar-default" @click="handleAvatarMultiTap">
             <text>{{ isLoggedIn ? '我' : '开' }}</text>
           </view>
 
@@ -570,6 +571,21 @@ export default {
       uni.navigateTo({ url: `/subpkg-member/pages/agreement?type=${type}` })
     }
 
+    // 连点头像 5 次进性能自测页——这是给开发/测试用的入口，不该在正式界面上留一个
+    // "性能统计"入口给顾客看，藏在一个顾客不会误触的手势后面，2 秒内点不满 5 次就重新计数。
+    let avatarTapCount = 0
+    let avatarTapTimer = null
+    const handleAvatarMultiTap = () => {
+      avatarTapCount += 1
+      clearTimeout(avatarTapTimer)
+      avatarTapTimer = setTimeout(() => { avatarTapCount = 0 }, 2000)
+      if (avatarTapCount >= 5) {
+        avatarTapCount = 0
+        clearTimeout(avatarTapTimer)
+        uni.navigateTo({ url: '/subpkg-common/pages/perf-debug' })
+      }
+    }
+
     return {
       customer,
       loading,
@@ -587,6 +603,7 @@ export default {
       storeSceneText,
       storePhone,
       customerPhone,
+      handleAvatarMultiTap,
       customerAvatar,
       displayName,
       lastVisitText,

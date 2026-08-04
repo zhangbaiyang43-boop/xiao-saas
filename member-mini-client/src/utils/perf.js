@@ -1,0 +1,85 @@
+// 第0批性能埋点：本地滚动窗口存样本，算 P50/P95，不依赖后端新增接口。
+// 目的是给后续每一项"进页/结算"优化提供一把能验证效果的尺子，不是长期的生产监控方案——
+// 真要看全量用户的分布，以后再考虑上报到后端聚合。
+
+const STORAGE_PREFIX = 'perf_samples_'
+const START_MARK_PREFIX = 'perf_start_'
+const MAX_SAMPLES = 60 // 每个指标只留最近 60 条，够算 P50/P95，又不会把本地存储撑爆
+
+function readSamples(metric) {
+  try {
+    const raw = uni.getStorageSync(STORAGE_PREFIX + metric)
+    return Array.isArray(raw) ? raw : []
+  } catch {
+    return []
+  }
+}
+
+function writeSamples(metric, samples) {
+  try {
+    uni.setStorageSync(STORAGE_PREFIX + metric, samples)
+  } catch { /* 存储写满之类的边界情况直接放弃这次埋点，不影响正常点餐 */ }
+}
+
+// durationMs 是这次测到的耗时；meta 是任意补充信息（比如接口 URL、服务端 X-Process-Time-Ms），
+// 只用来排查问题，不参与 P50/P95 计算。
+export function recordSample(metric, durationMs, meta) {
+  if (!metric || !(durationMs >= 0)) return
+  const samples = readSamples(metric)
+  samples.push({ t: Date.now(), ms: Math.round(durationMs), meta: meta || undefined })
+  if (samples.length > MAX_SAMPLES) samples.splice(0, samples.length - MAX_SAMPLES)
+  writeSamples(metric, samples)
+  // eslint-disable-next-line no-console
+  console.log(`[perf] ${metric}: ${Math.round(durationMs)}ms`, meta || '')
+}
+
+function percentile(sortedMs, p) {
+  if (!sortedMs.length) return 0
+  const idx = Math.min(sortedMs.length - 1, Math.ceil((p / 100) * sortedMs.length) - 1)
+  return sortedMs[Math.max(0, idx)]
+}
+
+export function getStats(metric) {
+  const samples = readSamples(metric)
+  const sorted = samples.map((s) => s.ms).sort((a, b) => a - b)
+  if (!sorted.length) return { metric, count: 0, avg: 0, p50: 0, p95: 0, min: 0, max: 0 }
+  const sum = sorted.reduce((a, b) => a + b, 0)
+  return {
+    metric,
+    count: sorted.length,
+    avg: Math.round(sum / sorted.length),
+    p50: percentile(sorted, 50),
+    p95: percentile(sorted, 95),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+  }
+}
+
+const TRACKED_METRICS = ['scan_to_interactive', 'menu_api', 'cart_open', 'submit_order']
+
+export function getAllStats() {
+  return TRACKED_METRICS.map(getStats)
+}
+
+export function clearAll() {
+  TRACKED_METRICS.forEach((metric) => {
+    try { uni.removeStorageSync(STORAGE_PREFIX + metric) } catch {}
+  })
+}
+
+// 跨页面计时（扫码入口 App.onLaunch 到 menu.vue 首屏可交互，中间会经过一次 redirectTo，
+// 页面 JS 上下文会换掉，普通的内存变量存不住，只能落本地存储）。consumeStart 读到即删，
+// 避免同一个起点被后面的非扫码场景（比如页面内其它跳转）重复消费。
+export function markStart(name) {
+  try { uni.setStorageSync(START_MARK_PREFIX + name, Date.now()) } catch {}
+}
+
+export function consumeStart(name) {
+  try {
+    const startedAt = uni.getStorageSync(START_MARK_PREFIX + name)
+    uni.removeStorageSync(START_MARK_PREFIX + name)
+    return typeof startedAt === 'number' && startedAt > 0 ? startedAt : null
+  } catch {
+    return null
+  }
+}

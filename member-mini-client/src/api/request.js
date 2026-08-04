@@ -1,4 +1,25 @@
 import { config } from '../config'
+import { recordSample } from '../utils/perf'
+
+// 第0批性能埋点：只认这两个 URL，命中就顺手记一笔耗时，不用改任何调用方。
+// 后端已经在响应头里带了 X-Process-Time-Ms（服务端处理耗时），一并存进 meta 里，
+// 跟客户端整体耗时（含网络往返）对比，能看出慢是慢在网络还是慢在后端处理。
+const METRIC_URL_MATCHERS = [
+  { metric: 'menu_api', test: (url, method) => url === '/v1/menu/items' && method === 'GET' },
+  { metric: 'submit_order', test: (url, method) => url === '/v1/orders' && method === 'POST' },
+]
+
+function matchMetric(url, method) {
+  const hit = METRIC_URL_MATCHERS.find((m) => m.test(url, method))
+  return hit ? hit.metric : null
+}
+
+function readProcessTimeMs(header) {
+  if (!header) return undefined
+  const raw = header['X-Process-Time-Ms'] ?? header['x-process-time-ms']
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : undefined
+}
 
 const technicalPatterns = [
   'Traceback',
@@ -62,6 +83,9 @@ const request = (options) => {
     header.Authorization = `Bearer ${token}`
   }
 
+  const metric = matchMetric(options.url, (options.method || 'GET').toUpperCase())
+  const startedAt = Date.now()
+
   return new Promise((resolve, reject) => {
     uni.request({
       ...options,
@@ -72,6 +96,12 @@ const request = (options) => {
         const statusCode = res.statusCode || 0
 
         if (statusCode >= 200 && statusCode < 300 && body.code === 200) {
+          if (metric) {
+            recordSample(metric, Date.now() - startedAt, {
+              url: options.url,
+              serverMs: readProcessTimeMs(res.header),
+            })
+          }
           resolve(body)
           return
         }

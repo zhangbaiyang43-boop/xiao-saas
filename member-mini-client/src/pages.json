@@ -131,6 +131,12 @@
           "style": {
             "navigationBarTitleText": "核销码"
           }
+        },
+        {
+          "path": "pages/perf-debug",
+          "style": {
+            "navigationBarTitleText": "性能自测"
+          }
         }
       ]
     },
