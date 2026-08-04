@@ -41,7 +41,12 @@
 }
 
 // ─── Reset ────────────────────────────────────────────────────
-html, body { height: 100%; overflow-x: hidden; }
+// overscroll-behavior-y: contain 关掉浏览器原生的下拉刷新手势——这个手势等于一次
+// 整页刷新，会把接单页里已经解锁过的提醒音（AudioContext 是页面级状态，刷新就没了，
+// 见 useOrderAlert.js）、轮询状态等全部清空重来。页面自己已经有右上角的刷新按钮
+// （manualRefresh，只重新拉数据，不动这些状态），原生下拉刷新对这个 app 只有副作用，
+// 没有额外价值。
+html, body { height: 100%; overflow-x: hidden; overscroll-behavior-y: contain; }
 #app { height: 100%; }
 * { -webkit-tap-highlight-color: transparent; }
 .ant-btn { touch-action: manipulation; }
