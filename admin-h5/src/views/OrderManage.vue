@@ -109,10 +109,9 @@
             <span class="table-total">¥{{ selectedTable.total.toFixed(2) }}</span>
           </div>
 
-          <!-- 取餐牌号：管的是这一桌这一次吃饭，不是某一单菜，一桌填一次，后面的加单自动共享 -->
-          <div class="merchant-note-row" style="padding:8px 16px;margin:0;border-bottom:1px solid var(--border)">
-            <input v-model="selectedTablePickupNoDraft" class="merchant-note-input" placeholder="这一桌的取餐牌号（如：07）" maxlength="16" @keyup.enter="sendTablePickupNo(selectedTable)" />
-            <button class="merchant-note-send" @click="sendTablePickupNo(selectedTable)">登记</button>
+          <!-- 取餐牌号：管的是这一桌这一次吃饭，不是某一单菜，一桌登记一次，后面的加单自动共享 -->
+          <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
+            <PickupNoPicker :model-value="selectedTable.pickupNo" @pick="(n) => sendTablePickupNo(selectedTable, n)" />
           </div>
 
           <!-- 订单列表 -->
@@ -153,10 +152,6 @@
               <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
               <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
-            </div>
-            <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
-              <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言（如：招牌菜品已售完，换成了清蒸鱼）" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
-              <button class="merchant-note-send" @click="sendMerchantNote(order)">发送</button>
             </div>
             <div v-if="reviewsMap[order.id]" class="review-row">
               <span class="review-stars-display">{{ '★'.repeat(reviewsMap[order.id].rating) }}{{ '☆'.repeat(5 - reviewsMap[order.id].rating) }}</span>
@@ -281,13 +276,8 @@
             <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
           </div>
-          <div v-if="!['cancelled','rejected'].includes(order.status)" class="merchant-note-row">
-            <input v-model="order.pickup_no_draft" class="merchant-note-input" placeholder="取餐牌号（如：07）" maxlength="16" @keyup.enter="sendPickupNo(order)" />
-            <button class="merchant-note-send" @click="sendPickupNo(order)">登记</button>
-          </div>
-          <div v-if="['preparing','done'].includes(order.status)" class="merchant-note-row">
-            <input v-model="order.merchant_note_draft" class="merchant-note-input" placeholder="给顾客留言" maxlength="40" @keyup.enter="sendMerchantNote(order)" />
-            <button class="merchant-note-send" @click="sendMerchantNote(order)">发送</button>
+          <div v-if="!['cancelled','rejected'].includes(order.status)" style="margin-top:8px">
+            <PickupNoPicker :model-value="order.pickup_no" @pick="(n) => sendPickupNo(order, n)" />
           </div>
           <div v-if="reviewsMap[order.id]" class="review-row">
             <span class="review-stars-display">{{ '★'.repeat(reviewsMap[order.id].rating) }}{{ '☆'.repeat(5 - reviewsMap[order.id].rating) }}</span>
@@ -448,9 +438,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, updateMerchantNote, updateOrderPickupNo, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, updateOrderStatus, updateOrderPickupNo, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
 import { useOrderAlert } from '../composables/useOrderAlert'
+import PickupNoPicker from '../components/PickupNoPicker.vue'
 
 function decodeJwtPayload(token) {
   try {
@@ -473,7 +464,6 @@ const reviewsMap = ref({}) // order_id -> review
 // 按钮，多了一步；订单列表按钮直接在卡片上。桌台视图还在，需要看整桌汇总时手动切过去。
 const view = ref('list')
 const selectedTableKey = ref(null)
-const selectedTablePickupNoDraft = ref('')
 const showTableDetail = ref(false)
 const showSettleDialog = ref(false)
 const settlingTable = ref(null)
@@ -647,9 +637,6 @@ async function loadOrders(pollMeta = {}) {
       source: o.source || 'miniprogram',
       staffNote: o.staff_note || '',
       pickup_no: o.pickup_no || '',
-      pickup_no_draft: o.pickup_no || '',
-      merchant_note: o.merchant_note || '',
-      merchant_note_draft: o.merchant_note || '',
       printStatus: o.print_status || null,
       createdAt: o.created_at || '',
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
@@ -797,7 +784,6 @@ const visibleTableGroups = computed(() => tableGroups.value.filter(t => !t.isSet
 const selectedTable = computed(() => tableGroups.value.find(t => t.groupKey === selectedTableKey.value) || null)
 function openTableDetail(table) {
   selectedTableKey.value = table.groupKey
-  selectedTablePickupNoDraft.value = table.orders.find(o => o.pickup_no)?.pickup_no || ''
   showTableDetail.value = true
 }
 
@@ -861,17 +847,6 @@ async function acceptOrder(order) {
   catch { message.error('操作失败') } finally { order.updating = false }
 }
 
-async function sendMerchantNote(order) {
-  if (!order.merchant_note_draft.trim()) return
-  try {
-    const res = await updateMerchantNote(order.id, order.merchant_note_draft.trim())
-    if (res.code === 200) {
-      order.merchant_note = order.merchant_note_draft.trim()
-      message.success('留言已发送，顾客查看订单时可看到')
-    } else message.error(res.msg || '发送失败')
-  } catch { message.error('发送失败') }
-}
-
 // 牌子管的是这一桌这一次吃饭，不是某一单菜：登记接口会把这个号同步给同一个桌台会话下的
 // 所有订单，这里把返回的 order_ids 应用回本地列表，同一桌其它订单（包括加单）立刻跟着更新，
 // 不用等下一次轮询刷新才看到。
@@ -880,13 +855,11 @@ function applyPickupNoToOrders(pickupNo, orderIds) {
   for (const o of orders.value) {
     if (idSet.has(String(o.id))) {
       o.pickup_no = pickupNo || ''
-      o.pickup_no_draft = pickupNo || ''
     }
   }
 }
 
-async function sendPickupNo(order) {
-  const value = order.pickup_no_draft.trim()
+async function sendPickupNo(order, value) {
   if (!value || value === order.pickup_no) return
   try {
     const res = await updateOrderPickupNo(order.id, value)
@@ -897,8 +870,7 @@ async function sendPickupNo(order) {
   } catch { message.error('登记失败') }
 }
 
-async function sendTablePickupNo(table) {
-  const value = selectedTablePickupNoDraft.value.trim()
+async function sendTablePickupNo(table, value) {
   const anyOrder = table?.orders?.[0]
   if (!value || !anyOrder) return
   try {
@@ -1337,38 +1309,6 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-.merchant-note-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.merchant-note-input {
-  flex: 1;
-  height: 36px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 10px;
-  font-size: 13px;
-  outline: none;
-  color: var(--text-1);
-  background: var(--bg-card);
-  &:focus { border-color: #07C160; }
-}
-.merchant-note-send {
-  height: 36px;
-  padding: 0 14px;
-  background: #07C160;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  &:active { opacity: .85; }
-}
 .review-row {
   display: flex;
   align-items: center;

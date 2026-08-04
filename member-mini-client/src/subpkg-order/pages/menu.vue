@@ -2015,7 +2015,6 @@ export default {
         if (isPaidOrSubmittedOrder(data)) {
           orderId.value = id
           orderStatus.value = data.status || 'pending'
-          merchantNote.value = data.merchant_note || ''
           showCart.value = false
           showCheckoutAuth.value = false
           pendingPaymentIntent.value = null
@@ -2053,8 +2052,6 @@ export default {
         recoveringPayment = false
       }
     }
-
-    const merchantNote = ref('')
 
     const successOrderItemCount = computed(() =>
       successItems.value.reduce((sum, item) => sum + Number(item.qty || 0), 0)
@@ -2131,7 +2128,6 @@ export default {
         getOrderStatus(id, diningParticipantToken.value).then((body) => {
           if (body.code === 200) {
             const newStatus = body.data?.status || 'pending'
-            merchantNote.value = body.data?.merchant_note || ''
             orderStatus.value = newStatus
             const rec = myOrders.value.find(o => o.id === id)
             if (rec && rec.status !== newStatus) {
@@ -3398,7 +3394,7 @@ export default {
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
       paying, payAmount, confirmPay,
-      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, merchantNote,
+      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll,
       remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,
       orderRemarkExpanded, toggleOrderRemarkExpanded, orderRemarkSummary,
