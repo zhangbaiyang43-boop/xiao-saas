@@ -21,7 +21,7 @@
       scroll-y
       :scroll-into-view="scrollTarget"
       scroll-with-animation
-      @scroll="$emit('dish-scroll')"
+      @scroll="handleScroll"
     >
 
       <view v-if="lastOrderItems.length" class="reorder-bar">
@@ -126,17 +126,22 @@
 
 <script>
 // 从 menu.vue 拆出来的菜品列表 + 分类导航区块（原来是 activeTab==='order' 那部
-// 分模板：category-nav + dish-scroll，含"再来一单"、空菜单态、菜品卡片）。纯
-// 展示组件，不带任何业务逻辑——切换分类、滚动、再来一单、加购物车、选规格、
-// 图片失败等所有动作都只 emit 出去，真正的处理函数还是原来 menu.vue 里那几个
-// （switchCategory/onDishScroll/reorderItem/reorderAll/loadMenu/openCart/
-// openSpecSheet/addToCart/removeFromCart/markDishImageFailed/
-// openProductDetail），一行都没有改。
+// 分模板：category-nav + dish-scroll，含"再来一单"、空菜单态、菜品卡片）。基本
+// 是纯展示组件——切换分类（点击）、再来一单、加购物车、选规格、图片失败等动作
+// 都只 emit 出去，真正的处理函数还是原来 menu.vue 里那几个
+// （switchCategory/reorderItem/reorderAll/loadMenu/openCart/openSpecSheet/
+// addToCart/removeFromCart/markDishImageFailed/openProductDetail），一行都
+// 没有改。
 //
-// 注意：onDishScroll 内部用 uni.createSelectorQuery()（不带 .in()）按 class/id
-// 选择器查询 .dish-scroll 和 #cat-sec-N 的位置——这是页面级选择器查询，按小程序
-// 默认行为能穿透自定义组件边界选到子组件内部节点，这里没有改这部分逻辑，只是把
-// 这些节点的模板挪到了子组件里。
+// 唯一的例外：滚动时"左侧分类自动跟着高亮"这部分逻辑（原来的 onDishScroll）
+// 挪进了这个组件自己内部，而不是像其它逻辑一样留在 menu.vue 里再靠 emit 转发。
+// 原因：这段逻辑要用 uni.createSelectorQuery() 去查 .dish-scroll 和 #cat-sec-N
+// 这些节点的实时位置——这些节点现在是本组件内部的模板节点，选择器查询必须用
+// .in(this) 明确绑定到本组件实例才能可靠地查到自己内部的节点，不能指望不带
+// .in() 的页面级查询穿透自定义组件边界（试过了，实测会查不到，导致滚动时左侧
+// 分类不跟着高亮）。所以把这段查询逻辑一起挪进来，查完只把"当前应该高亮哪个
+// 分类"这个结论通过 active-category-change emit 出去，真正的赋值
+// （activeCategory.value = cat）还是父组件做，不在这里直接改父组件状态。
 export default {
   name: 'DishList',
   props: {
@@ -151,6 +156,7 @@ export default {
     imageLoadFailed: { type: Object, default: () => ({}) },
     qtyPulseKey: { type: String, default: '' },
     addPressKey: { type: String, default: '' },
+    ignoreScroll: { type: Boolean, default: false },
     // 纯查询/格式化函数直接从父组件原样传进来（不是在这里重写一份同名逻辑）。
     categoryIconClass: { type: Function, required: true },
     categoryDisplayName: { type: Function, required: true },
@@ -171,7 +177,7 @@ export default {
   },
   emits: [
     'switch-category',
-    'dish-scroll',
+    'active-category-change',
     'reorder-item',
     'reorder-all',
     'retry-load',
@@ -182,6 +188,35 @@ export default {
     'remove-from-cart',
     'add-to-cart',
   ],
+  data() {
+    return { scrollThrottleTimer: null }
+  },
+  methods: {
+    handleScroll() {
+      if (this.ignoreScroll) return
+      if (this.scrollThrottleTimer) return
+      this.scrollThrottleTimer = setTimeout(() => {
+        this.scrollThrottleTimer = null
+        const cats = this.categories
+        if (!cats.length) return
+        const query = uni.createSelectorQuery().in(this)
+        query.select('.dish-scroll').boundingClientRect()
+        cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
+        query.exec((res) => {
+          const svRect = res[0]
+          if (!svRect || svRect.height <= 0) return
+          let current = cats[0]
+          for (let i = 0; i < cats.length; i++) {
+            const r = res[i + 1]
+            if (r && typeof r.top === 'number' && (r.top - svRect.top) <= 30) current = cats[i]
+          }
+          if (current !== this.activeCategory) {
+            this.$emit('active-category-change', current)
+          }
+        })
+      }, 150)
+    },
+  },
 }
 </script>
 

@@ -48,6 +48,7 @@
       :image-load-failed="imageLoadFailed"
       :qty-pulse-key="qtyPulseKey"
       :add-press-key="addPressKey"
+      :ignore-scroll="ignoreScroll"
       :category-icon-class="categoryIconClass"
       :category-display-name="categoryDisplayName"
       :dishes-by-category="dishesByCategory"
@@ -65,7 +66,7 @@
       :cart-count="cartCount"
       :has-specs="hasSpecs"
       @switch-category="switchCategory"
-      @dish-scroll="onDishScroll"
+      @active-category-change="handleActiveCategoryChange"
       @reorder-item="reorderItem"
       @reorder-all="reorderAll"
       @retry-load="loadMenu"
@@ -2064,50 +2065,26 @@ export default {
       categoryVisibleStart = Math.max(0, idx - 2)
       categoryScrollTop.value = categoryVisibleStart * categoryItemHeight
     }
-    let ignoreScroll = false
+    const ignoreScroll = ref(false)
 
     const switchCategory = (cat) => {
       activeCategory.value = cat
-      ignoreScroll = true
-      setTimeout(() => { ignoreScroll = false }, 600)
+      ignoreScroll.value = true
+      setTimeout(() => { ignoreScroll.value = false }, 600)
       const idx = categories.value.indexOf(cat)
       syncCategoryVisible(cat)
       scrollTarget.value = ''
       nextTick(() => { scrollTarget.value = 'cat-sec-' + idx })
     }
 
-
-    // 之前的做法是缓存每个分类锚点的位置，滚动时拿当前 scrollTop 去跟缓存比对——问题是
-    // 分类顺序会在页面加载过程中动态变化（商家配置的分类顺序是另一个跟菜单并行加载的
-    // 请求，可能比菜单晚到），缓存跟真实布局之间必然存在时间差，这几轮修复下来一直在
-    // 堵不同的时机漏洞，本身就说明"缓存一份随时可能过期的快照"这个思路跟"分类顺序会
-    // 动态变化"这个前提是矛盾的。改成不缓存任何东西：每次滚动（节流后）都直接现场查一次
-    // 真实的 DOM 布局，问到的永远是当下的真相，不存在"缓存没跟上"这类问题。
-    let scrollThrottleTimer = null
-    const onDishScroll = () => {
-      if (ignoreScroll) return
-      if (scrollThrottleTimer) return
-      scrollThrottleTimer = setTimeout(() => {
-        scrollThrottleTimer = null
-        const cats = categories.value
-        if (!cats.length) return
-        const query = uni.createSelectorQuery()
-        query.select('.dish-scroll').boundingClientRect()
-        cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
-        query.exec((res) => {
-          const svRect = res[0]
-          if (!svRect || svRect.height <= 0) return
-          let current = cats[0]
-          for (let i = 0; i < cats.length; i++) {
-            const r = res[i + 1]
-            if (r && typeof r.top === 'number' && (r.top - svRect.top) <= 30) current = cats[i]
-          }
-          if (current !== activeCategory.value) {
-            activeCategory.value = current
-            syncCategoryVisible(current)
-          }
-        })
-      }, 150)
+    // 滚动时"实时查 DOM 现在滚到哪个分类锚点"这段查询逻辑现在在 DishList.vue 组件内部
+    // 自己做（因为要查的 .dish-scroll/#cat-sec-N 节点现在是它自己的模板节点，必须用
+    // .in(this) 绑定到组件实例才能可靠查到，不能从页面这一层隔着组件边界去查）。这里
+    // 只负责接收子组件查完之后报上来的"当前应该高亮哪个分类"结论，然后跟 switchCategory
+    // 点击分类时做的事一样：赋值 + 同步左侧分类栏可见区域。
+    const handleActiveCategoryChange = (cat) => {
+      activeCategory.value = cat
+      syncCategoryVisible(cat)
     }
 
     const setupCategoryObserver = () => {}
@@ -2730,7 +2707,7 @@ export default {
       isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured, dishPlaceholderStyle,
       lastOrderItems, reorderItem, reorderAll,
-      setupCategoryObserver, onDishScroll,
+      setupCategoryObserver, handleActiveCategoryChange, ignoreScroll,
     }
   },
 
