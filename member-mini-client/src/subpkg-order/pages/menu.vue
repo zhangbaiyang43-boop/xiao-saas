@@ -2819,6 +2819,20 @@ export default {
   flex-direction: column;
 }
 
+/* DishList 拆成独立组件后，.menu-body 的 flex:1/min-height:0 是靠"父级是 flex
+   容器"才生效的——原来 .menu-body 直接是 .order-page 的 flex 子元素，现在中间
+   多了一层 <dish-list> 自定义组件的宿主节点，小程序自定义组件宿主节点默认
+   display:block，不参与 flex 布局，.menu-body 的尺寸链就断在这一层，分类栏和
+   菜品列表都会失去可滚动的高度边界（点击分类没反应、菜品列表滚不动，就是这个
+   原因）。这里让 dish-list 标签本身也变成 flex:1 的 flex 容器，把 .order-page
+   分配的高度正确传下去。 */
+dish-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
 
 .shop-header {
   position: relative;
