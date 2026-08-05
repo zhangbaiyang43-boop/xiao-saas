@@ -2,20 +2,13 @@
   <view class="order-page">
 
 
-    <view class="shop-header">
-      <view class="shop-header-row">
-        <image v-if="shopLogo" class="shop-logo" :src="shopLogo" mode="aspectFill" />
-        <view class="shop-title-main">
-          <text class="shop-name">{{ shopName }}</text>
-          <view class="shop-meta-row" @click="showTableHint">
-            <text class="shop-table-text">{{ tableDisplayText }}</text>
-            <text class="shop-meta-dot">·</text>
-            <text class="shop-mode-text">{{ orderModeDisplayText }}</text>
-            <text class="shop-meta-arrow iconfont icon-roundright"></text>
-          </view>
-        </view>
-      </view>
-    </view>
+    <ShopHeader
+      :shop-logo="shopLogo"
+      :shop-name="shopName"
+      :table-display-text="tableDisplayText"
+      :order-mode-display-text="orderModeDisplayText"
+      @show-table-hint="showTableHint"
+    />
 
 
     <CouponBar
@@ -163,22 +156,14 @@
     />
 
 
-    <view class="bottom-nav">
-      <view :class="['bn-item', { active: activeTab === 'home' }]" @click="activeTab = 'home'">
-        <text :class="['bn-icon', 'iconfont', activeTab === 'home' ? 'icon-homefill' : 'icon-home']"></text>
-      </view>
-      <view :class="['bn-item', { active: activeTab === 'order' }]" @click="activeTab = 'order'">
-        <text :class="['bn-icon', 'iconfont', activeTab === 'order' ? 'icon-shopfill' : 'icon-shop']"></text>
-        <view v-if="totalCount > 0 && activeTab !== 'order'" class="bn-dot"></view>
-      </view>
-      <view :class="['bn-item', { active: activeTab === 'card' }]" @click="switchToCard">
-        <text :class="['bn-icon', 'iconfont', activeTab === 'card' ? 'icon-likefill' : 'icon-like']"></text>
-        <view v-if="bannerInfo && bannerInfo.couponCount > 0 && activeTab !== 'card'" class="bn-dot"></view>
-      </view>
-      <view :class="['bn-item', { active: activeTab === 'mine' }]" @click="goMine">
-        <text :class="['bn-icon', 'iconfont', activeTab === 'mine' ? 'icon-myfill' : 'icon-my']"></text>
-      </view>
-    </view>
+    <BottomNav
+      :active-tab="activeTab"
+      :total-count="totalCount"
+      :banner-info="bannerInfo"
+      @switch-tab="tab => activeTab = tab"
+      @switch-to-card="switchToCard"
+      @go-mine="goMine"
+    />
 
 
     <!-- Order confirmation sheet -->
@@ -380,27 +365,11 @@
     />
 
 
-    <view v-if="loadError && !loading" class="loading-mask">
-      <text class="loading-text">菜单加载中...</text>
-      <view class="retry-btn" @click="loadMenu"><text>重新加载</text></view>
-    </view>
-
-
-    <view v-if="loading" class="loading-mask skeleton-mask">
-      <view class="skeleton-nav">
-        <view v-for="n in 6" :key="n" class="skeleton-nav-item"></view>
-      </view>
-      <view class="skeleton-list">
-        <view v-for="n in 4" :key="n" class="skeleton-dish">
-          <view class="skeleton-thumb"></view>
-          <view class="skeleton-lines">
-            <view class="skeleton-line skeleton-line--title"></view>
-            <view class="skeleton-line skeleton-line--desc"></view>
-            <view class="skeleton-line skeleton-line--price"></view>
-          </view>
-        </view>
-      </view>
-    </view>
+    <LoadingStates
+      :load-error="loadError"
+      :loading="loading"
+      @retry-load="loadMenu"
+    />
 
 
   </view>
@@ -431,6 +400,9 @@ import CouponBar from '../components/CouponBar.vue'
 import WelcomeCouponSheet from '../components/WelcomeCouponSheet.vue'
 import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 import { useWelcomeCoupon } from '../composables/useWelcomeCoupon.js'
+import ShopHeader from '../components/ShopHeader.vue'
+import BottomNav from '../components/BottomNav.vue'
+import LoadingStates from '../components/LoadingStates.vue'
 import { orderModeText, confirmationText, successText, specText, authSheetText } from '../utils/orderText.js'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
@@ -441,7 +413,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, DishList, CartBar, CouponBar, WelcomeCouponSheet },
+  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, DishList, CartBar, CouponBar, WelcomeCouponSheet, ShopHeader, BottomNav, LoadingStates },
   setup() {
     const {
       formatPrice, dishImage, dishPlaceholderStyle, hasSpecs, isSoldOut, dishCardDesc,
@@ -2735,107 +2707,6 @@ dish-list {
   width: 100%;
 }
 
-
-.shop-header {
-  position: relative;
-  height: calc(220rpx + env(safe-area-inset-top));
-  min-height: calc(220rpx + env(safe-area-inset-top));
-  max-height: calc(220rpx + env(safe-area-inset-top));
-  background: var(--brand) url('/static/order/shop-cover-default.jpg') right bottom / cover no-repeat;
-  padding: calc(28rpx + env(safe-area-inset-top)) 32rpx 24rpx;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-/* 门店封面图目前是通用素材，不分商户；等 admin-h5 有了真正的封面上传入口，
-   这层叠加渐变可以继续用，只需要把 url() 换成商户自己的封面图。
-   background-position 用 right bottom：这张图的餐桌/菜品在右下方，居中裁剪
-   会把菜品裁掉一截、只剩空景。
-   这张图本身左侧就是渐变到浅色的留白（跟首页"立即点餐"卡片同一张风格的图），
-   之前又在上面叠了一层深绿色遮罩、文字还留白色——两层"提亮对比度"的手段叠加，
-   把照片本身糊成一片。首页卡片那次是对的做法：不加遮罩，直接把文字换成深色，
-   这里改成同一个做法，照片才能透出来，不然然会一直"雾蒙蒙"。 */
-
-.shop-header-row {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  height: 100%;
-  max-width: calc(100vw - 220rpx);
-  box-sizing: border-box;
-}
-
-.shop-logo {
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
-  flex-shrink: 0;
-  border: 2rpx solid rgba(255,255,255,0.65);
-  background: rgba(255,255,255,0.15);
-}
-
-.shop-title-main {
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-.shop-name {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  color: #2b1c0f;
-  font-size: 36rpx;
-  font-weight: 600;
-  line-height: 50rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shop-meta-row {
-  min-height: 72rpx;
-  margin-top: 4rpx;
-  display: flex;
-  align-items: center;
-  width: fit-content;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.shop-table-text {
-  color: #2b1c0f;
-  font-size: 28rpx;
-  line-height: 40rpx;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.shop-meta-dot {
-  margin: 0 10rpx;
-  color: rgba(58,38,18,0.6);
-  font-size: 28rpx;
-  line-height: 40rpx;
-}
-
-.shop-mode-text {
-  color: rgba(58,38,18,0.78);
-  font-size: 28rpx;
-  line-height: 40rpx;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.shop-meta-arrow {
-  margin-left: 10rpx;
-  color: rgba(58,38,18,0.55);
-  font-size: 28rpx;
-  line-height: 40rpx;
-  font-weight: 500;
-}
-
 .shop-name-row,
 .mode-pill,
 .mode-pill--muted,
@@ -2977,43 +2848,6 @@ dish-list {
 }
 
 
-.bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: calc(100rpx + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
-  background: #fff;
-  border-top: 1rpx solid var(--border);
-  display: flex;
-  align-items: stretch;
-  z-index: 300;
-}
-
-.bn-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-
-  &:active { opacity: 0.72; }
-}
-
-.bn-icon {
-  display: block;
-  width: 60rpx;
-  height: 60rpx;
-  color: var(--text-3);
-  font-size: 56rpx;
-  line-height: 60rpx;
-  text-align: center;
-  transition: color 180ms ease-out, transform 180ms ease-out;
-}
-
-
 .bn-item.active .bn-icon {
   color: var(--brand);
   transform: translateY(-1rpx);
@@ -3024,16 +2858,6 @@ dish-list {
   0% { transform: scale(1); }
   40% { transform: scale(1.18); }
   100% { transform: scale(1); }
-}
-
-.bn-dot {
-  position: absolute;
-  top: 12rpx;
-  right: calc(50% - 36rpx);
-  width: 12rpx;
-  height: 12rpx;
-  border-radius: 50%;
-  background: var(--danger);
 }
 
 
@@ -3568,111 +3392,9 @@ dish-list {
   text { color: var(--text-2); }
 }
 
-.loading-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  background: rgba(255,255,255,0.9);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 24rpx;
-}
-
-.loading-text { font-size: 28rpx; color: var(--text-3); }
-
-.skeleton-mask {
-  position: fixed;
-  top: calc(176rpx + env(safe-area-inset-top));
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: #fff;
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0;
-}
-
-.skeleton-nav {
-  width: 156rpx;
-  flex: 0 0 156rpx;
-  background: #F6F7F8;
-  padding-top: 20rpx;
-  box-sizing: border-box;
-}
-
-.skeleton-nav-item {
-  height: 36rpx;
-  margin: 0 28rpx 32rpx;
-  border-radius: 8rpx;
-}
-
-.skeleton-list {
-  flex: 1;
-  min-width: 0;
-  padding: 20rpx 20rpx 0;
-  box-sizing: border-box;
-  overflow: hidden;
-}
-
-.skeleton-dish {
-  display: flex;
-  align-items: flex-start;
-  height: 192rpx;
-  margin-bottom: 24rpx;
-}
-
-.skeleton-thumb {
-  width: 192rpx;
-  height: 192rpx;
-  border-radius: 20rpx;
-  flex-shrink: 0;
-}
-
-.skeleton-lines {
-  flex: 1;
-  min-width: 0;
-  margin-left: 20rpx;
-  padding-top: 10rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 18rpx;
-}
-
-.skeleton-line {
-  height: 26rpx;
-  border-radius: 8rpx;
-}
-
-.skeleton-line--title { width: 55%; height: 32rpx; }
-.skeleton-line--desc { width: 85%; }
-.skeleton-line--price { width: 28%; height: 34rpx; margin-top: 36rpx; }
-
-.skeleton-nav-item,
-.skeleton-thumb,
-.skeleton-line {
-  background: linear-gradient(90deg, #edeff1 25%, #f7f8f9 37%, #edeff1 63%);
-  background-size: 400% 100%;
-  animation: skeletonShimmer 1.4s ease infinite;
-}
-
 @keyframes skeletonShimmer {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
-}
-
-.retry-btn {
-  margin-top: 24rpx;
-  padding: 16rpx 48rpx;
-  border-radius: var(--radius-card);
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text { color: #fff; font-size: 30rpx; font-weight: 700; }
 }
 
 
