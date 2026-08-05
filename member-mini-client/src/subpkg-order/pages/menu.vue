@@ -377,12 +377,9 @@
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
-import { getMenuItems, getShopInfo, createOrder, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
+import { getMenuItems, getShopInfo, createOrder, createWxPayOrder, getOrderStatus } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
-import { joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
-import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
-import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 import { consumeStart, recordSample } from '@/utils/perf'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
@@ -414,6 +411,10 @@ import { useHistoryReorder } from '../composables/useHistoryReorder.js'
 import { useMyOrdersStore } from '../composables/useMyOrdersStore.js'
 import { useSpecSheet } from '../composables/useSpecSheet.js'
 import { useMemberAuth } from '../composables/useMemberAuth.js'
+import { useTableCheckout } from '../composables/useTableCheckout.js'
+import { useOrderStatusPoll } from '../composables/useOrderStatusPoll.js'
+import { useCheckout } from '../composables/useCheckout.js'
+import { useDiningSession } from '../composables/useDiningSession.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
@@ -450,132 +451,6 @@ export default {
       const value = String(mode || 'prepay').trim()
       return ['prepay', 'postpay', 'table_account'].includes(value) ? value : 'prepay'
     }
-    // 只更新本组件的响应式状态；实际的"怎么建立/校验本桌身份、往 storage 写哪些字段"
-    // 全部收敛到 utils/dining.js 的 resolveDiningIdentity/persistDiningContext，跟扫码
-    // 入口页（entry/index.vue）共用同一份实现，不再各自维护一份。
-    const persistDiningContext = (data = {}) => {
-      diningSessionId.value = data.dining_session_id || diningSessionId.value || ''
-      diningParticipantToken.value = data.participant_token || diningParticipantToken.value || ''
-      diningClientId.value = data.client_id || diningClientId.value || ''
-      persistDiningStorage(data)
-    }
-
-    const ensureDiningSession = async (force = false) => {
-      const tenantId = shopId.value || uni.getStorageSync('tenant_id') || ''
-      const table = tableNo.value || uni.getStorageSync('table_no') || ''
-      if (tableSessionClosed.value && !force) return false
-      const identity = await resolveDiningIdentity({ tenantId, table, force })
-      if (!identity.ok) return false
-      persistDiningContext(identity.data)
-      tableSessionClosed.value = false
-      return true
-    }
-
-    const bindCurrentDiningParticipant = async () => {
-      if (!diningParticipantToken.value) return
-      const tenantId = shopId.value || uni.getStorageSync('tenant_id') || ''
-      if (!tenantId) return
-      try {
-        await bindDiningParticipant({ tenant_id: tenantId, participant_token: diningParticipantToken.value }, { authRedirect: false })
-      } catch (e) {}
-    }
-
-    const diningOrderQuery = () => ({
-      tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
-      dining_session_id: diningSessionId.value || uni.getStorageSync('dining_session_id') || '',
-      participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') || '',
-    })
-
-    const mapServerOrder = (order) => {
-      const created = order.created_at ? new Date(order.created_at) : new Date()
-      const timeStr = Number.isNaN(created.getTime()) ? '' : created.getHours().toString().padStart(2,'0') + ':' + created.getMinutes().toString().padStart(2,'0')
-      return {
-        id: String(order.id || ''),
-        orderNo: String(order.order_no || order.id || '').slice(-4),
-        status: order.status || 'pending',
-        paymentStatus: order.payment_status || '',
-        paymentMode: normalizePaymentMode(order.payment_mode),
-        diningSessionId: order.dining_session_id ? String(order.dining_session_id) : '',
-        tableSessionId: order.dining_session_id ? String(order.dining_session_id) : '',
-        items: Array.isArray(order.items) ? order.items.map(i => ({ ...i, qty: Number(i.qty || 0), price: Number(i.price || 0) })) : [],
-        total: Number(order.total || 0),
-        discountAmount: Number(order.discount_amount || 0),
-        tableTotal: Number(order.table_total || order.session_total || 0),
-        participantNo: order.participant_no ?? null,
-        isStaff: order.source === 'staff',
-        staffNote: order.staff_note || '',
-        createdAt: timeStr,
-        createdTs: Number.isNaN(created.getTime()) ? Date.now() : created.getTime(),
-        table: order.table_no || tableNo.value,
-      }
-    }
-
-    // \u672c\u684c\u4eba\u6570\u53d8\u5316\u63d0\u793a\uff08\u53c2\u7167\u5ba2\u5982\u4e91\u540c\u6b3e\u4f53\u9a8c\uff09\uff1a\u53ea\u5728\u4eba\u6570\u6bd4\u4e0a\u4e00\u6b21\u540c\u6b65"\u53d8\u591a"\u65f6\u63d0\u9192\u4e00\u6b21\uff0c
-    // \u7b2c\u4e00\u6b21\u540c\u6b65\u4e0d\u63d0\u9192\uff08\u4e0d\u7136\u521a\u8fdb\u684c\u5c31\u5f39\u4e00\u4e2a"\u6709\u4eba\u52a0\u5165"\u5f88\u5947\u602a\uff0c\u90a3\u662f\u81ea\u5df1\uff09\u3002\u4eba\u6570\u4e0d\u843d\u5230
-    // \u5177\u4f53\u662f\u8c01\uff0c\u8ddf"\u53c2\u4e0e\u8005\u7f16\u53f7"\u6807\u7b7e\u662f\u540c\u4e00\u4e2a"\u4e0d\u66b4\u9732\u771f\u5b9e\u8eab\u4efd"\u7684\u539f\u5219\u3002
-    const knownParticipantCount = ref(0)
-    const hasSyncedParticipantCount = ref(false)
-
-    // 身份没就绪（守卫拦下）或后端明确回了 identity_mismatch，都不能悄悄返回"查不到订单"了
-    // 事——那跟"这一桌真的还没人点单"在界面上长得一模一样，顾客不会知道是身份出了问题。
-    // 这两种情况都先强制重建一次身份再重试，isRetry 保证最多重试一次，不会死循环。
-    const syncDiningOrders = async (isRetry = false) => {
-      const query = diningOrderQuery()
-      if (!query.tenant_id || !query.dining_session_id || !query.participant_token) {
-        if (isRetry) return false
-        return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
-      }
-      try {
-        const res = await getCurrentDiningOrders(query)
-        if (res?.code !== 200) return false
-        if (res.data?.identity_mismatch) {
-          if (isRetry) return false
-          return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
-        }
-        const sessionStatus = String(res.data?.session_status || '').toUpperCase()
-        tableSessionStatus.value = sessionStatus
-        tableSessionTotal.value = Number(res.data?.table_total || res.data?.session_total || 0)
-        tableSessionClosed.value = res.data?.closed === true || ['CLOSED', 'EXPIRED'].includes(sessionStatus)
-        if (tableSessionClosed.value) {
-          tableSessionClosedNotice.value = '\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c'
-          // Session closed: clear the local "which table" markers so the
-          // mine page won't keep showing this settled table as still dining.
-          uni.removeStorageSync('table_no')
-          uni.removeStorageSync('table_no_at')
-          uni.removeStorageSync('dining_session_id')
-          uni.removeStorageSync('dining_participant_id')
-          uni.removeStorageSync('dining_participant_token')
-          uni.removeStorageSync('dining_table_no')
-        }
-        checkoutRequestedAt.value = res.data?.checkout_requested_at || ''
-        tableSessionClosedAt.value = res.data?.closed_at || ''
-        myOrders.value = (res.data?.orders || []).map(mapServerOrder)
-        saveMyOrders()
-
-        const newParticipantCount = Number(res.data?.participant_count || 0)
-        if (newParticipantCount > 0) {
-          if (hasSyncedParticipantCount.value && newParticipantCount > knownParticipantCount.value) {
-            uni.showToast({ title: '\u6709\u65b0\u4f19\u4f34\u626b\u7801\u52a0\u5165\u4e86\u672c\u684c', icon: 'none', duration: 2500 })
-          }
-          knownParticipantCount.value = newParticipantCount
-          hasSyncedParticipantCount.value = true
-        }
-        return true
-      } catch (e) {
-        if (!isRetry && isDiningIdentityError(e)) {
-          return (await ensureDiningSession(true)) ? syncDiningOrders(true) : false
-        }
-        return false
-      }
-    }
-    const showTableHint = () => {
-      uni.showModal({
-        title: '\u684c\u53f7\u63d0\u793a',
-        content: '\u5f53\u524d\u684c\u53f7\uff1a' + (tableNo.value || orderModeText.unknownTable) + '\\n\u8bf7\u786e\u8ba4\u684c\u53f7\u540e\u7ee7\u7eed\u70b9\u9910',
-        showCancel: false,
-        confirmText: '\u77e5\u9053\u4e86'
-      })
-    }
     const todayActivity = ref('')
     const loading = ref(false)
     const loadError = ref(false)
@@ -584,12 +459,6 @@ export default {
     // 同一次结算内的重试（弱网超时后重新提交）都带同一个值，
     // 后端用它返回同一张订单而不是建出第二张。
     const pendingSubmitRequestId = ref('')
-    const ensureSubmitRequestId = () => {
-      if (!pendingSubmitRequestId.value) {
-        pendingSubmitRequestId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      }
-      return pendingSubmitRequestId.value
-    }
     const showCart = ref(false)
     const itemsExpanded = ref(false)
     const showSuccess = ref(false)
@@ -641,8 +510,6 @@ export default {
     const paymentFailed = ref(false)  // 上一次点"去支付"真的失败了（不是用户取消）——按钮要明确提示这是在重试，不能让用户猜要不要再点一次
     const payAmount = ref(0)
     const pendingOrderId = ref('')
-    let statusPollTimer = null
-    let tablePresencePollTimer = null
 
     const myOrders = ref([])
     const showOrders = ref(false)
@@ -672,21 +539,6 @@ export default {
     const activeTab = ref('order')
     const shopDistance = ref('')
 
-    const isCheckoutAuthError = (err) => {
-      const code = String(err?.code || '')
-      const statusCode = Number(err?.statusCode || 0)
-      const message = String(err?.message || '')
-      return [401, 403].includes(statusCode) || ['401', '403', 'NEED_LOGIN', 'member auth required'].includes(code) || message.includes('NEED_LOGIN')
-    }
-
-    const requireCheckoutAuth = () => {
-      clearCustomerSession()
-      refreshCustomerAuthState()
-      if (!pendingPaymentIntent.value && !pendingOrderId.value) pendingPaymentIntent.value = createPaymentIntent()
-      authActionStatus.value = 'idle'
-      showCheckoutAuth.value = true
-    }
-
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
 
     const availableCoupons = ref([])
@@ -695,7 +547,7 @@ export default {
     } = useMemberAuth({
       shopId, tableNo, activeTab, isCustomerLoggedIn, authStateVersion, availableCoupons,
       bannerInfo, isMember, memberLoading, memberAuthorizing,
-      wxLogin, bindCurrentDiningParticipant, pickAvatarChar, checkWelcomeCoupon,
+      wxLogin, bindCurrentDiningParticipant: () => bindCurrentDiningParticipant(), pickAvatarChar, checkWelcomeCoupon,
     })
 
     const loadDistance = (shopLat, shopLng) => {
@@ -755,127 +607,25 @@ export default {
       stopStatusPoll: () => stopStatusPoll(),
     })
 
-    const pendingPaymentStorageKey = () => 'pending_payment_order_' + shopId.value + '_' + tableNo.value
-
-    const savePendingPaymentOrder = () => {
-      if (!pendingOrderId.value) return
-      try {
-        uni.setStorageSync(pendingPaymentStorageKey(), JSON.stringify({
-          orderId: pendingOrderId.value,
-          orderNo: orderNo.value,
-          payAmount: payAmount.value,
-          total: payAmount.value,
-          items: successItems.value,
-          createdTs: Date.now(),
-        }))
-      } catch (e) {}
-    }
-
-    const restorePendingPaymentOrder = () => {
-      if (pendingOrderId.value) return true
-      try {
-        const raw = uni.getStorageSync(pendingPaymentStorageKey())
-        if (!raw) return false
-        const record = JSON.parse(raw)
-        if (!record?.orderId) return false
-        pendingOrderId.value = String(record.orderId)
-        orderNo.value = String(record.orderNo || record.orderId || '').slice(-4)
-        payAmount.value = Number(record.payAmount || record.total || 0)
-        successItems.value = Array.isArray(record.items) ? record.items : []
-        successTotal.value = Number(record.total || record.payAmount || 0)
-        return true
-      } catch (e) {
-        return false
-      }
-    }
-
-    const clearPendingPaymentOrder = () => {
-      try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
-      pendingOrderId.value = ''
-      paymentFailed.value = false
-    }
-
-    const clearStalePrepayOrderForPayLater = () => {
-      if (isPrepayMode.value || !pendingOrderId.value) return
-      clearPendingPaymentOrder()
-      pendingPaymentIntent.value = null
-    }
-
-    const isPaidOrSubmittedOrder = (order) => {
-      const status = order?.status || ''
-      const paymentStatus = order?.payment_status || ''
-      return paymentStatus === 'paid' || ['pending', 'paid', 'accepted', 'preparing', 'done', 'completed', 'settled'].includes(status)
-    }
-
-    let recoveringPayment = false
-    const recoverPendingPaymentResult = async ({ showDetail = false } = {}) => {
-      if (recoveringPayment) return false
-      restorePendingPaymentOrder()
-      const id = pendingOrderId.value
-      if (!id) return false
-      recoveringPayment = true
-      try {
-        const res = await getOrderStatus(id, diningParticipantToken.value)
-        const data = res?.data || {}
-        if (isPaidOrSubmittedOrder(data)) {
-          orderId.value = id
-          orderStatus.value = data.status || 'pending'
-          showCart.value = false
-          showCheckoutAuth.value = false
-          pendingPaymentIntent.value = null
-          clearPendingPaymentOrder()
-
-          const now = new Date()
-          const existed = myOrders.value.find(o => String(o.id) === String(id))
-          if (existed) {
-            existed.status = orderStatus.value
-          } else {
-            myOrders.value.unshift({
-              id,
-              orderNo: orderNo.value || String(id).slice(-4),
-              status: orderStatus.value,
-              items: successItems.value,
-              total: successTotal.value || payAmount.value,
-              createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
-              createdTs: now.getTime(),
-              table: tableNo.value,
-            })
-          }
-          saveMyOrders()
-          startStatusPoll(id)
-          await syncDiningOrders()
-          showOrders.value = showDetail || showOrders.value
-          return true
-        }
-        if (['cancelled', 'rejected'].includes(data.status)) {
-          clearPendingPaymentOrder()
-        }
-        return false
-      } catch (e) {
-        return false
-      } finally {
-        recoveringPayment = false
-      }
-    }
+    const {
+      persistDiningContext, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders, showTableHint,
+    } = useDiningSession({
+      shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
+      tableSessionClosed, tableSessionStatus, tableSessionTotal, tableSessionClosedNotice,
+      checkoutRequestedAt, tableSessionClosedAt, myOrders,
+      normalizePaymentMode, saveMyOrders,
+    })
 
     const {
       successOrderItemCount, successOrderNo, successStatusText, successStatusTone,
       orderStatusText, orderStatusClass,
     } = useSuccessSheetView({ successItems, orderNo, orderId, orderStatus })
 
-    watch(orderStatus, (newVal, oldVal) => {
-      if (newVal === 'preparing' && oldVal === 'pending') {
-        uni.vibrateShort({ type: 'heavy' })
-        uni.showToast({ title: '\u5546\u5bb6\u5df2\u63a5\u5355\uff0c\u6b63\u5728\u5907\u9910', icon: 'none', duration: 2500 })
-      } else if (newVal === 'done') {
-        uni.vibrateShort({ type: 'heavy' })
-      } else if (newVal === 'rejected') {
-        stopStatusPoll()
-        uni.vibrateShort({ type: 'heavy' })
-        uni.showModal({ title: '\u8ba2\u5355\u5df2\u88ab\u62d2\u7edd', content: '\u5546\u5bb6\u6682\u65f6\u65e0\u6cd5\u5904\u7406\u6b64\u8ba2\u5355\uff0c\u8bf7\u8054\u7cfb\u670d\u52a1\u5458', showCancel: false })
-      }
+    const {
+      startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, refreshAllOrderStatuses,
+    } = useOrderStatusPoll({
+      orderStatus, diningParticipantToken, myOrders, saveMyOrders, syncDiningOrders, normalizeOrderStatus,
     })
-
 
     const finishOrdering = () => {
       showSuccess.value = false
@@ -907,58 +657,6 @@ export default {
       showOrders.value = true
     }
 
-    function startStatusPoll(id) {
-      stopStatusPoll()
-      statusPollTimer = setInterval(() => {
-        getOrderStatus(id, diningParticipantToken.value).then((body) => {
-          if (body.code === 200) {
-            const newStatus = body.data?.status || 'pending'
-            orderStatus.value = newStatus
-            const rec = myOrders.value.find(o => o.id === id)
-            if (rec && rec.status !== newStatus) {
-              rec.status = newStatus
-              saveMyOrders()
-            }
-            if (['settled', 'cancelled', 'rejected'].includes(newStatus)) stopStatusPoll()
-          }
-        }).catch(() => { })
-      }, 15000)
-    }
-
-    function stopStatusPoll() {
-      if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
-    }
-
-    // 本桌人数轮询：只在顾客真的停留在点餐页时跑，间隔比订单状态轮询（15秒）更松——
-    // "有人加入"不是紧急信息，稍微有延迟没关系，没必要跟催单一样频繁。onHide/onUnload
-    // 会停掉，不在后台空耗电量和流量。
-    function startTablePresencePoll() {
-      stopTablePresencePoll()
-      tablePresencePollTimer = setInterval(() => {
-        syncDiningOrders().catch(() => {})
-      }, 25000)
-    }
-
-    function stopTablePresencePoll() {
-      if (tablePresencePollTimer) { clearInterval(tablePresencePollTimer); tablePresencePollTimer = null }
-    }
-
-    async function refreshAllOrderStatuses() {
-      if (await syncDiningOrders()) return
-      const orders = myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status)))
-      orders.forEach(order => {
-        getOrderStatus(order.id, diningParticipantToken.value).then((body) => {
-          if (body.code === 200) {
-            const newStatus = body.data?.status || order.status
-            const rec = myOrders.value.find(o => o.id === order.id)
-            if (rec && rec.status !== newStatus) {
-              rec.status = newStatus
-              saveMyOrders()
-            }
-          }
-        }).catch(() => {})
-      })
-    }
     const remark = ref('')
     const orderRemarkChips = ref(['\u4e00\u8d77\u4e0a\u83dc', '\u5168\u90e8\u6253\u5305', '\u52a0\u53cc\u7b77\u5b50', '\u4e0d\u7528\u9910\u5177', '\u6709\u513f\u7ae5\u7528\u9910'])
     const showOrderRemarkExtra = ref(false)
@@ -1006,16 +704,6 @@ export default {
       if (!isPrepayMode.value) return authSheetText.confirmSubmit
       if (wechatPayAmount.value <= 0) return authSheetText.confirmFree
       return authSheetText.confirm + ' ' + confirmationText.currency + wechatPayAmount.value.toFixed(2)
-    })
-    const createPaymentIntent = () => ({
-      merchantId: shopId.value,
-      tableId: tableNo.value,
-      cartSnapshot: cartItems.value.map(item => ({ id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specKey: item.specKey || '' })),
-      couponId: selectedCouponId.value || null,
-      orderRemark: remark.value.trim(),
-      payableAmount: wechatPayAmount.value,
-      requestId: 'pay_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      createdAt: Date.now(),
     })
     const toggleItemsExpanded = () => { itemsExpanded.value = !itemsExpanded.value }
     const closeOrderConfirm = () => { if (!ordering.value && !paying.value) showCart.value = false }
@@ -1190,359 +878,30 @@ export default {
       refreshAvailableCoupons()
     }
 
-    const goCheckout = () => {
-      if (ordering.value || paying.value || authorizing.value) return
-      if (!canSubmitOrder.value) {
-        uni.showToast({ title: tableSessionClosed.value ? '\u672c\u684c\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u70b9\u9910' : (tableNo.value ? '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355' : '\u672a\u8bc6\u522b\u684c\u53f7\uff0c\u8bf7\u91cd\u65b0\u626b\u7801'), icon: 'none' })
-        return
-      }
-      clearStalePrepayOrderForPayLater()
-      if (pendingOrderId.value) return confirmPay()
-      submitOrder()
-    }
+    const {
+      createPaymentIntent, goCheckout, cancelCheckoutAuth, continuePendingPaymentIntent, handleCheckoutAuth,
+      performSubmitOrder, submitOrder, applyRewardCoupon, attachPaymentReward, confirmPay,
+      savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder,
+      clearStalePrepayOrderForPayLater, recoverPendingPaymentResult, requireCheckoutAuth,
+    } = useCheckout({
+      shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
+      orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,
+      showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed,
+      payAmount, pendingOrderId, pendingSubmitRequestId,
+      myOrders, showOrders, showCart, showSuccess,
+      ordering, tableSessionClosed, paymentMode,
+      reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
+      totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
+      wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
+      normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+    })
 
-    const cancelCheckoutAuth = () => {
-      if (authorizing.value) return
-      showCheckoutAuth.value = false
-    }
-
-    const continuePendingPaymentIntent = async () => {
-      clearStalePrepayOrderForPayLater()
-      if (!pendingPaymentIntent.value && !pendingOrderId.value) pendingPaymentIntent.value = createPaymentIntent()
-      if (pendingOrderId.value) return confirmPay()
-      return submitOrder()
-    }
-
-    const handleCheckoutAuth = async (event) => {
-      if (authorizing.value || ordering.value || paying.value) return
-      const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
-      if (!phoneCode) return uni.showToast({ title: '\u672a\u5b8c\u6210\u6388\u6743\uff0c\u6682\u65f6\u65e0\u6cd5\u7ee7\u7eed\u652f\u4ed8', icon: 'none' })
-      authorizing.value = true
-      authActionStatus.value = 'authorizing'
-      try {
-        const code = await wxLogin()
-        const res = await joinByEntranceCode({
-          scene: uni.getStorageSync('entrance_scene') || '',
-          tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
-          table_no: tableNo.value || uni.getStorageSync('table_no') || '',
-          code,
-          phone_code: phoneCode,
-          agreement_accepted: true,
-          invite_code: uni.getStorageSync('invite_code') || '',
-        }, { authRedirect: false })
-        if (res.code !== 200) {
-          authActionStatus.value = 'idle'
-          uni.showToast({ title: res?.msg || '\u52a0\u5165\u4f1a\u5458\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none', duration: 1200 })
-          return
-        }
-        uni.removeStorageSync('invite_code')
-        saveCustomerSession(res.data || {})
-        await bindCurrentDiningParticipant()
-        authActionStatus.value = 'submitting'
-        const ok = await continuePendingPaymentIntent()
-        if (ok) {
-          pendingPaymentIntent.value = null
-          showCheckoutAuth.value = false
-        } else {
-          authActionStatus.value = 'idle'
-        }
-      } catch (err) {
-        authActionStatus.value = 'idle'
-        uni.showToast({ title: err.message || '\u6388\u6743\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
-      } finally {
-        authorizing.value = false
-        if (!ordering.value && !paying.value && authActionStatus.value !== 'idle') authActionStatus.value = 'idle'
-      }
-    }
-
-    // performSubmitOrder \u62c6\u51fa\u6765\u662f\u4e3a\u4e86\u8ba9"\u672c\u684c\u8eab\u4efd\u5931\u6548\uff0c\u91cd\u5efa\u540e\u81ea\u52a8\u91cd\u8bd5\u4e00\u6b21"\u8fd9\u6761\u8def\u5f84\u80fd
-    // \u9012\u5f52\u8c03\u7528\u81ea\u5df1\u800c\u4e0d\u649e\u4e0a submitOrder \u81ea\u5df1\u7684 ordering.value \u91cd\u5165\u9501\uff08\u9501\u5728\u6574\u4e2a\u4e0b\u5355+\u652f\u4ed8
-    // \u671f\u95f4\u4e00\u76f4\u662f true\uff0c\u9012\u5f52\u8c03\u7528\u5916\u5c42 submitOrder \u4f1a\u88ab\u8fd9\u628a\u9501\u76f4\u63a5\u6321\u56de\u6765\uff09\u3002
-    const performSubmitOrder = async (isRetry = false) => {
-      try {
-        const sessionReady = await ensureDiningSession()
-        if (!sessionReady || tableSessionClosed.value) throw new Error(tableSessionClosed.value ? '\u672c\u684c\u5df2\u7ed3\u675f\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u70b9\u9910' : '\u672c\u684c\u70b9\u9910\u4f1a\u8bdd\u4e0d\u53ef\u7528\uff0c\u8bf7\u91cd\u65b0\u626b\u7801')
-        const payload = {
-          table: tableNo.value,
-          shop: shopId.value,
-          total: totalPrice.value,
-          remark: remark.value.trim() || undefined,
-          coupon_id: selectedCouponId.value || undefined,
-          dining_session_id: diningSessionId.value || undefined,
-          participant_token: diningParticipantToken.value || undefined,
-          client_id: diningClientId.value || undefined,
-          request_id: ensureSubmitRequestId(),
-          items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined })),
-        }
-        const res = await createOrder(payload, { authRedirect: false })
-        const data = res?.data || {}
-        pendingOrderId.value = String(data.id || data.order_id || '')
-        paymentFailed.value = false
-        orderNo.value = String(data.order_no || data.id || '').slice(-4)
-        successItems.value = cartItems.value.map(i => ({ ...i }))
-        successDiscount.value = Number(data.discount_amount ?? 0)
-        payAmount.value = Number(data.pay_amount ?? data.total ?? finalPrice.value)
-        paymentMode.value = normalizePaymentMode(data.payment_mode)
-        if (!pendingOrderId.value) throw new Error('\u8ba2\u5355\u521b\u5efa\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5')
-        if (data.need_payment !== false) {
-          savePendingPaymentOrder()
-          return await confirmPay()
-        }
-        _handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })
-        pendingPaymentIntent.value = null
-        return true
-      } catch (err) {
-        // \u672c\u684c\u533f\u540d\u8eab\u4efd\u5931\u6548\uff08\u540e\u7aef\u7edf\u4e00\u8fd4\u56de 409\uff09\u4e0d\u662f\u4f1a\u5458\u767b\u5f55\u95ee\u9898\uff0c\u9759\u9ed8\u91cd\u5efa\u8eab\u4efd\u540e\u81ea\u52a8\u91cd\u8bd5
-        // \u4e00\u6b21\uff1b\u4ecd\u5931\u8d25\u624d\u8d70\u4e0b\u9762\u7684\u515c\u5e95\u63d0\u793a\uff0c\u4e0d\u4f1a\u5f39"\u7ee7\u7eed\u652f\u4ed8/\u6388\u6743"\u8fd9\u79cd\u4f1a\u5458\u4e13\u5c5e\u7684\u63aa\u8f9e\u3002
-        if (!isRetry && isDiningIdentityError(err)) {
-          const rebuilt = await ensureDiningSession(true)
-          if (rebuilt) return performSubmitOrder(true)
-        }
-        if (isCheckoutAuthError(err)) {
-          requireCheckoutAuth()
-          return false
-        }
-        const rawMsg = err?.message || ''
-        if (rawMsg.includes('\u4f1a\u8bdd') || rawMsg.includes('\u91cd\u65b0\u626b\u7801') || rawMsg.includes('\u672c\u684c')) tableSessionClosed.value = true
-        const msg = rawMsg || '\u4e0b\u5355\u5931\u8d25\uff0c\u8bf7\u544a\u77e5\u670d\u52a1\u5458'
-        uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
-        return false
-      }
-    }
-
-    const submitOrder = async () => {
-      if (ordering.value || paying.value) return false
-      ordering.value = true
-      if (showCheckoutAuth.value) authActionStatus.value = 'submitting'
-      try {
-        return await performSubmitOrder()
-      } finally {
-        ordering.value = false
-      }
-    }
-
-    const _handlePaySuccess = (data) => {
-      showCart.value = false
-      orderId.value = pendingOrderId.value
-      orderStatus.value = data.status || 'pending'
-      successTotal.value = Number(data.total ?? payAmount.value)
-      startStatusPoll(orderId.value)
-      const now = new Date()
-      const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
-      myOrders.value.unshift({
-        id: orderId.value, orderNo: orderNo.value, status: orderStatus.value,
-        paymentStatus: data.payment_status || '', paymentMode: normalizePaymentMode(data.payment_mode || paymentMode.value),
-        diningSessionId: diningSessionId.value || '', tableSessionId: diningSessionId.value || '',
-        items: successItems.value, total: successTotal.value, createdAt: timeStr,
-        createdTs: now.getTime(), table: tableNo.value,
-      })
-      saveMyOrders()
-      syncDiningOrders().catch(() => {})
-      reminderRequested.value = false
-      applyRewardCoupon(data.coupon || null)
-      cart.value = {}
-      specCartItems.value = []
-      selectedCouponId.value = null
-      remark.value = ''
-      pendingSubmitRequestId.value = ''
-      showSuccess.value = true
-      clearPendingPaymentOrder()
-    }
-
-    // \u628a"\u540e\u7aef\u8fd4\u56de\u7684\u5956\u52b1\u5238"\u62d3\u6210 earnedCoupon \u7684\u5c55\u793a\u5f62\u72b6\uff1a\u6709\u771f\u5b9e\u5956\u52b1\u5238\u5c31\u7528\u5b83\uff0c
-    // \u6ca1\u6709\uff08c \u4e3a null\uff09\u5219\u56de\u9000\u5230\u672c\u5730\u7f13\u5b58\u7684\u5165\u4f1a\u6b22\u8fce\u5238\uff0c\u514d\u5f97\u652f\u4ed8\u5b8c\u6210\u90a3\u4e00\u523b\u4ec0\u4e48\u90fd\u4e0d\u5c55\u793a\u3002
-    const applyRewardCoupon = (c) => {
-      if (c) {
-        earnedCoupon.value = {
-          couponId: c.id || '',
-          amount: Number(c.value ?? c.amount ?? 0),
-          threshold: Number(c.min_amount ?? c.threshold ?? 0),
-          // \u540e\u7aef\u7ed9\u7684\u662f\u7edd\u5bf9\u8fc7\u671f\u65f6\u95f4 expired_at\uff0c\u4e0d\u662f\u76f8\u5bf9\u5929\u6570\uff0c
-          // \u76f4\u63a5\u5b58\u6210 expire_time \u65b9\u4fbf\u590d\u7528\u4e0b\u9762\u7684 couponValidityText\u3002
-          expire_time: c.expired_at || '',
-          name: c.name || '\u4f18\u60e0\u5238',
-          isSecondOrder: Boolean(c.is_second_order),
-        }
-        return true
-      }
-      const welcome = consumeWelcomeCoupon()
-      earnedCoupon.value = welcome ? {
-        couponId: welcome.id || '',
-        amount: Number(welcome.amount ?? welcome.value ?? 0),
-        threshold: Number(welcome.min_amount ?? welcome.threshold ?? 0),
-        expire_time: welcome.expired_at || '',
-        name: welcome.name || '\u65b0\u4eba\u4f18\u60e0\u5238',
-      } : null
-      return false
-    }
-
-    // \u771f\u5b9e\u5fae\u4fe1\u652f\u4ed8\u7684\u5956\u52b1\u5238\u662f\u5f02\u6b65\u53d1\u7684\uff08wxpay_notify \u56de\u8c03\u843d\u5e93\uff09\uff0c\u5ba2\u6237\u7aef requestPayment
-    // \u521a\u6210\u529f\u90a3\u4e00\u523b\u540e\u7aef\u672a\u5fc5\u5df2\u7ecf\u5904\u7406\u5b8c\uff0c\u6240\u4ee5\u5148\u7528\u56de\u9000\u6587\u6848\u5c55\u793a\uff0c\u518d\u5728\u540e\u53f0\u77ed\u8f6e\u8be2 /orders/my
-    // \u62ff\u5230\u771f\u5b9e\u53d1\u653e\u7684\u5956\u52b1\u5238\u540e\u8865\u4e0a\u53bb\u2014\u2014\u82e5\u7528\u6237\u5df2\u5173\u95ed\u6210\u529f\u9762\u677f\u6216\u5df2\u53bb\u770b\u5176\u4ed6\u8ba2\u5355\u5c31\u4e0d\u518d\u6539\u3002
-    const attachPaymentReward = async (id) => {
-      for (let attempt = 0; attempt < 6; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 900))
-        try {
-          const res = await getOrderStatus(id, diningParticipantToken.value)
-          const d = res?.data || {}
-          if (d.payment_status === 'paid') {
-            if (showSuccess.value && orderId.value === id && d.reward_coupon) {
-              applyRewardCoupon(d.reward_coupon)
-            }
-            return
-          }
-        } catch (e) { /* keep retrying */ }
-      }
-    }
-
-    const confirmPay = async () => {
-      if (paying.value || !pendingOrderId.value) return false
-      paying.value = true
-      paymentFailed.value = false
-      try {
-        if (await recoverPendingPaymentResult()) return true
-        if (showCheckoutAuth.value) authActionStatus.value = 'paying'
-        let jsCode = ''
-        if (!uni.getStorageSync('customer_token')) {
-          jsCode = await wxLogin()
-        }
-        const res = await createWxPayOrder(pendingOrderId.value, false, { authRedirect: false, js_code: jsCode, participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') })
-        const data = res?.data || {}
-
-        if (data.free) {
-          _handlePaySuccess(data)
-          pendingPaymentIntent.value = null
-          return true
-        }
-
-        const p = data.pay_params
-        if (!p) {
-          throw new Error('\u652f\u4ed8\u53c2\u6570\u7f3a\u5931\uff0c\u8bf7\u91cd\u65b0\u4e0b\u5355')
-        }
-
-        await uni.requestPayment({
-          provider: 'wxpay',
-          timeStamp: p.timeStamp,
-          nonceStr: p.nonceStr,
-          package: p.package,
-          signType: p.signType || 'RSA',
-          paySign: p.paySign,
-        })
-
-        const paidOrderId = pendingOrderId.value
-        _handlePaySuccess({ ...data, total: payAmount.value })
-        pendingPaymentIntent.value = null
-        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去轮询。
-        attachPaymentReward(paidOrderId)
-        return true
-
-      } catch (err) {
-        if (isCheckoutAuthError(err)) {
-          requireCheckoutAuth()
-          return false
-        }
-        if (await recoverPendingPaymentResult({ showDetail: true })) return true
-        const msg = err?.errMsg || err?.message || '\u652f\u4ed8\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5'
-        paymentFailed.value = true
-        if (String(msg).includes('cancel')) {
-          uni.showToast({ title: '\u5df2\u53d6\u6d88\u652f\u4ed8', icon: 'none' })
-        } else {
-          uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
-        }
-        return false
-      } finally {
-        paying.value = false
-      }
-    }
-
-    const clearCheckoutRequest = () => {
-      if (!checkoutRequestedAt.value) return
-      checkoutRequestedAt.value = ''
-      requestTableCheckout({
-        tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
-        dining_session_id: tableSessionId.value,
-        participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') || '',
-        requested: false,
-      }).catch(() => {})
-    }
-
-    const handleTableContinueOrder = async () => {
-      if (!canContinueOrder.value) {
-        uni.showToast({ title: '本桌账单已结束，不能继续加菜', icon: 'none' })
-        return
-      }
-      if (!tableSessionId.value) {
-        const ok = await ensureDiningSession(true)
-        if (!ok) {
-          uni.showToast({ title: '本桌点餐会话不可用，请重新扫码', icon: 'none' })
-          return
-        }
-      }
-      // 顾客决定继续加菜，说明这一桌暂时不结账了，之前呼叫服务员的请求就该撤销，
-      // 不然等新点的菜也做完了，界面会立刻显示"已呼叫服务员"这种其实早就过期的状态。
-      clearCheckoutRequest()
-      persistDiningContext({
-        dining_session_id: tableSessionId.value,
-        participant_token: diningParticipantToken.value,
-        client_id: diningClientId.value,
-      })
-      showOrders.value = false
-      showSuccess.value = false
-      activeTab.value = 'order'
-    }
-
-    const performTableCheckout = async (isRetry = false) => {
-      try {
-        // participant_token 有时会跟 session 状态不同步（比如缓存只留下了 session_id），
-        // 后端校验不到身份会直接 409，先补一次 ensureDiningSession 把它修复回来，
-        // 避免明明这一桌点单正常、结账却因为身份缺失而失败。
-        if (!diningParticipantToken.value && !uni.getStorageSync('dining_participant_token')) {
-          await ensureDiningSession()
-        }
-        const res = await requestTableCheckout({
-          tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
-          dining_session_id: tableSessionId.value,
-          participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') || '',
-          requested: true,
-        }, { authRedirect: false })
-        if (res?.code === 200) {
-          checkoutRequestedAt.value = res.data?.checkout_requested_at || new Date().toISOString()
-          uni.vibrateShort({ type: 'heavy' })
-          uni.showToast({ title: '已通知服务员，请稍候为您结账', icon: 'none', duration: 2000 })
-        } else {
-          uni.showToast({ title: res?.msg || '呼叫失败，请重试', icon: 'none' })
-        }
-      } catch (e) {
-        if (!isRetry && isDiningIdentityError(e)) {
-          const rebuilt = await ensureDiningSession(true)
-          if (rebuilt) return performTableCheckout(true)
-        }
-        uni.showToast({ title: '呼叫失败，请重试', icon: 'none' })
-      }
-    }
-
-    const handleTableCheckout = async () => {
-      if (tableCheckouting.value || checkoutRequested.value) return
-      if (isTableSettled.value) {
-        uni.showModal({
-          title: '本桌已结账',
-          content: '本次用餐账单已经结清，如需明细请联系服务员。',
-          showCancel: false,
-          confirmText: '知道了',
-        })
-        return
-      }
-      if (!tableSessionId.value) {
-        uni.showToast({ title: '缺少桌台账单信息，请重新加载', icon: 'none' })
-        return
-      }
-      tableCheckouting.value = true
-      try {
-        await performTableCheckout()
-      } finally {
-        tableCheckouting.value = false
-      }
-    }
+    const { handleTableContinueOrder, handleTableCheckout } = useTableCheckout({
+      shopId, diningParticipantToken, diningClientId, tableSessionId,
+      canContinueOrder, checkoutRequestedAt, checkoutRequested, isTableSettled, tableCheckouting,
+      showOrders, showSuccess, activeTab,
+      ensureDiningSession, persistDiningContext,
+    })
 
     const goCoupons = () => {
       showSuccess.value = false
