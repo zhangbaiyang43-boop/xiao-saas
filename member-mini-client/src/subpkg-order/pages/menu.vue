@@ -162,92 +162,31 @@
 
 
     <scroll-view v-show="activeTab === 'home'" class="tab-scroll" scroll-y>
-      <view class="home-tab">
-        <view class="ht-status-card">
-          <view class="ht-status-main">
-            <text class="ht-store-name">{{ shopName }}</text>
-            <text class="ht-status-desc">{{ homeStatusDesc }}</text>
-          </view>
-          <view :class="['ht-status-badge', storeClosed ? 'ht-status-badge--closed' : 'ht-status-badge--open']">
-            <text>{{ storeClosed ? '\u4f11\u606f\u4e2d' : '\u8425\u4e1a\u4e2d' }}</text>
-          </view>
-        </view>
-
-        <view class="ht-order-card" :class="{ 'ht-order-card--disabled': !canStartOrdering }" @click="handleHomeStartOrder">
-          <text class="ht-order-kicker">今日推荐</text>
-          <text class="ht-order-title">立即点餐</text>
-          <text class="ht-order-desc">{{ homeStatusDesc }}</text>
-          <text v-if="homeCouponHint" class="ht-order-coupon">{{ homeCouponHint }}</text>
-          <view class="ht-order-btn" :class="{ 'ht-order-btn--disabled': !canStartOrdering }" @click.stop="handleHomeStartOrder">
-            <text>{{ homeOrderButtonText }}</text>
-          </view>
-        </view>
-
-        <view v-if="featuredDish" class="ht-section">
-          <view class="ht-section-head">
-            <text class="ht-section-title">店长推荐</text>
-            <text class="ht-section-sub">精选招牌菜品</text>
-          </view>
-          <view class="ht-feature-card" @click="openProductDetail(featuredDish)">
-            <view class="ht-feature-img-wrap">
-              <image
-                v-if="dishImage(featuredDish) && !imageLoadFailed[featuredDish.id]"
-                class="ht-feature-img"
-                :src="dishImage(featuredDish)"
-                mode="aspectFill"
-                @error="markDishImageFailed(featuredDish.id)"
-              />
-              <view v-else class="ht-feature-placeholder">
-                <image class="ht-feature-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
-              </view>
-            </view>
-            <view class="ht-feature-info">
-              <view class="ht-feature-title-row">
-                <text class="ht-feature-name">{{ featuredDish.name }}</text>
-                <text v-if="featuredDishTag" class="ht-feature-tag">{{ featuredDishTag }}</text>
-              </view>
-              <text v-if="dishCardDesc(featuredDish)" class="ht-feature-desc">{{ dishCardDesc(featuredDish) }}</text>
-              <view class="ht-feature-bottom">
-                <view class="ht-feature-price">
-                  <text class="ht-feature-yen">¥</text>
-                  <text class="ht-feature-amount">{{ dishPriceText(featuredDish) }}</text>
-                  <text v-if="dishPriceSuffix(featuredDish)" class="ht-feature-suffix">{{ dishPriceSuffix(featuredDish) }}</text>
-                </view>
-                <view
-                  class="ht-feature-add"
-                  :class="{ 'ht-feature-add--disabled': !canHomeAdd }"
-                  @click.stop="handleFeaturedAdd"
-                >
-                  <text>{{ hasSpecs(featuredDish) ? '\u9009\u89c4\u683c' : '\u76f4\u63a5\u52a0\u5165' }}</text>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-
-        <view v-if="homeLastOrderItems.length" class="ht-section">
-          <view class="ht-section-head ht-section-head--row">
-            <text class="ht-section-title">再来一单</text>
-            <text class="ht-section-action" @click="handleHomeReorderAll">全部再来一份</text>
-          </view>
-          <view class="ht-last-list">
-            <view
-              v-for="item in homeLastOrderItems"
-              :key="item.key"
-              class="ht-last-chip"
-              :class="{ 'ht-last-chip--disabled': storeClosed }"
-              @click="handleHomeReorderItem(item)"
-            >
-              <text class="ht-last-name">{{ item.name }}</text>
-              <text class="ht-last-add">+</text>
-            </view>
-          </view>
-        </view>
-
-      </view>
+      <HomeTab
+        :shop-name="shopName"
+        :home-status-desc="homeStatusDesc"
+        :store-closed="storeClosed"
+        :can-start-ordering="canStartOrdering"
+        :home-coupon-hint="homeCouponHint"
+        :home-order-button-text="homeOrderButtonText"
+        :featured-dish="featuredDish"
+        :featured-dish-tag="featuredDishTag"
+        :can-home-add="canHomeAdd"
+        :home-last-order-items="homeLastOrderItems"
+        :image-load-failed="imageLoadFailed"
+        :dish-image="dishImage"
+        :dish-card-desc="dishCardDesc"
+        :dish-price-text="dishPriceText"
+        :dish-price-suffix="dishPriceSuffix"
+        :has-specs="hasSpecs"
+        @start-order="handleHomeStartOrder"
+        @open-product-detail="openProductDetail"
+        @featured-add="handleFeaturedAdd"
+        @image-error="markDishImageFailed"
+        @reorder-item="handleHomeReorderItem"
+        @reorder-all="handleHomeReorderAll"
+      />
     </scroll-view>
-
-
     <scroll-view v-show="activeTab === 'card'" class="tab-scroll" scroll-y>
       <MemberCard
         :banner-info="bannerInfo"
@@ -371,221 +310,93 @@
 
 
     <!-- Order confirmation sheet -->
-    <view v-if="showCart" class="mask" @click="closeOrderConfirm">
-      <view class="cart-sheet order-confirm-sheet" @click.stop>
-        <view class="order-confirm-head">
-          <text class="order-confirm-title">{{ confirmationText.title }}</text>
-          <text class="order-confirm-close iconfont icon-close" @click="closeOrderConfirm"></text>
-        </view>
+    <CheckoutSheet
+      v-if="showCart"
+      :confirmation-text="confirmationText"
+      :order-mode-text="orderModeText"
+      :table-no="tableNo"
+      :items-expanded="itemsExpanded"
+      :cart-items="cartItems"
+      :total-count="totalCount"
+      :total-price="totalPrice"
+      :qty-pulse-key="qtyPulseKey"
+      :order-remark-expanded="orderRemarkExpanded"
+      :order-remark-summary="orderRemarkSummary"
+      :order-remark-chips="orderRemarkChips"
+      :remark="remark"
+      :show-order-remark-extra="showOrderRemarkExtra"
+      :discount-amount="discountAmount"
+      :available-coupons="availableCoupons"
+      :confirm-payment-label="confirmPaymentLabel"
+      :wechat-pay-amount="wechatPayAmount"
+      :can-submit-order="canSubmitOrder"
+      :ordering="ordering"
+      :paying="paying"
+      :pay-button-text="payButtonText"
+      :format-price="formatPrice"
+      @close="closeOrderConfirm"
+      @show-table-hint="showTableHint"
+      @toggle-items-expanded="toggleItemsExpanded"
+      @remove-from-cart="removeFromCart"
+      @increase-cart-item="increaseCartItem"
+      @clear-cart="clearCart"
+      @toggle-order-remark-expanded="toggleOrderRemarkExpanded"
+      @toggle-remark-chip="toggleRemarkChip"
+      @show-order-remark-extra="showOrderRemarkExtra = true"
+      @update:remark="remark = $event"
+      @open-coupon-picker="openCouponPicker"
+      @checkout="goCheckout"
+    />
 
-        <scroll-view class="order-confirm-content" scroll-y>
-          <view class="order-summary-card" :class="{ 'order-summary-card--missing': !tableNo }" @click="showTableHint">
-            <view class="summary-mode-pill"><text>{{ orderModeText.dineIn }}</text></view>
-            <text class="summary-table-no">{{ (tableNo || orderModeText.unknownTable) + '桌' }}</text>
-            <text v-if="!tableNo" class="summary-table-tip">{{ confirmationText.tableMissing }}</text>
-          </view>
+    <CouponPicker
+      v-if="showCouponPicker"
+      :selected-coupon-id="selectedCouponId"
+      :coupon-picker-list="couponPickerList"
+      :total-price="totalPrice"
+      :coupon-picker-amount="couponPickerAmount"
+      :coupon-picker-cond-text="couponPickerCondText"
+      :format-price="formatPrice"
+      @cancel="closeCouponPicker"
+      @select-coupon="pickCoupon"
+    />
+    <CheckoutAuthSheet
+      v-if="showCheckoutAuth"
+      :auth-sheet-text="authSheetText"
+      :shop-name="shopName"
+      :table-no="tableNo"
+      :auth-amount-label="authAmountLabel"
+      :confirmation-text="confirmationText"
+      :wechat-pay-amount="wechatPayAmount"
+      :authorizing="authorizing"
+      :ordering="ordering"
+      :paying="paying"
+      :auth-primary-text="authPrimaryText"
+      @cancel="cancelCheckoutAuth"
+      @getphonenumber="handleCheckoutAuth"
+    />
 
-          <view class="confirm-card selected-items-section">
-            <view class="selected-items-summary" @click="toggleItemsExpanded">
-              <view class="selected-items-title-wrap">
-                <view class="confirm-title-line"><text class="confirm-title-icon iconfont icon-list"></text><text class="selected-items-title">{{ confirmationText.selectedItems }}({{ totalCount }})</text></view>
-              </view>
-              <view class="selected-items-action">
-                <text class="selected-items-amount">{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text>
-                <text :class="['selected-items-toggle-icon', 'iconfont', itemsExpanded ? 'icon-pullup' : 'icon-unfold']"></text>
-              </view>
-            </view>
-            <view v-if="itemsExpanded" class="cart-items-panel">
-              <scroll-view class="cart-items" scroll-y>
-                <view v-for="item in cartItems" :key="item.specKey || item.id" class="cart-row">
-                  <view class="cart-row-main">
-                    <text class="cart-row-name">{{ item.name }}</text>
-                    <text v-if="item.specLabel" class="cart-row-spec">{{ item.specLabel }}</text>
-                  </view>
-                  <view class="cart-row-right">
-                    <view class="counter-btn minus sm" @click="removeFromCart(item)"><text class="iconfont icon-move"></text></view>
-                    <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === (item.specKey || item.id) }">{{ item.qty }}</text>
-                    <view class="counter-btn plus sm" @click="increaseCartItem(item)"><text class="iconfont icon-add"></text></view>
-                    <text class="cart-row-price">{{ confirmationText.currency }}{{ formatPrice(item.price * item.qty) }}</text>
-                  </view>
-                </view>
-              </scroll-view>
-              <view class="cart-clear-line" @click="clearCart"><text class="iconfont icon-delete"></text><text>{{ confirmationText.clear }}</text></view>
-            </view>
-          </view>
-
-          <view class="confirm-card order-preference-section">
-            <view class="remark-summary-row" @click="toggleOrderRemarkExpanded">
-              <view class="remark-label-wrap"><text class="remark-label-icon iconfont icon-edit"></text><text class="remark-label">{{ confirmationText.orderRemark }}</text></view>
-              <view class="remark-summary-action">
-                <text class="remark-summary-text">{{ orderRemarkSummary }}</text>
-                <text :class="['remark-summary-toggle-icon', 'iconfont', orderRemarkExpanded ? 'icon-pullup' : 'icon-unfold']"></text>
-              </view>
-            </view>
-            <view v-if="orderRemarkExpanded && orderRemarkChips.length" class="remark-chips">
-              <view
-                v-for="chip in orderRemarkChips"
-                :key="chip"
-                class="remark-chip"
-                :class="{ 'remark-chip--on': remark.includes(chip) }"
-                @click="toggleRemarkChip(chip)"
-              ><text>{{ chip }}</text></view>
-            </view>
-            <view v-if="orderRemarkExpanded" class="remark-row order-remark-row">
-              <text v-if="!showOrderRemarkExtra" class="item-remark-extra-toggle" @click="showOrderRemarkExtra = true">+ 其他要求</text>
-              <input v-else class="remark-input" v-model="remark" :placeholder="confirmationText.orderRemarkPlaceholder" placeholder-class="remark-placeholder" maxlength="60" />
-            </view>
-          </view>
-
-          <view class="confirm-card price-summary-card">
-            <view class="price-row"><view class="price-label-wrap"><text class="price-label-icon iconfont icon-list"></text><text>{{ confirmationText.goodsAmount }}</text></view><text>{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text></view>
-            <view class="price-row price-row--clickable" @click="openCouponPicker">
-              <view class="price-label-wrap"><text class="price-label-icon iconfont icon-ticket"></text><text>{{ confirmationText.coupon }}</text></view>
-              <text v-if="discountAmount > 0" class="price-discount">-{{ confirmationText.currency }}{{ discountAmount.toFixed(2) }} {{ confirmationText.arrow }}</text>
-              <text v-else-if="availableCoupons.length > 0" class="price-muted">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
-              <text v-else class="price-muted">{{ confirmationText.couponNone }} {{ confirmationText.arrow }}</text>
-            </view>
-            <view class="price-row price-row--payable">
-              <view class="price-label-wrap"><text class="price-label-icon iconfont icon-pay"></text><text>{{ confirmPaymentLabel }}</text></view>
-              <text>{{ confirmationText.currency }}{{ wechatPayAmount.toFixed(2) }}</text>
-            </view>
-          </view>
-        </scroll-view>
-
-        <view class="order-confirm-bottom">
-          <view class="checkout-btn-full" :class="{ 'checkout-btn-full--disabled': !canSubmitOrder || ordering || paying }" @click="goCheckout">
-            <text class="checkout-btn-icon iconfont icon-pay"></text><text>{{ payButtonText }}</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <view v-if="showCouponPicker" class="mask" @click="closeCouponPicker">
-      <view class="coupon-picker-sheet" @click.stop>
-        <view class="cp-head">
-          <text class="cp-title">选择优惠券</text>
-          <text class="cp-close iconfont icon-close" @click="closeCouponPicker"></text>
-        </view>
-        <scroll-view class="cp-list" scroll-y>
-          <view class="cp-option" :class="{ 'cp-option--on': !selectedCouponId }" @click="pickCoupon(null)">
-            <view class="cp-option-main">
-              <text class="cp-option-name">不使用优惠券</text>
-            </view>
-            <text :class="['cp-radio-icon', 'iconfont', !selectedCouponId ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
-          </view>
-          <view
-            v-for="c in couponPickerList"
-            :key="c.id"
-            class="cp-option"
-            :class="{ 'cp-option--on': selectedCouponId === c.id, 'cp-option--disabled': !c.eligible }"
-            @click="pickCoupon(c)"
-          >
-            <view class="cp-option-amount"><text>¥{{ couponPickerAmount(c) }}</text></view>
-            <view class="cp-option-main">
-              <text class="cp-option-name">{{ c.name || '\u4f18\u60e0\u5238' }}</text>
-              <text class="cp-option-cond">{{ c.eligible ? couponPickerCondText(c) : '\u8fd8\u5dee' + formatPrice(Math.max(0, Number(c.min_amount || c.threshold_amount || 0) - totalPrice)) + '\u5143\u53ef\u7528' }}</text>
-            </view>
-            <text :class="['cp-radio-icon', 'iconfont', selectedCouponId === c.id ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
-          </view>
-          <view v-if="!couponPickerList.length" class="cp-empty"><text>暂无可用优惠券</text></view>
-        </scroll-view>
-      </view>
-    </view>
-
-    <view v-if="showCheckoutAuth" class="mask checkout-auth-mask" @click="cancelCheckoutAuth">
-      <view class="checkout-auth-sheet" @click.stop>
-        <view class="checkout-auth-handle"></view>
-        <text class="checkout-auth-title">{{ authSheetText.title }}</text>
-        <text class="checkout-auth-desc">{{ authSheetText.desc }}</text>
-        <view class="checkout-auth-order">
-          <view class="checkout-auth-row"><text>{{ authSheetText.store }}</text><text>{{ shopName }}</text></view>
-          <view class="checkout-auth-row"><text>{{ authSheetText.table }}</text><text>{{ tableNo || authSheetText.unknownTable }}</text></view>
-          <view class="checkout-auth-row checkout-auth-row--amount"><text>{{ authAmountLabel }}</text><text>{{ confirmationText.currency }}{{ wechatPayAmount.toFixed(2) }}</text></view>
-        </view>
-        <view class="checkout-auth-auto">
-          <text>{{ authSheetText.auto }}</text>
-        </view>
-        <button
-          class="checkout-auth-primary"
-          open-type="getPhoneNumber"
-          :disabled="authorizing || ordering || paying"
-          @getphonenumber="handleCheckoutAuth"
-        >{{ authPrimaryText }}</button>
-        <view class="checkout-auth-cancel" @click="cancelCheckoutAuth">
-          <text>{{ authSheetText.cancel }}</text>
-        </view>
-        <text class="checkout-auth-member">{{ authSheetText.member }}</text>
-        <text class="checkout-auth-privacy">{{ authSheetText.privacy }}</text>
-      </view>
-    </view>
-
-    <view v-if="showSuccess" class="mask success-mask">
-      <view class="success-sheet" @click.stop>
-        <view class="success-handle"></view>
-        <view class="success-card">
-          <view class="success-check">
-            <view class="success-check-inner"></view>
-          </view>
-          <text class="success-title">{{ successText.title }}</text>
-          <view class="success-paid-amount-row">
-            <text class="success-paid-currency">{{ confirmationText.currency }}</text>
-            <text class="success-paid-amount">{{ successTotal.toFixed(2) }}</text>
-          </view>
-          <text class="success-paid-label">{{ successText.paidLabel }}</text>
-
-          <view class="order-status-bar" :class="successStatusTone">
-            <text class="order-status-text">{{ successStatusText }}</text>
-          </view>
-
-          <view v-if="earnedCoupon" class="earned-coupon-card">
-            <text class="ec-ribbon">{{ earnedCoupon.isSecondOrder ? '欢迎回来 · 专属奖励' : '支付成功 · 专属奖励' }}</text>
-            <view class="ec-amount-row">
-              <text class="ec-currency">¥</text>
-              <text class="ec-amount">{{ formatPrice(earnedCoupon.amount) }}</text>
-            </view>
-            <text class="ec-cond">{{ earnedCoupon.threshold > 0 ? '满' + formatPrice(earnedCoupon.threshold) + '元可用' : '无门槛立减' }}</text>
-            <view class="ec-divider"></view>
-            <text class="ec-title">{{ (earnedCoupon.isSecondOrder ? '欢迎回来，这是你的第二次光临！再送你一张券：' : '又送你一张券：') + (earnedCoupon.name || '') }}</text>
-            <text v-if="earnedCoupon.expire_time" class="ec-deadline">{{ couponValidityText(earnedCoupon) }}</text>
-            <text
-              v-if="couponReminderTemplateId && earnedCoupon.couponId"
-              class="ec-remind-btn"
-              :class="{ 'ec-remind-btn--done': reminderRequested }"
-              @click="requestCouponReminder"
-            >{{ reminderRequested ? '已设置提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我别忘了用') }}</text>
-          </view>
-
-          <view class="success-summary">
-            <view class="success-summary-row">
-              <text class="success-summary-label">{{ successText.table }}</text>
-              <text class="success-summary-value">{{ tableNo || orderModeText.unknownTable }}</text>
-            </view>
-            <view class="success-summary-row">
-              <text class="success-summary-label">{{ successText.orderNo }}</text>
-              <text class="success-summary-value">#{{ successOrderNo }}</text>
-            </view>
-            <view class="success-summary-row">
-              <text class="success-summary-label">{{ successText.items }}</text>
-              <text class="success-summary-value">{{ successOrderItemCount }}{{ successText.itemUnit }}</text>
-            </view>
-          </view>
-
-          <view class="success-actions">
-            <view class="success-btn-primary" @click="closeSuccessAndWait">
-              <text>{{ successText.closeAndWait }}</text>
-            </view>
-            <view class="success-btn-secondary" @click="continueOrdering">
-              <text>{{ successText.continueOrdering }}</text>
-            </view>
-            <view class="success-btn-ghost" @click="viewOrderDetail">
-              <text>{{ successText.viewDetail }}</text>
-            </view>
-          </view>
-
-          <text class="success-safe-tip">{{ successText.safeTip }}</text>
-        </view>
-      </view>
-    </view>
+    <PaymentSuccessSheet
+      v-if="showSuccess"
+      :success-text="successText"
+      :currency="confirmationText.currency"
+      :success-total="successTotal"
+      :success-status-tone="successStatusTone"
+      :success-status-text="successStatusText"
+      :earned-coupon="earnedCoupon"
+      :coupon-reminder-template-id="couponReminderTemplateId"
+      :reminder-requested="reminderRequested"
+      :requesting-reminder="requestingReminder"
+      :table-no="tableNo"
+      :order-mode-text="orderModeText"
+      :success-order-no="successOrderNo"
+      :success-order-item-count="successOrderItemCount"
+      :format-price="formatPrice"
+      :coupon-validity-text="couponValidityText"
+      @request-coupon-reminder="requestCouponReminder"
+      @close-and-wait="closeSuccessAndWait"
+      @continue-ordering="continueOrdering"
+      @view-order-detail="viewOrderDetail"
+    />
 
     <view v-if="showWelcomeCoupon" class="mask welcome-mask" @click="closeWelcomeCoupon">
       <view class="welcome-coupon-sheet" @click.stop>
@@ -602,326 +413,98 @@
       </view>
     </view>
 
-    <view v-if="showOrders" class="mask" @click="showOrders = false">
-      <view v-if="isSharedBillMode" class="orders-sheet table-account-sheet" @click.stop>
-        <view class="orders-sheet-head table-account-head">
-          <view class="table-account-back" @click="showOrders = false">
-            <text class="iconfont icon-back"></text>
-          </view>
-          <text class="orders-sheet-title">已点菜品</text>
-          <text class="orders-sheet-close iconfont icon-close" @click="showOrders = false"></text>
-        </view>
+    <TableBillSheet
+      v-if="showOrders && isSharedBillMode"
+      :load-error="loadError"
+      :table-status-view="tableStatusView"
+      :table-no="tableNo"
+      :order-mode-text="orderModeText"
+      :shared-bill-sub-label="sharedBillSubLabel"
+      :table-total="tableTotal"
+      :table-item-count="tableItemCount"
+      :table-order-groups="tableOrderGroups"
+      :order-item-image-failed="orderItemImageFailed"
+      :can-continue-order="canContinueOrder"
+      :can-checkout="canCheckout"
+      :is-table-settled="isTableSettled"
+      :still-preparing="stillPreparing"
+      :postpay-ready-to-settle="postpayReadyToSettle"
+      :table-checkouting="tableCheckouting"
+      :checkout-requested="checkoutRequested"
+      :table-account-scroll-into="tableAccountScrollInto"
+      :format-price="formatPrice"
+      :order-item-image="orderItemImage"
+      :order-item-name="orderItemName"
+      :order-item-spec-text="orderItemSpecText"
+      :order-item-qty="orderItemQty"
+      :order-item-amount="orderItemAmount"
+      @close="showOrders = false"
+      @retry-load="loadMenu"
+      @continue-order="handleTableContinueOrder"
+      @checkout="handleTableCheckout"
+      @scroll-to-top="scrollTableAccountToTop"
+      @mark-image-failed="markOrderItemImageFailed"
+    />
+    <OrderHistorySheet
+      v-if="showOrders && !isSharedBillMode"
+      :current-table-order="currentTableOrder"
+      :history-table-orders="historyTableOrders"
+      :show-all-orders="showAllOrders"
+      :table-order-status-tone="tableOrderStatusTone"
+      :table-order-status-icon="tableOrderStatusIcon"
+      :table-order-status-badge="tableOrderStatusBadge"
+      :table-order-next-action="tableOrderNextAction"
+      :table-order-status-title="tableOrderStatusTitle"
+      :table-order-status-hint="tableOrderStatusHint"
+      :table-order-progress-sub="tableOrderProgressSub"
+      :table-order-timeline="tableOrderTimeline"
+      :current-order-item-count="currentOrderItemCount"
+      :current-order-main-item-text="currentOrderMainItemText"
+      :table-order-primary-button-text="tableOrderPrimaryButtonText"
+      :table-no="tableNo"
+      :order-mode-text="orderModeText"
+      :format-price="formatPrice"
+      :order-item-name="orderItemName"
+      :order-item-spec-text="orderItemSpecText"
+      :order-item-qty="orderItemQty"
+      :order-item-amount="orderItemAmount"
+      :order-item-count="orderItemCount"
+      @close="showOrders = false"
+      @toggle-history="showAllOrders = !showAllOrders"
+    />
 
-        <scroll-view v-if="!loadError" class="table-account-list" scroll-y :scroll-into-view="tableAccountScrollInto" scroll-with-animation>
-          <view id="table-account-status-anchor" class="table-account-status">
-            <view class="table-account-status-icon" :class="'table-account-status-icon--' + tableStatusView.tone">
-              <text class="iconfont" :class="tableStatusView.icon"></text>
-            </view>
-            <text class="table-account-status-title">{{ tableStatusView.title }}</text>
-            <text class="table-account-status-desc">{{ tableStatusView.desc }}</text>
-            <text v-if="tableStatusView.note" class="table-account-status-note">{{ tableStatusView.note }}</text>
-          </view>
-
-          <view class="table-account-summary">
-            <view class="table-account-summary-left">
-              <text class="table-account-table">{{ tableNo || orderModeText.unknownTable }}桌</text>
-              <text class="table-account-sub">{{ sharedBillSubLabel }}</text>
-            </view>
-            <view class="table-account-summary-right">
-              <text class="table-account-total">¥{{ formatPrice(tableTotal) }}</text>
-              <text class="table-account-count">共 {{ tableItemCount }} 份</text>
-            </view>
-          </view>
-
-          <view class="table-account-section">
-            <view class="table-account-section-head">
-              <text class="table-account-section-title">本桌已点菜品</text>
-            </view>
-
-            <view v-if="tableOrderGroups.length" class="table-account-groups">
-              <view v-for="group in tableOrderGroups" :key="group.id" class="table-account-group">
-                <view class="table-account-group-head">
-                  <view class="table-account-group-left">
-                    <view v-if="group.participantNo" class="participant-badge" :style="{ background: group.participantColor }">{{ group.participantNo }}</view>
-                    <text v-if="group.isStaff" class="table-account-staff-badge">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
-                    <text class="table-account-group-time">{{ group.title }}</text>
-                    <text v-if="group.discountAmount > 0" class="table-account-group-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
-                  </view>
-                  <text class="table-account-group-status" :class="'table-account-group-status--' + group.tone">{{ group.statusText }}</text>
-                </view>
-                <view v-for="(item, idx) in group.items" :key="item.specKey || item.dish_id || item.id || item.name || idx" class="table-account-item" :class="{ 'table-account-item--muted': item.isInvalid }">
-                  <view class="table-account-item-img-wrap">
-                    <image
-                      v-if="orderItemImage(item) && !orderItemImageFailed[group.id + '_' + idx]"
-                      class="table-account-item-img"
-                      :src="orderItemImage(item)"
-                      mode="aspectFill"
-                      @error="markOrderItemImageFailed(group.id + '_' + idx)"
-                    />
-                    <view v-else class="table-account-item-placeholder">
-                      <text>{{ orderItemName(item).slice(0, 1) }}</text>
-                    </view>
-                  </view>
-                  <view class="table-account-item-main">
-                    <text class="table-account-item-name">{{ orderItemName(item) }}</text>
-                    <text v-if="orderItemSpecText(item)" class="table-account-item-spec">{{ orderItemSpecText(item) }}</text>
-                    <text v-if="item.isInvalid" class="table-account-item-mark">{{ item.invalidText }}</text>
-                  </view>
-                  <text class="table-account-item-qty">×{{ orderItemQty(item) }}</text>
-                  <text class="table-account-item-amount">¥{{ formatPrice(orderItemAmount(item)) }}</text>
-                </view>
-              </view>
-            </view>
-
-            <view v-else class="table-account-empty">
-              <text class="table-account-empty-title">本桌还没有已点菜品</text>
-              <text class="table-account-empty-desc">可以先去点菜，后续加菜会自动合并到本桌账单</text>
-            </view>
-          </view>
-
-          <view class="table-account-tip">
-            <text>同桌后续加菜会自动合并，不需要每次付款。</text>
-          </view>
-        </scroll-view>
-
-        <view v-else class="table-status-empty">
-          <text class="table-status-empty-icon iconfont icon-warnfill"></text>
-          <text class="table-status-empty-title">本桌订单加载失败</text>
-          <text class="table-status-empty-desc">请重新加载后再查看本桌账单</text>
-          <view class="table-account-retry" @click="loadMenu"><text>重新加载</text></view>
-        </view>
-
-        <view class="table-account-actions">
-          <view
-            class="table-account-action table-account-action--secondary"
-            :class="{ 'table-account-action--disabled': !canContinueOrder }"
-            @click="handleTableContinueOrder"
-          >
-            <text>{{ tableOrderGroups.length ? '继续加菜' : '去点菜' }}</text>
-          </view>
-          <view
-            v-if="canCheckout"
-            class="table-account-action table-account-action--primary"
-            :class="{ 'table-account-action--disabled': tableCheckouting || checkoutRequested }"
-            @click="handleTableCheckout"
-          >
-            <text>{{ tableCheckouting ? '呼叫中...' : (checkoutRequested ? '已呼叫服务员，等待确认' : '吃好了，去结账') }}</text>
-          </view>
-          <view
-            v-else-if="isTableSettled"
-            class="table-account-action table-account-action--primary table-account-action--ghost"
-            @click="scrollTableAccountToTop"
-          >
-            <text>查看结账详情</text>
-          </view>
-          <view
-            v-else-if="stillPreparing"
-            class="table-account-action table-account-action--primary table-account-action--disabled"
-          >
-            <text>制作中，暂不能结账</text>
-          </view>
-          <view
-            v-else-if="postpayReadyToSettle"
-            class="table-account-action table-account-action--info"
-          >
-            <text>用餐结束请到收银台或联系服务员结账</text>
-          </view>
-        </view>
-      </view>
-
-      <view v-else class="orders-sheet" @click.stop>
-        <view class="orders-sheet-head">
-          <text class="orders-sheet-title">本桌订单</text>
-          <text class="orders-sheet-close iconfont icon-close" @click="showOrders = false"></text>
-        </view>
-
-        <scroll-view v-if="currentTableOrder" class="orders-list" scroll-y>
-          <view class="table-status-card" :class="'table-status-card--' + tableOrderStatusTone">
-            <view class="table-status-top">
-              <view class="table-status-badge">
-                <text class="table-status-badge-icon iconfont" :class="tableOrderStatusIcon"></text>
-                <text>{{ tableOrderStatusBadge }}</text>
-              </view>
-              <text class="table-status-order-no">#{{ currentTableOrder.orderNo }}</text>
-            </view>
-            <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
-            <text class="table-status-sub">{{ tableOrderStatusHint }}</text>
-            <view class="table-status-action">
-              <text class="table-status-action-icon iconfont icon-roundright"></text>
-              <text class="table-status-action-text">{{ tableOrderNextAction }}</text>
-            </view>
-          </view>
-
-          <view class="order-core-strip">
-            <view class="order-core-item">
-              <text class="order-core-icon iconfont icon-zuowei"></text>
-              <text class="order-core-value">{{ tableNo || orderModeText.unknownTable }}</text>
-            </view>
-            <view class="order-core-item">
-              <text class="order-core-icon order-core-icon--amount iconfont icon-pay"></text>
-              <text class="order-core-value order-core-value--amount">{{ '\u00a5' + formatPrice(currentTableOrder.total || 0) }}</text>
-            </view>
-            <view class="order-core-item">
-              <text class="order-core-icon iconfont icon-timefill"></text>
-              <text class="order-core-value">{{ currentTableOrder.createdAt || '-' }}</text>
-            </view>
-            <view class="order-core-item">
-              <text class="order-core-icon iconfont icon-form"></text>
-              <text class="order-core-value">{{ currentOrderItemCount + '\u4efd' }}</text>
-            </view>
-          </view>
-
-          <view class="order-progress-card">
-            <view class="order-progress-head">
-              <text class="order-progress-card-title">{{ '\u8ba2\u5355\u8fdb\u5ea6' }}</text>
-              <text class="order-progress-card-sub">{{ tableOrderProgressSub }}</text>
-            </view>
-            <view class="order-progress-steps">
-              <view v-for="step in tableOrderTimeline" :key="step.key" class="order-progress-step" :class="{ active: step.active, done: step.done }">
-                <view class="order-progress-dot"><text class="iconfont" :class="step.icon"></text></view>
-                <view v-if="step.key !== 'settled'" class="order-progress-line"></view>
-                <text class="order-progress-title">{{ step.label }}</text>
-              </view>
-            </view>
-          </view>
-
-          <view class="current-order-card">
-            <view class="current-order-head">
-              <view>
-                <view class="current-order-title-line">
-                  <text class="current-order-title-icon iconfont icon-list"></text>
-                  <text class="current-order-title">{{ '\u83dc\u54c1\u660e\u7ec6' }}</text>
-                </view>
-                <text class="current-order-no">#{{ currentTableOrder.orderNo }}</text>
-              </view>
-              <text class="current-order-total">{{ '\u00a5' + formatPrice(currentTableOrder.total || 0) }}</text>
-            </view>
-            <view class="current-order-summary">
-              <text>{{ '\u4e0b\u5355\u65f6\u95f4 ' + (currentTableOrder.createdAt || '-') }}</text>
-              <text>{{ '\u5171' + currentOrderItemCount + '\u4efd' }}</text>
-            </view>
-            <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="current-order-items current-order-items--visible">
-              <view v-for="(item, idx) in currentTableOrder.items" :key="item.specKey || item.id || item.name || idx" class="order-detail-row">
-                <view class="order-detail-main">
-                  <text class="order-detail-name">{{ orderItemName(item) }}</text>
-                  <text v-if="orderItemSpecText(item)" class="order-detail-spec">{{ orderItemSpecText(item) }}</text>
-                </view>
-                <text class="order-detail-qty">{{ '\u00d7' + orderItemQty(item) }}</text>
-                <text class="order-detail-amount">{{ '\u00a5' + formatPrice(orderItemAmount(item)) }}</text>
-              </view>
-            </view>
-            <view v-else class="current-order-empty-detail">
-              <text>{{ currentOrderMainItemText }}</text>
-            </view>
-          </view>
-
-          <view v-if="historyTableOrders.length" class="history-orders-card">
-            <view class="history-orders-head" @click="showAllOrders = !showAllOrders">
-              <text>历史订单</text>
-              <text>{{ showAllOrders ? '\u6536\u8d77' : '\u67e5\u770b\u5168\u90e8 ' + historyTableOrders.length }}</text>
-            </view>
-            <view v-if="showAllOrders">
-              <view v-for="order in historyTableOrders" :key="order.id" class="history-order-block">
-                <view class="history-order-row">
-                  <text>#{{ order.orderNo }} 共{{ orderItemCount(order) }}份</text>
-                  <text>¥{{ Number(order.total || 0).toFixed(2) }}</text>
-                </view>
-                <view v-if="(order.items || []).length" class="history-order-items">
-                  <view v-for="(item, idx) in order.items" :key="item.specKey || item.id || item.name || idx" class="history-order-item-row">
-                    <text>{{ orderItemName(item) }} ×{{ orderItemQty(item) }}</text>
-                    <text>¥{{ formatPrice(orderItemAmount(item)) }}</text>
-                  </view>
-                </view>
-              </view>
-            </view>
-          </view>
-        </scroll-view>
-
-        <view v-else class="table-status-empty">
-          <text class="table-status-empty-icon iconfont icon-list"></text>
-          <text class="table-status-empty-title">暂无本桌订单</text>
-          <text class="table-status-empty-desc">选好菜品，点击下单即可开始</text>
-        </view>
-
-        <view class="orders-actions">
-          <view class="orders-secondary-btn" :class="'orders-secondary-btn--' + tableOrderStatusTone" @click="showOrders = false">
-            <text>{{ tableOrderPrimaryButtonText }}</text>
-          </view>
-        </view>
-      </view>
-    </view>
-
-    <view v-if="showSpecSheet" class="mask" @click="cancelSpec">
-      <view class="spec-sheet option-sheet" @click.stop>
-        <view class="spec-detail-hero">
-          <image
-            v-if="dishImage(specDish) && !detailImageFailed"
-            class="spec-detail-img"
-            :src="dishImage(specDish, 750)"
-            mode="aspectFill"
-            @error="detailImageFailed = true"
-          />
-          <view v-else class="spec-detail-placeholder" :style="dishPlaceholderStyle(specDish)">
-            <text>{{ specDish.name ? specDish.name[0] : '\u83dc' }}</text>
-          </view>
-        </view>
-        <view class="spec-sheet-head">
-          <text class="spec-sheet-title">{{ specDish.name }}</text>
-          <text v-if="specDishDesc" class="spec-sheet-desc">{{ specDishDesc }}</text>
-          <view class="spec-sheet-price">
-            <text class="spec-price-symbol">{{ confirmationText.currency }}</text>
-            <text class="spec-price-num">{{ formatPrice(specBasePrice) }}</text>
-          </view>
-          <view class="spec-sheet-close" @click="cancelSpec"><text class="iconfont icon-close"></text></view>
-        </view>
-        <scroll-view class="spec-sheet-body" scroll-y>
-          <view v-for="group in specRadioGroups" :key="group.name" class="spec-group-block">
-            <view class="spec-group-label">
-              <text class="spec-group-name">{{ group.name }}</text>
-              <text v-if="group.required" class="spec-required">{{ specText.required }}</text>
-              <text v-else class="spec-optional">{{ specText.optional }}</text>
-            </view>
-            <view class="spec-option-list spec-option-list--single">
-              <view v-for="opt in group.options" :key="opt.name" class="spec-option" :class="{ 'spec-option--on': isSpecSelected(group, opt) }" @click="toggleSpec(group, opt)">
-                <text>{{ opt.name }}</text>
-                <text v-if="opt.price_delta > 0" class="spec-price">+{{ confirmationText.currency }}{{ formatPrice(opt.price_delta) }}</text>
-              </view>
-            </view>
-          </view>
-          <view v-if="specExtraOptions.length" class="spec-group-block">
-            <view class="spec-group-label"><text class="spec-group-name">{{ specText.extras }}</text><text class="spec-optional">{{ specText.multi }}</text></view>
-            <view class="spec-option-list">
-              <view v-for="extra in specExtraOptions" :key="extra.name" class="spec-option" :class="{ 'spec-option--on': selectedExtras.includes(extra.name) }" @click="toggleExtra(extra.name)">
-                <text>{{ extra.name }}</text>
-                <text v-if="extra.price_delta > 0" class="spec-price">+{{ confirmationText.currency }}{{ formatPrice(extra.price_delta) }}</text>
-              </view>
-            </view>
-          </view>
-          <view class="spec-group-block spec-remark-block">
-            <view class="spec-group-label"><view class="spec-group-title-line"><text class="spec-group-icon iconfont icon-form"></text><text class="spec-group-name">{{ specText.itemRemark }}</text></view><text class="spec-optional">{{ specText.optional }}</text></view>
-            <view v-if="filteredRemarkChips.length" class="remark-chip-list">
-              <view
-                v-for="chip in filteredRemarkChips"
-                :key="chip"
-                class="remark-chip-option"
-                :class="{ 'remark-chip-option--on': itemRemark.includes(chip) }"
-                @click="toggleItemRemarkChip(chip)"
-              >{{ chip }}</view>
-            </view>
-            <text v-if="!showItemRemarkExtra" class="item-remark-extra-toggle" @click="showItemRemarkExtra = true">+ 其他要求</text>
-            <template v-else>
-              <textarea class="item-remark-input" v-model="itemRemark" maxlength="50" :placeholder="specText.itemRemarkPlaceholder" />
-              <text class="item-remark-count">{{ itemRemark.length }}/50</text>
-            </template>
-          </view>
-          <view class="spec-qty-row"><text class="spec-group-name">{{ specText.qty }}</text><view class="spec-counter-row"><view class="counter-btn minus" @click="specQty > 1 && specQty--"><text class="iconfont icon-move"></text></view><text class="counter-num">{{ specQty }}</text><view class="counter-btn plus" @click="specQty++"><text class="iconfont icon-add"></text></view></view></view>
-        </scroll-view>
-        <view class="spec-footer">
-          <view class="spec-confirm-btn" :class="{ 'spec-confirm-btn--disabled': !canGoNextSpec }" @click="handleSpecPrimary"><text>{{ specPrimaryText }}</text></view>
-        </view>
-      </view>
-    </view>
-
+    <SpecSheet
+      v-if="showSpecSheet"
+      :spec-dish="specDish"
+      :detail-image-failed="detailImageFailed"
+      :currency="confirmationText.currency"
+      :spec-dish-desc="specDishDesc"
+      :spec-base-price="specBasePrice"
+      :spec-radio-groups="specRadioGroups"
+      :spec-extra-options="specExtraOptions"
+      :spec-text="specText"
+      :selected-extras="selectedExtras"
+      :item-remark="itemRemark"
+      :filtered-remark-chips="filteredRemarkChips"
+      :show-item-remark-extra="showItemRemarkExtra"
+      :spec-qty="specQty"
+      :can-go-next-spec="canGoNextSpec"
+      :spec-primary-text="specPrimaryText"
+      :dish-image="dishImage"
+      :dish-placeholder-style="dishPlaceholderStyle"
+      :format-price="formatPrice"
+      :is-spec-selected="isSpecSelected"
+      @cancel="cancelSpec"
+      @confirm="handleSpecPrimary"
+      @image-error="detailImageFailed = true"
+      @toggle-spec="toggleSpec"
+      @toggle-extra="toggleExtra"
+      @toggle-remark-chip="toggleItemRemarkChip"
+      @show-remark-extra="showItemRemarkExtra = true"
+      @update:item-remark="itemRemark = $event"
+      @qty-increase="specQty++"
+      @qty-decrease="specQty--"
+    />
     <view v-if="storeClosed || tableSessionClosed" class="closed-mask">
       <view class="closed-card">
         <view class="closed-icon-wrap"><text class="closed-icon iconfont" :class="tableSessionClosed ? 'icon-roundcheckfill' : 'icon-shopfill'"></text></view>
@@ -970,6 +553,14 @@ import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, is
 import { consumeStart, recordSample } from '@/utils/perf'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
+import SpecSheet from '../components/SpecSheet.vue'
+import CouponPicker from '../components/CouponPicker.vue'
+import HomeTab from '../components/HomeTab.vue'
+import TableBillSheet from '../components/TableBillSheet.vue'
+import OrderHistorySheet from '../components/OrderHistorySheet.vue'
+import PaymentSuccessSheet from '../components/PaymentSuccessSheet.vue'
+import CheckoutSheet from '../components/CheckoutSheet.vue'
+import CheckoutAuthSheet from '../components/CheckoutAuthSheet.vue'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -979,7 +570,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble, MemberCard },
+  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet },
   setup() {
     const tableNo = ref('')
     const shopId = ref('')
