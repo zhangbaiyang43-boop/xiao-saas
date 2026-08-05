@@ -561,6 +561,7 @@ import OrderHistorySheet from '../components/OrderHistorySheet.vue'
 import PaymentSuccessSheet from '../components/PaymentSuccessSheet.vue'
 import CheckoutSheet from '../components/CheckoutSheet.vue'
 import CheckoutAuthSheet from '../components/CheckoutAuthSheet.vue'
+import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -572,6 +573,12 @@ const wxLogin = () => new Promise((resolve, reject) => {
 export default {
   components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet },
   setup() {
+    const {
+      formatPrice, dishImage, dishPlaceholderStyle, hasSpecs, isSoldOut, dishCardDesc,
+      dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
+      couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
+      orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
+    } = useOrderFormatters()
     const tableNo = ref('')
     const shopId = ref('')
     const shopName = ref(uni.getStorageSync('tenant_name') || '\u672a\u6765\u9910\u5385')
@@ -927,20 +934,6 @@ export default {
       return amount > 0 ? '\u518d\u6d88\u8d39 \u00a5' + formatPrice(amount) + ' \u5347\u7ea7' : ''
     })
     const usableMemberCoupons = computed(() => (bannerInfo.value?.coupons || []).slice(0, 3))
-    const couponAmountText = (coupon) => formatPrice(coupon?.value ?? coupon?.amount ?? coupon?.discount_amount ?? 0)
-    const couponConditionText = (coupon) => {
-      const min = Number(coupon?.min_amount ?? coupon?.threshold_amount ?? coupon?.threshold ?? 0)
-      return min > 0 ? '\u6ee1' + formatPrice(min) + '\u5143\u53ef\u7528' : '\u65e0\u95e8\u69db\u53ef\u7528'
-    }
-    const couponValidityText = (coupon) => {
-      const raw = coupon?.expire_time || coupon?.valid_end_time || coupon?.end_time || ''
-      if (!raw) return '\u5f53\u524d\u53ef\u7528'
-      const end = new Date(raw)
-      if (Number.isNaN(end.getTime())) return '\u5f53\u524d\u53ef\u7528'
-      const now = new Date()
-      if (end.toDateString() === now.toDateString()) return '\u4eca\u65e5\u6709\u6548'
-      return '\u6709\u6548\u671f\u81f3' + String(end.getMonth() + 1).padStart(2, '0') + '.' + String(end.getDate()).padStart(2, '0')
-    }
     const goOrderFromMember = () => { activeTab.value = 'order' }
     const handleMemberCardAuth = async (event) => {
       if (memberAuthorizing.value) return
@@ -1161,9 +1154,6 @@ export default {
       return 'pending'
     }
 
-    const orderItemCount = (order) =>
-      (order?.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0)
-
     const activeOrderRank = (order) => {
       const status = normalizeOrderStatus(order?.status)
       if (['pending', 'preparing'].includes(status)) return 0
@@ -1322,7 +1312,6 @@ export default {
       }
       return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
     })
-    const orderItemImage = (item) => item?.image || item?.image_url || item?.cover || item?.cover_url || ''
     const markOrderItemImageFailed = (key) => { orderItemImageFailed.value = { ...orderItemImageFailed.value, [key]: true } }
 
     const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
@@ -1407,18 +1396,6 @@ export default {
 
     const currentOrderItemCount = computed(() => orderItemCount(currentTableOrder.value))
     const currentOrderItems = computed(() => currentTableOrder.value?.items || [])
-
-    const orderItemName = (item) => item?.orderName || item?.name || item?.goods_name || item?.dish_name || '\u5546\u54c1'
-    const orderItemQty = (item) => Number(item?.qty || item?.quantity || item?.count || 1)
-    const orderItemAmount = (item) => Number(item?.amount ?? item?.total ?? (Number(item?.price || 0) * orderItemQty(item)))
-    const orderItemSpecText = (item) => {
-      if (item?.specLabel) return item.specLabel
-      if (item?.spec_text) return item.spec_text
-      if (Array.isArray(item?.specifications) && item.specifications.length) {
-        return item.specifications.map(spec => spec.value || spec.name).filter(Boolean).join(' \u00b7 ')
-      }
-      return ''
-    }
 
     const currentOrderMainItemText = computed(() => {
       const items = currentTableOrder.value?.items || []
@@ -1746,11 +1723,6 @@ export default {
         .map(c => ({ ...c, eligible: totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0) }))
         .sort((a, b) => (b.eligible - a.eligible) || compareCouponPriority(a, b))
     )
-    const couponPickerAmount = (c) => formatPrice(c.value || c.amount || 0)
-    const couponPickerCondText = (c) => {
-      const min = Number(c.min_amount || c.threshold_amount || 0)
-      return min > 0 ? '\u6ee1' + formatPrice(min) + '\u5143\u53ef\u7528' : '\u65e0\u95e8\u69db\u53ef\u7528'
-    }
     const openCouponPicker = () => { showCouponPicker.value = true }
     const closeCouponPicker = () => { showCouponPicker.value = false }
     const pickCoupon = (coupon) => {
@@ -1937,19 +1909,6 @@ export default {
       return allDishes.value.filter((d) => d.category === cat)
     }
 
-    // 存量菜品图片是商家直接传的原图（可能几MB），在服务端加处理管线之前上传的图都是这样，
-    // 重新上传前没法改变已经存在 COS 上的文件本身。用 COS 万象缩略图参数在"读"的时候按需
-    // 裁一份小图，不用等商家重新上传就能立刻覆盖全部存量图片；只对 http(s) 的 COS 图片链接
-    // 生效，本地占位图/相对路径原样返回。size 是缩略图目标宽度（像素），列表小图和详情大图
-    // 用不同的值，没必要都按详情图的尺寸下载。
-    const withCosThumbnail = (url, size) => {
-      if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return url
-      const sep = url.includes('?') ? '&' : '?'
-      return `${url}${sep}imageMogr2/thumbnail/${size}x/format/webp`
-    }
-
-    const dishImage = (dish, size = 240) => withCosThumbnail(dish.image_url || dish.image || dish.cover_image || '', size)
-
     const dishTags = (dish) => {
       if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
       if (typeof dish.tags === 'string' && dish.tags.trim()) {
@@ -1975,43 +1934,10 @@ export default {
       }
       return []
     }
-    const dishCardDesc = (dish) => {
-      const desc = String(dish.desc || dish.description || '').trim()
-      if (desc) return desc
-      if (hasSpecs(dish)) return '\u591a\u89c4\u683c\u53ef\u9009'
-      return ''
-    }
-    const showDishSales = (dish) => Number(dish.sales_count || 0) >= 10
-    const isSoldOut = (dish) => dish.available === false || dish.sold_out === true || dish.is_sold_out === true || ['sold_out', 'soldout', 'unavailable'].includes(String(dish.status || '').toLowerCase()) || (dish.stock !== undefined && dish.stock !== null && dish.stock !== '' && Number(dish.stock) <= 0)
-    const dishPriceBase = (dish) => Number(dish.min_price ?? dish.price_min ?? dish.price ?? 0)
-    const dishPriceText = (dish) => formatPrice(dishPriceBase(dish))
-    const dishPriceSuffix = (dish) => hasSpecs(dish) || Number(dish.max_price || dish.price_max || 0) > dishPriceBase(dish) ? '\u8d77' : ''
-
-    const dishOriginalPrice = (dish) => dish.original_price || dish.market_price || ''
-
-    const formatPrice = (val) => {
-      const n = Number(val)
-      if (isNaN(n)) return val
-      return n % 1 === 0 ? String(n) : n.toFixed(2)
-    }
-    const hasSpecs = (dish) => {
-      const tags = Array.isArray(dish.tags) ? dish.tags : String(dish.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
-      return !!dish.has_options || !!dish.hasOptions || tags.includes('\u591a\u89c4\u683c') || tags.includes('\u89c4\u683c') || (Array.isArray(dish.spec_groups) && dish.spec_groups.length > 0) || (Array.isArray(dish.specs) && dish.specs.length > 0) || (Array.isArray(dish.spec_options) && dish.spec_options.length > 0)
-    }
     const specButtonText = (dish) => dish.option_button_text || dish.spec_button_text || (hasSpecs(dish) ? specText.chooseTaste : specText.chooseSpec)
     const dishOptionKindCount = (id) => specCartItems.value.filter(i => i.id === id).length
     const optionCountText = (id) => specText.selectedKinds + dishOptionKindCount(id) + specText.kindUnit
 
-    const placeholderGradients = [
-      'linear-gradient(135deg,#a8edea,#fed6e3)',
-      'linear-gradient(135deg,#d4fc79,#96e6a1)',
-      'linear-gradient(135deg,#ffecd2,#fcb69f)',
-      'linear-gradient(135deg,#a1c4fd,#c2e9fb)',
-      'linear-gradient(135deg,#fbc2eb,#a6c1ee)',
-      'linear-gradient(135deg,#fddb92,#d1fdff)',
-      'linear-gradient(135deg,#e0c3fc,#8ec5fc)',
-      'linear-gradient(135deg,#f6d365,#fda085)',
-    ]
     const homeRecommendedTags = ['\u62db\u724c', '\u70ed\u9500', '\u5e97\u957f\u63a8\u8350', '\u65b0\u54c1']
     const isMenuEmpty = computed(() => allDishes.value.length <= 0)
     const canStartOrdering = computed(() => !storeClosed.value && !isMenuEmpty.value)
@@ -2171,11 +2097,6 @@ export default {
       const tags = dishTags(dish).map(normalizeDishTag)
       return tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500') || tags.includes('\u65b0\u54c1')
     }
-    const dishPlaceholderStyle = (dish) => {
-      const idx = (dish.name || '').charCodeAt(0) % placeholderGradients.length
-      return { background: placeholderGradients[idx] }
-    }
-
     const markDishImageFailed = (id) => {
       imageLoadFailed.value = { ...imageLoadFailed.value, [id]: true }
     }
