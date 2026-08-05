@@ -430,6 +430,8 @@ import CartBar from '../components/CartBar.vue'
 import CouponBar from '../components/CouponBar.vue'
 import WelcomeCouponSheet from '../components/WelcomeCouponSheet.vue'
 import { useOrderFormatters } from '../composables/useOrderFormatters.js'
+import { useWelcomeCoupon } from '../composables/useWelcomeCoupon.js'
+import { orderModeText, confirmationText, successText, specText, authSheetText } from '../utils/orderText.js'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -464,12 +466,6 @@ export default {
     const normalizePaymentMode = (mode) => {
       const value = String(mode || 'prepay').trim()
       return ['prepay', 'postpay', 'table_account'].includes(value) ? value : 'prepay'
-    }
-    const orderModeText = {
-      dineIn: '\u5802\u98df',
-      delivery: '\u5916\u5356',
-      tableLabel: '\u684c\u53f7',
-      unknownTable: '\u672a\u8bc6\u522b'
     }
     // 只更新本组件的响应式状态；实际的"怎么建立/校验本桌身份、往 storage 写哪些字段"
     // 全部收敛到 utils/dining.js 的 resolveDiningIdentity/persistDiningContext，跟扫码
@@ -597,37 +593,6 @@ export default {
         confirmText: '\u77e5\u9053\u4e86'
       })
     }
-    const confirmationText = {
-      title: '\u786e\u8ba4\u8ba2\u5355', tableMissing: '\u672a\u8bc6\u522b\u684c\u53f7\uff0c\u8bf7\u91cd\u65b0\u626b\u7801',
-      selectedItems: '\u5df2\u9009\u5546\u54c1', clear: '\u6e05\u7a7a\u5df2\u9009\u5546\u54c1',
-      remark: '\u5907\u6ce8', remarkPlaceholder: '\u5176\u4ed6\u8981\u6c42\u2026', goodsAmount: '\u5546\u54c1\u91d1\u989d', coupon: '\u4f18\u60e0\u5238', couponAvailable: '\u5f20\u53ef\u7528', couponNone: '\u6682\u65e0\u53ef\u7528', noThreshold: '\u65e0\u95e8\u69db', thresholdPrefix: '\u6ee1',
-      payable: '\u5e94\u4ed8\u91d1\u989d', wechatPay: '\u5fae\u4fe1\u652f\u4ed8', tableAccount: '\u684c\u53f0\u8d26\u5355', postpay: '\u9910\u540e\u4ed8\u6b3e', payNow: '\u7acb\u5373\u652f\u4ed8', submitTableAccount: '\u63d0\u4ea4\u5230\u684c\u53f0\u8d26\u5355', submitOrder: '\u63d0\u4ea4\u8ba2\u5355',
-      orderRemark: '\u6574\u5355\u5907\u6ce8', orderRemarkPlaceholder: '\u4f8b\u5982\uff1a\u4e00\u8d77\u4e0a\u83dc\u3001\u5168\u90e8\u6253\u5305\u3001\u9700\u8981\u513f\u7ae5\u9910\u5177', orderRemarkEmpty: '\u65e0', unavailable: '\u5f53\u524d\u4e0d\u53ef\u4e0b\u5355', confirming: '\u6b63\u5728\u786e\u8ba4\u8ba2\u5355\u2026', paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026', currency: '\u00a5', close: 'x', arrow: '>'
-    }
-    const successText = {
-      title: '\u4e0b\u5355\u6210\u529f',
-      paidLabel: '\u5b9e\u4ed8\u91d1\u989d',
-      table: '\u684c\u53f7',
-      orderNo: '\u8ba2\u5355\u53f7',
-      items: '\u5546\u54c1',
-      itemUnit: '\u4ef6',
-      closeAndWait: '\u5173\u95ed\u5e76\u7b49\u5f85',
-      continueOrdering: '\u7ee7\u7eed\u52a0\u83dc',
-      viewDetail: '\u67e5\u770b\u8ba2\u5355\u8be6\u60c5',
-      safeTip: '\u8ba2\u5355\u72b6\u6001\u4f1a\u81ea\u52a8\u66f4\u65b0\uff0c\u65e0\u9700\u91cd\u590d\u63d0\u4ea4\u6216\u518d\u6b21\u652f\u4ed8\u3002',
-      statusPending: '\u5546\u5bb6\u5df2\u6536\u5230\u8ba2\u5355\uff0c\u6b63\u5728\u7b49\u5f85\u63a5\u5355',
-      statusPreparing: '\u5546\u5bb6\u5df2\u63a5\u5355\uff0c\u6b63\u5728\u5236\u4f5c',
-      statusDone: '\u9910\u54c1\u5df2\u5b8c\u6210\uff0c\u8bf7\u7559\u610f\u53d6\u9910\u6216\u670d\u52a1\u5458\u901a\u77e5',
-      statusRejected: '\u8ba2\u5355\u72b6\u6001\u5f02\u5e38\uff0c\u8bf7\u8054\u7cfb\u5546\u5bb6\u5904\u7406',
-      statusFallback: '\u8ba2\u5355\u5df2\u63d0\u4ea4\uff0c\u53ef\u5728\u8ba2\u5355\u8be6\u60c5\u4e2d\u67e5\u770b\u72b6\u6001',
-      detailOpened: '\u5df2\u6253\u5f00\u8ba2\u5355\u8be6\u60c5',
-      closed: '\u5df2\u5173\u95ed\uff0c\u8bf7\u5b89\u5fc3\u7b49\u5f85',
-      backToMenu: '\u5df2\u8fd4\u56de\u70b9\u9910\u9875',
-    }
-    const specText = {
-      defaultDesc: '\u9009\u597d\u53e3\u5473\u540e\u52a0\u5165\u8d2d\u7269\u8f66', required: '\u5fc5\u9009', optional: '\u53ef\u9009', multi: '\u53ef\u591a\u9009', extras: '\u9644\u52a0\u8981\u6c42', itemRemark: '\u5355\u54c1\u5907\u6ce8', itemRemarkPlaceholder: '\u4f8b\u5982\uff1a\u5c11\u76d0\u3001\u4e0d\u8981\u9999\u83dc\u3001\u5bf9\u82b1\u751f\u8fc7\u654f',
-      dish: '\u83dc\u54c1', spec: '\u89c4\u683c', qty: '\u6570\u91cf', none: '\u65e0', prev: '\u8fd4\u56de\u4e0a\u4e00\u6b65', next: '\u4e0b\u4e00\u6b65', add: '\u52a0\u5165\u8d2d\u7269\u8f66', chooseTaste: '\u9009\u53e3\u5473', chooseSpec: '\u9009\u89c4\u683c', selectedKinds: '\u5df2\u9009', kindUnit: '\u79cd', separator: '\u3001', dotSeparator: '\u00b7'
-    }
     const todayActivity = ref('')
     const loading = ref(false)
     const loadError = ref(false)
@@ -675,32 +640,10 @@ export default {
         requestingReminder.value = false
       }
     }
-    const showWelcomeCoupon = ref(false)
-    const welcomeCouponData = ref(null)
-    const welcomeCouponCondText = computed(() => {
-      const min = Number(welcomeCouponData.value?.min_amount || 0)
-      return min > 0 ? '\u6ee1' + min.toFixed(0) + '\u5143\u53ef\u7528' : '\u65e0\u95e8\u69db\u53ef\u7528'
-    })
-    const consumeWelcomeCoupon = () => {
-      if (uni.getStorageSync('coupon_modal_shown') !== 'false') return null
-      uni.setStorageSync('coupon_modal_shown', 'true')
-      const raw = uni.getStorageSync('welcome_coupon')
-      if (!raw) return null
-      try { return JSON.parse(raw) } catch { return null }
-    }
-    const checkWelcomeCoupon = () => {
-      const data = consumeWelcomeCoupon()
-      if (!data) return
-      welcomeCouponData.value = data
-      showWelcomeCoupon.value = true
-    }
-    const closeWelcomeCoupon = () => {
-      showWelcomeCoupon.value = false
-    }
-    const goOrderFromWelcomeCoupon = () => {
-      showWelcomeCoupon.value = false
-      activeTab.value = 'order'
-    }
+    const {
+      showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText,
+      consumeWelcomeCoupon, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
+    } = useWelcomeCoupon(() => { activeTab.value = 'order' })
     const orderNo = ref('')
     const orderId = ref('')
     const orderStatus = ref('pending') // pending | preparing | done
@@ -709,24 +652,6 @@ export default {
     const successDiscount = ref(0)
     const showCheckoutAuth = ref(false)
     const authorizing = ref(false)
-    const authSheetText = {
-      title: '\u7ee7\u7eed\u652f\u4ed8',
-      desc: '\u5fae\u4fe1\u6388\u6743\u540e\uff0c\u5c06\u81ea\u52a8\u7ee7\u7eed\u63d0\u4ea4\u672c\u6b21\u8ba2\u5355\uff0c\u65e0\u9700\u91cd\u590d\u64cd\u4f5c\u3002',
-      auto: '\u6388\u6743\u6210\u529f\u540e\uff0c\u7cfb\u7edf\u5c06\u81ea\u52a8\u521b\u5efa\u8ba2\u5355\u5e76\u62c9\u8d77\u5fae\u4fe1\u652f\u4ed8\u3002',
-      store: '\u95e8\u5e97',
-      table: '\u684c\u53f7',
-      amount: '\u5e94\u4ed8\u91d1\u989d',
-      unknownTable: '\u672a\u8bc6\u522b',
-      confirm: '\u6388\u6743\u5e76\u652f\u4ed8',
-      confirmSubmit: '\u6388\u6743\u5e76\u63d0\u4ea4\u8ba2\u5355',
-      confirmFree: '\u6388\u6743\u5e76\u5b8c\u6210\u8ba2\u5355',
-      authorizing: '\u6b63\u5728\u6388\u6743\u2026',
-      submitting: '\u6b63\u5728\u63d0\u4ea4\u8ba2\u5355\u2026',
-      paying: '\u6b63\u5728\u53d1\u8d77\u652f\u4ed8\u2026',
-      cancel: '\u6682\u4e0d\u652f\u4ed8',
-      member: '\u652f\u4ed8\u6210\u529f\u540e\u81ea\u52a8\u6210\u4e3a\u672c\u5e97\u4f1a\u5458\uff0c\u53ef\u5728\u201c\u6211\u7684\u201d\u4e2d\u67e5\u770b\u8ba2\u5355\u4e0e\u6743\u76ca\u3002',
-      privacy: '\u6388\u6743\u4ec5\u7528\u4e8e\u8bc6\u522b\u672c\u6b21\u8ba2\u5355\u4e0e\u4f1a\u5458\u8eab\u4efd\uff0c\u4e0d\u4f1a\u53d1\u5e03\u5185\u5bb9\u3002',
-    }
     const authActionStatus = ref('idle')
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
