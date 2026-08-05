@@ -400,6 +400,8 @@ import CouponBar from '../components/CouponBar.vue'
 import WelcomeCouponSheet from '../components/WelcomeCouponSheet.vue'
 import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 import { useWelcomeCoupon } from '../composables/useWelcomeCoupon.js'
+import { useMemberCard } from '../composables/useMemberCard.js'
+import { useCouponPicker } from '../composables/useCouponPicker.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
@@ -427,10 +429,6 @@ export default {
     const shopName = ref(uni.getStorageSync('tenant_name') || '\u672a\u6765\u9910\u5385')
     const shopLogo = ref('')
     const shopCreatedAt = ref('')
-    const memberSinceText = computed(() => {
-      const year = new Date(shopCreatedAt.value).getFullYear()
-      return Number.isNaN(year) ? '' : '\u4f1a\u5458\u81ea ' + year + ' \u5e74'
-    })
     const diningSessionId = ref(uni.getStorageSync('dining_session_id') || '')
     const diningParticipantToken = ref(uni.getStorageSync('dining_participant_token') || '')
     const diningClientId = ref(uni.getStorageSync('dining_client_id') || '')
@@ -646,10 +644,16 @@ export default {
     const storeClosed = ref(false)
     const tableSessionClosed = ref(false)
     const tableSessionClosedNotice = ref('\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c')
-    const isMember = ref(false)
-    const bannerInfo = ref(null)
-    const memberAuthorizing = ref(false)
-    const memberLoading = ref(false)
+    const {
+      bannerInfo, isMember, memberLoading, memberAuthorizing, memberSinceText,
+      memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText,
+      usableMemberCoupons, goOrderFromMember, useMemberCoupon,
+    } = useMemberCard({
+      shopCreatedAt,
+      formatPrice,
+      onGoOrder: () => { activeTab.value = 'order' },
+      onUseCoupon: (id) => { selectedCouponId.value = id },
+    })
     const isCustomerLoggedIn = ref(Boolean(uni.getStorageSync('customer_token')))
     const authStateVersion = ref(0)
     const activeTab = ref('order')
@@ -686,21 +690,6 @@ export default {
       if (hasCustomerIdentity.value && !bannerInfo.value) loadMemberStatus({ authRedirect: false })
     }
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
-    const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '\u666e\u901a\u4f1a\u5458')
-    const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
-    const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
-    const memberProgressPercent = computed(() => {
-      const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)
-      const target = Number(bannerInfo.value?.nextGrowth || 0)
-      if (!target || target <= 0) return 0
-      return Math.max(0, Math.min(100, Math.round((current / target) * 100)))
-    })
-    const memberUpgradeText = computed(() => {
-      const amount = Number(bannerInfo.value?.nextUpgradeAmount || 0)
-      return amount > 0 ? '\u518d\u6d88\u8d39 \u00a5' + formatPrice(amount) + ' \u5347\u7ea7' : ''
-    })
-    const usableMemberCoupons = computed(() => (bannerInfo.value?.coupons || []).slice(0, 3))
-    const goOrderFromMember = () => { activeTab.value = 'order' }
     const handleMemberCardAuth = async (event) => {
       if (memberAuthorizing.value) return
       const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
@@ -734,10 +723,6 @@ export default {
       } finally {
         memberAuthorizing.value = false
       }
-    }
-    const useMemberCoupon = (coupon) => {
-      selectedCouponId.value = coupon?.id || coupon?.coupon_id || null
-      activeTab.value = 'order'
     }
     const loadDistance = (shopLat, shopLng) => {
       if (!shopLat || !shopLng) return
@@ -1451,49 +1436,16 @@ export default {
     const orderRemarkSummary = computed(() => remark.value.trim() || confirmationText.orderRemarkEmpty)
     const deliveryEnabled = ref(false)
     const availableCoupons = ref([])
-    const selectedCouponId = ref(null)
-    const selectedCoupon = computed(() =>
-      availableCoupons.value.find(c => c.id === selectedCouponId.value) || null
-    )
-    const couponBarVisible = computed(() => isCustomerLoggedIn.value && availableCoupons.value.length > 0)
-    const bestCouponValue = computed(() => {
-      if (!availableCoupons.value.length) return 0
-      return Math.max(...availableCoupons.value.map(c => Number(c.value || c.amount || 0)))
+    const {
+      selectedCouponId, selectedCoupon, couponBarVisible, bestCouponValue,
+      couponBarText, couponBarPrefix, couponBarAmount, discountAmount, finalPrice,
+      showCouponPicker, couponPickerList, openCouponPicker, closeCouponPicker, pickCoupon,
+    } = useCouponPicker({
+      availableCoupons,
+      getTotalPrice: () => totalPrice.value,
+      isCustomerLoggedIn,
+      formatPrice,
     })
-    const couponBarText = computed(() => `\u60a8\u6709${availableCoupons.value.length}\u5f20\u4f18\u60e0\u5238\uff0c\u6700\u9ad8\u51cf\u00a5${formatPrice(bestCouponValue.value)}`)
-    const couponBarPrefix = computed(() => `\u60a8\u6709${availableCoupons.value.length}\u5f20\u4f18\u60e0\u5238\uff0c\u6700\u9ad8\u51cf`)
-    const couponBarAmount = computed(() => `\u00a5${formatPrice(bestCouponValue.value)}`)
-    const MAX_DISCOUNT_RATIO = 0.20
-    const discountAmount = computed(() => {
-      if (!selectedCoupon.value) return 0
-      const min = Number(selectedCoupon.value.min_amount || selectedCoupon.value.threshold_amount || 0)
-      if (totalPrice.value < min) return 0
-      const rawDiscount = Number(selectedCoupon.value.value || selectedCoupon.value.amount || 0)
-      return Math.min(rawDiscount, Math.round(totalPrice.value * MAX_DISCOUNT_RATIO * 100) / 100)
-    })
-    const finalPrice = computed(() => Math.max(totalPrice.value - discountAmount.value, 0))
-    const showCouponPicker = ref(false)
-    // 面额一样大的时候，谁排前面不能看后端接口凑巧返回的顺序——快过期的那张要是没被
-    // 选中用掉，白白过期作废，就是纯浪费掉的营销成本。所以打平时改成比谁先过期。
-    const compareCouponPriority = (a, b) => {
-      const valueDiff = Number(b.value || b.amount || 0) - Number(a.value || a.amount || 0)
-      if (valueDiff !== 0) return valueDiff
-      const aExpire = new Date(a.expire_time || a.valid_end_time || '2099-01-01').getTime()
-      const bExpire = new Date(b.expire_time || b.valid_end_time || '2099-01-01').getTime()
-      return aExpire - bExpire
-    }
-    const couponPickerList = computed(() =>
-      [...availableCoupons.value]
-        .map(c => ({ ...c, eligible: totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0) }))
-        .sort((a, b) => (b.eligible - a.eligible) || compareCouponPriority(a, b))
-    )
-    const openCouponPicker = () => { showCouponPicker.value = true }
-    const closeCouponPicker = () => { showCouponPicker.value = false }
-    const pickCoupon = (coupon) => {
-      if (coupon && !coupon.eligible) return
-      selectedCouponId.value = coupon ? coupon.id : null
-      showCouponPicker.value = false
-    }
     const wechatPayAmount = computed(() => finalPrice.value)
     const isPrepayMode = computed(() => paymentMode.value === 'prepay')
     const confirmPaymentLabel = computed(() => {
