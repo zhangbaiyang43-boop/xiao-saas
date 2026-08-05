@@ -578,6 +578,7 @@ export default {
       dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
       couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
+      statusLabel, dishTags, strongDishTags, normalizeDishTag, isStrongDishTag, dishCardTags, isFeatured,
     } = useOrderFormatters()
     const tableNo = ref('')
     const shopId = ref('')
@@ -1408,8 +1409,6 @@ export default {
       myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))).length
     )
 
-    const statusLabel = (s) => ({ pending: '\u7b49\u5f85\u63a5\u5355', preparing: '\u5907\u9910\u4e2d', done: '\u5df2\u5b8c\u6210', rejected: '\u5df2\u62d2\u5355', cancelled: '\u5df2\u53d6\u6d88', settled: '\u5df2\u7ed3\u8d26' })[s] || s
-
     const doCancelOrder = (order) => {
       uni.showModal({
         title: '\u53d6\u6d88\u8ba2\u5355',
@@ -1909,31 +1908,6 @@ export default {
       return allDishes.value.filter((d) => d.category === cat)
     }
 
-    const dishTags = (dish) => {
-      if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
-      if (typeof dish.tags === 'string' && dish.tags.trim()) {
-        return dish.tags.split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean).slice(0, 3)
-      }
-      return []
-    }
-
-
-    const strongDishTags = ['\u62db\u724c', '\u70ed\u9500', '\u5e97\u957f\u63a8\u8350', '\u65b0\u54c1']
-    const normalizeDishTag = (tag) => {
-      const text = String(tag || '').trim()
-      if (['\u63a8\u8350', '\u5fc5\u70b9', '\u5fc5\u5403'].includes(text)) return '\u62db\u724c'
-      if (text === '\u706b\u7206') return '\u70ed\u9500'
-      return text
-    }
-    const isStrongDishTag = (tag) => tag === '\u5df2\u552e\u7f44' || strongDishTags.includes(tag)
-    const dishCardTags = (dish) => {
-      if (isSoldOut(dish)) return ['\u5df2\u552e\u7f44']
-      const normalized = dishTags(dish).map(normalizeDishTag).filter(Boolean)
-      for (const tag of strongDishTags) {
-        if (normalized.includes(tag)) return [tag]
-      }
-      return []
-    }
     const specButtonText = (dish) => dish.option_button_text || dish.spec_button_text || (hasSpecs(dish) ? specText.chooseTaste : specText.chooseSpec)
     const dishOptionKindCount = (id) => specCartItems.value.filter(i => i.id === id).length
     const optionCountText = (id) => specText.selectedKinds + dishOptionKindCount(id) + specText.kindUnit
@@ -2093,10 +2067,6 @@ export default {
       showHistoryReorderToast({ added, skippedUnavailable, skippedSpec })
     }
 
-    const isFeatured = (dish) => {
-      const tags = dishTags(dish).map(normalizeDishTag)
-      return tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500') || tags.includes('\u65b0\u54c1')
-    }
     const markDishImageFailed = (id) => {
       imageLoadFailed.value = { ...imageLoadFailed.value, [id]: true }
     }

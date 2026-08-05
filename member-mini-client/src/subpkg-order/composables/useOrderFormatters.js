@@ -91,6 +91,37 @@ export function useOrderFormatters() {
   const orderItemImage = (item) => item?.image || item?.image_url || item?.cover || item?.cover_url || ''
   const orderItemCount = (order) => (order?.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0)
 
+  const statusLabel = (s) => ({ pending: '等待接单', preparing: '备餐中', done: '已完成', rejected: '已拒单', cancelled: '已取消', settled: '已结账' })[s] || s
+
+  const dishTags = (dish) => {
+    if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)
+    if (typeof dish.tags === 'string' && dish.tags.trim()) {
+      return dish.tags.split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean).slice(0, 3)
+    }
+    return []
+  }
+
+  const strongDishTags = ['招牌', '热销', '店长推荐', '新品']
+  const normalizeDishTag = (tag) => {
+    const text = String(tag || '').trim()
+    if (['推荐', '必点', '必吃'].includes(text)) return '招牌'
+    if (text === '火爆') return '热销'
+    return text
+  }
+  const isStrongDishTag = (tag) => tag === '已售罄' || strongDishTags.includes(tag)
+  const dishCardTags = (dish) => {
+    if (isSoldOut(dish)) return ['已售罄']
+    const normalized = dishTags(dish).map(normalizeDishTag).filter(Boolean)
+    for (const tag of strongDishTags) {
+      if (normalized.includes(tag)) return [tag]
+    }
+    return []
+  }
+  const isFeatured = (dish) => {
+    const tags = dishTags(dish).map(normalizeDishTag)
+    return tags.includes('招牌') || tags.includes('热销') || tags.includes('新品')
+  }
+
   return {
     formatPrice,
     dishImage,
@@ -114,5 +145,12 @@ export function useOrderFormatters() {
     orderItemSpecText,
     orderItemImage,
     orderItemCount,
+    statusLabel,
+    dishTags,
+    strongDishTags,
+    normalizeDishTag,
+    isStrongDishTag,
+    dishCardTags,
+    isFeatured,
   }
 }
