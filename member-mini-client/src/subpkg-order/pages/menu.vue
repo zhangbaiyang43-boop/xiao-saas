@@ -249,101 +249,27 @@
 
 
     <scroll-view v-show="activeTab === 'card'" class="tab-scroll" scroll-y>
-      <view v-if="bannerInfo" class="card-tab member-center">
-        <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
-          <view class="mic-glow"></view>
-          <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
-          <view class="mic-body">
-            <view class="member-avatar">
-              <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
-              <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
-            </view>
-            <view class="member-identity-main">
-              <view class="mic-crest-row">
-                <text class="member-level">{{ memberLevelLabel }}</text>
-              </view>
-              <text class="mic-sub">MEMBER</text>
-            </view>
-            <text class="mic-chevron iconfont icon-roundright"></text>
-          </view>
-          <view v-if="memberUpgradeText" class="member-progress-wrap">
-            <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
-            <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
-          </view>
-          <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
-            <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
-            <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
-          </view>
-        </view>
-
-        <view class="member-assets-card">
-          <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
-            <text class="member-asset-value">{{ bannerInfo.points || 0 }}</text>
-            <text class="member-asset-label">积分</text>
-          </view>
-          <view class="member-asset-divider"></view>
-          <view class="member-asset-item" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
-            <text class="member-asset-value">{{ bannerInfo.couponCount }}</text>
-            <text class="member-asset-label">优惠券</text>
-          </view>
-        </view>
-
-        <view class="member-main-action-card">
-          <text class="member-action-title">您有{{ bannerInfo.couponCount }}张优惠券可用</text>
-          <view class="member-action-btn" @click="goOrderFromMember"><text>去点餐</text></view>
-        </view>
-
-        <view v-if="usableMemberCoupons.length" class="member-section">
-          <text class="member-section-title">可用优惠券</text>
-          <view class="member-coupon-list">
-            <view v-for="coupon in usableMemberCoupons" :key="coupon.id || coupon.coupon_id || coupon.name" class="member-coupon-card" @click="useMemberCoupon(coupon)">
-              <view class="member-coupon-value">
-                <text class="member-coupon-yen">¥</text>
-                <text class="member-coupon-amount">{{ couponAmountText(coupon) }}</text>
-              </view>
-              <view class="member-coupon-info">
-                <text class="member-coupon-condition">{{ couponConditionText(coupon) }}</text>
-                <text class="member-coupon-time">{{ couponValidityText(coupon) }}</text>
-              </view>
-              <view class="member-coupon-use"><text>立即使用</text></view>
-            </view>
-          </view>
-        </view>
-
-        <view class="member-service-card">
-          <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-member/pages/points' })">
-            <view class="member-service-icon"><text class="iconfont icon-timefill"></text></view>
-            <text class="member-service-label">积分明细</text>
-            <text class="member-service-arrow iconfont icon-roundright"></text>
-          </view>
-          <view class="member-service-row" @click="uni.navigateTo({ url: '/subpkg-coupon/pages/list' })">
-            <view class="member-service-icon"><text class="iconfont icon-youhuiquan"></text></view>
-            <text class="member-service-label">优惠券</text>
-            <text class="member-service-arrow iconfont icon-roundright"></text>
-          </view>
-        </view>
-      </view>
-      <view v-else-if="hasCustomerIdentity" class="card-tab-empty">
-        <text class="cte-title">会员中心</text>
-        <text class="cte-desc">普通会员</text>
-        <view class="cte-btn cte-btn-plain" @click="loadMemberStatus">
-          <text>{{ memberLoading ? '\u52a0\u8f7d\u4e2d...' : '\u91cd\u65b0\u52a0\u8f7d' }}</text>
-        </view>
-        <text class="cte-secondary" @click="goOrderFromMember">去点餐</text>
-      </view>
-      <view v-else class="card-tab-empty">
-        <text class="cte-title">会员中心</text>
-        <text class="cte-desc">{{ newCustomerHookText }}</text>
-        <button
-          class="cte-btn"
-          open-type="getPhoneNumber"
-          :disabled="memberAuthorizing"
-          @getphonenumber="handleMemberCardAuth"
-        >
-          <text>{{ memberAuthorizing ? '\u6388\u6743\u4e2d...' : '\u67e5\u770b\u4f1a\u5458\u6743\u76ca' }}</text>
-        </button>
-        <text class="cte-secondary" @click="goOrderFromMember">去点餐</text>
-      </view>
+      <MemberCard
+        :banner-info="bannerInfo"
+        :shop-name="shopName"
+        :member-level-badge-src="memberLevelBadgeSrc"
+        :member-level-label="memberLevelLabel"
+        :member-upgrade-text="memberUpgradeText"
+        :member-progress-percent="memberProgressPercent"
+        :member-since-text="memberSinceText"
+        :usable-member-coupons="usableMemberCoupons"
+        :has-customer-identity="hasCustomerIdentity"
+        :member-loading="memberLoading"
+        :new-customer-hook-text="newCustomerHookText"
+        :member-authorizing="memberAuthorizing"
+        :coupon-amount-text="couponAmountText"
+        :coupon-condition-text="couponConditionText"
+        :coupon-validity-text="couponValidityText"
+        @go-order="goOrderFromMember"
+        @reload="loadMemberStatus"
+        @use-coupon="useMemberCoupon"
+        @phone-auth="handleMemberCardAuth"
+      />
     </scroll-view>
 
     <view v-show="activeTab === 'mine'" class="tab-scroll tab-mine-redirect">
@@ -1043,6 +969,7 @@ import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 import { consumeStart, recordSample } from '@/utils/perf'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
+import MemberCard from '../components/MemberCard.vue'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -1052,7 +979,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble },
+  components: { OrderBubble, MemberCard },
   setup() {
     const tableNo = ref('')
     const shopId = ref('')
