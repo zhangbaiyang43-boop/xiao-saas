@@ -377,10 +377,10 @@
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
-import { getMenuItems, getShopInfo, createOrder, cancelOrder, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
+import { getMenuItems, getShopInfo, createOrder, createWxPayOrder, getCurrentDiningOrders, getOrderStatus, requestTableCheckout } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
-import { getMemberProfile, getMembershipGrowth, joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
+import { joinByEntranceCode, bindDiningParticipant } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 import { consumeStart, recordSample } from '@/utils/perf'
@@ -407,6 +407,13 @@ import { useHomeTabView } from '../composables/useHomeTabView.js'
 import { useTableBillView } from '../composables/useTableBillView.js'
 import { useSuccessSheetView } from '../composables/useSuccessSheetView.js'
 import { useRemarkChips } from '../composables/useRemarkChips.js'
+import { useCartFeedback } from '../composables/useCartFeedback.js'
+import { useCategoryScroll } from '../composables/useCategoryScroll.js'
+import { useFailedImageMap } from '../composables/useFailedImageMap.js'
+import { useHistoryReorder } from '../composables/useHistoryReorder.js'
+import { useMyOrdersStore } from '../composables/useMyOrdersStore.js'
+import { useSpecSheet } from '../composables/useSpecSheet.js'
+import { useMemberAuth } from '../composables/useMemberAuth.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
@@ -646,7 +653,7 @@ export default {
     const checkoutRequestedAt = ref('')
     const tableSessionClosedAt = ref('')   // 真正的结账时间（区别于下单时间），给"查看结账详情"用
     const tableAccountScrollInto = ref('')
-    const orderItemImageFailed = ref({})
+    const { failed: orderItemImageFailed, markFailed: markOrderItemImageFailed } = useFailedImageMap()
     const storeClosed = ref(false)
     const tableSessionClosed = ref(false)
     const tableSessionClosedNotice = ref('\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c')
@@ -665,16 +672,6 @@ export default {
     const activeTab = ref('order')
     const shopDistance = ref('')
 
-    const refreshCustomerAuthState = () => {
-      authStateVersion.value += 1
-      isCustomerLoggedIn.value = Boolean(uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))
-      checkWelcomeCoupon()
-    }
-    const hasCustomerIdentity = computed(() => {
-      authStateVersion.value
-      return Boolean(uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))
-    })
-
     const isCheckoutAuthError = (err) => {
       const code = String(err?.code || '')
       const statusCode = Number(err?.statusCode || 0)
@@ -690,46 +687,17 @@ export default {
       showCheckoutAuth.value = true
     }
 
-    const switchToCard = () => {
-      activeTab.value = 'card'
-      refreshCustomerAuthState()
-      if (hasCustomerIdentity.value && !bannerInfo.value) loadMemberStatus({ authRedirect: false })
-    }
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
-    const handleMemberCardAuth = async (event) => {
-      if (memberAuthorizing.value) return
-      const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
-      if (!phoneCode) return uni.showToast({ title: '\u672a\u5b8c\u6210\u6388\u6743\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
-      memberAuthorizing.value = true
-      try {
-        const code = await wxLogin()
-        const res = await joinByEntranceCode({
-          scene: uni.getStorageSync('entrance_scene') || '',
-          tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
-          table_no: tableNo.value || uni.getStorageSync('table_no') || '',
-          code,
-          phone_code: phoneCode,
-          agreement_accepted: true,
-          invite_code: uni.getStorageSync('invite_code') || '',
-        }, { authRedirect: false })
-        if (res?.code !== 200) {
-          uni.showToast({ title: res?.msg || '\u52a0\u5165\u4f1a\u5458\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
-          return
-        }
-        // \u9080\u8bf7\u7801\u7528\u8fc7\u5c31\u6e05\u6389\uff0c\u907f\u514d\u4ee5\u540e\u5728\u522b\u7684\u5e97\u8bef\u7528
-        uni.removeStorageSync('invite_code')
-        saveCustomerSession(res.data || {})
-        await bindCurrentDiningParticipant()
-        await loadMemberStatus({ authRedirect: false })
-        activeTab.value = 'card'
-        uni.showToast({ title: '\u5df2\u767b\u5f55', icon: 'none' })
-        checkWelcomeCoupon()
-      } catch (err) {
-        uni.showToast({ title: err?.message || '\u6388\u6743\u672a\u5b8c\u6210\uff0c\u8bf7\u91cd\u8bd5', icon: 'none' })
-      } finally {
-        memberAuthorizing.value = false
-      }
-    }
+
+    const availableCoupons = ref([])
+    const {
+      refreshCustomerAuthState, hasCustomerIdentity, loadMemberStatus, switchToCard, handleMemberCardAuth,
+    } = useMemberAuth({
+      shopId, tableNo, activeTab, isCustomerLoggedIn, authStateVersion, availableCoupons,
+      bannerInfo, isMember, memberLoading, memberAuthorizing,
+      wxLogin, bindCurrentDiningParticipant, pickAvatarChar, checkWelcomeCoupon,
+    })
+
     const loadDistance = (shopLat, shopLng) => {
       if (!shopLat || !shopLng) return
       uni.getLocation({
@@ -747,150 +715,23 @@ export default {
     }
     const closedNotice = ref('')
 
-    const showSpecSheet = ref(false)
-    const specDish = ref({})
-    const specQty = ref(1)
-    const specStep = ref(1)
-    const selectedSpecs = ref({})
-    const selectedExtras = ref([])
     const itemRemark = ref('') // { groupName: [optName] }
     const showItemRemarkExtra = ref(false)
     const remarkChips = ref(['不要辣', '微辣', '不要香菜', '不要葱', '少盐', '打包'])
     const { cleanedText: itemRemarkExtra, toggleChip: toggleItemRemarkChip } = useRemarkChips(itemRemark, remarkChips)
-    const imageLoadFailed = ref({})
-    const detailImageFailed = ref(false)
-
-    const specSteps = [
-      { no: 1, label: '\u9009\u89c4\u683c' },
-      { no: 2, label: '\u9644\u52a0' },
-      { no: 3, label: '\u5907\u6ce8' },
-      { no: 4, label: '\u786e\u8ba4' },
-    ]
-    const normalizeSpecGroups = (dish) => {
-      const raw = dish?.spec_groups || dish?.specs || dish?.spec_options || []
-      if (Array.isArray(raw) && raw.length) {
-        return raw.map((g) => {
-          const rawType = g.type || (g.multiple ? 'checkbox' : 'single')
-          const normalizedType = ['multi', 'multiple', 'checkbox'].includes(rawType) ? 'multiple' : 'single'
-          return {
-            name: g.name || g.group || g.title || specText.spec,
-            type: normalizedType,
-            required: g.required !== false,
-            options: (g.options || g.values || []).map((o) => typeof o === 'string' ? { name: o, price_delta: 0 } : { name: o.name || o.value || o.label, price_delta: Number(o.price_delta || o.extra_price || 0) }),
-          }
-        }).filter(g => g.options.length)
-      }
-      if (dish?.has_options || dish?.hasOptions) {
-        return [{ name: '\u8fa3\u5ea6', type: 'single', required: true, options: ['\u4e0d\u8fa3', '\u5fae\u8fa3', '\u4e2d\u8fa3', '\u91cd\u8fa3'].map(name => ({ name, price_delta: 0 })) }]
-      }
-      return []
-    }
-    const specAllGroups = computed(() => normalizeSpecGroups(specDish.value))
-    const specRadioGroups = computed(() => specAllGroups.value.filter(g => g.type !== 'checkbox' && g.type !== 'multiple' && g.type !== 'multi'))
-    const specExtraOptions = computed(() => {
-      const groups = specAllGroups.value.filter(g => g.type === 'checkbox' || g.type === 'multiple' || g.type === 'multi')
-      return groups.flatMap(g => g.options).filter(o => o.name)
-    })
-    // 备注快捷词跟这道菜自己的规格选项字面重复时不再展示——比如这道菜的"辣度"
-    // 规格已经问过"不辣/微辣/中辣/重辣"，备注里就不该再问一遍"不要辣/微辣"，不然
-    // 顾客两边都能点、选出自相矛盾的组合（规格选中辣、备注又点不要辣），厨房不
-    // 知道听哪个。去掉"不要/不/少/多/加/免"这类常见修饰前缀取核心词再比较，纯
-    // 字符串规则、不做语义理解，能覆盖"不要辣"对应规格选项"不辣"这类同义表达，
-    // 又不会误伤"少盐""打包"这些跟规格无关的词。
-    const SPEC_REMARK_MODIFIER_PREFIXES = ['不要', '不', '少', '多', '加', '免']
-    const specRemarkCoreWord = (text) => {
-      const raw = String(text || '').trim()
-      for (const prefix of SPEC_REMARK_MODIFIER_PREFIXES) {
-        if (raw.startsWith(prefix) && raw.length > prefix.length) return raw.slice(prefix.length)
-      }
-      return raw
-    }
-    const specGroupOptionCoreWords = computed(() => {
-      const words = new Set()
-      specAllGroups.value.forEach((group) => {
-        group.options.forEach((opt) => {
-          const core = specRemarkCoreWord(opt.name)
-          if (core) words.add(core)
-        })
-      })
-      return words
-    })
-    const filteredRemarkChips = computed(() => {
-      const coreWords = specGroupOptionCoreWords.value
-      if (!coreWords.size) return remarkChips.value
-      return remarkChips.value.filter((chip) => !coreWords.has(specRemarkCoreWord(chip)))
-    })
-    const specBasePrice = computed(() => Number(specDish.value.price) || 0)
-    const specExtraPrice = computed(() => {
-      let extra = 0
-      for (const group of specRadioGroups.value) {
-        const sel = selectedSpecs.value[group.name] || []
-        for (const opt of group.options) if (sel.includes(opt.name)) extra += Number(opt.price_delta || 0)
-      }
-      for (const opt of specExtraOptions.value) if (selectedExtras.value.includes(opt.name)) extra += Number(opt.price_delta || 0)
-      return extra
-    })
-    const specUnitPrice = computed(() => specBasePrice.value + specExtraPrice.value)
-    const specTotalPrice = computed(() => specUnitPrice.value * specQty.value)
-    const selectedSpecRows = computed(() => specRadioGroups.value.map(group => ({ group: group.name, value: (selectedSpecs.value[group.name] || [])[0] || '' })).filter(i => i.value))
-    const selectedSpecSummary = computed(() => selectedSpecRows.value.map(i => i.value).join(specText.separator))
-    const specDishDesc = computed(() => String(specDish.value.desc || specDish.value.description || '').trim())
-    const missingRequiredSpecGroup = computed(() => specRadioGroups.value.find(group => group.required && !(selectedSpecs.value[group.name] || []).length))
-    const requiredGroupPrompt = (group) => new RegExp('\\u8fa3|\\u53e3\\u5473|\\u751c\\u5ea6|\\u6e29\\u5ea6').test(group?.name || '') ? specText.chooseTaste : specText.chooseSpec
-    const canGoNextSpec = computed(() => !isSoldOut(specDish.value) && !missingRequiredSpecGroup.value)
-    const specPrimaryText = computed(() => {
-      if (isSoldOut(specDish.value)) return '\u5df2\u552e\u7f44'
-      if (missingRequiredSpecGroup.value) return requiredGroupPrompt(missingRequiredSpecGroup.value)
-      return specText.add + ' ' + confirmationText.currency + formatPrice(specTotalPrice.value)
-    })
-    function isSpecSelected(group, opt) {
-      return (selectedSpecs.value[group.name] || []).includes(opt.name)
-    }
-    function toggleSpec(group, opt) {
-      selectedSpecs.value = { ...selectedSpecs.value, [group.name]: [opt.name] }
-    }
-    const toggleExtra = (extra) => {
-      selectedExtras.value = selectedExtras.value.includes(extra) ? selectedExtras.value.filter(x => x !== extra) : [...selectedExtras.value, extra]
-    }
-    const buildSpecKey = () => JSON.stringify({ id: specDish.value.id, specifications: selectedSpecRows.value, extras: selectedExtras.value, itemRemark: itemRemark.value.trim() })
-    function cancelSpec() { showSpecSheet.value = false }
-    function handleSpecPrimary() {
-      if (!canGoNextSpec.value) return
-      confirmSpec()
-    }
-    function confirmSpec() {
-      if (isSoldOut(specDish.value)) return
-      const specKey = buildSpecKey()
-      const specifications = selectedSpecRows.value.map(i => ({ group: i.group, value: i.value }))
-      const extras = [...selectedExtras.value]
-      const remarkText = itemRemark.value.trim()
-      const labels = [...specifications.map(i => i.value), ...extras]
-      if (remarkText) labels.push(remarkText)
-      const existing = specCartItems.value.find(i => i.specKey === specKey)
-      if (existing) {
-        existing.qty += specQty.value
-      } else {
-        specCartItems.value.push({
-          specKey,
-          id: specDish.value.id,
-          name: specDish.value.name,
-          orderName: labels.length ? specDish.value.name + '(' + labels.join(specText.separator) + ')' : specDish.value.name,
-          price: specUnitPrice.value,
-          qty: specQty.value,
-          emoji: specDish.value.emoji,
-          specLabel: labels.join(specText.dotSeparator),
-          specifications,
-          extras,
-          itemRemark: remarkText,
-          selectedSpecs: JSON.parse(JSON.stringify(selectedSpecs.value)),
-        })
-      }
-      showSpecSheet.value = false
-      triggerCartSuccessFeedback(specKey)
-      uni.vibrateShort({ type: 'light' })
-    }
+    const { failed: imageLoadFailed, markFailed: markDishImageFailed } = useFailedImageMap()
 
     const specCartItems = ref([])
+    const {
+      showSpecSheet, specDish, specQty, specStep, selectedSpecs, selectedExtras, detailImageFailed,
+      specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, specBasePrice, specTotalPrice,
+      selectedSpecSummary, specDishDesc, canGoNextSpec, specPrimaryText, isSpecSelected, toggleSpec,
+      toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet, openProductDetail,
+    } = useSpecSheet({
+      itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
+      specCartItems, isSoldOut, hasSpecs, formatPrice,
+      triggerCartSuccessFeedback: (key) => triggerCartSuccessFeedback(key),
+    })
 
     const {
       normalizeOrderStatus, currentTableOrder, historyTableOrders,
@@ -908,43 +749,11 @@ export default {
       tableCheckouting, tableSessionClosedAt, tableAccountScrollInto,
       normalizePaymentMode, orderItemQty, orderItemCount,
     })
-    const markOrderItemImageFailed = (key) => { orderItemImageFailed.value = { ...orderItemImageFailed.value, [key]: true } }
 
-    const doCancelOrder = (order) => {
-      uni.showModal({
-        title: '\u53d6\u6d88\u8ba2\u5355',
-        content: '\u786e\u8ba4\u53d6\u6d88\u6b64\u8ba2\u5355\u5417\uff1f\u5546\u5bb6\u63a5\u5355\u540e\u65e0\u6cd5\u53d6\u6d88\u3002',
-        success: async ({ confirm }) => {
-          if (!confirm) return
-          try {
-            await cancelOrder(order.id, diningParticipantToken.value || uni.getStorageSync('dining_participant_token'))
-            order.status = 'cancelled'
-            saveMyOrders()
-            if (orderId.value === order.id) {
-              stopStatusPoll()
-              orderStatus.value = 'cancelled'
-              showSuccess.value = false
-            }
-            uni.showToast({ title: '\u8ba2\u5355\u5df2\u53d6\u6d88', icon: 'success', duration: 1200 })
-          } catch {
-            uni.showToast({ title: '\u53d6\u6d88\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5', icon: 'none', duration: 1200 })
-          }
-        }
-      })
-    }
-
-    function saveMyOrders() {
-      const key = 'my_orders_' + shopId.value + '_' + tableNo.value
-      try { uni.setStorageSync(key, JSON.stringify(myOrders.value)) } catch (e) {}
-    }
-
-    function loadMyOrders() {
-      const key = 'my_orders_' + shopId.value + '_' + tableNo.value
-      try {
-        const raw = uni.getStorageSync(key)
-        if (raw) myOrders.value = JSON.parse(raw)
-      } catch (e) {}
-    }
+    const { saveMyOrders, loadMyOrders, doCancelOrder } = useMyOrdersStore({
+      myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken,
+      stopStatusPoll: () => stopStatusPoll(),
+    })
 
     const pendingPaymentStorageKey = () => 'pending_payment_order_' + shopId.value + '_' + tableNo.value
 
@@ -1161,7 +970,6 @@ export default {
     const toggleOrderRemarkExpanded = () => { orderRemarkExpanded.value = !orderRemarkExpanded.value }
     const orderRemarkSummary = computed(() => remark.value.trim() || confirmationText.orderRemarkEmpty)
     const deliveryEnabled = ref(false)
-    const availableCoupons = ref([])
     const {
       selectedCouponId, selectedCoupon, couponBarVisible, bestCouponValue,
       couponBarText, couponBarPrefix, couponBarAmount, discountAmount, finalPrice,
@@ -1224,44 +1032,10 @@ export default {
     const scrollTarget = ref('')
     const allDishes = ref([])
     const cart = ref({}) // { dishId: qty }
-    const addPressKey = ref('')
-    const qtyPulseKey = ref('')
-    const cartIconPulse = ref(false)
-    const cartBadgePulse = ref(false)
-    const amountPulse = ref(false)
-    const microTimers = {}
-    const restartMicroTimer = (key, done, duration = 180) => {
-      if (microTimers[key]) clearTimeout(microTimers[key])
-      microTimers[key] = setTimeout(() => {
-        done()
-        microTimers[key] = null
-      }, duration)
-    }
-    const pulseKey = (target, key, timerKey, duration = 160) => {
-      target.value = ''
-      nextTick(() => {
-        target.value = key
-        restartMicroTimer(timerKey, () => { target.value = '' }, duration)
-      })
-    }
-    const pulseFlag = (target, timerKey, duration = 180) => {
-      target.value = false
-      nextTick(() => {
-        target.value = true
-        restartMicroTimer(timerKey, () => { target.value = false }, duration)
-      })
-    }
-    const triggerAddPress = (key) => pulseKey(addPressKey, key, 'add-' + key, 160)
-    const triggerCartSuccessFeedback = (key) => {
-      pulseKey(qtyPulseKey, key, 'qty-' + key, 160)
-      pulseFlag(cartIconPulse, 'cart-icon', 180)
-      pulseFlag(cartBadgePulse, 'cart-badge', 180)
-      pulseFlag(amountPulse, 'cart-amount', 220)
-    }
-    const triggerCartValueFeedback = (key) => {
-      pulseKey(qtyPulseKey, key, 'qty-' + key, 150)
-      pulseFlag(amountPulse, 'cart-amount', 200)
-    }
+    const {
+      addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
+      triggerAddPress, triggerCartSuccessFeedback, triggerCartValueFeedback,
+    } = useCartFeedback()
     const categoryOrder = ref([])
 
     const {
@@ -1274,129 +1048,7 @@ export default {
       featuredDish, canHomeAdd, featuredDishTag, findHistoryDish, validateHistoryReorderItem,
       lastOrderItems, homeLastOrderItems,
     } = useHomeTabView({ allDishes, storeClosed, bannerInfo, myOrders, isSoldOut, dishTags, normalizeDishTag, hasSpecs })
-    const showHistoryReorderToast = ({ added = 0, skippedUnavailable = 0, skippedSpec = 0 }) => {
-      if (added > 0) {
-        let title = '已加入' + added + '件'
-        if (skippedUnavailable > 0) title += '，部分菜品已下架或售罄'
-        else if (skippedSpec > 0) title += '，部分规格已变更，请重新选择'
-        uni.showToast({ title, icon: 'none', duration: 1400 })
-        return
-      }
-      if (skippedUnavailable > 0) {
-        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1400 })
-        return
-      }
-      if (skippedSpec > 0) {
-        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1400 })
-        return
-      }
-      uni.showToast({ title: '没有可重新加入的菜品', icon: 'none', duration: 1200 })
-    }
-
-
-    const handleHomeStartOrder = () => {
-      if (!canStartOrdering.value) return
-      activeTab.value = 'order'
-    }
-    const handleFeaturedAdd = () => {
-      if (!canHomeAdd.value) return
-      if (hasSpecs(featuredDish.value)) openSpecSheet(featuredDish.value)
-      else addToCart(featuredDish.value)
-    }
-    const handleHomeReorderItem = (item) => {
-      if (storeClosed.value) return
-      const check = validateHistoryReorderItem(item)
-      if (!check.dish || check.reason === 'unavailable') {
-        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
-        return
-      }
-      if (check.reason === 'spec_changed') {
-        openSpecSheet(check.dish)
-        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
-        return
-      }
-      addToCart(check.dish)
-    }
-    const handleHomeReorderAll = () => {
-      if (storeClosed.value || !homeLastOrderItems.value.length) return
-      let added = 0
-      let skippedUnavailable = 0
-      let skippedSpec = 0
-      homeLastOrderItems.value.forEach(item => {
-        const check = validateHistoryReorderItem(item)
-        if (!check.dish || check.reason === 'unavailable') {
-          skippedUnavailable += 1
-          return
-        }
-        if (check.reason === 'spec_changed') {
-          skippedSpec += 1
-          return
-        }
-        addToCart(check.dish)
-        added += 1
-      })
-      if (added > 0) uni.vibrateShort({ type: 'medium' })
-      showHistoryReorderToast({ added, skippedUnavailable, skippedSpec })
-    }
-
-    const reorderItem = (item) => {
-      const check = validateHistoryReorderItem(item)
-      if (!check.dish || check.reason === 'unavailable') {
-        uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
-        return
-      }
-      if (check.reason === 'spec_changed') {
-        openSpecSheet(check.dish)
-        uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
-        return
-      }
-      addToCart(check.dish)
-    }
-
-    const reorderAll = () => {
-      let added = 0
-      let skippedUnavailable = 0
-      let skippedSpec = 0
-      lastOrderItems.value.forEach(item => {
-        const check = validateHistoryReorderItem(item)
-        if (!check.dish || check.reason === 'unavailable') {
-          skippedUnavailable += 1
-          return
-        }
-        if (check.reason === 'spec_changed') {
-          skippedSpec += 1
-          return
-        }
-        addToCart(check.dish)
-        added++
-      })
-      if (added > 0) uni.vibrateShort({ type: 'medium' })
-      showHistoryReorderToast({ added, skippedUnavailable, skippedSpec })
-    }
-
-    const markDishImageFailed = (id) => {
-      imageLoadFailed.value = { ...imageLoadFailed.value, [id]: true }
-    }
-
     const cartCount = (id) => cart.value[id] || 0
-
-    const openSpecSheet = (dish, existingItem = null) => {
-      specDish.value = dish
-      detailImageFailed.value = false
-      specQty.value = existingItem?.qty || 1
-      specStep.value = 4
-      selectedSpecs.value = {}
-      for (const g of normalizeSpecGroups(dish).filter(g => g.type !== 'checkbox' && g.type !== 'multiple' && g.type !== 'multi')) {
-        const existingValue = existingItem?.specifications?.find(i => i.group === g.name)?.value
-        if (existingValue) selectedSpecs.value[g.name] = [existingValue]
-      }
-      selectedExtras.value = existingItem?.extras ? [...existingItem.extras] : []
-      itemRemark.value = existingItem?.itemRemark || ''
-      showItemRemarkExtra.value = Boolean(itemRemarkExtra.value)
-      showSpecSheet.value = true
-    }
-
-    const openProductDetail = (dish) => openSpecSheet(dish)
 
     const addToCart = (dish) => {
       if (isSoldOut(dish)) return
@@ -1409,6 +1061,15 @@ export default {
       triggerCartSuccessFeedback(dish.id)
       uni.vibrateShort({ type: 'light' })
     }
+
+    const {
+      handleHomeStartOrder, handleFeaturedAdd, handleHomeReorderItem, handleHomeReorderAll,
+      reorderItem, reorderAll,
+    } = useHistoryReorder({
+      activeTab, storeClosed, canStartOrdering, canHomeAdd, featuredDish,
+      validateHistoryReorderItem, homeLastOrderItems, lastOrderItems,
+      hasSpecs, addToCart, openSpecSheet,
+    })
 
     const removeFromCart = (dish) => {
       if (dish.specKey) {
@@ -1480,41 +1141,9 @@ export default {
       const target = preferred || fallbackDish?.category || categories.value[0]
       if (target) switchCategory(target)
     }
-    const dishScrollTopVal = ref(0)
-    const categoryScrollTarget = ref('')
-    const categoryScrollTop = ref(0)
-    const categoryItemHeight = 108
-    const categoryVisibleRows = 6
-    let categoryVisibleStart = 0
-    const syncCategoryVisible = (cat) => {
-      const idx = categories.value.indexOf(cat)
-      if (idx < 0) return
-      const visibleEnd = categoryVisibleStart + categoryVisibleRows - 1
-      if (idx >= categoryVisibleStart && idx <= visibleEnd) return
-      categoryVisibleStart = Math.max(0, idx - 2)
-      categoryScrollTop.value = categoryVisibleStart * categoryItemHeight
-    }
-    const ignoreScroll = ref(false)
-
-    const switchCategory = (cat) => {
-      activeCategory.value = cat
-      ignoreScroll.value = true
-      setTimeout(() => { ignoreScroll.value = false }, 600)
-      const idx = categories.value.indexOf(cat)
-      syncCategoryVisible(cat)
-      scrollTarget.value = ''
-      nextTick(() => { scrollTarget.value = 'cat-sec-' + idx })
-    }
-
-    // 滚动时"实时查 DOM 现在滚到哪个分类锚点"这段查询逻辑现在在 DishList.vue 组件内部
-    // 自己做（因为要查的 .dish-scroll/#cat-sec-N 节点现在是它自己的模板节点，必须用
-    // .in(this) 绑定到组件实例才能可靠查到，不能从页面这一层隔着组件边界去查）。这里
-    // 只负责接收子组件查完之后报上来的"当前应该高亮哪个分类"结论，然后跟 switchCategory
-    // 点击分类时做的事一样：赋值 + 同步左侧分类栏可见区域。
-    const handleActiveCategoryChange = (cat) => {
-      activeCategory.value = cat
-      syncCategoryVisible(cat)
-    }
+    const {
+      categoryScrollTop, ignoreScroll, switchCategory, handleActiveCategoryChange,
+    } = useCategoryScroll({ categories, activeCategory, scrollTarget })
 
     const switchOrderMode = (mode) => {
       if (mode === 'delivery') {
@@ -1920,50 +1549,6 @@ export default {
       uni.navigateTo({ url: '/subpkg-coupon/pages/list' })
     }
 
-    const loadMemberStatus = async (opts = {}) => {
-      refreshCustomerAuthState()
-      const token = uni.getStorageSync('customer_token')
-      isCustomerLoggedIn.value = Boolean(token || uni.getStorageSync('customer_phone'))
-      if (!token) {
-        bannerInfo.value = null
-        isMember.value = false
-        return
-      }
-      if (memberLoading.value) return
-      memberLoading.value = true
-      try {
-        const [profileRes, couponRes, growthRes] = await Promise.all([
-          getMemberProfile({ authRedirect: opts.authRedirect !== false }),
-          getCustomerCoupons('UNUSED', { authRedirect: opts.authRedirect !== false }).catch(() => null),
-          getMembershipGrowth().catch(() => null),
-        ])
-        if (profileRes?.code === 200 && profileRes?.data) {
-          const p = profileRes.data
-          const g = growthRes?.code === 200 ? (growthRes.data || {}) : {}
-          isMember.value = !!(p.membership_level || p.is_member || p.member_card || p.membership_expire_at || p.level)
-          const coupons = Array.isArray(couponRes?.data) ? couponRes.data : []
-          availableCoupons.value = coupons
-          bannerInfo.value = {
-            nameChar: pickAvatarChar(p.name),
-            avatar: p.avatar || p.avatar_url || p.headimgurl || '',
-            memberNo: p.store_member_no ? String(p.store_member_no).padStart(6, '0') : '',
-            levelLabel: p.level || p.membership_level || '\u666e\u901a\u4f1a\u5458',
-            levelCode: p.level_code || g.level_code || 'LV1',
-            couponCount: coupons.length,
-            coupons,
-            points: Number(p.points || 0),
-            // \u8fd9\u4e09\u4e2a\u5b57\u6bb5\u4e4b\u524d\u4ece\u672a\u88ab /v1/member/profile \u586b\u8fc7\uff0c
-            // \u8fdb\u5ea6\u6761\u6c38\u8fdc\u4e0d\u6e32\u67d3\uff0c\u73b0\u5728\u6539\u4ece\u4e0e growth.vue \u540c\u4e00\u4e2a
-            // /v1/member/membership \u53d6\u6570\uff0c\u907f\u514d\u4e24\u5904\u5404\u7b97\u4e00\u5957\u5bf9\u4e0d\u4e0a\u53f7\u3002
-            growth: Number(g.yearly_consumption || 0),
-            nextGrowth: Number(g.next_level?.threshold || 0),
-            nextUpgradeAmount: Math.max(0, Number(g.next_level?.threshold || 0) - Number(g.yearly_consumption || 0)),
-          }
-        }
-      } catch { }
-      finally { memberLoading.value = false }
-    }
-
     const entryCoupon = ref(null)   // { coupon_id, amount, threshold, expire_time }
     const couponReminderTemplateId = ref('')   // 空字符串表示还没配置订阅消息模板，"提醒我"按钮不显示
     const newCustomerCouponPreview = ref(null)   // { name, amount, min_amount, valid_days }，未登录也能看到的首单钩子数字
@@ -2099,7 +1684,7 @@ export default {
       showCouponPicker, couponPickerList, couponPickerAmount, couponPickerCondText, openCouponPicker, closeCouponPicker, pickCoupon,
       couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
       openCart, refreshAvailableCoupons,
-      activeCategory, scrollTarget, categoryScrollTarget, categoryScrollTop, dishScrollTopVal, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
+      activeCategory, scrollTarget, categoryScrollTop, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       successItems, successTotal,
       categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
       imageLoadFailed, detailImageFailed, markDishImageFailed, openProductDetail,
