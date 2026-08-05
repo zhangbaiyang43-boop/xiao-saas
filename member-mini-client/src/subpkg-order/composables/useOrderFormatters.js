@@ -122,6 +122,13 @@ export function useOrderFormatters() {
     return tags.includes('招牌') || tags.includes('热销') || tags.includes('新品')
   }
 
+  const pickAvatarChar = (name) => {
+    const chars = Array.from(String(name || '').trim())
+    const ch = chars.find(c => /[一-龥a-zA-Z0-9]/.test(c))
+    if (!ch) return '会'
+    return /[a-z]/.test(ch) ? ch.toUpperCase() : ch
+  }
+
   return {
     formatPrice,
     dishImage,
@@ -152,5 +159,6 @@ export function useOrderFormatters() {
     isStrongDishTag,
     dishCardTags,
     isFeatured,
+    pickAvatarChar,
   }
 }

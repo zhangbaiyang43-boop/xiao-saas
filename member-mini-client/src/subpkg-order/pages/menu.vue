@@ -402,6 +402,11 @@ import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 import { useWelcomeCoupon } from '../composables/useWelcomeCoupon.js'
 import { useMemberCard } from '../composables/useMemberCard.js'
 import { useCouponPicker } from '../composables/useCouponPicker.js'
+import { useDishCategories } from '../composables/useDishCategories.js'
+import { useHomeTabView } from '../composables/useHomeTabView.js'
+import { useTableBillView } from '../composables/useTableBillView.js'
+import { useSuccessSheetView } from '../composables/useSuccessSheetView.js'
+import { useRemarkChips } from '../composables/useRemarkChips.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
@@ -423,6 +428,7 @@ export default {
       couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
       statusLabel, dishTags, strongDishTags, normalizeDishTag, isStrongDishTag, dishCardTags, isFeatured,
+      pickAvatarChar,
     } = useOrderFormatters()
     const tableNo = ref('')
     const shopId = ref('')
@@ -749,18 +755,8 @@ export default {
     const selectedExtras = ref([])
     const itemRemark = ref('') // { groupName: [optName] }
     const showItemRemarkExtra = ref(false)
-    const itemRemarkExtra = computed(() => {
-      let text = itemRemark.value
-      remarkChips.value.forEach((chip) => { text = text.split(chip).join('') })
-      return text.replace(/\s+/g, ' ').trim()
-    })
-    const toggleItemRemarkChip = (chip) => {
-      if (itemRemark.value.includes(chip)) {
-        itemRemark.value = itemRemark.value.replace(chip, '').replace(/^\s+|\s+$/g, '').trim()
-      } else {
-        itemRemark.value = itemRemark.value ? itemRemark.value + ' ' + chip : chip
-      }
-    }
+    const remarkChips = ref(['不要辣', '微辣', '不要香菜', '不要葱', '少盐', '打包'])
+    const { cleanedText: itemRemarkExtra, toggleChip: toggleItemRemarkChip } = useRemarkChips(itemRemark, remarkChips)
     const imageLoadFailed = ref({})
     const detailImageFailed = ref(false)
 
@@ -896,268 +892,23 @@ export default {
 
     const specCartItems = ref([])
 
-    const normalizeOrderStatus = (status) => {
-      if (['paid', 'pending'].includes(status)) return 'pending'
-      if (['accepted', 'preparing', 'cooking'].includes(status)) return 'preparing'
-      if (['done', 'completed'].includes(status)) return 'done'
-      if (status === 'settled') return 'settled'
-      if (['cancelled', 'rejected'].includes(status)) return status
-      return 'pending'
-    }
-
-    const activeOrderRank = (order) => {
-      const status = normalizeOrderStatus(order?.status)
-      if (['pending', 'preparing'].includes(status)) return 0
-      if (status === 'done') return 1
-      return 2
-    }
-
-    const currentTableOrder = computed(() => {
-      if (!myOrders.value.length) return null
-      const active = [...myOrders.value]
-        .filter(order => !['cancelled', 'rejected'].includes(normalizeOrderStatus(order.status)))
-        .sort((a, b) => activeOrderRank(a) - activeOrderRank(b))[0]
-      if (active) return active
-      // 全部订单都已取消/拒单时，只有当前设备正在跟踪的那单才继续展示"异常状态"，
-      // 避免把本桌历史上别人取消的旧单当成当前顾客的订单弹出来。
-      return myOrders.value.find(order => order.id === orderId.value) || null
-    })
-
-    const historyTableOrders = computed(() =>
-      myOrders.value.filter(order => !currentTableOrder.value || order.id !== currentTableOrder.value.id)
-    )
-
-    const isTableAccountMode = computed(() => paymentMode.value === "table_account")
-    const isPostpayMode = computed(() => paymentMode.value === "postpay")
-    // 餐后付款和桌台账单，后端其实是同一套机制：同一桌多次下单共用同一个 dining_session，
-    // 商家在后台也是按整桌一次性结账（settle-table），不是按单笔结账。小程序这边如果还是把
-    // 餐后付款当成"每笔订单各自一个独立进度条"来展示，就跟后端的真实行为对不上——这里统一
-    // 用"共享账单模式"复用桌台账单那套汇总视图，只是底部动作不同（见下面 canCheckout 附近）。
-    const isSharedBillMode = computed(() => isTableAccountMode.value || isPostpayMode.value)
-    const sharedBillSubLabel = computed(() => isPostpayMode.value ? '堂食 · 餐后统一结账' : '堂食 · 本桌统一结账')
-    const tableSessionId = computed(() => String(diningSessionId.value || uni.getStorageSync('dining_session_id') || ''))
-    const isSameDiningSessionOrder = (order) => {
-      const orderSessionId = String(order?.diningSessionId || order?.tableSessionId || '')
-      if (!tableSessionId.value || !orderSessionId) return false
-      return orderSessionId === tableSessionId.value
-    }
-    const tableSessionOrders = computed(() =>
-      myOrders.value
-        .filter(order => ['table_account', 'postpay'].includes(normalizePaymentMode(order?.paymentMode || paymentMode.value)))
-        .filter(isSameDiningSessionOrder)
-        .sort((a, b) => Number(a.createdTs || 0) - Number(b.createdTs || 0))
-    )
-    const isOrderInvalid = (order) => ['cancelled', 'rejected'].includes(normalizeOrderStatus(order?.status))
-    const isItemInvalid = (item) => ['refunded', 'refund', 'cancelled', 'canceled'].includes(String(item?.status || item?.refund_status || '').toLowerCase())
-    const validTableOrders = computed(() => tableSessionOrders.value.filter(order => !isOrderInvalid(order)))
-    const tableTotal = computed(() => {
-      if (Number(tableSessionTotal.value) > 0) return Number(tableSessionTotal.value)
-      const backendTotal = validTableOrders.value.map(order => Number(order.tableTotal || 0)).find(total => total > 0)
-      if (backendTotal) return backendTotal
-      return validTableOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
-    })
-    const tableItemCount = computed(() =>
-      validTableOrders.value.reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => itemSum + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0), 0)
-    )
-    const tableGroupStatusText = (status) => ({
-      pending: '待确认',
-      preparing: '制作中',
-      done: '已上桌',
-      settled: '已结账',
-      cancelled: '已取消',
-      rejected: '已取消',
-    })[normalizeOrderStatus(status)] || '待确认'
-    const tableGroupStatusTone = (status) => {
-      const normalized = normalizeOrderStatus(status)
-      if (['cancelled', 'rejected'].includes(normalized)) return 'muted'
-      if (normalized === 'settled') return 'settled'
-      if (normalized === 'done') return 'served'
-      return 'active'
-    }
-    // 拼桌时同一桌可能好几个人各自的手机都在下单，用固定的一组颜色循环分配，
-    // 不够用就从头再来一轮——纯展示用的编号，跟真实身份无关，参考大厂拼单点餐的做法。
-    const PARTICIPANT_COLORS = ['#07C160', '#FF7D45', '#5B8FF9', '#F5A623', '#B37FEB', '#3ABBB0']
-    const participantColor = (no) => {
-      if (!no || no < 1) return PARTICIPANT_COLORS[0]
-      return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
-    }
-    const tableOrderGroups = computed(() =>
-      tableSessionOrders.value.map((order, index) => ({
-        id: order.id || String(index),
-        title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
-        statusText: tableGroupStatusText(order.status),
-        tone: tableGroupStatusTone(order.status),
-        discountAmount: Number(order.discountAmount || 0),
-        participantNo: order.participantNo || null,
-        participantColor: participantColor(order.participantNo),
-        isStaff: Boolean(order.isStaff),
-        staffNote: order.staffNote || '',
-        items: (order.items || []).map(item => ({
-          ...item,
-          isInvalid: isOrderInvalid(order) || isItemInvalid(item),
-          invalidText: isOrderInvalid(order) ? '已取消' : '已退菜',
-        })),
-      }))
-    )
-    const isTableSettled = computed(() => {
-      if (tableSessionClosed.value) return true
-      if (tableSessionStatus.value === 'CLOSED') return true
-      return tableSessionOrders.value.length > 0 && tableSessionOrders.value.every(order => normalizeOrderStatus(order.status) === 'settled')
-    })
-    const canContinueOrder = computed(() => isSharedBillMode.value && !tableSessionClosed.value && tableSessionStatus.value !== 'CLOSED')
-    // 桌台账单/餐后付款都必须等本桌所有有效订单都做完（done）才算"可以结账"，否则会出现
-    // 桌台账单顾客点了"去结账"、商家在后台点结账时却被后端 settle-table 以"本桌还有未完成
-    // 的订单"拒绝的落差；餐后付款虽然没有"去结账"按钮，但同样的判断决定要不要提示去收银台。
-    const allOrdersDone = computed(() =>
-      validTableOrders.value.length > 0 && validTableOrders.value.every(order => normalizeOrderStatus(order.status) === 'done')
-    )
-    const stillPreparing = computed(() => tableOrderGroups.value.length > 0 && !isTableSettled.value && !allOrdersDone.value)
-    const checkoutRequested = computed(() => Boolean(checkoutRequestedAt.value))
-    // 只有桌台账单才有"去结账"这个可点击的自助操作——餐后付款结账动作在商家手里
-    // （收银台/服务员操作后台"结账"按钮），小程序这边只负责提示，不提供可点的按钮。
-    const canCheckout = computed(() =>
-      isTableAccountMode.value && tableItemCount.value > 0 && !isTableSettled.value && !tableCheckouting.value && allOrdersDone.value
-    )
-    const postpayReadyToSettle = computed(() =>
-      isPostpayMode.value && tableItemCount.value > 0 && !isTableSettled.value && allOrdersDone.value
-    )
-    // "查看结账详情"点击后要做的事：账单信息（结账时间/优惠/明细）本来就在这个 sheet
-    // 里，不需要再跳一个页面或弹一次窗——只是把视图滚回顶部，让这些信息进入视野。
-    // 之前这里错误地复用了"发起结账"的 handleTableCheckout，点了只会弹"请联系服务员"。
-    const scrollTableAccountToTop = async () => {
-      tableAccountScrollInto.value = ''
-      await nextTick()
-      tableAccountScrollInto.value = 'table-account-status-anchor'
-    }
-    const formatClosedAtTime = (raw) => {
-      if (!raw) return ''
-      const d = new Date(raw)
-      if (Number.isNaN(d.getTime())) return ''
-      return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-    }
-    const tableStatusView = computed(() => {
-      if (isTableSettled.value) {
-        const closedTimeText = formatClosedAtTime(tableSessionClosedAt.value)
-        const payNote = isTableAccountMode.value
-          ? '由商家柜台现结，无需再次付款'
-          : (isPostpayMode.value ? '已在收银台完成支付' : '')
-        return {
-          icon: 'icon-roundcheckfill',
-          title: '本桌已结账',
-          desc: closedTimeText ? `结账时间 ${closedTimeText}` : '本次用餐账单已经结清',
-          note: payNote,
-          tone: 'settled',
-        }
-      }
-      if (!tableOrderGroups.value.length) return { icon: 'icon-list', title: '本桌还没有已点菜品', desc: '先点菜，后续加菜会自动合并', tone: 'settled' }
-      const statuses = validTableOrders.value.map(order => normalizeOrderStatus(order.status))
-      if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '商家正在确认订单，请稍候', tone: 'active' }
-      if (statuses.includes('preparing')) return { icon: 'icon-beican', title: '菜品正在制作', desc: '厨房正在制作，可以继续加菜', tone: 'active' }
-      if (statuses.includes('done')) {
-        if (isPostpayMode.value) {
-          return { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '用餐结束请到收银台或联系服务员结账', tone: 'served' }
-        }
-        return checkoutRequested.value
-          ? { icon: 'icon-roundcheckfill', title: '已呼叫服务员', desc: '请稍候，服务员马上为您结账', tone: 'served' }
-          : { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '吃好后可统一结账', tone: 'served' }
-      }
-      return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
+    const {
+      normalizeOrderStatus, currentTableOrder, historyTableOrders,
+      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId,
+      tableSessionOrders, validTableOrders, tableTotal, tableItemCount, tableOrderGroups,
+      isTableSettled, canContinueOrder, allOrdersDone, stillPreparing, checkoutRequested,
+      canCheckout, postpayReadyToSettle, scrollTableAccountToTop, tableStatusView,
+      currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
+      tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle,
+      tableOrderStatusHint, tableOrderTimeline, currentOrderItemCount, currentOrderItems,
+      currentOrderMainItemText, pendingOrderCount,
+    } = useTableBillView({
+      myOrders, orderId, orderStatus, paymentMode, diningSessionId,
+      tableSessionTotal, tableSessionClosed, tableSessionStatus, checkoutRequestedAt,
+      tableCheckouting, tableSessionClosedAt, tableAccountScrollInto,
+      normalizePaymentMode, orderItemQty, orderItemCount,
     })
     const markOrderItemImageFailed = (key) => { orderItemImageFailed.value = { ...orderItemImageFailed.value, [key]: true } }
-
-    const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
-
-
-    const tableOrderStatusTone = computed(() => {
-      if (!currentTableOrder.value) return 'empty'
-      const status = currentTableOrderStatus.value
-      if (['cancelled', 'rejected'].includes(status)) return 'canceled'
-      if (status === 'pending') return 'paid'
-      if (status === 'preparing') return 'preparing'
-      if (status === 'done') return 'served'
-      if (status === 'settled') return 'settled'
-      return 'paid'
-    })
-
-    const tableOrderStatusBadge = computed(() => ({
-      canceled: '\u5f02\u5e38\u72b6\u6001',
-      paid: '\u6b63\u5e38\u8fdb\u884c',
-      preparing: '\u6b63\u5728\u5907\u9910',
-      served: '\u5df2\u9001\u8fbe',
-      settled: '\u8ba2\u5355\u5b8c\u6210',
-    })[tableOrderStatusTone.value] || '\u6b63\u5e38\u8fdb\u884c')
-
-    const tableOrderStatusIcon = computed(() => ({
-      canceled: 'icon-warnfill',
-      paid: 'icon-pay',
-      preparing: 'icon-beican',
-      served: 'icon-deliver',
-      settled: 'icon-roundcheckfill',
-    })[tableOrderStatusTone.value] || 'icon-pay')
-
-    const tableOrderNextAction = computed(() => ({
-      canceled: '\u91cd\u65b0\u70b9\u9910',
-      paid: '\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u7a0d\u5019',
-      preparing: '\u7b49\u5f85\u4e0a\u9910\u5373\u53ef',
-      served: '\u8bf7\u786e\u8ba4\u83dc\u54c1',
-      settled: '\u53ef\u5173\u95ed\u67e5\u770b',
-    })[tableOrderStatusTone.value] || '\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u7a0d\u5019')
-
-    const tableOrderProgressSub = computed(() => ({
-      canceled: '\u65e0\u9700\u7b49\u5f85',
-      paid: '\u9884\u8ba1\u5f88\u5feb\u63a5\u5355',
-      preparing: '\u5546\u5bb6\u5904\u7406\u4e2d',
-      served: '\u53ef\u5b89\u5fc3\u7528\u9910',
-      settled: '\u8ba2\u5355\u5b8c\u6210',
-    })[tableOrderStatusTone.value] || '\u8ba2\u5355\u8fdb\u884c\u4e2d')
-
-    const tableOrderPrimaryButtonText = computed(() => ({
-      empty: '\u53bb\u70b9\u9910',
-      canceled: '\u91cd\u65b0\u70b9\u9910',
-      paid: '\u6211\u77e5\u9053\u4e86',
-      preparing: '\u6211\u77e5\u9053\u4e86',
-      served: '\u786e\u8ba4\u5df2\u6536\u5230',
-      settled: '\u5173\u95ed',
-    })[tableOrderStatusTone.value] || '\u6211\u77e5\u9053\u4e86')
-
-    const tableOrderStatusTitle = computed(() => ({
-      pending: '\u5546\u5bb6\u6b63\u5728\u786e\u8ba4\u8ba2\u5355',
-      preparing: '\u5546\u5bb6\u5df2\u63a5\u5355\uff0c\u6b63\u5728\u5236\u4f5c',
-      done: '\u9910\u54c1\u5df2\u4e0a\u9910\uff0c\u8bf7\u7559\u610f',
-      settled: '\u672c\u684c\u8ba2\u5355\u5df2\u5b8c\u6210',
-      rejected: '\u8ba2\u5355\u5f02\u5e38\uff0c\u8bf7\u8054\u7cfb\u5546\u5bb6',
-      cancelled: '\u8ba2\u5355\u5df2\u53d6\u6d88',
-    })[currentTableOrderStatus.value] || '\u5546\u5bb6\u6b63\u5728\u786e\u8ba4\u8ba2\u5355')
-
-    const tableOrderStatusHint = computed(() => {
-      if (!currentTableOrder.value) return '\u6682\u65e0\u672c\u684c\u8ba2\u5355'
-      return ['done', 'settled'].includes(currentTableOrderStatus.value) ? '\u8bf7\u7559\u610f\u53d6\u9910\u6216\u670d\u52a1\u5458\u901a\u77e5' : '\u65e0\u9700\u64cd\u4f5c\uff0c\u8bf7\u5b89\u5fc3\u7b49\u5f85'
-    })
-
-    const tableOrderTimeline = computed(() => {
-      const order = ['pending', 'preparing', 'done', 'settled']
-      const currentIndex = Math.max(0, order.indexOf(currentTableOrderStatus.value))
-      return [
-        { key: 'paid', status: 'pending', label: '\u5df2\u652f\u4ed8', icon: 'icon-pay', desc: currentTableOrder.value?.createdAt || '' },
-        { key: 'preparing', status: 'preparing', label: '\u5546\u5bb6\u5df2\u63a5\u5355', icon: 'icon-beican', desc: currentIndex >= 1 ? '\u53a8\u623f\u5f00\u59cb\u5904\u7406' : '' },
-        { key: 'done', status: 'done', label: '\u5df2\u4e0a\u9910', icon: 'icon-deliver', desc: currentIndex >= 2 ? '\u9910\u54c1\u5df2\u5b8c\u6210' : '' },
-        { key: 'settled', status: 'settled', label: '\u5df2\u5b8c\u6210', icon: 'icon-roundcheckfill', desc: currentIndex >= 3 ? '\u672c\u684c\u5df2\u7ed3\u675f' : '' },
-      ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
-    })
-
-    const currentOrderItemCount = computed(() => orderItemCount(currentTableOrder.value))
-    const currentOrderItems = computed(() => currentTableOrder.value?.items || [])
-
-    const currentOrderMainItemText = computed(() => {
-      const items = currentTableOrder.value?.items || []
-      if (!items.length) return '\u6682\u65e0\u5546\u54c1'
-      const first = items[0]
-      const suffix = items.length > 1 ? ' \u7b49' + items.length + '\u79cd' : ''
-      return first.name + ' x' + first.qty + suffix
-    })
-    const pendingOrderCount = computed(() =>
-      myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))).length
-    )
 
     const doCancelOrder = (order) => {
       uni.showModal({
@@ -1298,30 +1049,10 @@ export default {
       }
     }
 
-    const successOrderItemCount = computed(() =>
-      successItems.value.reduce((sum, item) => sum + Number(item.qty || 0), 0)
-    )
-    const successOrderNo = computed(() => orderNo.value || (orderId.value ? String(orderId.value).slice(-4) : '--'))
-    const successStatusText = computed(() => ({
-      pending: successText.statusPending,
-      paid: successText.statusPending,
-      accepted: successText.statusPreparing,
-      preparing: successText.statusPreparing,
-      done: successText.statusDone,
-      completed: successText.statusDone,
-      settled: successText.statusDone,
-      rejected: successText.statusRejected,
-      cancelled: successText.statusRejected,
-    })[orderStatus.value] || successText.statusFallback)
-    const successStatusTone = computed(() => {
-      if (['preparing', 'accepted'].includes(orderStatus.value)) return 'preparing'
-      if (['done', 'completed', 'settled'].includes(orderStatus.value)) return 'done'
-      if (['rejected', 'cancelled'].includes(orderStatus.value)) return 'warning'
-      return 'pending'
-    })
-    const orderStatusText = successStatusText
-
-    const orderStatusClass = computed(() => orderStatus.value)
+    const {
+      successOrderItemCount, successOrderNo, successStatusText, successStatusTone,
+      orderStatusText, orderStatusClass,
+    } = useSuccessSheetView({ successItems, orderNo, orderId, orderStatus })
 
     watch(orderStatus, (newVal, oldVal) => {
       if (newVal === 'preparing' && oldVal === 'pending') {
@@ -1420,14 +1151,9 @@ export default {
       })
     }
     const remark = ref('')
-    const remarkChips = ref(['\u4e0d\u8981\u8fa3', '\u5fae\u8fa3', '\u4e0d\u8981\u9999\u83dc', '\u4e0d\u8981\u8471', '\u5c11\u76d0', '\u6253\u5305'])
     const orderRemarkChips = ref(['\u4e00\u8d77\u4e0a\u83dc', '\u5168\u90e8\u6253\u5305', '\u52a0\u53cc\u7b77\u5b50', '\u4e0d\u7528\u9910\u5177', '\u6709\u513f\u7ae5\u7528\u9910'])
     const showOrderRemarkExtra = ref(false)
-    const orderRemarkExtra = computed(() => {
-      let text = remark.value
-      orderRemarkChips.value.forEach((chip) => { text = text.split(chip).join('') })
-      return text.replace(/\s+/g, ' ').trim()
-    })
+    const { cleanedText: orderRemarkExtra, toggleChip: toggleRemarkChip } = useRemarkChips(remark, orderRemarkChips)
     // 整单备注默认折叠成一行，跟"已选商品"用同一个模式（menu.vue 里 toggleItemsExpanded
     // 那一行），避免5个chip换行铺开撑高确认单、跟价格支付这些核心信息抢视觉权重。
     // 折叠态靠这句摘要保留可见性，不会出现"以为选了、其实没点开"的问题。
@@ -1491,13 +1217,6 @@ export default {
       pendingPaymentIntent.value = null
       paymentFailed.value = false
     }
-    const toggleRemarkChip = (chip) => {
-      if (remark.value.includes(chip)) {
-        remark.value = remark.value.replace(chip, '').replace(/^\s+|\s+$/g, '').trim()
-      } else {
-        remark.value = remark.value ? remark.value + ' ' + chip : chip
-      }
-    }
     const activeCategory = ref('')
     const orderMode = ref('dineIn')
     const tableDisplayText = computed(() => (tableNo.value || orderModeText.unknownTable) + '\u684c')
@@ -1545,133 +1264,16 @@ export default {
     }
     const categoryOrder = ref([])
 
-    const RECOMMEND_CAT = '\u63a8\u8350'
+    const {
+      categories, categoryDisplayName, categoryIconClass, dishesByCategory,
+      specButtonText, dishOptionKindCount, optionCountText,
+    } = useDishCategories({ allDishes, categoryOrder, specCartItems, hasSpecs })
 
-    const categories = computed(() => {
-      const raw = []
-      for (const d of allDishes.value) {
-        if (d.category && !raw.includes(d.category)) raw.push(d.category)
-      }
-      const order = categoryOrder.value
-      let sorted
-      if (order.length) {
-        // 分类锚点 id（cat-nav-N / cat-sec-N）都是按数组下标生成的，如果 order 里同一个分类
-        // 出现了两次（商家后台保存过脏数据，或旧版本排序抽屉没做去重），这里再用 filter 不去重
-        // 的话，categories 数组会带着重复项：indexOf(cat) 永远只会命中第一次出现的下标，
-        // 点击排在后面的那个重名分类会跳到前面那个的位置——这正是点分类跳错、滚动时中间
-        // 分类被跳过的根因，跟去重后 sidebar/正文两个 v-for 是否还共用同一份数组无关。
-        const seen = new Set()
-        sorted = order.filter(c => raw.includes(c) && !seen.has(c) && seen.add(c))
-      } else {
-        // 商家没配置分类顺序时，按点餐习惯给个默认顺序，而不是菜品在数据库里出现的原始
-        // 顺序（等于商家后台录入顺序直接透传给顾客）；商家一旦自己配置过就完全尊重商家。
-        sorted = [...raw].sort((a, b) => categoryOrderWeight(a) - categoryOrderWeight(b))
-      }
-      raw.forEach(c => { if (!sorted.includes(c)) sorted.push(c) })
-      const hasRecommended = allDishes.value.some(d => {
-        const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
-        return tags.includes('\u63a8\u8350') || tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500')
-      })
-      if (hasRecommended) sorted = [RECOMMEND_CAT, ...sorted.filter(c => c !== RECOMMEND_CAT)]
-      return sorted
-    })
-
-    const normalizeCategoryText = (cat) => String(cat || '').trim()
-
-    const categoryDisplayName = (cat) => {
-      const text = normalizeCategoryText(cat)
-      if (text === RECOMMEND_CAT) return RECOMMEND_CAT
-      if (/\u62db\u724c|\u70ed\u9500|\u7279\u8272/.test(text)) return '\u62db\u724c'
-      if (/\u6c64|\u7ca5|\u4f8b\u6c64/.test(text)) return '\u6c64\u54c1'
-      if (/\u4e3b\u98df|\u7c73\u996d|\u7c73\u7ebf|\u9762|\u7c89|\u996d/.test(text)) return '\u4e3b\u98df'
-      if (/\u996e|\u5976\u8336|\u5496\u5561|\u679c\u6c41|\u8336|\u9152/.test(text)) return '\u996e\u54c1'
-      if (/\u70b9\u5fc3|\u8336\u70b9|\u751c\u54c1|\u5305\u5b50|\u997a\u5b50/.test(text)) return text.length > 3 ? '\u70b9\u5fc3' : text
-      return text.length > 4 ? text.slice(0, 4) : text
-    }
-
-    const categoryIconClass = (cat) => {
-      const text = normalizeCategoryText(cat)
-      if (text === RECOMMEND_CAT) return 'icon-likefill'
-      if (/\u62db\u724c|\u70ed\u9500|\u7279\u8272/.test(text)) return 'icon-xiaochao'
-      if (/\u6c64|\u7ca5|\u4f8b\u6c64/.test(text)) return 'icon-zhou'
-      if (/\u9762|\u7c89/.test(text)) return 'icon-mianshi'
-      if (/\u4e3b\u98df|\u7c73\u996d|\u996d/.test(text)) return 'icon-mifan'
-      if (/\u51b7\u996e|\u996e\u54c1|\u996e\u6599|\u679c\u6c41/.test(text)) return 'icon-lengyin'
-      if (/\u70ed\u996e|\u5496\u5561|\u8336/.test(text)) return 'icon-reyin'
-      if (/\u70b9\u5fc3|\u8336\u70b9/.test(text)) return 'icon-chadian'
-      if (/\u5305\u5b50/.test(text)) return 'icon-baozi'
-      if (/\u997a\u5b50/.test(text)) return 'icon-jiaozi'
-      if (/\u751c\u54c1/.test(text)) return 'icon-tianpin'
-      return 'icon-chadian'
-    }
-
-    // \u5546\u5bb6\u6ca1\u6709\u5728\u540e\u53f0\u624b\u52a8\u914d\u597d\u5206\u7c7b\u987a\u5e8f\u65f6\uff0c\u4e4b\u524d\u662f\u6309\u83dc\u54c1\u5728\u6570\u636e\u5e93\u91cc\u51fa\u73b0\u7684\u539f\u59cb\u987a\u5e8f\u6392\u5206\u7c7b
-    // sidebar\u2014\u2014\u672c\u8d28\u4e0a\u662f\u5546\u5bb6\u540e\u53f0\u7684\u5f55\u5165\u987a\u5e8f\u76f4\u63a5\u900f\u4f20\u5230\u987e\u5ba2\u70b9\u9910\u754c\u9762\uff0c\u4e0d\u662f\u70b9\u9910\u4e60\u60ef\u7684\u987a\u5e8f\u3002
-    // \u8fd9\u91cc\u7ed9\u51e0\u4e2a\u5e38\u89c1\u5f52\u4e00\u5316\u540e\u7684\u5206\u7c7b\u4e00\u4e2a\u9ed8\u8ba4\u6743\u91cd\uff0c\u547d\u4e2d\u4e0d\u4e86\u7684\u5206\u7c7b\uff08\u6743\u91cd99\uff09\u6392\u5728\u6700\u540e\uff0c
-    // \u4e00\u65e6\u5546\u5bb6\u81ea\u5df1\u914d\u7f6e\u8fc7 category_order\uff0c\u8fd9\u4e2a\u9ed8\u8ba4\u6743\u91cd\u5b8c\u5168\u4e0d\u751f\u6548\uff0c\u4e0d\u8986\u76d6\u5546\u5bb6\u7684\u9009\u62e9\u3002
-    const CATEGORY_DEFAULT_WEIGHT = { '\u62db\u724c': 1, '\u6c64\u54c1': 2, '\u4e3b\u98df': 3, '\u996e\u54c1': 4, '\u70b9\u5fc3': 5 }
-    const categoryOrderWeight = (cat) => {
-      if (normalizeCategoryText(cat) === RECOMMEND_CAT) return 0
-      return CATEGORY_DEFAULT_WEIGHT[categoryDisplayName(cat)] ?? 99
-    }
-
-    const dishesByCategory = (cat) => {
-      if (cat === RECOMMEND_CAT) {
-        return allDishes.value.filter(d => {
-          const tags = Array.isArray(d.tags) ? d.tags : String(d.tags || '').split(new RegExp('[,\\s\\uFF0C\\u3001]+')).map(t => t.trim()).filter(Boolean)
-          return tags.includes('\u63a8\u8350') || tags.includes('\u62db\u724c') || tags.includes('\u70ed\u9500')
-        })
-      }
-      return allDishes.value.filter((d) => d.category === cat)
-    }
-
-    const specButtonText = (dish) => dish.option_button_text || dish.spec_button_text || (hasSpecs(dish) ? specText.chooseTaste : specText.chooseSpec)
-    const dishOptionKindCount = (id) => specCartItems.value.filter(i => i.id === id).length
-    const optionCountText = (id) => specText.selectedKinds + dishOptionKindCount(id) + specText.kindUnit
-
-    const homeRecommendedTags = ['\u62db\u724c', '\u70ed\u9500', '\u5e97\u957f\u63a8\u8350', '\u65b0\u54c1']
-    const isMenuEmpty = computed(() => allDishes.value.length <= 0)
-    const canStartOrdering = computed(() => !storeClosed.value && !isMenuEmpty.value)
-    const homeStatusDesc = computed(() => {
-      if (isMenuEmpty.value) return '\u6682\u65e0\u53ef\u70b9\u83dc\u54c1'
-      return '\u5171' + allDishes.value.length + '\u9053\u83dc\u53ef\u70b9'
-    })
-    const homeOrderButtonText = computed(() => {
-      if (storeClosed.value) return '\u95e8\u5e97\u4f11\u606f\u4e2d'
-      if (isMenuEmpty.value) return '\u6682\u65e0\u83dc\u54c1'
-      return '\u5f00\u59cb\u70b9\u9910'
-    })
-    const homeCouponHint = computed(() => {
-      const count = Number(bannerInfo.value?.couponCount || 0)
-      if (count <= 0) return ''
-      return count + '\u5f20\u4f18\u60e0\u5238\u53ef\u7528'
-    })
-    const canHomeAdd = computed(() => !!featuredDish.value && !storeClosed.value && !isSoldOut(featuredDish.value))
-    const featuredDish = computed(() => {
-      if (isMenuEmpty.value) return null
-      return allDishes.value.find(d => {
-        if (isSoldOut(d)) return false
-        const tags = dishTags(d).map(normalizeDishTag)
-        return homeRecommendedTags.some(tag => tags.includes(normalizeDishTag(tag)))
-      }) || null
-    })
-    const featuredDishTag = computed(() => {
-      if (!featuredDish.value) return ''
-      const tags = dishTags(featuredDish.value).map(normalizeDishTag)
-      if (tags.includes('\u62db\u724c')) return '\u62db\u724c'
-      if (tags.includes('\u70ed\u9500')) return '\u70ed\u9500'
-      if (tags.includes('\u65b0\u54c1')) return '\u65b0\u54c1'
-      return ''
-    })
-    const dishMatchesHistoryItem = (dish, item) => String(dish.id) === String(item.id || item.dish_id || item.menu_item_id || '') || dish.name === item.name
-    const findHistoryDish = (item) => allDishes.value.find(d => dishMatchesHistoryItem(d, item))
-    const historyItemHasSpecSnapshot = (item) => !!(item?.specKey || item?.specLabel || item?.specifications?.length || /[闂?]/.test(String(item?.name || "")))
-    const validateHistoryReorderItem = (item) => {
-      const dish = findHistoryDish(item)
-      if (!dish || isSoldOut(dish)) return { dish, reason: 'unavailable' }
-      if (hasSpecs(dish) || historyItemHasSpecSnapshot(item)) return { dish, reason: 'spec_changed' }
-      return { dish, reason: '' }
-    }
+    const {
+      canStartOrdering, homeStatusDesc, homeOrderButtonText, homeCouponHint,
+      featuredDish, canHomeAdd, featuredDishTag, findHistoryDish, validateHistoryReorderItem,
+      lastOrderItems, homeLastOrderItems,
+    } = useHomeTabView({ allDishes, storeClosed, bannerInfo, myOrders, isSoldOut, dishTags, normalizeDishTag, hasSpecs })
     const showHistoryReorderToast = ({ added = 0, skippedUnavailable = 0, skippedSpec = 0 }) => {
       if (added > 0) {
         let title = '已加入' + added + '件'
@@ -1691,18 +1293,6 @@ export default {
       uni.showToast({ title: '没有可重新加入的菜品', icon: 'none', duration: 1200 })
     }
 
-    const lastOrderItems = computed(() => {
-      const last = myOrders.value.find(o => !['cancelled', 'rejected'].includes(o.status))
-      if (!last || !last.items) return []
-      return last.items.slice(0, 6)
-    })
-    const homeLastOrderItems = computed(() => {
-      if (isMenuEmpty.value) return []
-      return lastOrderItems.value
-        .map((item, index) => ({ ...item, dish: findHistoryDish(item), key: String(item.id || item.name || index) + '-' + index }))
-        .filter(item => item.dish && !isSoldOut(item.dish))
-        .slice(0, 4)
-    })
 
     const handleHomeStartOrder = () => {
       if (!canStartOrdering.value) return
@@ -1890,16 +1480,6 @@ export default {
       const target = preferred || fallbackDish?.category || categories.value[0]
       if (target) switchCategory(target)
     }
-    const memberSavings = computed(() => {
-      return cartItems.value.reduce((s, item) => {
-        const dish = allDishes.value.find(d => d.id === item.id)
-        if (dish && dish.member_price && dish.member_price < dish.price) {
-          return s + (dish.price - dish.member_price) * item.qty
-        }
-        return s
-      }, 0)
-    })
-
     const dishScrollTopVal = ref(0)
     const categoryScrollTarget = ref('')
     const categoryScrollTop = ref(0)
@@ -1935,8 +1515,6 @@ export default {
       activeCategory.value = cat
       syncCategoryVisible(cat)
     }
-
-    const setupCategoryObserver = () => {}
 
     const switchOrderMode = (mode) => {
       if (mode === 'delivery') {
@@ -2342,13 +1920,6 @@ export default {
       uni.navigateTo({ url: '/subpkg-coupon/pages/list' })
     }
 
-    const pickAvatarChar = (name) => {
-      const chars = Array.from(String(name || '').trim())
-      const ch = chars.find(c => /[一-龥a-zA-Z0-9]/.test(c))
-      if (!ch) return '会'
-      return /[a-z]/.test(ch) ? ch.toUpperCase() : ch
-    }
-
     const loadMemberStatus = async (opts = {}) => {
       refreshCustomerAuthState()
       const token = uni.getStorageSync('customer_token')
@@ -2545,7 +2116,7 @@ export default {
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       successDiscount, wechatPayAmount, canSubmitOrder, payButtonText,
-      storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, memberSavings, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
+      storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
       memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
       homeStatusDesc, homeOrderButtonText, homeCouponHint, canStartOrdering, featuredDish, featuredDishTag, canHomeAdd, homeLastOrderItems,
@@ -2556,7 +2127,7 @@ export default {
       isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured, dishPlaceholderStyle,
       lastOrderItems, reorderItem, reorderAll,
-      setupCategoryObserver, handleActiveCategoryChange, ignoreScroll,
+      handleActiveCategoryChange, ignoreScroll,
     }
   },
 
@@ -2629,9 +2200,6 @@ export default {
   onUnload: function () {
     this.stopStatusPoll()
     this.stopTablePresencePoll()
-    if (this.setupCategoryObserver) {
-
-    }
   },
 }
 </script>
@@ -2658,13 +2226,6 @@ dish-list {
   min-height: 0;
   width: 100%;
 }
-
-.shop-name-row,
-.mode-pill,
-.mode-pill--muted,
-.activity-bar,
-.activity-text,
-.shop-meta { display: none; }
 
 .cat-item.active {
   background: #fff;
@@ -2702,51 +2263,8 @@ dish-list {
   font-weight: 700;
   color: var(--text-3);
 }
-.dish-emoji-wrap, .dish-emoji, .dish-initial, .dish-badge-top { display: none; }
-
-
-.dish-save-badge {
-  font-size: 18rpx;
-  color: #fff;
-  background: #f97316;
-  border-radius: 6rpx;
-  padding: 2rpx 8rpx;
-  font-weight: 700;
-  margin-left: 4rpx;
-}
-
-
-.member-hint-bar {
-  margin: 8rpx 0 0;
-  background: linear-gradient(90deg, #fff7ed, #fef3c7);
-  border-radius: 12rpx;
-  padding: 14rpx 20rpx;
-  border-left: 4rpx solid var(--warning);
-}
-
-.member-hint-text {
-  font-size: 24rpx;
-  color: #92400e;
-  font-weight: 600;
-}
-
-
-.order-saved-bar {
-  background: linear-gradient(90deg, #ecfdf5, #d1fae5);
-  border-radius: 12rpx;
-  padding: 14rpx 20rpx;
-  margin: 0 0 12rpx;
-  text-align: center;
-}
-
-.order-saved-text {
-  font-size: 26rpx;
-  color: #065f46;
-  font-weight: 700;
-}
 .dish-tag--strong { color: #078546; background: #e9f9f0; }
 .dish-tag--plain { display: none; }
-.dish-origin-price, .dish-save-badge, .member-price { display: none; }
 .dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
 .dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
 .dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
@@ -2813,27 +2331,6 @@ dish-list {
 }
 
 
-.shop-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12rpx;
-}
-
-.dist-pill {
-  flex-shrink: 0;
-  background: rgba(255,255,255,0.2);
-  border-radius: 20rpx;
-  padding: 4rpx 12rpx;
-  margin-top: 4rpx;
-}
-
-.dist-text {
-  color: rgba(255,255,255,0.9);
-  font-size: 20rpx;
-}
-
-
 .tab-scroll {
   position: fixed;
   top: 0;
@@ -2864,8 +2361,6 @@ dish-list {
   display: flex;
   align-items: flex-end;
 }
-.selected-items-toggle { color: var(--text-2); font-size: 26rpx; }
-
 .ht-shop-header {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx;
 }
@@ -2928,19 +2423,6 @@ dish-list {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.82; }
 }
-
-.merchant-note-bar {
-  margin: 12rpx 40rpx 0;
-  padding: 16rpx 20rpx;
-  border-radius: 16rpx;
-  background: #fffbeb;
-  display: flex;
-  align-items: flex-start;
-  gap: 10rpx;
-}
-.merchant-note-icon { font-size: 24rpx; flex-shrink: 0; }
-.merchant-note-text { font-size: 24rpx; color: #92400e; line-height: 1.5; flex: 1; }
-
 
 .success-items {
   padding: 24rpx 40rpx;
@@ -3053,58 +2535,6 @@ dish-list {
   align-items: center;
   justify-content: center;
   text { color: var(--text-3); font-size: 28rpx; }
-}
-
-
-.my-orders-pill {
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 10rpx 18rpx;
-  border-radius: 32rpx;
-  border: 2rpx solid rgba(255,255,255,0.2);
-  text { font-size: 24rpx; color: rgba(255,255,255,0.75); white-space: nowrap; }
-}
-
-
-.my-orders-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  padding: 0 20rpx;
-  height: 64rpx;
-  border-radius: 32rpx;
-  border: 2rpx solid rgba(255,255,255,0.25);
-  flex-shrink: 0;
-}
-
-.my-orders-label {
-  font-size: 22rpx;
-  color: rgba(255,255,255,0.75);
-  white-space: nowrap;
-}
-
-.my-orders-spent {
-  font-size: 26rpx;
-  font-weight: 800;
-  color: #fff;
-  white-space: nowrap;
-}
-
-.my-orders-dot {
-  position: absolute;
-  top: -8rpx;
-  right: -8rpx;
-  min-width: 32rpx;
-  height: 32rpx;
-  border-radius: 16rpx;
-  background: var(--danger);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6rpx;
-  box-sizing: border-box;
-  text { color: #fff; font-size: 20rpx; font-weight: 800; }
 }
 
 
@@ -3407,13 +2837,6 @@ dish-list {
   padding-top: 16rpx;
 }
 
-
-.member-price {
-  font-size: 24rpx;
-  color: var(--brand);
-  font-weight: 600;
-  margin-left: 8rpx;
-}
 
 @keyframes slide-up {
   from { transform: translateY(100%); }
