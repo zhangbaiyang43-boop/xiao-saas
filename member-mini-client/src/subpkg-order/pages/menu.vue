@@ -1222,59 +1222,6 @@ dish-list {
 .dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
 
 
-.counter-btn {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  text {
-    font-size: 36rpx;
-    font-weight: 700;
-    line-height: 1;
-  }
-
-  &.plus {
-    background: var(--brand);
-    text { color: #fff; }
-  }
-
-  &.minus {
-    background: #f3f4f6;
-    text { color: var(--text-2); }
-  }
-
-  &.sm {
-    width: 52rpx;
-    height: 52rpx;
-    text { font-size: 30rpx; }
-  }
-}
-
-.counter-num {
-  font-size: 28rpx;
-  font-weight: 800;
-  color: var(--text-1);
-  min-width: 32rpx;
-  text-align: center;
-}
-
-
-.bn-item.active .bn-icon {
-  color: var(--brand);
-  transform: translateY(-1rpx);
-  animation: tabLabelBounce 280ms var(--bounce-ease);
-}
-
-@keyframes tabLabelBounce {
-  0% { transform: scale(1); }
-  40% { transform: scale(1.18); }
-  100% { transform: scale(1); }
-}
-
-
 .tab-scroll {
   position: fixed;
   top: 0;
@@ -1297,14 +1244,6 @@ dish-list {
 }
 
 
-.mask {
-  position: fixed;
-  inset: 0;
-  z-index: 3100;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: flex-end;
-}
 .ht-shop-header {
   display: flex; align-items: center; justify-content: space-between; margin-bottom: 12rpx;
 }
@@ -1718,11 +1657,6 @@ dish-list {
   text { color: var(--text-2); }
 }
 
-@keyframes skeletonShimmer {
-  0% { background-position: 100% 50%; }
-  100% { background-position: 0 50%; }
-}
-
 
 .coupon-select-section {
   border-top: 1rpx solid #f3f4f6;
@@ -1841,65 +1775,6 @@ dish-list {
   margin-top: 16rpx;
   background: #f3f4f6;
   text { color: var(--text-3); font-weight: 600; }
-}
-@keyframes authSheetIn { from { transform: translateY(24rpx); opacity: .92; } to { transform: translateY(0); opacity: 1; } }
-
-/* Cart micro interactions */
-.counter-btn {
-  transform-origin: center;
-  transition: transform 160ms ease-out;
-}
-
-.counter-btn .iconfont {
-  font-size: 30rpx;
-  font-weight: 400;
-  line-height: 1;
-}
-
-.counter-num--pulse {
-  animation: cartQtyPulse 150ms ease-out;
-}
-
-@keyframes addButtonPress {
-  0% { transform: scale(1); }
-  40% { transform: scale(.9); }
-  75% { transform: scale(1.08); }
-  100% { transform: scale(1); }
-}
-
-@keyframes cartQtyPulse {
-  0% { opacity: .75; transform: scale(.9); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes cartIconPulse {
-  0% { transform: scale(1); }
-  45% { transform: scale(1.07); }
-  100% { transform: scale(1); }
-}
-
-@keyframes cartBadgePulse {
-  0% { opacity: .85; transform: scale(.86); }
-  55% { opacity: 1; transform: scale(1.1); }
-  100% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes cartAmountHighlight {
-  0% { transform: translateY(0); }
-  45% { transform: translateY(-4rpx); }
-  100% { transform: translateY(0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .counter-btn,
-  .cart-icon-wrap,
-  .cart-badge,
-  .cart-price,
-  .checkout-btn,
-  .choose-option-btn {
-    transition-duration: 0ms;
-    animation: none;
-  }
 }
 
 /* 顶部大状态图标和下面每笔子订单的状态标签用同一套语义色：

@@ -131,6 +131,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .spec-detail-hero {
   width: 100%;
   height: 460rpx;

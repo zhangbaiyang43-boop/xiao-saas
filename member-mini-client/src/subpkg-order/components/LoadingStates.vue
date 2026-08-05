@@ -165,4 +165,9 @@ export default {
   justify-content: center;
   text { color: #fff; font-size: 30rpx; font-weight: 700; }
 }
+
+@keyframes skeletonShimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
 </style>

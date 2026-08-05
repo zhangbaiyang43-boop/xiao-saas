@@ -221,6 +221,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .menu-body {
   display: flex;
   flex: 1;
@@ -647,5 +649,12 @@ export default {
 
 .counter-btn--pressing {
   animation: addButtonPress 220ms var(--bounce-ease);
+}
+
+@keyframes addButtonPress {
+  0% { transform: scale(1); }
+  40% { transform: scale(.9); }
+  75% { transform: scale(1.08); }
+  100% { transform: scale(1); }
 }
 </style>

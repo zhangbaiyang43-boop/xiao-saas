@@ -86,4 +86,16 @@ export default {
   border-radius: 50%;
   background: var(--danger);
 }
+
+.bn-item.active .bn-icon {
+  color: var(--brand);
+  transform: translateY(-1rpx);
+  animation: tabLabelBounce 280ms var(--bounce-ease);
+}
+
+@keyframes tabLabelBounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
 </style>

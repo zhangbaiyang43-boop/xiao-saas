@@ -150,6 +150,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .cart-sheet {
   width: 100%;
   background: #f5f7f8;

@@ -57,6 +57,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .cart-bar {
   position: fixed;
   z-index: 320;
@@ -243,5 +245,23 @@ export default {
 
 .checkout-btn {
   transition: background 180ms ease-out, opacity 180ms ease-out;
+}
+
+@keyframes cartIconPulse {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
+@keyframes cartBadgePulse {
+  0% { opacity: .85; transform: scale(.86); }
+  55% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cartAmountHighlight {
+  0% { transform: translateY(0); }
+  45% { transform: translateY(-4rpx); }
+  100% { transform: translateY(0); }
 }
 </style>

@@ -1,0 +1,86 @@
+// 点餐子包（subpkg-order）内跨组件共享的样式原语。
+//
+// 这里只放"3 个以上组件都在用、且如果各自复制一份会导致改一处忘改另一处"
+// 的东西——遮罩、加减数量按钮、数量跳动动画、无障碍减弱动效媒体查询。
+// 只属于某一个组件的样式不要往这里加，直接写进那个组件自己的 <style> 里。
+//
+// 用法：谁的模板里出现了下面这些类名，谁就在自己的 <style lang="scss"> 顶部
+// `@import '../styles/_shared.scss';`。会被重复编译进每个引用它的组件，这是
+// 故意的——比各自维护一份、改的时候漏改其中一份要安全。
+
+.mask {
+  position: fixed;
+  inset: 0;
+  z-index: 3100;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: flex-end;
+}
+
+.counter-btn {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  transition: transform 160ms ease-out;
+
+  text {
+    font-size: 36rpx;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .iconfont {
+    font-size: 30rpx;
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  &.plus {
+    background: var(--brand);
+    text { color: #fff; }
+  }
+
+  &.minus {
+    background: #f3f4f6;
+    text { color: var(--text-2); }
+  }
+
+  &.sm {
+    width: 52rpx;
+    height: 52rpx;
+    text { font-size: 30rpx; }
+  }
+}
+
+.counter-num {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: var(--text-1);
+  min-width: 32rpx;
+  text-align: center;
+}
+
+.counter-num--pulse {
+  animation: cartQtyPulse 150ms ease-out;
+}
+
+@keyframes cartQtyPulse {
+  0% { opacity: .75; transform: scale(.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .counter-btn,
+  .cart-icon-wrap,
+  .cart-badge,
+  .cart-price,
+  .checkout-btn,
+  .choose-option-btn {
+    transition-duration: 0ms;
+    animation: none;
+  }
+}
