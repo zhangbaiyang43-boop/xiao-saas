@@ -18,147 +18,64 @@
     </view>
 
 
-    <view v-if="activeTab === 'order' && couponBarVisible" class="coupon-bar tap-shrink" @click="openCouponPicker">
-      <text class="coupon-bar-icon iconfont icon-youhuiquan"></text>
-      <text class="coupon-bar-text">{{ couponBarPrefix }}<text class="coupon-bar-amount">{{ couponBarAmount }}</text></text>
-      <text class="coupon-bar-arrow iconfont icon-roundright"></text>
-    </view>
-    <button
-      v-else-if="activeTab === 'order' && !isCustomerLoggedIn && newCustomerCouponPreview"
-      class="coupon-bar new-customer-bar tap-shrink"
-      open-type="getPhoneNumber"
-      :disabled="memberAuthorizing"
-      @getphonenumber="handleMemberCardAuth"
-    >
-      <text class="coupon-bar-icon iconfont icon-youhuiquan"></text>
-      <text class="coupon-bar-text">{{ newCustomerHookText }}</text>
-      <text class="coupon-bar-arrow iconfont icon-roundright"></text>
-    </button>
+    <CouponBar
+      v-if="activeTab === 'order'"
+      :coupon-bar-visible="couponBarVisible"
+      :coupon-bar-prefix="couponBarPrefix"
+      :coupon-bar-amount="couponBarAmount"
+      :is-customer-logged-in="isCustomerLoggedIn"
+      :new-customer-coupon-preview="newCustomerCouponPreview"
+      :new-customer-hook-text="newCustomerHookText"
+      :member-authorizing="memberAuthorizing"
+      :coupon-nudge-state="couponNudgeState"
+      :total-price="totalPrice"
+      :format-price="formatPrice"
+      @open-coupon-picker="openCouponPicker"
+      @phone-auth="handleMemberCardAuth"
+      @coupon-add-on="goCouponAddOn"
+    />
 
-    <view class="menu-body" v-show="activeTab === 'order'">
-
-
-      <scroll-view class="category-nav" scroll-y scroll-with-animation :scroll-top="categoryScrollTop">
-        <view
-          v-for="(cat, catIdx) in categories"
-          :key="cat"
-          :id="`cat-nav-${catIdx}`"
-          class="cat-item"
-          :class="{ active: activeCategory === cat }"
-          @click="switchCategory(cat)"
-        >
-          <view class="cat-icon-wrap"><text :class="['cat-icon', 'iconfont', categoryIconClass(cat)]"></text></view>
-          <text class="cat-name">{{ categoryDisplayName(cat) }}</text>
-        </view>
-      </scroll-view>
-
-
-      <scroll-view
-        class="dish-scroll"
-        scroll-y
-        :scroll-into-view="scrollTarget"
-        scroll-with-animation
-        @scroll="onDishScroll"
-      >
-
-        <view v-if="lastOrderItems.length" class="reorder-bar">
-          <text class="reorder-label">再来一单</text>
-          <scroll-view scroll-x class="reorder-scroll">
-            <view class="reorder-chips">
-              <view
-                v-for="item in lastOrderItems"
-                :key="item.name"
-                class="reorder-chip"
-                @click="reorderItem(item)"
-              >
-                <text class="reorder-chip-name">{{ item.name }}</text>
-                <text class="reorder-chip-add">+</text>
-              </view>
-            </view>
-          </scroll-view>
-          <view class="reorder-all-btn" @click="reorderAll">
-            <text class="reorder-all-text">全部再来一份</text>
-          </view>
-        </view>
-
-        <view v-if="!loading && !loadError && !allDishes.length" class="empty-menu">
-          <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
-          <text class="empty-title">暂无菜品</text>
-          <text class="empty-desc">菜单加载失败</text>
-          <view class="empty-retry" @click="loadMenu"><text>重新加载</text></view>
-        </view>
-        <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
-          <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
-          <view
-            v-for="(dish, dishIdx) in dishesByCategory(cat)"
-            :key="dish.id"
-            class="dish-item"
-            :class="{ 'dish-item--featured': isFeatured(dish), 'dish-item--soldout': isSoldOut(dish) }"
-            @click="openProductDetail(dish)"
-          >
-            <view class="dish-thumb">
-              <image
-                v-if="dishImage(dish) && !imageLoadFailed[dish.id]"
-                class="dish-img"
-                :src="dishImage(dish)"
-                mode="aspectFill"
-                lazy-load
-                @error="markDishImageFailed(dish.id)"
-              />
-              <view v-else class="dish-placeholder">
-                <image class="dish-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
-              </view>
-              <view v-if="isSoldOut(dish)" class="dish-soldout-mask"><text>已售罄</text></view>
-            </view>
-            <view class="dish-info">
-              <view class="dish-title-row">
-                <text class="dish-name">{{ dish.name }}</text>
-                <view v-if="dishCardTags(dish).length" class="dish-tags">
-                  <text
-                    v-for="tag in dishCardTags(dish)"
-                    :key="tag"
-                    class="dish-tag"
-                    :class="isStrongDishTag(tag) ? 'dish-tag--strong' : 'dish-tag--plain'"
-                  >{{ tag }}</text>
-                </view>
-              </view>
-              <view class="dish-meta">
-                <text v-if="dishCardDesc(dish)" class="dish-desc">{{ dishCardDesc(dish) }}</text>
-                <text v-if="showDishSales(dish)" class="dish-sales">月售{{ dish.sales_count }}</text>
-              </view>
-              <view class="dish-bottom-row">
-                <view class="dish-price-wrap">
-                  <text class="dish-price-currency">¥</text>
-                  <text class="dish-price-amount">{{ dishPriceText(dish) }}</text>
-                  <text v-if="dishPriceSuffix(dish)" class="dish-price-suffix">{{ dishPriceSuffix(dish) }}</text>
-                </view>
-                <view class="dish-counter" @click.stop>
-                  <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>已售罄</text></view>
-                  <template v-else-if="hasSpecs(dish)">
-                    <view v-if="dishOptionKindCount(dish.id) > 0" class="option-count-pill" @click.stop="openCart">
-                      <text>{{ optionCountText(dish.id) }}</text>
-                    </view>
-                    <view class="choose-option-btn" @click.stop="openSpecSheet(dish)">
-                      <text>选规格</text>
-                    </view>
-                  </template>
-                  <template v-else>
-                    <view v-if="cartCount(dish.id) > 0" class="dish-qty-control">
-                      <view class="counter-touch" @click.stop="removeFromCart(dish)"><view class="counter-btn minus"><text class="iconfont icon-move"></text></view></view>
-                      <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === dish.id }">{{ cartCount(dish.id) }}</text>
-                      <view class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
-                    </view>
-                    <view v-else class="counter-touch" @click.stop="addToCart(dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
-                  </template>
-                </view>
-              </view>
-            </view>
-          </view>
-        </view>
-        <view class="list-pad" />
-      </scroll-view>
-
-    </view>
+    <DishList
+      v-show="activeTab === 'order'"
+      :categories="categories"
+      :active-category="activeCategory"
+      :category-scroll-top="categoryScrollTop"
+      :scroll-target="scrollTarget"
+      :last-order-items="lastOrderItems"
+      :loading="loading"
+      :load-error="loadError"
+      :all-dishes="allDishes"
+      :image-load-failed="imageLoadFailed"
+      :qty-pulse-key="qtyPulseKey"
+      :add-press-key="addPressKey"
+      :category-icon-class="categoryIconClass"
+      :category-display-name="categoryDisplayName"
+      :dishes-by-category="dishesByCategory"
+      :is-featured="isFeatured"
+      :is-sold-out="isSoldOut"
+      :dish-image="dishImage"
+      :dish-card-tags="dishCardTags"
+      :is-strong-dish-tag="isStrongDishTag"
+      :dish-card-desc="dishCardDesc"
+      :show-dish-sales="showDishSales"
+      :dish-price-text="dishPriceText"
+      :dish-price-suffix="dishPriceSuffix"
+      :dish-option-kind-count="dishOptionKindCount"
+      :option-count-text="optionCountText"
+      :cart-count="cartCount"
+      :has-specs="hasSpecs"
+      @switch-category="switchCategory"
+      @dish-scroll="onDishScroll"
+      @reorder-item="reorderItem"
+      @reorder-all="reorderAll"
+      @retry-load="loadMenu"
+      @open-cart="openCart"
+      @open-spec-sheet="openSpecSheet"
+      @image-error="markDishImageFailed"
+      @open-product-detail="openProductDetail"
+      @remove-from-cart="removeFromCart"
+      @add-to-cart="addToCart"
+    />
 
 
     <scroll-view v-show="activeTab === 'home'" class="tab-scroll" scroll-y>
@@ -231,64 +148,18 @@
     />
 
 
-    <view
-      v-if="activeTab === 'order' && couponNudgeState.visible"
-      class="coupon-nudge-bar"
-      :class="{ 'coupon-nudge-bar--done': couponNudgeState.satisfied }"
-    >
-      <view class="coupon-nudge-main" @click="couponNudgeState.satisfied ? openCouponPicker() : goCouponAddOn()">
-        <text class="coupon-nudge-icon iconfont icon-youhuiquan"></text>
-        <view class="coupon-nudge-copy">
-          <template v-if="couponNudgeState.satisfied">
-            <text class="coupon-nudge-title">已享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}优惠</text>
-          </template>
-          <template v-else>
-            <text class="coupon-nudge-title">再加 <text class="coupon-nudge-strong">¥{{ couponNudgeState.diffText }}</text>，立享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}</text>
-          </template>
-          <text class="coupon-nudge-sub">当前 ¥{{ formatPrice(totalPrice) }} / 门槛 ¥{{ couponNudgeState.thresholdText }}</text>
-        </view>
-      </view>
-      <view v-if="!couponNudgeState.satisfied" class="coupon-nudge-action" @click="goCouponAddOn">
-        <text>去凑单</text>
-      </view>
-      <view v-else class="coupon-nudge-action coupon-nudge-action--plain" @click="openCouponPicker">
-        <text>换券</text>
-      </view>
-    </view>
 
-    <view v-show="activeTab === 'order'" class="cart-bar" :class="{ 'has-items': totalCount > 0 }">
-      <view class="cart-main" @click="totalCount > 0 ? openCart() : null">
-
-        <view class="cart-icon-wrap" :class="{ 'cart-icon-wrap--pulse': cartIconPulse }">
-          <text :class="['cart-iconfont', 'iconfont', totalCount > 0 ? 'icon-cartfill' : 'icon-cart']"></text>
-          <view v-if="totalCount > 0" class="cart-badge" :class="{ 'cart-badge--pulse': cartBadgePulse }">
-            <text>{{ cartBadgeText }}</text>
-          </view>
-        </view>
-
-
-        <view class="cart-info">
-          <template v-if="totalCount > 0">
-            <text class="cart-price" :class="{ 'cart-price--highlight': amountPulse }">¥{{ formatPrice(totalPrice) }}</text>
-            <text class="cart-tip">共{{ totalCount }}份</text>
-          </template>
-          <template v-else>
-            <text class="cart-empty">未选择商品</text>
-          </template>
-        </view>
-      </view>
-
-
-      <view class="cart-right">
-        <view
-          class="checkout-btn"
-          :class="{ disabled: totalCount === 0 }"
-          @click.stop="totalCount > 0 && openCart()"
-        >
-          <text>去结算</text>
-        </view>
-      </view>
-    </view>
+    <CartBar
+      v-show="activeTab === 'order'"
+      :total-count="totalCount"
+      :cart-icon-pulse="cartIconPulse"
+      :cart-badge-text="cartBadgeText"
+      :cart-badge-pulse="cartBadgePulse"
+      :total-price="totalPrice"
+      :amount-pulse="amountPulse"
+      :format-price="formatPrice"
+      @open-cart="openCart"
+    />
 
 
     <view class="bottom-nav">
@@ -398,20 +269,21 @@
       @view-order-detail="viewOrderDetail"
     />
 
-    <view v-if="showWelcomeCoupon" class="mask welcome-mask" @click="closeWelcomeCoupon">
-      <view class="welcome-coupon-sheet" @click.stop>
-        <text class="wc-ribbon">送你一张新人券</text>
-        <view class="wc-amount-row">
-          <text class="wc-currency">¥</text>
-          <text class="wc-amount">{{ formatPrice(welcomeCouponData?.amount ?? welcomeCouponData?.value ?? 0) }}</text>
-        </view>
-        <text class="wc-cond">{{ welcomeCouponCondText }}</text>
-        <view class="wc-divider"></view>
-        <text class="wc-name">{{ welcomeCouponData?.name || '优惠券' }}</text>
-        <view class="wc-btn" @click="goOrderFromWelcomeCoupon"><text>去点餐使用</text></view>
-        <text class="wc-skip" @click="closeWelcomeCoupon">稍后再说</text>
-      </view>
-    </view>
+    <WelcomeCouponSheet
+      :show-welcome-coupon="showWelcomeCoupon"
+      :welcome-coupon-data="welcomeCouponData"
+      :welcome-coupon-cond-text="welcomeCouponCondText"
+      :store-closed="storeClosed"
+      :table-session-closed="tableSessionClosed"
+      :shop-name="shopName"
+      :table-session-closed-notice="tableSessionClosedNotice"
+      :closed-notice="closedNotice"
+      :format-price="formatPrice"
+      @close="closeWelcomeCoupon"
+      @go-order="goOrderFromWelcomeCoupon"
+      @go-mine="goMine"
+      @keep-browsing="storeClosed = false"
+    />
 
     <TableBillSheet
       v-if="showOrders && isSharedBillMode"
@@ -505,15 +377,6 @@
       @qty-increase="specQty++"
       @qty-decrease="specQty--"
     />
-    <view v-if="storeClosed || tableSessionClosed" class="closed-mask">
-      <view class="closed-card">
-        <view class="closed-icon-wrap"><text class="closed-icon iconfont" :class="tableSessionClosed ? 'icon-roundcheckfill' : 'icon-shopfill'"></text></view>
-        <text class="closed-title">{{ tableSessionClosed ? '\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f' : shopName + ' \u5f53\u524d\u4f11\u606f\u4e2d' }}</text>
-        <text class="closed-desc">{{ tableSessionClosed ? tableSessionClosedNotice : (closedNotice || '\u8425\u4e1a\u65f6\u95f4\u8bf7\u53c2\u8003\u95e8\u5e97\u516c\u544a') }}</text>
-        <view v-if="tableSessionClosed" class="closed-btn" @click="goMine"><text>{{ '\u597d\u7684\uff0c\u6211\u77e5\u9053\u4e86' }}</text></view>
-        <view v-else class="closed-btn" @click="storeClosed = false"><text>{{ '\u4ecd\u8981\u6d4f\u89c8\u83dc\u5355' }}</text></view>
-      </view>
-    </view>
 
 
     <view v-if="loadError && !loading" class="loading-mask">
@@ -561,6 +424,10 @@ import OrderHistorySheet from '../components/OrderHistorySheet.vue'
 import PaymentSuccessSheet from '../components/PaymentSuccessSheet.vue'
 import CheckoutSheet from '../components/CheckoutSheet.vue'
 import CheckoutAuthSheet from '../components/CheckoutAuthSheet.vue'
+import DishList from '../components/DishList.vue'
+import CartBar from '../components/CartBar.vue'
+import CouponBar from '../components/CouponBar.vue'
+import WelcomeCouponSheet from '../components/WelcomeCouponSheet.vue'
 import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
@@ -571,7 +438,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet },
+  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, DishList, CartBar, CouponBar, WelcomeCouponSheet },
   setup() {
     const {
       formatPrice, dishImage, dishPlaceholderStyle, hasSpecs, isSoldOut, dishCardDesc,
@@ -3060,126 +2927,6 @@ export default {
 .activity-text,
 .shop-meta { display: none; }
 
-.coupon-bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  height: 68rpx;
-  padding: 0 32rpx;
-  background: linear-gradient(90deg, #fdf0dc, #fbe4bf);
-  box-sizing: border-box;
-}
-
-.coupon-bar-icon {
-  font-size: 26rpx;
-  line-height: 1;
-  color: #b5691f;
-}
-
-.coupon-bar-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #5a3c1e;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.coupon-bar-amount {
-  color: #e0432a;
-  font-weight: 800;
-}
-
-.coupon-bar-arrow {
-  flex-shrink: 0;
-  color: rgba(90, 60, 30, 0.55);
-  font-size: 24rpx;
-  line-height: 1;
-}
-
-.new-customer-bar {
-  width: 100%;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  line-height: normal;
-}
-.new-customer-bar::after { border: none; }
-.new-customer-bar[disabled] { opacity: .7; }
-
-
-.menu-body {
-  display: flex;
-  flex: 1;
-  width: 100%;
-  min-width: 0;
-  /* 不能设 overflow:hidden——小程序的渲染引擎会把 overflow:hidden 祖先当成"裁剪边界"，
-     连它里面 position:fixed 的弹层（确认订单、优惠券选择等）也一起裁掉，跟标准浏览器里
-     position:fixed 应该完全无视祖先 overflow 裁剪的行为不一样。这些弹层要铺满到屏幕最
-     底部，一旦被 menu-body 自己的高度边界裁掉，最下面的按钮就会看不见（这次反馈的问题）。
-     侧栏分类和菜品列表各自已经自己声明了 overflow-y:auto，靠的是 min-height:0 这个
-     flex 属性让它们在受限布局里能正常滚动，不依赖 menu-body 自己的 overflow，去掉它
-     不影响任何滚动区域。 */
-  overflow: visible;
-  min-height: 0;
-}
-
-.category-nav {
-  width: 168rpx;
-  flex: 0 0 168rpx;
-  background: #F6F7F8;
-  overflow-x: hidden;
-  overflow-y: auto;
-  box-sizing: border-box;
-}
-
-.cat-item {
-  position: relative;
-  height: 108rpx;
-  min-height: 108rpx;
-  padding: 12rpx 10rpx 10rpx 14rpx;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6rpx;
-  text-align: center;
-  color: #6F7680;
-  background: transparent;
-}
-
-.cat-icon-wrap {
-  width: 42rpx;
-  height: 42rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  flex-shrink: 0;
-}
-
-.cat-icon {
-  color: #9CA3AF;
-  font-size: 32rpx;
-  line-height: 36rpx;
-}
-
-.cat-name {
-  max-width: 124rpx;
-  font-size: 24rpx;
-  line-height: 30rpx;
-  font-weight: 600;
-  color: #6F7680;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .cat-item.active {
   background: #fff;
 }
@@ -3209,58 +2956,6 @@ export default {
   background: var(--brand);
 }
 
-.dish-scroll {
-  flex: 1;
-  min-width: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--bg-page);
-  padding: 0;
-  box-sizing: border-box;
-}
-
-.cat-divider {
-  height: 64rpx;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-}
-.cat-divider-line {
-  flex: 1;
-  max-width: 160rpx;
-  height: 1rpx;
-  background: #E7E9EC;
-}
-.cat-divider-main {
-  margin: 0 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  min-width: 0;
-}
-
-.cat-divider-icon {
-  flex-shrink: 0;
-  font-size: 28rpx;
-  line-height: 32rpx;
-  color: var(--brand);
-}
-
-.cat-divider-text {
-  max-width: 168rpx;
-  font-size: 26rpx;
-  color: var(--text-3);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0;
-}
-
 .cat-title {
   display: block;
   padding: 24rpx 0 16rpx;
@@ -3268,118 +2963,7 @@ export default {
   font-weight: 700;
   color: var(--text-3);
 }
-
-.dish-item {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  height: 236rpx;
-  min-height: 236rpx;
-  max-height: 236rpx;
-  margin: 0 20rpx 16rpx;
-  padding: 20rpx 20rpx 20rpx 24rpx;
-  box-sizing: border-box;
-  background: #fff;
-  border-radius: var(--radius-card);
-  box-shadow: var(--card-shadow);
-  position: relative;
-  overflow: hidden;
-  transition: background 120ms ease, opacity 120ms ease;
-}
-
-.dish-item:active { background: #f8faf9; }
-.dish-item--featured { border-left-color: transparent; }
-.dish-item--soldout { opacity: .76; }
-
-.dish-thumb {
-  position: relative;
-  width: 192rpx;
-  height: 192rpx;
-  border-radius: 20rpx;
-  overflow: hidden;
-  background: #F5F3EE;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  box-shadow: 0 2rpx 8rpx rgba(17,24,39,0.08);
-}
-
-.dish-img { width: 100%; height: 100%; display: block; }
-.dish-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #F5F3EE; }
-.dish-placeholder-img { width: 60%; height: 60%; }
-.dish-soldout-mask { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(31,41,55,.42); }
-.dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: #fff; font-size: 24rpx; font-weight: 700; }
 .dish-emoji-wrap, .dish-emoji, .dish-initial, .dish-badge-top { display: none; }
-
-
-.reorder-bar {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  margin: 16rpx 20rpx 12rpx;
-  padding: 16rpx 20rpx;
-  border-radius: 20rpx;
-  background: #fff;
-  box-shadow: var(--card-shadow);
-  box-sizing: border-box;
-}
-
-.reorder-label {
-  font-size: 22rpx;
-  color: var(--text-3);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.reorder-scroll {
-  flex: 1;
-  white-space: nowrap;
-}
-
-.reorder-chips {
-  display: flex;
-  gap: 10rpx;
-}
-
-.reorder-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6rpx;
-  padding: 8rpx 16rpx;
-  border-radius: 32rpx;
-  border: 1rpx solid var(--brand);
-  background: #f0fdf4;
-  flex-shrink: 0;
-}
-
-.reorder-chip-name {
-  font-size: 22rpx;
-  color: #065f46;
-  max-width: 120rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.reorder-chip-add {
-  font-size: 24rpx;
-  color: var(--brand);
-  font-weight: 800;
-  line-height: 1;
-}
-
-.reorder-all-btn {
-  flex-shrink: 0;
-  background: var(--brand);
-  border-radius: 28rpx;
-  padding: 6rpx 18rpx;
-}
-
-.reorder-all-text {
-  font-size: 22rpx;
-  color: #fff;
-  font-weight: 700;
-  white-space: nowrap;
-}
 
 
 .dish-save-badge {
@@ -3421,32 +3005,11 @@ export default {
   color: #065f46;
   font-weight: 700;
 }
-
-
-.dish-info { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 18rpx; box-sizing: border-box; overflow: hidden; }
-.dish-title-row { display: flex; align-items: flex-start; gap: 8rpx; min-width: 0; }
-.dish-name { flex: 1; min-width: 0; font-size: 32rpx; font-weight: 600; line-height: 44rpx; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-tags { display: flex; flex-shrink: 0; flex-wrap: nowrap; max-width: 88rpx; overflow: hidden; }
-.dish-tag { max-width: 88rpx; height: 34rpx; padding: 0 8rpx; border-radius: 8rpx; box-sizing: border-box; font-size: 20rpx; font-weight: 500; line-height: 34rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dish-tag--strong { color: #078546; background: #e9f9f0; }
 .dish-tag--plain { display: none; }
-.dish-meta { flex: 1; min-width: 0; min-height: 0; padding-top: 6rpx; }
-.dish-desc { display: block; min-width: 0; font-size: 26rpx; color: var(--text-3); line-height: 36rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-sales { display: block; min-width: 0; margin-top: 2rpx; margin-left: 0; font-size: 24rpx; line-height: 34rpx; color: #A8ADB4; font-weight: 400; }
-.dish-bottom-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0; margin-top: auto; min-width: 0; }
-.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; display: flex; align-items: baseline; color: var(--brand); }
-.dish-price-currency { flex-shrink: 0; font-size: 24rpx; font-weight: 700; line-height: 1; }
-.dish-price-amount { min-width: 0; font-size: 40rpx; font-weight: 700; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-price-suffix { flex-shrink: 0; margin-left: 2rpx; font-size: 22rpx; font-weight: 500; line-height: 1; color: var(--brand); }
 .dish-origin-price, .dish-save-badge, .member-price { display: none; }
-.dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; margin-left: 6rpx; min-width: 60rpx; max-width: 176rpx; padding-right: 0; box-sizing: border-box; }
-.dish-qty-control { width: 164rpx; max-width: 164rpx; height: 58rpx; padding: 4rpx; display: flex; align-items: center; justify-content: space-between; gap: 0; overflow: hidden; flex-shrink: 0; box-sizing: border-box; border-radius: 29rpx; background: #F3F4F6; }
-.counter-touch { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
-.dish-qty-control .counter-touch { width: 50rpx; height: 50rpx; }
-.dish-counter > .counter-touch { width: 76rpx; height: 76rpx; }
 .dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
 .dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
-.dish-qty-control .counter-btn--pressing { animation: none; transform: none; }
 .dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
 .dish-counter .counter-btn .iconfont { font-size: 27rpx; font-weight: 400; line-height: 1; }
 .dish-counter .counter-btn.plus { background: var(--brand); }
@@ -3456,8 +3019,6 @@ export default {
 .dish-counter .counter-btn.minus text { color: #4B5563; }
 .dish-counter .counter-num { width: 36rpx; min-width: 36rpx; text-align: center; font-size: 30rpx; line-height: 32rpx; font-weight: 600; color: var(--text-1); }
 .dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
-.soldout-action { height: 60rpx; min-width: 104rpx; padding: 0 20rpx; border-radius: 30rpx; display: flex; align-items: center; justify-content: center; background: #eef1f4; box-sizing: border-box; flex-shrink: 0; }
-.soldout-action text { font-size: 24rpx; font-weight: 600; color: #9aa1aa; white-space: nowrap; }
 
 
 .counter-btn {
@@ -3497,49 +3058,6 @@ export default {
   color: var(--text-1);
   min-width: 32rpx;
   text-align: center;
-}
-
-
-.list-pad { height: calc(348rpx + env(safe-area-inset-bottom)); }
-
-.empty-menu {
-  min-height: 520rpx;
-  padding: 80rpx 32rpx 32rpx;
-  text-align: center;
-  box-sizing: border-box;
-}
-
-.empty-menu-img {
-  width: 280rpx;
-  height: 280rpx;
-  margin: 0 auto 8rpx;
-}
-
-.empty-title {
-  display: block;
-  color: var(--text-1);
-  font-size: 34rpx;
-  font-weight: 800;
-}
-
-.empty-desc {
-  display: block;
-  margin-top: 14rpx;
-  color: var(--text-3);
-  font-size: 26rpx;
-  line-height: 1.6;
-}
-
-.empty-retry {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 28rpx;
-  padding: 0 36rpx;
-  height: 72rpx;
-  border-radius: 36rpx;
-  background: var(--brand);
-  text { color: #fff; font-size: 28rpx; font-weight: 700; }
 }
 
 
@@ -3644,246 +3162,6 @@ export default {
   .member-coupon-card { gap: 14rpx; padding: 22rpx; }
   .member-coupon-use { padding: 0 18rpx; }
 }
-
-
-.coupon-nudge-bar {
-  position: fixed;
-  left: 20rpx;
-  right: 20rpx;
-  bottom: calc(248rpx + env(safe-area-inset-bottom) + env(safe-area-inset-bottom));
-  z-index: 319;
-  min-height: 76rpx;
-  padding: 12rpx 14rpx 12rpx 18rpx;
-  border-radius: 18rpx 18rpx 0 0;
-  background: #fff7e6;
-  border: 1rpx solid #ffe2ad;
-  box-shadow: 0 -6rpx 18rpx rgba(120, 75, 20, .08);
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  box-sizing: border-box;
-}
-
-.coupon-nudge-bar--done {
-  background: #ecfbf3;
-  border-color: #bdebd2;
-}
-
-.coupon-nudge-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.coupon-nudge-icon {
-  flex-shrink: 0;
-  width: 42rpx;
-  height: 42rpx;
-  border-radius: 50%;
-  background: #ffe9c7;
-  color: #d85a22;
-  font-size: 24rpx;
-  line-height: 42rpx;
-  text-align: center;
-}
-
-.coupon-nudge-bar--done .coupon-nudge-icon {
-  background: #dff7e9;
-  color: var(--brand);
-}
-
-.coupon-nudge-copy {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.coupon-nudge-title {
-  color: #5a3c1e;
-  font-size: 25rpx;
-  line-height: 34rpx;
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.coupon-nudge-bar--done .coupon-nudge-title {
-  color: #0f8f50;
-}
-
-.coupon-nudge-strong {
-  color: #ef3f24;
-  font-weight: 900;
-}
-
-.coupon-nudge-sub {
-  margin-top: 2rpx;
-  color: #9a6a21;
-  font-size: 20rpx;
-  line-height: 28rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.coupon-nudge-bar--done .coupon-nudge-sub {
-  color: #43a36b;
-}
-
-.coupon-nudge-action {
-  flex-shrink: 0;
-  height: 52rpx;
-  min-width: 112rpx;
-  padding: 0 20rpx;
-  border-radius: 26rpx;
-  background: #ff5a3c;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-
-.coupon-nudge-action text {
-  color: #fff;
-  font-size: 23rpx;
-  line-height: 32rpx;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.coupon-nudge-action--plain {
-  background: var(--brand);
-}
-.cart-bar {
-  position: fixed;
-  z-index: 320;
-  bottom: calc(100rpx + env(safe-area-inset-bottom));
-  left: 0;
-  right: 0;
-  height: calc(148rpx + env(safe-area-inset-bottom));
-  min-height: calc(148rpx + env(safe-area-inset-bottom));
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  padding: 12rpx 24rpx;
-  padding-bottom: calc(12rpx + env(safe-area-inset-bottom));
-  background: #1f2937;
-  box-shadow: 0 -6rpx 20rpx rgba(0,0,0,0.18);
-  box-sizing: border-box;
-
-  &.has-items { background: var(--text-1); }
-}
-
-.cart-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 112rpx;
-  display: flex;
-  align-items: center;
-}
-
-.cart-icon-wrap {
-  position: relative;
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: #4B5362;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-
-  .has-items & { background: var(--brand); }
-}
-
-.cart-iconfont {
-  width: 48rpx;
-  height: 48rpx;
-  color: #fff;
-  font-size: 46rpx;
-  line-height: 48rpx;
-  text-align: center;
-}
-
-.cart-badge {
-  position: absolute;
-  top: -4rpx;
-  right: -4rpx;
-  min-width: 36rpx;
-  height: 36rpx;
-  border-radius: 18rpx;
-  background: #F04444;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 8rpx;
-  box-sizing: border-box;
-
-  text { color: #fff; font-size: 22rpx; line-height: 36rpx; font-weight: 600; }
-}
-
-.cart-info { flex: 1; min-width: 0; margin-left: 20rpx; display: flex; flex-direction: column; justify-content: center; }
-.cart-right { display: flex; align-items: center; flex-shrink: 0; }
-
-.cart-price {
-  display: block;
-  color: #fff;
-  font-size: 48rpx;
-  line-height: 56rpx;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cart-tip {
-  display: block;
-  color: rgba(255,255,255,0.62);
-  font-size: 24rpx;
-  line-height: 34rpx;
-  margin-top: 4rpx;
-}
-
-.cart-empty {
-  display: block;
-  color: rgba(255,255,255,0.72);
-  font-size: 30rpx;
-  line-height: 40rpx;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.checkout-btn {
-  min-width: 236rpx;
-  height: 92rpx;
-  padding: 0 48rpx;
-  border-radius: 46rpx;
-  background: var(--brand);
-  box-shadow: 0 8rpx 24rpx rgba(7,193,96,0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
-
-  text { color: #fff; font-size: 32rpx; font-weight: 600; white-space: nowrap; }
-
-  &.disabled {
-    background: #4B5362;
-    box-shadow: none;
-    text { color: rgba(255,255,255,0.45); }
-  }
-}
-
-.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 180ms var(--bounce-ease); text { color: #fff; font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
-.choose-option-btn:active { transform: scale(.97); }
-.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: var(--brand); font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
 
 
 .mask {
@@ -4602,68 +3880,6 @@ export default {
   text-align: center;
 }
 
-.closed-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 3000;
-  background: rgba(0, 0, 0, 0.65);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 48rpx;
-}
-
-.closed-card {
-  background: #fff;
-  border-radius: 32rpx;
-  padding: 56rpx 40rpx 40rpx;
-  text-align: center;
-  width: 100%;
-}
-
-.closed-icon-wrap {
-  width: 112rpx;
-  height: 112rpx;
-  margin: 0 auto 24rpx;
-  border-radius: 50%;
-  background: #F3F4F6;
-  color: #9aa1aa;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.closed-icon {
-  font-size: 56rpx;
-}
-
-.closed-title {
-  display: block;
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #111;
-  margin-bottom: 12rpx;
-}
-
-.closed-desc {
-  display: block;
-  font-size: 28rpx;
-  color: var(--text-3);
-  line-height: 1.6;
-  margin-bottom: 40rpx;
-}
-
-.closed-btn {
-  padding: 24rpx 0;
-  background: var(--brand);
-  border-radius: 20rpx;
-  text {
-    font-size: 30rpx;
-    color: #fff;
-    font-weight: 700;
-  }
-}
-
 .closed-btn-plain {
   margin-top: 16rpx;
   background: #f3f4f6;
@@ -4683,43 +3899,8 @@ export default {
   line-height: 1;
 }
 
-.counter-btn--pressing {
-  animation: addButtonPress 220ms var(--bounce-ease);
-}
-
 .counter-num--pulse {
   animation: cartQtyPulse 150ms ease-out;
-}
-
-.cart-icon-wrap {
-  transform-origin: center;
-  transition: background 150ms ease-out, transform 180ms ease-out;
-}
-
-.cart-icon-wrap--pulse {
-  animation: cartIconPulse 180ms ease-out;
-}
-
-.cart-badge {
-  transform-origin: center;
-}
-
-.cart-badge--pulse {
-  animation: cartBadgePulse 180ms ease-out;
-}
-
-.cart-price {
-  transform-origin: left center;
-  transition: color 150ms ease-out, transform 180ms ease-out;
-}
-
-.cart-price--highlight {
-  color: #34f38a;
-  animation: cartAmountHighlight 200ms ease-out;
-}
-
-.checkout-btn {
-  transition: background 180ms ease-out, opacity 180ms ease-out;
 }
 
 @keyframes addButtonPress {
@@ -4836,113 +4017,6 @@ export default {
   .success-sheet .success-check {
     animation: none;
   }
-}
-
-.welcome-mask {
-  align-items: center;
-  justify-content: center;
-  padding: 0 48rpx;
-  background: rgba(15, 23, 42, .58);
-}
-
-.welcome-coupon-sheet {
-  width: 100%;
-  max-width: 560rpx;
-  background: linear-gradient(160deg, #ff5a3c 0%, #ff2f1f 55%, #d81717 100%);
-  border: 2rpx solid rgba(255, 222, 150, 0.9);
-  border-radius: 32rpx;
-  padding: 48rpx 40rpx 36rpx;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-  box-shadow: 0 16rpx 40rpx -14rpx rgba(180, 20, 10, 0.45);
-  animation: ec-card-in 0.5s cubic-bezier(0.22, 1.3, 0.4, 1) both;
-}
-
-.welcome-coupon-sheet::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.5) 50%, transparent 58%);
-  transform: translateX(-140%);
-  animation: ec-shine 1s ease 0.45s 1;
-  pointer-events: none;
-}
-
-.wc-ribbon {
-  display: inline-block;
-  padding: 4rpx 20rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffe9c2;
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-.wc-amount-row {
-  display: flex;
-  align-items: baseline;
-  margin-top: 22rpx;
-}
-
-.wc-currency {
-  font-size: 34rpx;
-  font-weight: 800;
-  color: #ffffff;
-  margin-right: 4rpx;
-}
-
-.wc-amount {
-  font-size: 88rpx;
-  font-weight: 900;
-  color: #ffffff;
-  line-height: 1;
-  text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
-}
-
-.wc-cond {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 24rpx;
-  color: #ffe4d2;
-}
-
-.wc-divider {
-  width: 100%;
-  height: 1rpx;
-  background: rgba(255, 255, 255, 0.25);
-  margin: 24rpx 0 18rpx;
-}
-
-.wc-name {
-  display: block;
-  font-size: 28rpx;
-  font-weight: 700;
-  color: #ffffff;
-}
-
-.wc-btn {
-  width: 100%;
-  height: 88rpx;
-  margin-top: 32rpx;
-  border-radius: 999rpx;
-  background: linear-gradient(180deg, #ffe9a8, #ffcf5c);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  box-shadow: 0 10rpx 22rpx -10rpx rgba(255, 180, 40, 0.75);
-  text { color: #7a1f00; font-size: 30rpx; font-weight: 900; }
-}
-
-.wc-skip {
-  margin-top: 20rpx;
-  font-size: 24rpx;
-  color: rgba(255, 255, 255, 0.7);
 }
 </style>
 
