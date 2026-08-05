@@ -51,3 +51,148 @@ export default {
   emits: ['cancel', 'select-coupon'],
 }
 </script>
+
+<style lang="scss">
+.coupon-picker-sheet {
+  width: 100%;
+  max-height: 76vh;
+  background: #fff;
+  border-radius: 32rpx 32rpx 0 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  animation: slide-up 0.25s ease;
+}
+
+
+
+.cp-head {
+  position: relative;
+  flex-shrink: 0;
+  padding: 28rpx 32rpx 18rpx;
+  text-align: center;
+}
+
+
+
+.cp-title {
+  font-size: 32rpx;
+  font-weight: 900;
+  color: var(--text-1);
+}
+
+
+
+.cp-close {
+  position: absolute;
+  right: 20rpx;
+  top: 16rpx;
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: 34rpx;
+  line-height: 64rpx;
+  text-align: center;
+}
+
+
+
+.cp-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+
+
+.cp-option {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 22rpx 20rpx;
+  margin-bottom: 16rpx;
+  border-radius: 20rpx;
+  border: 2rpx solid #edf0f2;
+  background: #fafbfc;
+  box-sizing: border-box;
+}
+
+
+
+.cp-option--on {
+  border-color: var(--brand);
+  background: #ecfbf3;
+}
+
+
+
+.cp-option--disabled {
+  opacity: .5;
+}
+
+
+
+.cp-option-amount {
+  flex-shrink: 0;
+  min-width: 108rpx;
+  text-align: center;
+  /* 券面额用红金色而不是品牌绿，跟"选中态"用色分开：绿色始终代表"这个选项被选中"，
+     红金色代表"这是一张券"，两套含义混用同一个颜色会互相干扰。 */
+  text { color: #ff3018; font-size: 40rpx; font-weight: 900; }
+}
+
+
+
+.cp-option-main {
+  flex: 1;
+  min-width: 0;
+}
+
+
+
+.cp-option-name {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+
+
+.cp-option-cond {
+  display: block;
+  margin-top: 4rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+}
+
+
+
+.cp-radio-icon {
+  flex-shrink: 0;
+  width: 44rpx;
+  height: 44rpx;
+  color: #d7dce2;
+  font-size: 42rpx;
+  line-height: 44rpx;
+  text-align: center;
+}
+
+
+
+.cp-option--on .cp-radio-icon {
+  color: var(--brand);
+}
+
+
+
+.cp-empty {
+  padding: 64rpx 0;
+  text-align: center;
+  text { color: var(--text-3); font-size: 26rpx; }
+}
+</style>

@@ -167,3 +167,538 @@ export default {
   emits: ['close', 'retry-load', 'continue-order', 'checkout', 'scroll-to-top', 'mark-image-failed'],
 }
 </script>
+
+<style lang="scss">
+.table-account-sheet {
+  background: #f6f7f8;
+  padding-bottom: 0;
+}
+
+
+
+.table-account-head {
+  position: relative;
+  justify-content: center;
+  min-height: 88rpx;
+}
+
+
+
+.table-account-back {
+  position: absolute;
+  left: 18rpx;
+  top: 12rpx;
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+
+
+
+.table-account-back text {
+  font-size: 34rpx;
+}
+
+
+
+.table-account-list {
+  max-height: calc(82vh - 176rpx - env(safe-area-inset-bottom));
+  padding: 0 24rpx 188rpx;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18rpx 24rpx 20rpx;
+  text-align: center;
+}
+
+
+
+.table-account-status-icon {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+
+.table-account-status-icon text {
+  font-size: 30rpx;
+}
+
+
+
+.table-account-status-title {
+  margin-top: 12rpx;
+  color: var(--text-1);
+  font-size: 44rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+
+
+.table-account-status-desc {
+  margin-top: 8rpx;
+  color: var(--text-3);
+  font-size: 28rpx;
+  line-height: 1.45;
+}
+
+
+
+.table-account-status-note {
+  display: block;
+  margin-top: 4rpx;
+  color: var(--text-3);
+  font-size: 24rpx;
+  line-height: 1.4;
+}
+
+
+
+.table-account-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  margin-top: 8rpx;
+  padding: 26rpx 28rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-summary-left,
+.table-account-summary-right {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+.table-account-table,
+.table-account-total {
+  color: var(--text-1);
+  font-size: 40rpx;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+
+
+.table-account-sub,
+.table-account-count {
+  margin-top: 8rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 1.4;
+}
+
+
+
+.table-account-summary-right {
+  flex-shrink: 0;
+  align-items: flex-end;
+  text-align: right;
+}
+
+
+
+.table-account-total {
+  color: var(--brand);
+}
+
+
+
+.table-account-section {
+  margin-top: 18rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18rpx;
+}
+
+
+
+.table-account-section-title {
+  color: var(--text-1);
+  font-size: 34rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+
+
+.table-account-group + .table-account-group {
+  margin-top: 26rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid #eef1f3;
+}
+
+
+
+.table-account-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-bottom: 16rpx;
+}
+
+
+
+.table-account-group-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+
+
+/* 拼桌时标出"这一单是第几位点的"，纯展示编号，不关联真实身份 */
+.participant-badge {
+  flex-shrink: 0;
+  width: 34rpx;
+  height: 34rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 800;
+}
+
+
+
+.table-account-group-time {
+  color: var(--text-2);
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+
+
+/* 服务员代客加的单也标出来，让顾客知道这道菜是谁帮加的，结账时不会觉得莫名其妙 */
+.table-account-staff-badge {
+  flex-shrink: 0;
+  color: #a21caf;
+  background: #fdf4ff;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+
+
+.table-account-group-discount {
+  flex-shrink: 0;
+  color: #ef4444;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+
+
+.table-account-group-status {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
+
+
+.table-account-item {
+  min-height: 128rpx;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 12rpx 0;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-item--muted {
+  opacity: .58;
+}
+
+
+
+.table-account-item-img-wrap,
+.table-account-item-img,
+.table-account-item-placeholder {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 20rpx;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+
+
+.table-account-item-placeholder {
+  background: #f2f4f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+
+.table-account-item-placeholder text {
+  color: var(--text-3);
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+
+
+.table-account-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+
+
+.table-account-item-name {
+  color: var(--text-1);
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+
+.table-account-item-spec,
+.table-account-item-mark {
+  margin-top: 6rpx;
+  color: var(--text-3);
+  font-size: 25rpx;
+  line-height: 1.35;
+}
+
+
+
+.table-account-item-mark {
+  color: #9a6a21;
+}
+
+
+
+.table-account-item-qty {
+  flex-shrink: 0;
+  min-width: 52rpx;
+  color: var(--text-2);
+  font-size: 28rpx;
+  font-weight: 800;
+  text-align: right;
+}
+
+
+
+.table-account-item-amount {
+  flex-shrink: 0;
+  min-width: 118rpx;
+  color: var(--text-1);
+  font-size: 29rpx;
+  font-weight: 900;
+  text-align: right;
+}
+
+
+
+.table-account-empty {
+  padding: 56rpx 20rpx;
+  text-align: center;
+}
+
+
+
+.table-account-empty-title {
+  display: block;
+  color: var(--text-1);
+  font-size: 32rpx;
+  font-weight: 900;
+}
+
+
+
+.table-account-empty-desc {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+
+
+.table-account-tip {
+  margin: 18rpx 0 0;
+  padding: 18rpx 22rpx;
+  border-radius: 18rpx;
+  background: #eef2f0;
+  color: var(--text-3);
+  font-size: 25rpx;
+  line-height: 1.45;
+}
+
+
+
+.table-account-retry {
+  width: 220rpx;
+  height: 76rpx;
+  margin: 24rpx auto 0;
+  border-radius: 38rpx;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+
+.table-account-retry text {
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+
+
+.table-account-actions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  gap: 18rpx;
+  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  background: #fff;
+  border-top: 1rpx solid #edf0f2;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-action {
+  height: 92rpx;
+  border-radius: 46rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+
+
+.table-account-action text {
+  font-size: 29rpx;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+
+
+.table-account-action--secondary {
+  flex: 0 0 236rpx;
+  border: 2rpx solid var(--brand);
+  background: #fff;
+  color: var(--brand);
+}
+
+
+
+.table-account-action--secondary text {
+  color: var(--brand);
+}
+
+
+
+.table-account-action--primary {
+  flex: 1;
+  min-width: 0;
+  background: var(--brand);
+  color: #fff;
+}
+
+
+
+.table-account-action--primary text {
+  color: #fff;
+}
+
+
+
+.table-account-action--ghost {
+  background: #f1f4f3;
+}
+
+
+
+.table-account-action--ghost text {
+  color: var(--text-2);
+}
+
+
+
+.table-account-action--disabled {
+  opacity: .5;
+}
+
+
+
+/* 餐后付款没有可点击的"去结账"——结账动作在商家手里，这里只是一句提示，
+   不能长得跟旁边的按钮一样可点，字号、字重都调低，允许换行。 */
+.table-account-action--info {
+  height: auto;
+  min-height: 92rpx;
+  background: #f6f7f8;
+  padding: 12rpx 20rpx;
+}
+
+
+
+.table-account-action--info text {
+  color: var(--text-2);
+  font-size: 24rpx;
+  font-weight: 600;
+  white-space: normal;
+  line-height: 1.4;
+  text-align: center;
+}
+</style>

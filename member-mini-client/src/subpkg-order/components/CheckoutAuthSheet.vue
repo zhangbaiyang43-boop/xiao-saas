@@ -51,3 +51,52 @@ export default {
   emits: ['cancel', 'getphonenumber'],
 }
 </script>
+
+<style lang="scss">
+.checkout-auth-mask { align-items: flex-end; }
+
+
+.checkout-auth-sheet { width: 100%; max-height: 55vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
+
+
+.checkout-auth-handle { width: 72rpx; height: 8rpx; border-radius: 999rpx; background: #e5e7eb; align-self: center; margin-bottom: 20rpx; }
+
+
+.checkout-auth-title { color: var(--text-1); font-size: 38rpx; font-weight: 900; text-align: center; line-height: 1.25; }
+
+
+.checkout-auth-desc { margin-top: 12rpx; color: var(--text-2); font-size: 27rpx; line-height: 1.55; text-align: center; }
+
+
+.checkout-auth-order { margin-top: 22rpx; padding: 22rpx 24rpx; border-radius: 22rpx; background: #f8fafb; border: 1rpx solid #edf0f2; }
+
+
+.checkout-auth-row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; color: var(--text-3); font-size: 26rpx; line-height: 1.5; }
+
+
+.checkout-auth-row + .checkout-auth-row { margin-top: 12rpx; }
+
+
+.checkout-auth-row text:last-child { color: var(--text-1); font-weight: 800; text-align: right; max-width: 440rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+
+.checkout-auth-row--amount text:last-child { color: var(--brand); font-size: 32rpx; font-weight: 900; }
+
+
+.checkout-auth-auto { margin-top: 18rpx; padding: 18rpx 20rpx; border-radius: 18rpx; background: #ecfbf3; color: #0f8f50; font-size: 24rpx; line-height: 1.55; }
+
+
+.checkout-auth-primary { margin-top: 24rpx; height: 96rpx; border-radius: var(--radius-card); background: #16c76f; color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
+
+
+.checkout-auth-primary[disabled] { opacity: .72; box-shadow: none; }
+
+
+.checkout-auth-cancel { height: 72rpx; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 28rpx; }
+
+
+.checkout-auth-member { display: block; color: var(--text-3); font-size: 22rpx; line-height: 1.45; text-align: center; margin-top: 2rpx; }
+
+
+.checkout-auth-privacy { display: block; color: #a8b1bd; font-size: 21rpx; line-height: 1.45; text-align: center; margin-top: 10rpx; }
+</style>
