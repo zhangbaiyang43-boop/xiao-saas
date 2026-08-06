@@ -110,7 +110,6 @@ export default {
         posY.value = Math.max(0, Math.min(maxPosY(), areaHeightPx.value * DEFAULT_Y_RATIO))
       } catch {
         // 读不到系统信息就用不了自适应定位，气泡保持默认位置，不影响点餐主流程。
-        // eslint-disable-next-line no-empty
       }
     }
 

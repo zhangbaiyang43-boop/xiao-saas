@@ -127,7 +127,7 @@ export default {
           success: () => {
             resolve(true)
           },
-          fail: (err) => {
+          fail: () => {
             uni.reLaunch({
               url,
               success: () => {
@@ -158,7 +158,7 @@ export default {
         uni.redirectTo({
           url,
           success: () => resolve(true),
-          fail: (err) => {
+          fail: () => {
             uni.reLaunch({
               url,
               success: () => resolve(true),

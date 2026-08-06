@@ -87,7 +87,7 @@ describe('useDiningSession', () => {
 
   describe('syncDiningOrders', () => {
     it('本地身份不全且不是重试时，先强制重建身份再重试一次', async () => {
-      const { state, session } = setup()
+      const { session } = setup()
       // diningSessionId/diningParticipantToken 都是空的，diningOrderQuery() 拿不全
       resolveDiningIdentity.mockResolvedValue({
         ok: true,

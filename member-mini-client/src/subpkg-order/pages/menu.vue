@@ -377,7 +377,7 @@
 
 <script>
 import { ref, computed, watch, nextTick } from 'vue'
-import { getMenuItems, getShopInfo, createOrder, createWxPayOrder, getOrderStatus } from '@/api/order'
+import { getMenuItems, getShopInfo } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
 import { consumeStart, recordSample } from '@/utils/perf'
@@ -436,7 +436,7 @@ export default {
       dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
       couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
-      statusLabel, dishTags, strongDishTags, normalizeDishTag, isStrongDishTag, dishCardTags, isFeatured,
+      statusLabel, dishTags, normalizeDishTag, isStrongDishTag, dishCardTags, isFeatured,
       pickAvatarChar,
     } = useOrderFormatters()
     const tableNo = ref('')
@@ -589,8 +589,8 @@ export default {
     const {
       normalizeOrderStatus, currentTableOrder, historyTableOrders,
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId,
-      tableSessionOrders, validTableOrders, tableTotal, tableItemCount, tableOrderGroups,
-      isTableSettled, canContinueOrder, allOrdersDone, stillPreparing, checkoutRequested,
+      tableTotal, tableItemCount, tableOrderGroups,
+      isTableSettled, canContinueOrder, stillPreparing, checkoutRequested,
       canCheckout, postpayReadyToSettle, scrollTableAccountToTop, tableStatusView,
       currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
       tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle,
@@ -734,7 +734,7 @@ export default {
 
     const {
       canStartOrdering, homeStatusDesc, homeOrderButtonText, homeCouponHint,
-      featuredDish, canHomeAdd, featuredDishTag, findHistoryDish, validateHistoryReorderItem,
+      featuredDish, canHomeAdd, featuredDishTag, validateHistoryReorderItem,
       lastOrderItems, homeLastOrderItems,
     } = useHomeTabView({ allDishes, storeClosed, bannerInfo, myOrders, isSoldOut, dishTags, normalizeDishTag, hasSpecs })
     const cartCount = (id) => cart.value[id] || 0
@@ -882,10 +882,10 @@ export default {
     }
 
     const {
-      createPaymentIntent, goCheckout, cancelCheckoutAuth, continuePendingPaymentIntent, handleCheckoutAuth,
-      performSubmitOrder, submitOrder, applyRewardCoupon, attachPaymentReward, confirmPay,
+      goCheckout, cancelCheckoutAuth, handleCheckoutAuth,
+      confirmPay,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder,
-      clearStalePrepayOrderForPayLater, recoverPendingPaymentResult, requireCheckoutAuth,
+      recoverPendingPaymentResult,
     } = useCheckout({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
       orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,

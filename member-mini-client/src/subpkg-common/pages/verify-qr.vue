@@ -194,7 +194,6 @@ export default {
         }
       } catch (_) {
         // 本地缓存读取/解析失败就当没有缓存，照常走接口，不影响核销流程。
-        // eslint-disable-next-line no-empty
       }
     },
 
@@ -203,7 +202,6 @@ export default {
         uni.setStorageSync(this._cacheKey(), JSON.stringify({ ...data, _ts: Date.now() }))
       } catch (_) {
         // 缓存写入失败最多下次少一次离线兜底，不影响这一次的核销结果。
-        // eslint-disable-next-line no-empty
       }
     },
 
@@ -387,7 +385,6 @@ export default {
         }
       } catch (_) {
         // 这次查询失败不改变券状态，下一轮轮询会重试，不阻塞用户看到的核销页面。
-        // eslint-disable-next-line no-empty
       }
       return false
     },

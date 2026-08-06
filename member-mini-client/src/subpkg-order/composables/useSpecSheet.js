@@ -16,7 +16,7 @@ import { specText, confirmationText } from '../utils/orderText.js'
 //   组合式函数是分开调用的两个composable，这里只是复用其中一个触发函数。
 export function useSpecSheet({
   itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
-  specCartItems, isSoldOut, hasSpecs, formatPrice, triggerCartSuccessFeedback,
+  specCartItems, isSoldOut, formatPrice, triggerCartSuccessFeedback,
 }) {
   const showSpecSheet = ref(false)
   const specDish = ref({})

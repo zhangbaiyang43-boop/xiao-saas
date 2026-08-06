@@ -269,7 +269,7 @@ describe('useCheckout', () => {
 
   describe('performSubmitOrder - 本桌会话不可用', () => {
     it('ensureDiningSession 返回 false 时提示重新扫码，不发下单请求', async () => {
-      const { state, checkout } = setup({ ensureDiningSession: vi.fn(() => Promise.resolve(false)) })
+      const { checkout } = setup({ ensureDiningSession: vi.fn(() => Promise.resolve(false)) })
 
       const ok = await checkout.performSubmitOrder()
 
