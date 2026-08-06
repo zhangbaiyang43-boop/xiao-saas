@@ -183,6 +183,216 @@ async def _on_payment_success(
     return coupon_data, 0.0
 
 
+async def _apply_paid_order_member_assets_once(order: Order, db: AsyncSession) -> None:
+    """Apply member consumption assets for one paid order at most once.
+
+    Offline payment modes do not go through the WeChat payment callback, so they
+    need the same member-account side effect when the merchant marks the order
+    paid. PointLedger.ref_id already stores order.id for paid-order consumption,
+    so use it as the narrow idempotency guard without changing schema.
+    """
+    if not getattr(order, "customer_id", None):
+        return
+
+    from app.models.customer import Customer
+    from app.models.point_ledger import PointLedger
+    from app.services.membership_service import MembershipService
+
+    tenant_id = str(order.tenant_id)
+    customer_id = int(order.customer_id)
+    existing_result = await db.execute(
+        select(PointLedger.id).where(
+            PointLedger.tenant_id == tenant_id,
+            PointLedger.customer_id == customer_id,
+            PointLedger.event_type == "consumption",
+            PointLedger.ref_id == str(order.id),
+        )
+    )
+    if existing_result.scalar_one_or_none():
+        return
+
+    customer_result = await db.execute(
+        select(Customer).where(
+            Customer.tenant_id == tenant_id,
+            Customer.id == customer_id,
+            Customer.status == 1,
+        )
+    )
+    customer = customer_result.scalar_one_or_none()
+    if not customer:
+        return
+
+    membership_svc = MembershipService(db)
+    membership_svc.set_tenant_id(tenant_id)
+    await membership_svc.apply_consumption(customer, float(order.total or 0), consumption_id=order.id)
+
+    # 新客券/复购券：prepay 支付成功（_on_payment_success）会发，但 postpay/table_account
+    # 结账走的是这个函数，之前完全没有这一段——商户后台"复购券"卡片的文案明确写的是
+    # "每次下单后自动推送下次用的券"，不是"微信支付后"，postpay/table_account 静默漏发
+    # 与文案承诺不符。同一套 rule_type 判定逻辑（按已支付订单数区分新客/复购），
+    # 发放本身的去重交给 issue_auto_coupon 自己的幂等保护（_dedup_issue_lock）。
+    try:
+        prior_paid_count_result = await db.execute(
+            select(func.count(Order.id)).where(
+                Order.tenant_id == order.tenant_id,
+                Order.customer_id == customer_id,
+                Order.payment_status == "paid",
+                Order.id != order.id,
+            )
+        )
+        prior_paid_count = int(prior_paid_count_result.scalar() or 0)
+        rule_type = "new_customer_coupon" if prior_paid_count == 0 else "consumption_coupon"
+        coupon_svc = CouponService(db)
+        coupon_svc.set_tenant_id(tenant_id)
+        await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
+    except Exception as e:
+        logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")
+
+
+async def _refund_order_payment(order: Order, db: AsyncSession, reason: str) -> dict:
+    """Refund a paid order's money before flipping it to a terminal cancelled/rejected state.
+
+    Must be called with `order` already locked (with_for_update) in the current transaction.
+    Restores the balance-paid portion directly; submits a WeChat refund request for the
+    WeChat-charged portion. Uses a deterministic out_refund_no so retrying this call is safe
+    (WeChat treats a repeated out_refund_no as the same refund request, not a new one).
+
+    Returns {"success": bool, "amount": float, "error": str | None}.
+    """
+    if getattr(order, "payment_status", None) != "paid":
+        return {"success": True, "amount": 0.0, "error": None}
+    if getattr(order, "refund_status", None) == "success":
+        return {"success": True, "amount": float(order.refund_amount or 0), "error": None}
+
+    total = float(order.total or 0)
+    balance_portion = float(order.balance_deduct_requested or 0)
+    if balance_portion <= 0 and order.payment_method == "balance":
+        # Legacy orders paid before balance_deduct_requested tracked the actual amount.
+        balance_portion = total
+    wechat_portion = max(total - balance_portion, 0.0)
+    refunded_amount = 0.0
+
+    if balance_portion > 0 and order.customer_id:
+        from app.models.member_account import MemberAccount
+
+        acc_result = await db.execute(
+            select(MemberAccount).where(
+                MemberAccount.tenant_id == str(order.tenant_id),
+                MemberAccount.customer_id == int(order.customer_id),
+            ).with_for_update()
+        )
+        acc = acc_result.scalar_one_or_none()
+        if acc:
+            acc.balance = float(acc.balance) + balance_portion
+            refunded_amount += balance_portion
+
+    if wechat_portion > 0 and order.payment_method == "wxpay":
+        try:
+            from app.models.tenant import Tenant
+            from app.services.wxpay_service import WxPayService
+
+            tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
+            tenant = tenant_result.scalar_one_or_none()
+            svc = WxPayService(tenant) if tenant else None
+            if not svc or not svc.enabled:
+                raise RuntimeError("shang hu wei pei zhi wei xin zhi fu, wu fa zi dong tui kuan")
+            wechat_fen = max(1, round(wechat_portion * 100))
+            await svc.refund(
+                out_trade_no=str(order.id),
+                out_refund_no=f"RF{order.id}",
+                refund_fen=wechat_fen,
+                total_fen=wechat_fen,
+                reason=reason,
+            )
+            refunded_amount += wechat_portion
+        except Exception as exc:
+            order.refund_status = "failed"
+            order.refund_error = str(exc)[:500]
+            logger.error("[REFUND_FAILED] order_id=%s error=%s", order.id, exc)
+            return {"success": False, "amount": refunded_amount, "error": str(exc)}
+
+    # 退款后回滚这一单在支付成功时记的账：优惠券和积分/消费额，否则顾客能靠
+    # "付款->拿到积分/等级/优惠券->自己或商家取消退款"反复刷积分和等级。
+    if order.coupon_id:
+        from app.models.coupon import Coupon
+
+        coupon_result = await db.execute(
+            select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+        )
+        coupon = coupon_result.scalar_one_or_none()
+        if coupon and coupon.status in ("LOCKED", "USED"):
+            coupon.status = "UNUSED"
+            coupon.use_time = None
+
+    if order.customer_id:
+        try:
+            from app.services.membership_service import MembershipService
+
+            membership_svc = MembershipService(db)
+            membership_svc.set_tenant_id(str(order.tenant_id))
+            await membership_svc.reverse_consumption(int(order.customer_id), total, consumption_id=order.id)
+        except Exception as exc:
+            logger.warning("[REFUND_POINTS_REVERSAL_FAILED] order_id=%s error=%s", order.id, exc)
+
+    order.refund_status = "success"
+    order.refund_amount = refunded_amount
+    order.refunded_at = datetime.now(timezone.utc)
+    order.refund_error = None
+    logger.info(
+        "[REFUND_SUCCESS] order_id=%s amount=%s balance_portion=%s wechat_portion=%s reason=%s",
+        order.id, refunded_amount, balance_portion, wechat_portion, reason,
+    )
+    return {"success": True, "amount": refunded_amount, "error": None}
+
+
+async def _refund_orphaned_wxpay_payment(order: Order, db: AsyncSession) -> dict:
+    """WeChat confirms a payment succeeded for an order that's already cancelled/rejected
+    locally (see wxpay_notify) -- the callback arrived after cancel_order/update_order_status
+    had already committed the terminal state, so _on_payment_success never ran for this order:
+    no points, no consumption tracking, no coupon issuance, no kitchen ticket. There is nothing
+    on our side to reverse, only the money that actually landed in the merchant's WeChat
+    account to send back. Deliberately does not touch order.status or print anything -- the
+    kitchen was already told this order is off.
+
+    Must be called with `order` already locked (with_for_update) in the current transaction.
+    """
+    total_fen = max(1, round(float(order.total or 0) * 100))
+    try:
+        from app.models.tenant import Tenant
+        from app.services.wxpay_service import WxPayService
+
+        tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
+        tenant = tenant_result.scalar_one_or_none()
+        svc = WxPayService(tenant) if tenant else None
+        if not svc or not svc.enabled:
+            raise RuntimeError("merchant wxpay not configured, cannot auto-refund")
+        await svc.refund(
+            out_trade_no=str(order.id),
+            out_refund_no=f"RF{order.id}",
+            refund_fen=total_fen,
+            total_fen=total_fen,
+            reason="race_with_cancel_auto_refund",
+        )
+    except Exception as exc:
+        order.refund_status = "failed"
+        order.refund_error = str(exc)[:500]
+        logger.error(
+            "[WXPAY_NOTIFY_RACE_AUTO_REFUND_FAILED] order_id=%s error=%s -- needs manual refund",
+            order.id, exc,
+        )
+        return {"success": False, "amount": 0.0, "error": str(exc)}
+
+    order.refund_status = "success"
+    order.refund_amount = float(order.total or 0)
+    order.refunded_at = datetime.now(timezone.utc)
+    order.refund_error = None
+    logger.error(
+        "[WXPAY_NOTIFY_RACE_AUTO_REFUNDED] order_id=%s amount=%s order_status=%s",
+        order.id, order.refund_amount, order.status,
+    )
+    return {"success": True, "amount": float(order.refund_amount), "error": None}
+
+
 async def mock_pay_order(order_id: str, body, request, db: AsyncSession):
     """Mock payment for development only."""
     import traceback

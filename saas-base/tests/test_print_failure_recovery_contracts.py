@@ -262,6 +262,9 @@ def install_stubs():
     modules["app.services.order_payment_service"].mock_pay_order = _noop_async
     modules["app.services.order_payment_service"].create_wxpay_order = _noop_async
     modules["app.services.order_payment_service"].wxpay_notify = _noop_async
+    modules["app.services.order_payment_service"]._apply_paid_order_member_assets_once = _noop_async
+    modules["app.services.order_payment_service"]._refund_order_payment = _noop_async
+    modules["app.services.order_payment_service"]._refund_orphaned_wxpay_payment = _noop_async
     modules["app.services.feieyun_service"].build_order_ticket = lambda order, order_items: "ticket"
     modules["app.services.feieyun_service"].print_order = lambda *args: True
     modules["app.services.kuaimai_service"].KUAIMAI_ORDER_TEMPLATE_ID = "1634998374"
