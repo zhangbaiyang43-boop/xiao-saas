@@ -477,6 +477,16 @@ export default {
   white-space: nowrap;
 }
 
+@media screen and (max-width: 340px) {
+  .home-tab { padding-left: 24rpx; padding-right: 24rpx; }
+  .ht-status-card, .ht-order-card { padding: 30rpx; }
+  .ht-feature-card { gap: 18rpx; padding: 20rpx; }
+  .ht-feature-img-wrap { width: 176rpx; height: 176rpx; }
+  .ht-feature-add { padding: 0 22rpx; }
+  .ht-feature-add text { font-size: 24rpx; }
+  .ht-last-name { max-width: 184rpx; }
+}
+
 
 .ht-last-add { color: var(--brand); font-size: 30rpx; line-height: 36rpx; font-weight: 900; }
 </style>

@@ -237,6 +237,23 @@ export default {
   font-size: 30rpx;
 }
 
+// 顶部大状态图标和下面每笔子订单的状态标签用同一套语义色：
+// active=还在等（下单/制作中），served=菜已上齐可以结账，settled=已结账/归档。
+.table-account-status-icon--active {
+  background: #fff7e6;
+  color: var(--warning);
+}
+
+.table-account-status-icon--served {
+  background: #ecfbf3;
+  color: var(--brand);
+}
+
+.table-account-status-icon--settled {
+  background: #f3f4f6;
+  color: var(--text-3);
+}
+
 
 
 .table-account-status-title {
@@ -431,6 +448,18 @@ export default {
   color: var(--warning);
   font-size: 24rpx;
   line-height: 34rpx;
+}
+
+.table-account-group-status--served {
+  color: var(--brand);
+}
+
+.table-account-group-status--settled {
+  color: var(--text-3);
+}
+
+.table-account-group-status--muted {
+  color: #9aa1aa;
 }
 
 

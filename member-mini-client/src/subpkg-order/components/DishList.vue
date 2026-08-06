@@ -302,6 +302,43 @@ export default {
   white-space: nowrap;
 }
 
+.cat-item.active {
+  background: #fff;
+}
+
+.cat-item.active .cat-icon-wrap {
+  background: var(--brand-light);
+}
+
+.cat-item.active .cat-icon,
+.cat-item.active .cat-name {
+  color: var(--brand);
+}
+
+.cat-item.active .cat-name {
+  font-weight: 800;
+}
+
+.cat-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx;
+  height: 52rpx;
+  border-radius: 0 4rpx 4rpx 0;
+  background: var(--brand);
+}
+
+.cat-title {
+  display: block;
+  padding: 24rpx 0 16rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
 
 
 .dish-scroll {
@@ -531,6 +568,8 @@ export default {
 
 
 .dish-tag { max-width: 88rpx; height: 34rpx; padding: 0 8rpx; border-radius: 8rpx; box-sizing: border-box; font-size: 20rpx; font-weight: 500; line-height: 34rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dish-tag--strong { color: #078546; background: #e9f9f0; }
+.dish-tag--plain { display: none; }
 
 
 .dish-meta { flex: 1; min-width: 0; min-height: 0; padding-top: 6rpx; }
@@ -573,6 +612,18 @@ export default {
 
 
 .dish-qty-control .counter-btn--pressing { animation: none; transform: none; }
+
+.dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
+.dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
+.dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
+.dish-counter .counter-btn .iconfont { font-size: 27rpx; font-weight: 400; line-height: 1; }
+.dish-counter .counter-btn.plus { background: var(--brand); }
+.dish-counter .counter-btn.plus text { color: #fff; }
+.dish-counter .counter-btn.minus { border: none; background: #E5E7EB; }
+.dish-qty-control .counter-btn.minus { background: #EAEDF1; }
+.dish-counter .counter-btn.minus text { color: #4B5563; }
+.dish-counter .counter-num { width: 36rpx; min-width: 36rpx; text-align: center; font-size: 30rpx; line-height: 32rpx; font-weight: 600; color: var(--text-1); }
+.dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
 
 
 .soldout-action { height: 60rpx; min-width: 104rpx; padding: 0 20rpx; border-radius: 30rpx; display: flex; align-items: center; justify-content: center; background: #eef1f4; box-sizing: border-box; flex-shrink: 0; }

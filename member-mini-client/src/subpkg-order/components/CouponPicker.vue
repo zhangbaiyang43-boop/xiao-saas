@@ -53,6 +53,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .coupon-picker-sheet {
   width: 100%;
   max-height: 76vh;

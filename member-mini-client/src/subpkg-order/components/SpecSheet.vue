@@ -492,6 +492,48 @@ export default {
   flex-shrink: 0;
 }
 
+.spec-counter-row .counter-btn {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.spec-counter-row .counter-btn.minus {
+  width: 64rpx;
+  height: 64rpx;
+  background: #f5f6f7;
+  color: var(--text-2);
+}
+
+.spec-counter-row .counter-btn.plus {
+  background: var(--brand);
+  color: #fff;
+}
+
+.spec-counter-row .counter-btn text {
+  font-size: 36rpx;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.spec-counter-row .counter-btn .iconfont {
+  font-size: 30rpx;
+  font-weight: 400;
+}
+
+.spec-counter-row .counter-num {
+  width: 56rpx;
+  color: var(--text-1);
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 44rpx;
+  text-align: center;
+}
+
 
 
 .spec-footer {

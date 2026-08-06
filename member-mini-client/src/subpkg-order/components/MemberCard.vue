@@ -290,6 +290,7 @@ export default {
 
 
 .member-service-icon { width: 56rpx; height: 56rpx; border-radius: 16rpx; background: #E8F8EF; color: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.member-service-icon .iconfont { font-size: 28rpx; }
 
 
 .member-service-label { flex: 1; min-width: 0; }
@@ -328,5 +329,18 @@ export default {
   margin-top: 32rpx; padding: 24rpx 80rpx;
   background: var(--brand); border-radius: 16rpx;
   color: #fff; font-size: 30rpx; font-weight: 700;
+}
+
+@keyframes micBorderGlow { 0%, 100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 24rpx rgba(0,0,0,.22), 0 0 0 1px rgba(212,175,110,.28); } 50% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 26rpx rgba(0,0,0,.26), 0 0 0 1px rgba(232,202,160,.6); } }
+@keyframes micBadgePulse { 0%, 100% { opacity: .85; } 50% { opacity: 1; text-shadow: 0 0 12rpx rgba(232,202,160,.9); } }
+
+@media screen and (max-width: 340px) {
+  .card-tab.member-center { padding-left: 24rpx; padding-right: 24rpx; }
+  .member-identity-card { padding: 26rpx 26rpx 22rpx; }
+  .mic-body { gap: 18rpx; }
+  .member-level { font-size: 34rpx; }
+  .member-asset-value { font-size: 34rpx; }
+  .member-coupon-card { gap: 14rpx; padding: 22rpx; }
+  .member-coupon-use { padding: 0 18rpx; }
 }
 </style>

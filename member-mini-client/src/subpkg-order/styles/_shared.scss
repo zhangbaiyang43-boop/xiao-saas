@@ -84,3 +84,19 @@
     animation: none;
   }
 }
+
+// 弹层从底部滑入的入场动画——CouponPicker/SpecSheet 两个弹层都在用同一个效果。
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+// "+ 其他要求"这个展开备注快捷词区域的小按钮——CheckoutSheet（整单备注）
+// 和 SpecSheet（菜品备注）都用同一个样式。
+.item-remark-extra-toggle {
+  display: inline-block;
+  margin-top: 20rpx;
+  color: var(--text-3);
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
