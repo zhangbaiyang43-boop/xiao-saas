@@ -8,6 +8,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "app" / "api" / "v1" / "orders.py"
+PRINT_SERVICE_PATH = ROOT / "app" / "services" / "order_print_service.py"
+LIFECYCLE_SERVICE_PATH = ROOT / "app" / "services" / "order_lifecycle_service.py"
 
 
 class FakeColumn:
@@ -191,6 +193,10 @@ def fake_select(model):
     return FakeQuery(model)
 
 
+async def _noop_async(*args, **kwargs):
+    return None
+
+
 _ORIGINAL_MODULES = {}
 
 
@@ -222,8 +228,11 @@ def install_stubs():
         "app.models.tenant_config": types.ModuleType("app.models.tenant_config"),
         "app.services": types.ModuleType("app.services"),
         "app.services.coupon_service": types.ModuleType("app.services.coupon_service"),
+        "app.services.consumption_service": types.ModuleType("app.services.consumption_service"),
         "app.services.feieyun_service": types.ModuleType("app.services.feieyun_service"),
         "app.services.kuaimai_service": types.ModuleType("app.services.kuaimai_service"),
+        "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
+        "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
     }
     _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
     for name, module in modules.items():
@@ -241,6 +250,12 @@ def install_stubs():
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.models.tenant_config"].TenantConfig = FakeTenantConfig
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
+    modules["app.services.coupon_service"]._set_order_coupon_status_if_locked = _noop_async
+    modules["app.services.coupon_service"]._unlock_order_coupon_if_locked = _noop_async
+    modules["app.services.coupon_service"]._mark_order_coupon_used_if_locked = _noop_async
+    modules["app.services.consumption_service"]._record_order_consumption = _noop_async
+    modules["app.services.order_stock_service"]._restore_order_stock = _noop_async
+    modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
     modules["app.services.feieyun_service"].build_order_ticket = lambda order, order_items: "ticket"
     modules["app.services.feieyun_service"].print_order = lambda *args: True
     modules["app.services.kuaimai_service"].KUAIMAI_ORDER_TEMPLATE_ID = "1634998374"
@@ -252,6 +267,16 @@ def install_stubs():
 
 def load_orders_module():
     install_stubs()
+    print_spec = importlib.util.spec_from_file_location(
+        "order_print_service_under_test",
+        PRINT_SERVICE_PATH,
+    )
+    print_module = importlib.util.module_from_spec(print_spec)
+    assert print_spec.loader is not None
+    sys.modules["app.services.order_print_service"] = print_module
+    print_spec.loader.exec_module(print_module)
+    print_module.select = fake_select
+
     spec = importlib.util.spec_from_file_location("orders_print_recovery_under_test", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -414,10 +439,11 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         self.assertIsNotNone(data["print_manual_reprint_at"])
 
     def test_list_orders_contains_recovery_trigger(self):
-        source = MODULE_PATH.read_text(encoding="utf-8-sig")
-        self.assertIn('print_meta.get("status") == "failed"', source)
-        self.assertIn('reason="merchant_list_recovery"', source)
-        self.assertIn('@router.post("/orders/{order_id}/reprint")', source)
+        lifecycle_source = LIFECYCLE_SERVICE_PATH.read_text(encoding="utf-8-sig")
+        orders_source = MODULE_PATH.read_text(encoding="utf-8-sig")
+        self.assertIn('print_meta.get("status") == "failed"', lifecycle_source)
+        self.assertIn('reason="merchant_list_recovery"', lifecycle_source)
+        self.assertIn('@router.post("/orders/{order_id}/reprint")', orders_source)
 
 
 if __name__ == "__main__":

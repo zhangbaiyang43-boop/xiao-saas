@@ -5,6 +5,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
 
 
 def py_function_source(source: str, name: str) -> str:
@@ -15,6 +18,22 @@ def py_function_source(source: str, name: str) -> str:
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
         if line.startswith("@router.") or line.startswith("async def ") or line.startswith("class "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
+def lifecycle_method_source(name: str) -> str:
+    lines = LIFECYCLE_SERVICE_SOURCE.splitlines()
+    start = next(
+        (idx for idx, line in enumerate(lines) if line.startswith(f"    async def {name}(")),
+        None,
+    )
+    assert start is not None, f"{name} source not found"
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("    async def ") or line.startswith("    def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -46,16 +65,17 @@ def simulate_search(orders, tenant_id, *, order_no="", order_tail="", table_no="
 
 class MerchantOrderLookupContractsTest(unittest.TestCase):
     def test_backend_accepts_order_lookup_parameters(self):
-        source = py_function_source(ORDERS_SOURCE, "list_orders")
+        route_source = py_function_source(ORDERS_SOURCE, "list_orders")
+        service_source = lifecycle_method_source("list_orders")
         for param in ["keyword", "order_no", "order_tail", "tail_no", "table_no", "status", "page", "page_size"]:
-            self.assertIn(f"{param}: Optional", source)
-        self.assertIn("Order.tenant_id == tenant_id", source)
-        self.assertIn("cast(Order.id, String)", source)
-        self.assertIn("Order.table_no == normalized_table", source)
-        self.assertIn("Order.status == normalized_status", source)
-        self.assertIn("select(func.count()).select_from", source)
-        self.assertIn('"items": rows', source)
-        self.assertIn('"total": total or 0', source)
+            self.assertIn(f"{param}: Optional", route_source)
+        self.assertIn("Order.tenant_id == tenant_id", service_source)
+        self.assertIn("cast(Order.id, String)", service_source)
+        self.assertIn("Order.table_no == normalized_table", service_source)
+        self.assertIn("Order.status == normalized_status", service_source)
+        self.assertIn("select(func.count()).select_from", service_source)
+        self.assertIn('"items": rows', service_source)
+        self.assertIn('"total": total or 0', service_source)
 
     def test_full_order_no_tail_table_pagination_and_tenant_isolation_with_ten_orders(self):
         orders = [
@@ -97,9 +117,9 @@ class MerchantOrderLookupContractsTest(unittest.TestCase):
             self.assertIn(text, ORDERS_SOURCE)
 
     def test_default_order_list_response_remains_backward_compatible(self):
-        source = py_function_source(ORDERS_SOURCE, "list_orders")
-        self.assertIn("if wants_pagination:", source)
-        self.assertRegex(source, re.compile(r"return success_response\(data=rows\)"))
+        service_source = lifecycle_method_source("list_orders")
+        self.assertIn("if wants_pagination:", service_source)
+        self.assertRegex(service_source, re.compile(r"return success_response\(data=rows\)"))
 
 
 if __name__ == "__main__":

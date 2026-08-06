@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
 TENANT_MODEL_SOURCE = (ROOT / "app" / "models" / "tenant.py").read_text(encoding="utf-8-sig")
 ORDER_MODEL_SOURCE = (ROOT / "app" / "models" / "order.py").read_text(encoding="utf-8-sig")
 TENANT_API_SOURCE = (ROOT / "app" / "api" / "v1" / "tenant.py").read_text(encoding="utf-8-sig")
@@ -30,6 +33,22 @@ def function_source(source: str, name: str) -> str:
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
         if line.startswith("@router.") or line.startswith("class ") or line.startswith("async def ") or line.startswith("def "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
+def lifecycle_method_source(name: str) -> str:
+    lines = LIFECYCLE_SERVICE_SOURCE.splitlines()
+    start = next(
+        (idx for idx, line in enumerate(lines) if line.startswith(f"    async def {name}(")),
+        None,
+    )
+    assert start is not None, f"{name} source not found"
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("    async def ") or line.startswith("    def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -105,13 +124,13 @@ class PaymentModeContractsTest(unittest.TestCase):
 
     def test_pay_later_coupon_lifecycle_is_closed(self):
         create_source = function_source(ORDERS_SOURCE, "create_order")
-        status_source = function_source(ORDERS_SOURCE, "update_order_status")
-        settle_source = function_source(ORDERS_SOURCE, "settle_table")
+        status_source = lifecycle_method_source("update_order_status")
+        settle_source = lifecycle_method_source("settle_table")
         self.assertIn("_mark_order_coupon_used_if_locked", ORDERS_SOURCE)
         self.assertIn("_unlock_order_coupon_if_locked", ORDERS_SOURCE)
-        self.assertIn("await _mark_order_coupon_used_if_locked(order, db)", status_source)
-        self.assertIn("await _unlock_order_coupon_if_locked(order, db)", status_source)
-        self.assertIn("await _mark_order_coupon_used_if_locked(o, db)", settle_source)
+        self.assertIn("await _mark_order_coupon_used_if_locked(order, self.db)", status_source)
+        self.assertIn("await _unlock_order_coupon_if_locked(order, self.db)", status_source)
+        self.assertIn("await _mark_order_coupon_used_if_locked(o, self.db)", settle_source)
         self.assertIn('coupon.status = "LOCKED"', create_source)
 
     def test_wxpay_endpoint_rejects_non_prepay_orders(self):

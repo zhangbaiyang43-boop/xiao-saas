@@ -5,6 +5,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
 MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
@@ -26,6 +29,22 @@ def py_function_source(source: str, name: str) -> str:
     return "\n".join(lines[start:end])
 
 
+def lifecycle_method_source(name: str) -> str:
+    lines = LIFECYCLE_SERVICE_SOURCE.splitlines()
+    start = next(
+        (idx for idx, line in enumerate(lines) if line.startswith(f"    async def {name}(")),
+        None,
+    )
+    assert start is not None, f"{name} source not found"
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("    async def ") or line.startswith("    def "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
 class OrderStateMachineContractsTest(unittest.TestCase):
     def test_backend_declares_existing_status_machine_without_new_statuses(self):
         self.assertIn("ORDER_ALLOWED_TRANSITIONS", ORDERS_SOURCE)
@@ -37,7 +56,7 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertNotIn('"cooking"', ORDERS_SOURCE)
 
     def test_status_update_is_tenant_scoped_idempotent_and_blocks_reverse_flow(self):
-        source = py_function_source(ORDERS_SOURCE, "update_order_status")
+        source = lifecycle_method_source("update_order_status")
         self.assertIn("Order.tenant_id == tenant_id", source)
         self.assertIn("current_status == body.status", source)
         self.assertIn('"idempotent": True', source)
@@ -46,14 +65,14 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn("illegal status transition", source)
 
     def test_status_update_records_terminal_timestamps_once(self):
-        source = py_function_source(ORDERS_SOURCE, "update_order_status")
+        source = lifecycle_method_source("update_order_status")
         self.assertIn('body.status == "done"', source)
         self.assertIn("served_at", source)
         self.assertIn('body.status == "settled"', source)
         self.assertIn("completed_at", source)
 
     def test_table_settlement_only_settles_done_orders(self):
-        source = py_function_source(ORDERS_SOURCE, "settle_table")
+        source = lifecycle_method_source("settle_table")
         self.assertIn("Order.dining_session_id == active_session.id", source)
         self.assertIn("TABLE_CLOSE_BLOCKING_STATUSES", source)
         self.assertIn("TABLE_CLOSE_DONE_STATUSES", source)

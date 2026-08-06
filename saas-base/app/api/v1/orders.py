@@ -1,4 +1,3 @@
-import asyncio
 from datetime import date, datetime, timezone
 import json
 from typing import List, Optional
@@ -18,14 +17,31 @@ from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
-from app.services.coupon_service import CouponService
+from app.services.consumption_service import _record_order_consumption
+from app.services.coupon_service import (
+    CouponService,
+    _mark_order_coupon_used_if_locked,
+    _set_order_coupon_status_if_locked,
+    _unlock_order_coupon_if_locked,
+)
+from app.services.order_lifecycle_service import OrderLifecycleService
+from app.services.order_print_service import (
+    MAX_PRINT_RETRY_ATTEMPTS,
+    _compose_merchant_note_with_print_meta,
+    _get_print_meta,
+    _print_paid_order_ticket,
+    _print_paid_order_ticket_background,
+    _serialize_print_meta,
+    _spawn_background_print_task,
+    _split_merchant_note_and_print_meta,
+    can_reprint_order,
+)
+from app.services.order_stock_service import _restore_order_stock
 
 router = APIRouter(prefix="/api/v1", tags=["订单"])
 
 
 PENDING_PAYMENT_TIMEOUT_MINUTES = 15  # 待支付订单超时时长（分钟）
-PRINT_META_MARKER = "\n__PRINT_META__="
-MAX_PRINT_RETRY_ATTEMPTS = 3
 
 ORDER_KNOWN_STATUSES = {"pending_payment", "pending", "preparing", "done", "settled", "rejected", "cancelled"}
 ORDER_MERCHANT_TARGET_STATUSES = {"pending", "preparing", "done", "settled", "rejected", "cancelled"}
@@ -62,30 +78,6 @@ def build_order_next_action(payment_mode: str) -> str:
     return ORDER_NEXT_ACTIONS[payment_mode]
 
 
-def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> bool:
-    if getattr(order, "payment_status", None) == "paid":
-        return False
-    order.payment_status = "paid"
-    order.payment_method = payment_method
-    order.payment_time = datetime.now(timezone.utc).isoformat()
-    return True
-
-
-def can_reprint_order(order: Order, print_type: str = "kitchen") -> tuple[bool, str | None]:
-    status = getattr(order, "status", None)
-    payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
-    payment_status = getattr(order, "payment_status", None)
-    if status in ("cancelled", "rejected"):
-        return False, "order cancelled"
-    if print_type == "receipt":
-        return (payment_status == "paid", None if payment_status == "paid" else "order not paid")
-    if print_type == "kitchen":
-        if payment_mode == "prepay":
-            return (payment_status == "paid", None if payment_status == "paid" else "order not paid")
-        if payment_mode in ("postpay", "table_account"):
-            return True, None
-    return False, "unsupported print type"
-
 class OrderItemSpecIn(PydanticBase):
     group: str
     value: str
@@ -120,97 +112,6 @@ class OrderCreate(PydanticBase):
 class MockPayBody(PydanticBase):
     participant_token: Optional[str] = None
 
-
-def _split_merchant_note_and_print_meta(raw_note: str | None) -> tuple[str | None, dict]:
-    raw = raw_note or ""
-    if PRINT_META_MARKER not in raw:
-        return (raw.strip() or None), {}
-    note, meta_raw = raw.rsplit(PRINT_META_MARKER, 1)
-    try:
-        meta = json.loads(meta_raw) if meta_raw.strip() else {}
-        if not isinstance(meta, dict):
-            meta = {}
-    except Exception:
-        meta = {}
-    return (note.strip() or None), meta
-
-
-def _compose_merchant_note_with_print_meta(note: str | None, meta: dict | None) -> str | None:
-    clean_note = (note or "").strip()
-    if not meta:
-        return clean_note or None
-    meta = dict(meta)
-    meta["updated_at"] = datetime.now(timezone.utc).isoformat()
-    return f"{clean_note}{PRINT_META_MARKER}{json.dumps(meta, ensure_ascii=False, separators=(',', ':'))}"
-
-
-def _get_print_meta(order: Order) -> dict:
-    _, meta = _split_merchant_note_and_print_meta(getattr(order, "merchant_note", None))
-    return meta
-
-
-def _set_print_meta(order: Order, meta: dict, note: str | None = None) -> dict:
-    current_note, _ = _split_merchant_note_and_print_meta(getattr(order, "merchant_note", None))
-    order.merchant_note = _compose_merchant_note_with_print_meta(current_note if note is None else note, meta)
-    return meta
-
-
-
-def _db_print_status_to_meta_status(order: Order) -> str | None:
-    status = str(getattr(order, "print_status", "") or "").upper()
-    if status == "SUCCESS":
-        return "printed"
-    if status == "FAILED":
-        return "failed"
-    if status == "UNKNOWN":
-        return "unknown"
-    return None
-
-def _mark_order_print_state(order: Order, status: str, printed_at=None) -> None:
-    if hasattr(order, "print_status"):
-        order.print_status = status
-    if status == "SUCCESS" and hasattr(order, "printed_at"):
-        order.printed_at = printed_at or datetime.utcnow()
-
-def _serialize_print_meta(order: Order) -> dict:
-    note, meta = _split_merchant_note_and_print_meta(getattr(order, "merchant_note", None))
-    status = _db_print_status_to_meta_status(order)
-    if not status:
-        status = meta.get("status") if meta else None
-    if not status and getattr(order, "payment_status", None) == "paid":
-        status = "not_started"
-    return {
-        "merchant_note": note,
-        "print_status": status,
-        "print_attempts": int(meta.get("attempts") or 0) if meta else 0,
-        "print_error_code": meta.get("last_error_code") if meta else None,
-        "print_error": meta.get("last_error") if meta else None,
-        "print_provider_task_id": meta.get("provider_task_id") if meta else None,
-        "print_manual_reprint": bool(meta.get("manual_reprint")) if meta else False,
-        "print_manual_reprint_by": meta.get("manual_reprint_by") if meta else None,
-        "print_manual_reprint_at": meta.get("manual_reprint_at") if meta else None,
-        "print_last_reason": meta.get("last_reason") if meta else None,
-    }
-
-async def _set_order_coupon_status_if_locked(order: Order, db: AsyncSession, status: str) -> None:
-    if not getattr(order, "coupon_id", None):
-        return
-    from app.models.coupon import Coupon
-
-    coupon_result = await db.execute(
-        select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
-    )
-    coupon = coupon_result.scalar_one_or_none()
-    if coupon and coupon.status == "LOCKED":
-        coupon.status = status
-
-
-async def _unlock_order_coupon_if_locked(order: Order, db: AsyncSession) -> None:
-    await _set_order_coupon_status_if_locked(order, db, "UNUSED")
-
-
-async def _mark_order_coupon_used_if_locked(order: Order, db: AsyncSession) -> None:
-    await _set_order_coupon_status_if_locked(order, db, "USED")
 
 async def _apply_paid_order_member_assets_once(order: Order, db: AsyncSession) -> None:
     """Apply member consumption assets for one paid order at most once.
@@ -792,281 +693,6 @@ async def _recover_wxpay_order_if_paid(order: Order, db: AsyncSession) -> bool:
         logger.warning("[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s", getattr(order, "id", ""), exc)
         return False
 
-class PrintResultUnknownError(RuntimeError):
-    """飞鹅云请求超时/网络异常导致没拿到响应——不知道这次到底有没有打印成功，跟"服务端
-    明确说打印失败"是两码事，调用方必须分开处理（不能自动重试，见 print_order 的说明）。"""
-
-
-async def _print_paid_order_ticket(
-    order: Order,
-    db: AsyncSession,
-    *,
-    manual: bool = False,
-    reason: str = "auto",
-    operator: str | None = None,
-) -> dict:
-    """Print an order ticket and persist recoverable print state in existing order metadata."""
-    if not order:
-        return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
-    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
-        return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
-
-    locked_result = await db.execute(select(Order).where(Order.id == order.id).with_for_update())
-    locked_order = locked_result.scalar_one_or_none()
-    if locked_order:
-        order = locked_order
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
-    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
-        return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
-
-    meta = _get_print_meta(order)
-    db_print_status = str(getattr(order, "print_status", "") or "").upper()
-    if not manual and (db_print_status == "SUCCESS" or meta.get("status") == "printed"):
-        logger.warning(
-            "[PRINT_SKIPPED_ALREADY_SUCCESS] order_id=%s print_status=%s status=%s attempts=%s provider_task_id=%s",
-            order.id,
-            db_print_status or "",
-            meta.get("status"),
-            meta.get("attempts", 0),
-            meta.get("provider_task_id"),
-        )
-        logger.warning(
-            "[PRINT_IDEMPOTENT_HIT] order_id=%s reason=%s manual=%s",
-            order.id,
-            reason,
-            manual,
-        )
-        return {"success": True, "skipped": True, "status": "printed"}
-
-    attempts = int(meta.get("attempts") or 0)
-    if not manual and attempts >= MAX_PRINT_RETRY_ATTEMPTS:
-        logger.warning(
-            "[PRINT_ORDER_RETRY_LIMIT] order_id=%s attempts=%s last_error_code=%s",
-            order.id,
-            attempts,
-            meta.get("last_error_code"),
-        )
-        return {"success": False, "skipped": True, "code": "PRINT_RETRY_LIMIT"}
-
-    if attempts == 0 and not manual:
-        logger.warning(
-            "[PRINT_FIRST_EXECUTION] order_id=%s attempts=%s reason=%s manual=%s",
-            order.id,
-            attempts + 1,
-            reason,
-            manual,
-        )
-    meta.update({
-        "status": "printing",
-        "attempts": attempts + 1,
-        "last_reason": reason,
-        "manual_reprint": bool(meta.get("manual_reprint")) or manual,
-    })
-    if manual and operator:
-        meta["manual_reprint_by"] = operator
-        meta["manual_reprint_at"] = datetime.now(timezone.utc).isoformat()
-    _mark_order_print_state(order, "PENDING")
-    _set_print_meta(order, meta)
-    await db.flush()
-
-    try:
-        from app.models.tenant import Tenant
-        from app.models.tenant_config import TenantConfig
-        from app.models.order import OrderItem
-        from app.services.feieyun_service import build_order_ticket, print_order
-
-        tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
-        tenant_obj = tenant_result.scalar_one_or_none()
-        config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == str(order.tenant_id)))
-        config_obj = config_result.scalar_one_or_none()
-        business_info = (config_obj.business_info or {}) if config_obj else {}
-        provider = business_info.get("printer_provider") or "feieyun"
-        provider_task_id = None
-
-        if provider == "kuaimai":
-            from app.services.kuaimai_service import (
-                KUAIMAI_ORDER_TEMPLATE_ID,
-                build_order_template_render_data,
-                print_template_order,
-                validate_order_template_render_data,
-            )
-
-            kuaimai = business_info.get("kuaimai_printer") or {}
-            configured_template_id = str(kuaimai.get("order_template_id") or "").strip()
-            kuaimai_template_id = configured_template_id or KUAIMAI_ORDER_TEMPLATE_ID
-            logger.warning(
-                "[ORDER_PRINT_TEMPLATE_ID_CHECK] order_id=%s tenant_id=%s configured_order_template_id=%s effective_template_id=%s default_order_template_id=%s manual=%s reason=%s",
-                order.id,
-                order.tenant_id,
-                configured_template_id or "",
-                kuaimai_template_id,
-                KUAIMAI_ORDER_TEMPLATE_ID,
-                manual,
-                reason,
-            )
-
-            items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-            order_items = list(items_result.scalars().all())
-            render_data = build_order_template_render_data(
-                order,
-                order_items,
-                shop_name=getattr(tenant_obj, "name", "") if tenant_obj else "",
-            )
-            item_names = [item.get("goods_name") for item in render_data.get("items", [])]
-            logger.warning(
-                "[PRINT_ORDER_PAYLOAD] event=print_order_payload order_id=%s order_no=%s merchant_id=%s printer_id=%s template_id=%s items_count=%s item_names=%s total_amount=%s pay_amount=%s data_sources=%s manual=%s reason=%s",
-                order.id,
-                render_data.get("order_no"),
-                order.tenant_id,
-                kuaimai.get("sn") or "",
-                kuaimai_template_id,
-                len(render_data.get("items", [])),
-                item_names,
-                render_data.get("total_amount"),
-                render_data.get("pay_amount"),
-                ["items", "goods"],
-                manual,
-                reason,
-            )
-
-            valid, error_code = validate_order_template_render_data(render_data, order)
-            if not valid:
-                logger.warning(
-                    "[PRINT_ORDER_VALIDATE_FAILED] order_id=%s order_no=%s merchant_id=%s printer_id=%s template_id=%s items_type=%s items_count=%s error_code=%s",
-                    order.id,
-                    render_data.get("order_no"),
-                    order.tenant_id,
-                    kuaimai.get("sn") or "",
-                    kuaimai_template_id,
-                    type(render_data.get("items")).__name__,
-                    len(render_data.get("items", [])) if isinstance(render_data.get("items"), list) else "n/a",
-                    error_code,
-                )
-                raise RuntimeError(error_code)
-
-            result = await print_template_order(
-                kuaimai.get("app_id") or "",
-                kuaimai.get("app_secret") or "",
-                kuaimai.get("sn") or "",
-                kuaimai_template_id,
-                render_data,
-            )
-            if not result or result.get("success") is not True:
-                raise RuntimeError(result.get("code") or result.get("error") or "PRINT_PROVIDER_FAILED")
-            provider_task_id = result.get("provider_task_id")
-        elif tenant_obj and tenant_obj.feieyun_sn and tenant_obj.feieyun_key:
-            items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-            order_items = list(items_result.scalars().all())
-            ticket = build_order_ticket(order, order_items)
-            result = await print_order(tenant_obj.feieyun_sn, tenant_obj.feieyun_key, ticket)
-            if result == "unknown":
-                raise PrintResultUnknownError("FEIEYUN_PRINT_RESULT_UNKNOWN")
-            if result != "success":
-                raise RuntimeError("FEIEYUN_PRINT_FAILED")
-        else:
-            raise RuntimeError("PRINTER_CONFIG_INCOMPLETE")
-
-        meta.update({
-            "status": "printed",
-            "last_error_code": None,
-            "last_error": None,
-            "provider_task_id": provider_task_id,
-            "printed_at": datetime.now(timezone.utc).isoformat(),
-            "manual_reprint": bool(meta.get("manual_reprint")) or manual,
-        })
-        _mark_order_print_state(order, "SUCCESS")
-        _set_print_meta(order, meta)
-        logger.warning(
-            "[PRINT_ORDER_SUCCESS] order_id=%s attempts=%s provider_task_id=%s manual=%s reason=%s",
-            order.id,
-            meta.get("attempts"),
-            provider_task_id,
-            manual,
-            reason,
-        )
-        return {"success": True, "status": "printed", "attempts": meta.get("attempts"), "provider_task_id": provider_task_id}
-    except Exception as exc:
-        # 结果不明（网络超时/异常，没拿到打印服务商的响应）和明确失败（服务商回了响应说没
-        # 打印成功）分开处理："失败"允许后续自动重试（merchant_list_recovery 那条路），
-        # "未知"绝不能自动重试——如果这次其实已经打印成功了，自动重试会造成重复出票，
-        # 必须交给能实际看到打印机的人来判断要不要手动补打。
-        is_unknown = isinstance(exc, PrintResultUnknownError)
-        status_label = "unknown" if is_unknown else "failed"
-        db_status = "UNKNOWN" if is_unknown else "FAILED"
-        error_code = getattr(exc, "code", None) or str(exc) or type(exc).__name__
-        meta.update({
-            "status": status_label,
-            "last_error_code": error_code,
-            "last_error": str(exc),
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-            "manual_reprint": bool(meta.get("manual_reprint")) or manual,
-        })
-        _mark_order_print_state(order, db_status)
-        _set_print_meta(order, meta)
-        logger.warning(
-            "[PRINT_ORDER_%s_RECOVERABLE] order_id=%s attempts=%s error_code=%s manual=%s reason=%s",
-            db_status,
-            order.id,
-            meta.get("attempts"),
-            error_code,
-            manual,
-            reason,
-        )
-        return {"success": False, "status": status_label, "attempts": meta.get("attempts"), "code": error_code}
-
-
-# asyncio.create_task() 返回的 Task 如果没有任何地方存着强引用，理论上可能在下一次
-# 事件循环切换时被垃圾回收掉、任务莫名其妙就没跑完——这是 asyncio 官方文档专门强调过的
-# 坑（"Save a reference to the result of this function"）。对于打印这种失败了也不会有人
-# 立刻发现的后台任务，这个坑一旦踩中会很难查，所以这里维护一个模块级的引用集合，任务
-# 跑完自动从集合里摘掉。
-_background_print_tasks: set = set()
-
-
-def _spawn_background_print_task(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_print_tasks.add(task)
-    task.add_done_callback(_background_print_tasks.discard)
-
-
-async def _print_paid_order_ticket_background(order_id: int, tenant_id: str, *, reason: str) -> None:
-    """给顾客下单请求用的"不等打印机"版本。第三方云打印 API（飞鹅云/快麦）慢一点，
-    顾客提交订单这个动作就跟着慢——打印本来就是"尽力而为、失败可恢复"的旁路副作用
-    （见 _print_paid_order_ticket 里已有的说明和失败重试机制），没道理让它卡在顾客
-    的请求-响应周期里。
-
-    必须用独立的 DB session，不能复用调用方传进来的那个：调用方的请求早就返回了，
-    它的 session 这时候可能已经关闭；而且这个函数是在调用方 commit 之后才被调度的
-    （见 create_order 里的调用位置），这里重新按 order_id 查一次，保证读到的是已经
-    落库的最新状态，不会因为事务可见性问题误判成"订单还不存在/还没付款"。
-
-    session 工厂放函数体内 import（而不是模块顶部）：这个模块的打印失败恢复测试
-    （test_print_failure_recovery_contracts.py）用一个手搭的 sys.modules 假环境加载
-    这个文件，只桩了 app.core.database.get_db，模块顶部多 import 一个新符号会让那些
-    测试在 import 这一步就直接炸掉——跟文件里其它服务依赖（Tenant/TenantConfig 等）
-    延迟到函数体内 import 是同一个理由，不是我随手加的风格不一致。
-    """
-    from app.core.database import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as bg_db:
-        try:
-            TenantContext.set_tenant_id(tenant_id)
-            order_result = await bg_db.execute(
-                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
-            )
-            order = order_result.scalar_one_or_none()
-            if not order:
-                return
-            await _print_paid_order_ticket(order, bg_db, reason=reason)
-            await bg_db.commit()
-        except Exception as exc:
-            logger.warning(
-                "[PRINT_BACKGROUND_TASK_FAILED] order_id=%s reason=%s error=%s",
-                order_id, reason, exc,
-            )
-
-
 async def _on_payment_success(
     order: Order,
     db: AsyncSession,
@@ -1343,35 +969,6 @@ async def _refund_orphaned_wxpay_payment(order: Order, db: AsyncSession) -> dict
         order.id, order.refund_amount, order.status,
     )
     return {"success": True, "amount": float(order.refund_amount), "error": None}
-
-
-async def _restore_order_stock(order: Order, db: AsyncSession) -> None:
-    """Give back whatever stock create_order deducted (see its item loop, dish.stock -=)
-    when an order ends up cancelled/rejected/timed-out without ever being fulfilled -- otherwise
-    a dish that was never actually cooked/sold stays wrongly marked "sold out" forever, and
-    the shortfall only grows with every abandoned order. Locks each MenuItem row first so a
-    concurrent order for the same dish can't race the restore.
-
-    Must be called with `order` already locked (with_for_update) in the current transaction,
-    before the order's status is flipped away from pending_payment/pending.
-    """
-    from app.models.menu_item import MenuItem
-
-    items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-    order_items = items_result.scalars().all()
-    qty_by_dish_id: dict = {}
-    for item in order_items:
-        if item.dish_id:
-            qty_by_dish_id[item.dish_id] = qty_by_dish_id.get(item.dish_id, 0) + item.qty
-    if not qty_by_dish_id:
-        return
-
-    dishes_result = await db.execute(
-        select(MenuItem).where(MenuItem.id.in_(qty_by_dish_id.keys())).with_for_update()
-    )
-    for dish in dishes_result.scalars().all():
-        if dish.stock is not None:
-            dish.stock = dish.stock + qty_by_dish_id.get(dish.id, 0)
 
 
 @router.post("/orders/{order_id}/mock-pay")
@@ -1687,37 +1284,6 @@ async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
         return {"code": "FAIL", "message": str(e)}
 
 
-async def _record_order_consumption(order: Order, db: AsyncSession) -> None:
-    """订单结账后转成一条消费记录，供顾客端"消费记录"页展示。
-    没有 customer_id（匿名/未登录下单）就跳过；记录失败不影响结账本身。"""
-    if not order.customer_id:
-        return
-    try:
-        from app.services.consumption_service import ConsumptionService
-
-        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
-        items = items_result.scalars().all()
-        if items:
-            names = "、".join(i.name for i in items[:3])
-            if len(items) > 3:
-                names += f"等{len(items)}件"
-            project = names
-        else:
-            project = "堂食点餐"
-
-        consumption_service = ConsumptionService(db)
-        consumption_service.set_tenant_id(order.tenant_id)
-        await consumption_service.create_consumption(
-            customer_id=order.customer_id,
-            project=project,
-            amount=float(order.total or 0),
-            consume_time=order.completed_at or datetime.utcnow(),
-            remark=f"订单 #{order.id}" + (f" · {order.table_no}桌" if order.table_no else ""),
-        )
-    except Exception as e:
-        logger.error(f"结账后生成消费记录失败 - order_id: {order.id}, error: {e}")
-
-
 class OrderStatusUpdate(PydanticBase):
     status: str  # pending | preparing | done | settled
 
@@ -1733,73 +1299,9 @@ async def update_order_status(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    if body.status not in ORDER_MERCHANT_TARGET_STATUSES:
-        return error_response(code=400, msg="invalid status")
-    TenantContext.set_tenant_id(tenant_id)
-    result = await db.execute(
-        select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id).with_for_update()
-    )
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-
-    current_status = order.status or "pending"
-    if current_status == body.status:
-        return success_response(
-            data={"id": str(order.id), "status": order.status, "idempotent": True},
-            msg="状态未变化",
-        )
-    if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
-        return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
-
-    # 拒单/取消前先跟微信核实一下：顾客可能刚好在微信那边已经付款成功、回调只是还没
-    # 送达，直接放行拒单会导致钱已经进商户账户但订单却显示已拒绝/已取消，没人会再去
-    # 处理这笔钱（跟 cancel_order 的同一处理）。
-    if (
-        body.status in ("rejected", "cancelled")
-        and current_status == "pending_payment"
-        and getattr(order, "payment_mode", "prepay") == "prepay"
-    ):
-        if await _recover_wxpay_order_if_paid(order, db):
-            await db.commit()
-            return error_response(code=409, msg="订单已支付，请刷新查看最新状态")
-
-    if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) == "paid":
-        refund_result = await _refund_order_payment(order, db, reason=f"merchant_{body.status}")
-        if not refund_result["success"]:
-            await db.rollback()
-            return error_response(code=502, msg=f"操作失败，退款处理异常，请稍后重试：{refund_result['error']}")
-    if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) != "paid":
-        await _unlock_order_coupon_if_locked(order, db)
-    if body.status in ("rejected", "cancelled"):
-        await _restore_order_stock(order, db)
-
-    order.status = body.status
-    if body.status == "done" and not getattr(order, "served_at", None):
-        order.served_at = datetime.utcnow()
-    just_settled = body.status == "settled" and not getattr(order, "completed_at", None)
-    if just_settled:
-        order.completed_at = datetime.utcnow()
-        marked_offline_paid = False
-        if getattr(order, "payment_mode", "prepay") == "postpay":
-            marked_offline_paid = _mark_order_offline_paid(order)
-        await _mark_order_coupon_used_if_locked(order, db)
-        if marked_offline_paid:
-            await _apply_paid_order_member_assets_once(order, db)
-    await db.commit()
-    await db.refresh(order)
-    if just_settled:
-        await _record_order_consumption(order, db)
-    return success_response(
-        data={
-            "id": str(order.id),
-            "status": order.status,
-            "payment_status": getattr(order, "payment_status", None),
-            "payment_method": getattr(order, "payment_method", None),
-            "payment_time": getattr(order, "payment_time", None),
-        },
-        msg="状态已更新",
-    )
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    return await service.update_order_status(int(order_id), body)
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
 TABLE_CLOSE_DONE_STATUSES = {"done", "settled", "cancelled", "rejected"}
@@ -1816,113 +1318,12 @@ async def settle_table(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    table_no = (body.get("table_no") or "").strip()
-    if not table_no:
-        return error_response(code=400, msg="缺少桌号")
-    TenantContext.set_tenant_id(tenant_id)
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    closed_by = str(getattr(request.state, "user_id", "") or "merchant")
+    return await service.settle_table(body, closed_by=closed_by)
 
-    from app.models.dining import DiningSession
 
-    # 找"这一桌还有活儿要处理"的会话，按订单状态找，不按 DiningSession.status=="OPEN" 找。
-    # 历史上出现过会话被标成 CLOSED/EXPIRED，订单却还卡在 done 没跟着推进到 settled 的情况
-    # （旧版本结账联动没做全，或者过期扫描踩中竞态）——一旦发生，这一桌就再也找不到
-    # status=="OPEN" 的会话，桌台视图上却因为订单还是 done 状态、一直显示"可结账"，
-    # 商家怎么点都是这句"本桌没有进行中的会话"，成了清不掉的幽灵桌台。改成按这一桌名下
-    # 还有没到终态(settled/cancelled/rejected)订单的那个会话来找，不管它自己的 status
-    # 字段写的是什么——找到了照常走后面"有没有卡着的订单"这一关，正常结账；这样哪怕历史
-    # 数据已经出现过这种不一致，下一次点结账也能把它带回正轨，不需要人工修数据库。
-    non_terminal_result = await db.execute(
-        select(Order.dining_session_id)
-        .join(DiningSession, DiningSession.id == Order.dining_session_id)
-        .where(
-            DiningSession.tenant_id == tenant_id,
-            DiningSession.table_no == table_no,
-            Order.status.notin_(("settled", "cancelled", "rejected")),
-        )
-        .order_by(DiningSession.created_at.desc())
-        .limit(1)
-    )
-    session_id = non_terminal_result.scalar_one_or_none()
-    if not session_id:
-        return error_response(code=404, msg="本桌没有进行中的会话")
-
-    session_result = await db.execute(
-        select(DiningSession).where(DiningSession.id == session_id).with_for_update()
-    )
-    active_session = session_result.scalar_one_or_none()
-    if not active_session:
-        return error_response(code=404, msg="本桌没有进行中的会话")
-
-    result = await db.execute(
-        select(Order).where(
-            Order.tenant_id == tenant_id,
-            Order.dining_session_id == active_session.id,
-        )
-    )
-    table_orders = list(result.scalars().all())
-    blocking_orders = [
-        o for o in table_orders
-        if (o.status or "") in TABLE_CLOSE_BLOCKING_STATUSES or (o.status or "") not in TABLE_CLOSE_DONE_STATUSES
-    ]
-    if blocking_orders:
-        return error_response(
-            code=409,
-            msg="本桌还有未完成的订单，无法结账",
-            data={
-                "table_no": table_no,
-                "dining_session_id": str(active_session.id),
-                "blocking_order_ids": [str(o.id) for o in blocking_orders],
-                "blocking_statuses": sorted({o.status for o in blocking_orders}),
-            },
-        )
-
-    active_session.status = "CLOSED"
-    active_session.closed_at = datetime.utcnow()
-    active_session.closed_by = str(getattr(request.state, "user_id", "") or "merchant")
-    active_session.active_key = None
-
-    total = 0.0
-    settled_count = 0
-    paid_synced_count = 0
-    newly_settled_orders = []
-    # 这里不能再按 payment_status=="unpaid" 过滤：先付后厨的订单到 done 的时候早就已经
-    # payment_status=="paid" 了，之前只结未付款订单会把先付后厨的订单永远漏在 done 状态，
-    # 既拿不到"已结账"的消费记录（顾客端"消费记录"页永远看不到这笔），这一桌在商家后台也会
-    # 变成清不掉的"幽灵桌台"——结账按钮点了以后（因为 session 已经关闭）下次点就直接 404。
-    # 只要是 done 就该跟着这次结账一起推进到 settled，是否需要补标线下已付款交给下面
-    # payment_mode 的判断去管，不应该影响"要不要把它算作已结账"这件事。
-    settlement_orders = [o for o in table_orders if o.status == "done"]
-    for o in settlement_orders:
-        o.status = "settled"
-        settled_count += 1
-        newly_settled_orders.append(o)
-        if not getattr(o, "completed_at", None):
-            o.completed_at = datetime.utcnow()
-        # 桌台视图的"结账"是餐后付款和桌台账单共用的唯一批量结账入口（小程序下单时不分模式都会建
-        # dining_session，两种模式的订单都会被这里的桌台分组捞到），所以线下已付款的标记不能只认
-        # table_account——postpay 订单结账时同样要在这里补上，否则会留下"已结账却仍显示未支付"的订单。
-        if getattr(o, "payment_mode", "prepay") in ("table_account", "postpay"):
-            if _mark_order_offline_paid(o):
-                paid_synced_count += 1
-                await _apply_paid_order_member_assets_once(o, db)
-        await _mark_order_coupon_used_if_locked(o, db)
-        total += float(o.total or 0)
-    await db.commit()
-    for o in newly_settled_orders:
-        await _record_order_consumption(o, db)
-    return success_response(
-        data={
-            "table_no": table_no,
-            "dining_session_id": str(active_session.id),
-            "settled_count": settled_count,
-            "paid_synced_count": paid_synced_count,
-            "payment_status": "paid",
-            "payment_method": "offline",
-            "closed": True,
-            "total": total,
-        },
-        msg="结桌成功",
-    )
 class MerchantNoteUpdate(PydanticBase):
     note: str = ""
 
@@ -1946,43 +1347,9 @@ async def update_order_pickup_no(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    result = await db.execute(
-        select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
-    )
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-
-    pickup_no = body.pickup_no.strip()[:16] or None
-    affected_ids = [order.id]
-
-    if order.dining_session_id:
-        from app.models.dining import DiningSession
-
-        session = await db.get(DiningSession, order.dining_session_id)
-        if session:
-            session.pickup_no = pickup_no
-            siblings_result = await db.execute(
-                select(Order).where(
-                    Order.tenant_id == tenant_id,
-                    Order.dining_session_id == session.id,
-                    Order.status.notin_(["cancelled", "rejected"]),
-                )
-            )
-            siblings = siblings_result.scalars().all()
-            for sibling in siblings:
-                sibling.pickup_no = pickup_no
-            affected_ids = [o.id for o in siblings] or affected_ids
-        else:
-            order.pickup_no = pickup_no
-    else:
-        order.pickup_no = pickup_no
-
-    await db.commit()
-    return success_response(
-        data={"pickup_no": pickup_no, "order_ids": [str(i) for i in affected_ids]},
-        msg="取餐牌号已更新",
-    )
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    return await service.update_order_pickup_no(int(order_id), body.pickup_no)
 
 
 class OrderReprintBody(PydanticBase):
@@ -2001,17 +1368,9 @@ async def update_merchant_note(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    result = await db.execute(
-        select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
-    )
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-    _, meta = _split_merchant_note_and_print_meta(order.merchant_note)
-    order.merchant_note = _compose_merchant_note_with_print_meta(body.note.strip() or None, meta)
-    await db.commit()
-    display_note, _ = _split_merchant_note_and_print_meta(order.merchant_note)
-    return success_response(data={"id": str(order.id), "merchant_note": display_note}, msg="merchant note updated")
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    return await service.update_merchant_note(int(order_id), body.note)
 
 
 @router.post("/orders/{order_id}/reprint")
@@ -2051,57 +1410,13 @@ async def cancel_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Cancel current customer order."""
-    from app.models.coupon import Coupon as _Coupon
-    from datetime import datetime as _dt
-
     customer_id = getattr(request.state, "customer_id", None)
-    result = await db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-    # 归属校验：已登录的订单必须是同一个客户；匿名拼桌顾客下的单没有 customer_id，
-    # 必须靠 participant_token 核对身份——否则任何人拿到 order_id 就能取消别人的挂单
-    # （同一桌台其他人能在"本桌已点菜品"里直接看到这个 order_id）。
-    if order.customer_id:
-        if not customer_id or int(customer_id) != int(order.customer_id):
-            return error_response(code=403, msg="forbidden")
-    elif order.participant_id:
-        from app.models.dining import DiningParticipant
-        from app.services.dining_session_service import hash_participant_token
-
-        owns_order = False
-        if participant_token:
-            participant_result = await db.execute(
-                select(DiningParticipant).where(
-                    DiningParticipant.id == order.participant_id,
-                    DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
-                )
-            )
-            owns_order = participant_result.scalar_one_or_none() is not None
-        if not owns_order:
-            return error_response(code=403, msg="forbidden")
-    # 取消前先跟微信核实一下：如果顾客刚好在微信那边已经付款成功、回调只是还没送达，
-    # 直接放行取消会导致钱已经进商户账户但订单却显示已取消——没人会再去处理这笔钱。
-    if order.status == "pending_payment" and getattr(order, "payment_mode", "prepay") == "prepay":
-        if await _recover_wxpay_order_if_paid(order, db):
-            await db.commit()
-            return error_response(code=400, msg="订单已支付，请刷新查看最新状态")
-    if order.status not in ("pending_payment", "pending"):
-        return error_response(code=400, msg="订单已支付或已完成，无法取消")
-    if getattr(order, "payment_status", None) == "paid":
-        refund_result = await _refund_order_payment(order, db, reason="customer_cancel")
-        if not refund_result["success"]:
-            await db.rollback()
-            return error_response(code=502, msg=f"取消失败，退款处理异常，请稍后重试或联系客服：{refund_result['error']}")
-    await _restore_order_stock(order, db)
-    order.status = "cancelled"
-    # P0 修复：恢复被 LOCKED 的优惠券
-    if order.coupon_id:
-        coupon = await db.get(_Coupon, order.coupon_id)
-        if coupon and coupon.status == "LOCKED":
-            coupon.status = "UNUSED"
-    await db.commit()
-    return success_response(data={"id": str(order.id), "status": "cancelled"}, msg="order cancelled")
+    service = OrderLifecycleService(db)
+    return await service.cancel_order(
+        int(order_id),
+        customer_id=int(customer_id) if customer_id else None,
+        participant_token=participant_token,
+    )
 
 
 @router.get("/orders/my")
@@ -2112,52 +1427,13 @@ async def get_my_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Get current customer order status."""
-    result = await db.execute(select(Order).where(Order.id == int(order_id)))
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-
-    # 所有权校验：按 ID 就能查到别人订单的状态/备注，之前只凭 order_id 不做任何校验。
-    # 已登录顾客按 customer_id 核对；匿名同桌顾客按 dining participant 的令牌核对。
     customer_id = getattr(request.state, "customer_id", None)
-    if order.customer_id:
-        if not customer_id or int(customer_id) != int(order.customer_id):
-            return error_response(code=403, msg="forbidden")
-    elif order.participant_id:
-        from app.models.dining import DiningParticipant
-        from app.services.dining_session_service import hash_participant_token
-
-        owns_order = False
-        if participant_token:
-            participant_result = await db.execute(
-                select(DiningParticipant).where(
-                    DiningParticipant.id == order.participant_id,
-                    DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
-                )
-            )
-            owns_order = participant_result.scalar_one_or_none() is not None
-        if not owns_order:
-            return error_response(code=403, msg="forbidden")
-
-    recovered = await _recover_wxpay_order_if_paid(order, db)
-    if recovered:
-        await db.commit()
-        await db.refresh(order)
-
-    reward_coupon = None
-    if order.reward_coupon_snapshot:
-        try:
-            reward_coupon = json.loads(order.reward_coupon_snapshot)
-        except Exception:
-            reward_coupon = None
-
-    return success_response(data={
-        "id": str(order.id),
-        "status": order.status,
-        "payment_status": order.payment_status,
-        "merchant_note": order.merchant_note,
-        "reward_coupon": reward_coupon,
-    })
+    service = OrderLifecycleService(db)
+    return await service.get_my_order(
+        int(order_id),
+        customer_id=int(customer_id) if customer_id else None,
+        participant_token=participant_token,
+    )
 
 
 @router.get("/orders")
@@ -2178,148 +1454,19 @@ async def list_orders(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    TenantContext.set_tenant_id(tenant_id)
-
-    query = select(Order).where(Order.tenant_id == tenant_id)
-
-    if date_str == "today" or not date_str:
-        # Use UTC+8 local day range for today order query.
-        from datetime import timedelta as _td
-        utc8_now = datetime.now(timezone.utc) + _td(hours=8)
-        today_local = utc8_now.date()
-        day_start_utc = datetime(today_local.year, today_local.month, today_local.day) - _td(hours=8)
-        day_end_utc = day_start_utc + _td(hours=24)
-        # A dining session that stays open past midnight still has orders from
-        # "yesterday" blocking settle-table today. Always surface still-open
-        # orders regardless of created_at, or they become invisible in this
-        # list while still blocking checkout (same class of bug as the
-        # pending_payment table-grouping fix above). "done" orders don't block
-        # settle_table (they get finalized during closing), but they still
-        # haven't been paid/settled yet -- surface those across days too, or a
-        # table that finished cooking right before an idle dining_session
-        # rolled over to a new day silently drops out of the merchant's
-        # default view with no indication anything is owed.
-        query = query.where(
-            or_(
-                and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
-                Order.status.in_(TABLE_CLOSE_BLOCKING_STATUSES),
-                Order.status == "done",
-            )
-        )
-
-    normalized_order_no = (order_no or "").strip()
-    normalized_tail = (order_tail or tail_no or "").strip()
-    normalized_table = (table_no or "").strip()
-    normalized_keyword = (keyword or "").strip()
-    normalized_status = (status or "").strip()
-
-    if normalized_order_no:
-        if normalized_order_no.isdigit():
-            query = query.where(Order.id == int(normalized_order_no))
-        else:
-            query = query.where(cast(Order.id, String).like(f"%{normalized_order_no}%"))
-    if normalized_tail:
-        query = query.where(cast(Order.id, String).like(f"%{normalized_tail}"))
-    if normalized_table:
-        query = query.where(Order.table_no == normalized_table)
-    if normalized_status:
-        query = query.where(Order.status == normalized_status)
-    if normalized_keyword:
-        keyword_conditions = [
-            Order.table_no == normalized_keyword,
-            Order.table_no.like(f"%{normalized_keyword}%"),
-            cast(Order.id, String).like(f"%{normalized_keyword}"),
-        ]
-        if normalized_keyword.isdigit():
-            keyword_conditions.append(Order.id == int(normalized_keyword))
-        query = query.where(or_(*keyword_conditions))
-
-    wants_pagination = page is not None or page_size is not None or any([
-        normalized_order_no,
-        normalized_tail,
-        normalized_table,
-        normalized_status,
-        normalized_keyword,
-    ])
-    safe_page = max(int(page or 1), 1)
-    safe_page_size = min(max(int(page_size or 20), 1), 100)
-
-    total = None
-    if wants_pagination:
-        total_result = await db.execute(select(func.count()).select_from(query.order_by(None).subquery()))
-        total = int(total_result.scalar_one() or 0)
-        query = query.order_by(Order.created_at.desc()).offset((safe_page - 1) * safe_page_size).limit(safe_page_size)
-    else:
-        query = query.order_by(Order.created_at.desc())
-
-    result = await db.execute(query)
-    orders = result.scalars().all()
-
-    recovered_any = False
-    for order in orders:
-        if order.status == "pending_payment":
-            recovered_any = (await _recover_wxpay_order_if_paid(order, db)) or recovered_any
-        print_meta = _get_print_meta(order)
-        if (
-            getattr(order, "payment_status", None) == "paid"
-            and print_meta.get("status") == "failed"
-            and int(print_meta.get("attempts") or 0) < MAX_PRINT_RETRY_ATTEMPTS
-        ):
-            await _print_paid_order_ticket(order, db, reason="merchant_list_recovery")
-            recovered_any = True
-    if recovered_any:
-        await db.commit()
-        for order in orders:
-            await db.refresh(order)
-
-    order_ids = [o.id for o in orders]
-    items_by_order = {}
-    if order_ids:
-        items_result = await db.execute(
-            select(OrderItem).where(OrderItem.order_id.in_(order_ids))
-        )
-        all_items = items_result.scalars().all()
-        for item in all_items:
-            items_by_order.setdefault(item.order_id, []).append(item)
-
-    session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
-    checkout_requested_by_session = {}
-    if session_ids:
-        from app.models.dining import DiningSession
-
-        sessions_result = await db.execute(
-            select(DiningSession.id, DiningSession.checkout_requested_at).where(
-                DiningSession.id.in_(session_ids)
-            )
-        )
-        for session_id, checkout_requested_at in sessions_result.all():
-            if checkout_requested_at:
-                checkout_requested_by_session[session_id] = checkout_requested_at.isoformat()
-
-    # 拼桌场景下接单页要能看出"这道菜是哪位点的"——跟顾客端"已点菜品"用的是
-    # 同一套编号算法（DiningSessionService.get_participant_ordinals），两边永远对得上。
-    from app.services.dining_session_service import DiningSessionService
-    participant_ordinals = await DiningSessionService.get_participant_ordinals(db, tenant_id, list(session_ids))
-
-    rows = [
-        serialize_order(
-            o,
-            items_by_order.get(o.id, []),
-            checkout_requested_at=checkout_requested_by_session.get(getattr(o, "dining_session_id", None)),
-            participant_no=participant_ordinals.get(getattr(o, "participant_id", None)),
-        )
-        for o in orders
-    ]
-    if wants_pagination:
-        return success_response(
-            data={
-                "items": rows,
-                "total": total or 0,
-                "page": safe_page,
-                "page_size": safe_page_size,
-            }
-        )
-    return success_response(data=rows)
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    return await service.list_orders(
+        date_str=date_str,
+        keyword=keyword,
+        order_no=order_no,
+        order_tail=order_tail,
+        tail_no=tail_no,
+        table_no=table_no,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
 
 class ReviewCreate(PydanticBase):
     rating: int  # 1-5
@@ -2334,42 +1481,16 @@ async def create_review(
     db: AsyncSession = Depends(get_db),
 ):
     """Submit customer review for a completed order."""
-    from datetime import datetime as _dt
-    from app.models.order_review import OrderReview
-
     customer_id = getattr(request.state, "customer_id", None)
     if not customer_id:
         return error_response(code=401, msg="请先登录")
-    if not 1 <= body.rating <= 5:
-        return error_response(code=400, msg="璇勫垎闇€鍦?-5涔嬮棿")
-
-    result = await db.execute(select(Order).where(Order.id == int(order_id)))
-    order = result.scalar_one_or_none()
-    if not order:
-        return error_response(code=404, msg="order not found")
-    if int(order.customer_id or 0) != int(customer_id):
-        return error_response(code=403, msg="forbidden")
-    if order.status not in ("done", "settled"):
-        return error_response(code=400, msg="order not completed")
-
-    # 妫€鏌ユ槸鍚﹀凡璇勪环
-    exists = await db.execute(
-        select(OrderReview).where(OrderReview.order_id == int(order_id))
-    )
-    if exists.scalar_one_or_none():
-        return error_response(code=400, msg="order already reviewed")
-
-    review = OrderReview(
-        tenant_id=order.tenant_id,
-        order_id=order.id,
-        customer_id=int(customer_id) if customer_id else None,
+    service = OrderLifecycleService(db)
+    return await service.create_review(
+        int(order_id),
+        customer_id=int(customer_id),
         rating=body.rating,
         content=body.content,
-        created_at=_dt.utcnow(),
     )
-    db.add(review)
-    await db.commit()
-    return success_response(data={"id": str(review.id), "rating": review.rating}, msg="review submitted")
 
 
 @router.get("/orders/reviews")
@@ -2382,22 +1503,8 @@ async def list_reviews(
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return error_response(code=401, msg="请先登录")
-    from app.models.order_review import OrderReview
-
-    TenantContext.set_tenant_id(tenant_id)
-    result = await db.execute(
-        select(OrderReview).where(OrderReview.tenant_id == tenant_id).order_by(OrderReview.created_at.desc())
-    )
-    reviews = result.scalars().all()
-    return success_response(data=[
-        {
-            "id": str(r.id),
-            "order_id": str(r.order_id),
-            "rating": r.rating,
-            "content": r.content,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in reviews
-    ])
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(tenant_id)
+    return await service.list_reviews()
 
 

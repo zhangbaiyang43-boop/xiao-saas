@@ -4,6 +4,10 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
+PRINT_SERVICE_SOURCE = (ROOT / "app" / "services" / "order_print_service.py").read_text(encoding="utf-8-sig")
 DINING_SERVICE_SOURCE = (ROOT / "app" / "services" / "dining_session_service.py").read_text(encoding="utf-8-sig")
 DINING_MIGRATION_SOURCE = (
     ROOT / "alembic" / "versions" / "20260715_0001_add_dining_session_tables.py"
@@ -21,6 +25,22 @@ def function_source(source: str, name: str) -> str:
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
         if line.startswith("@router.") or line.startswith("class ") or line.startswith("async def ") or line.startswith("def "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
+def lifecycle_method_source(name: str) -> str:
+    lines = LIFECYCLE_SERVICE_SOURCE.splitlines()
+    start = next(
+        (idx for idx, line in enumerate(lines) if line.startswith(f"    async def {name}(")),
+        None,
+    )
+    assert start is not None, f"{name} source not found"
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("    async def ") or line.startswith("    def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -56,7 +76,7 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         self.assertIn('unique=True', DINING_MIGRATION_SOURCE)
 
     def test_table_account_settlement_locks_session_and_settles_all_done_orders(self):
-        settle_source = function_source(ORDERS_SOURCE, "settle_table")
+        settle_source = lifecycle_method_source("settle_table")
         # 会话查找按"这一桌还有没到终态的订单"来找，不再要求 DiningSession.status=="OPEN"——
         # 这样历史上出现过的"会话被标成 CLOSED/EXPIRED 但订单还卡在 done"这种不一致数据，
         # 下一次点结账也能被这里捞到并带回正轨，而不是永远 404（见 orders.py 里的注释）。
@@ -69,7 +89,7 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
 
     def test_reprint_path_does_not_mutate_payment_state(self):
         reprint_source = function_source(ORDERS_SOURCE, "reprint_order_ticket")
-        print_source = function_source(ORDERS_SOURCE, "_print_paid_order_ticket")
+        print_source = function_source(PRINT_SERVICE_SOURCE, "_print_paid_order_ticket")
         self.assertIn('allowed, reason = can_reprint_order(order, print_type=print_type)', reprint_source)
         self.assertIn('_print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator=tenant_id)', reprint_source)
         self.assertNotIn('payment_status = "paid"', reprint_source)

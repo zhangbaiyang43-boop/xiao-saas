@@ -1301,3 +1301,24 @@ class CouponService(BaseService):
             ][:result["success_count"]]
 
             return result
+
+
+async def _set_order_coupon_status_if_locked(order, db: AsyncSession, status: str) -> None:
+    if not getattr(order, "coupon_id", None):
+        return
+    from app.models.coupon import Coupon
+
+    coupon_result = await db.execute(
+        select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+    )
+    coupon = coupon_result.scalar_one_or_none()
+    if coupon and coupon.status == "LOCKED":
+        coupon.status = status
+
+
+async def _unlock_order_coupon_if_locked(order, db: AsyncSession) -> None:
+    await _set_order_coupon_status_if_locked(order, db, "UNUSED")
+
+
+async def _mark_order_coupon_used_if_locked(order, db: AsyncSession) -> None:
+    await _set_order_coupon_status_if_locked(order, db, "USED")

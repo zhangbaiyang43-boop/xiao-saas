@@ -11,6 +11,9 @@ POLLING_MANAGER_SOURCE = (
     ROOT.parent / "admin-h5" / "src" / "utils" / "pollingManager.js"
 ).read_text(encoding="utf-8-sig")
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
 
 
 def script_function_source(source: str, name: str) -> str:
@@ -42,12 +45,28 @@ def py_function_source(source: str, name: str) -> str:
     return "\n".join(lines[start:end])
 
 
+def lifecycle_method_source(name: str) -> str:
+    lines = LIFECYCLE_SERVICE_SOURCE.splitlines()
+    start = next(
+        (idx for idx, line in enumerate(lines) if line.startswith(f"    async def {name}(")),
+        None,
+    )
+    assert start is not None, f"{name} source not found"
+    end = len(lines)
+    for idx in range(start + 1, len(lines)):
+        line = lines[idx]
+        if line.startswith("    async def ") or line.startswith("    def "):
+            end = idx
+            break
+    return "\n".join(lines[start:end])
+
+
 class MerchantOrderDeliveryContractsTest(unittest.TestCase):
     def test_backend_merchant_query_returns_full_today_paid_orders(self):
-        source = py_function_source(ORDERS_SOURCE, "list_orders")
+        source = lifecycle_method_source("list_orders")
         self.assertIn("Order.tenant_id == tenant_id", source)
         self.assertIn("date_str == \"today\"", source)
-        self.assertIn("_recover_wxpay_order_if_paid(order, db)", source)
+        self.assertIn("_recover_wxpay_order_if_paid(order, self.db)", source)
         self.assertIn("serialize_order(", source)
         self.assertIn("items_by_order.get(o.id, [])", source)
         self.assertIn("checkout_requested_at=checkout_requested_by_session.get(", source)

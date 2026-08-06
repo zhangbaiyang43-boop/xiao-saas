@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+LIFECYCLE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_lifecycle_service.py"
+).read_text(encoding="utf-8-sig")
 MEMBERSHIP_SOURCE = (ROOT / "app" / "services" / "membership_service.py").read_text(encoding="utf-8-sig")
 
 
@@ -40,7 +43,7 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
 
     def test_failed_or_cancelled_payment_does_not_mutate_assets(self):
         confirm_pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
-        cancel_source = function_source(ORDERS_SOURCE, "cancel_order")
+        cancel_source = function_source(LIFECYCLE_SERVICE_SOURCE, "cancel_order")
         notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
 
         self.assertIn('if order.status != "pending_payment"', confirm_pay_source)
