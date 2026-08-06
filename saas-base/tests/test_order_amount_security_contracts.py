@@ -28,13 +28,13 @@ def function_source(name: str, *, source: str | None = None) -> str:
 
 class OrderAmountSecurityContractsTest(unittest.TestCase):
     def test_menu_item_price_is_loaded_from_server_with_tenant_scope(self):
-        source = function_source("create_order")
+        source = function_source("_validate_create_order_items_and_compute_total")
         self.assertIn("MenuItem.tenant_id == tenant_id", source)
         self.assertIn("unit_price = float(dish.price)", source)
         self.assertLess(source.index("unit_price = float(dish.price)"), source.index("real_total += unit_price * item_in.qty"))
 
     def test_invalid_quantity_and_missing_dish_id_are_rejected_before_total_calculation(self):
-        source = function_source("create_order")
+        source = function_source("_validate_create_order_items_and_compute_total")
         self.assertIn("if item_in.qty <= 0", source)
         self.assertIn("商品数量必须大于0", source)
         self.assertIn("缺少菜品ID", source)

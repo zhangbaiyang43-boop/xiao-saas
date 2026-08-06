@@ -391,43 +391,10 @@ async def _resolve_create_order_dining_context(
     return None, customer_id, dining_session_id, dining_participant_id, order_type, parent_order_id, session_for_pickup
 
 
-@router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession) -> None:
     from datetime import datetime as _dt, timedelta
-    from decimal import Decimal
-    from app.models.menu_item import MenuItem
+
     from app.models.coupon import Coupon
-    from app.models.coupon_template import CouponTemplate
-    from app.api.v1.menu import load_menu_specs
-
-    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
-    if early_response is not None:
-        return early_response
-
-    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
-        tenant, tenant_id, body, db
-    )
-
-    request_id = (body.request_id or "").strip() or None
-
-    (
-        early_response,
-        customer_id,
-        dining_session_id,
-        dining_participant_id,
-        order_type,
-        parent_order_id,
-        session_for_pickup,
-    ) = await _resolve_create_order_dining_context(
-        body, request, db, tenant_id, payment_mode, is_table_account
-    )
-    if early_response is not None:
-        return early_response
-
-    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
-
-    applied_coupon_id = None
-    coupon_discount = Decimal("0")
 
     # BUG-4: 处理超时待支付订单，恢复优惠券
     timeout_threshold = _dt.utcnow() - timedelta(minutes=PENDING_PAYMENT_TIMEOUT_MINUTES)
@@ -452,13 +419,25 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     if stale_orders:
         await db.flush()
 
+
+async def _validate_create_order_items_and_compute_total(
+    body: OrderCreate, db: AsyncSession, tenant_id: str
+):
+    """Validate menu items, deduct stock per line, and compute order total.
+
+    Returns (early_response, real_total, order_items_data). When early_response is
+    not None, the caller must return it immediately.
+    """
+    from app.api.v1.menu import load_menu_specs
+    from app.models.menu_item import MenuItem
+
     # 从 DB 重新计算价格、检查客户归属/下架状态，检查并扣减库存（with_for_update 防超卖）
     if not body.items:
-        return error_response(code=400, msg="订单商品不能为空")
+        return error_response(code=400, msg="订单商品不能为空"), None, None
 
     specs_map = await load_menu_specs(db, tenant_id)
 
-    def _resolve_spec_delta(dish: "MenuItem", item_in: "OrderItemIn") -> float:
+    def _resolve_spec_delta(dish: MenuItem, item_in: OrderItemIn) -> float:
         """Recompute the spec/extra surcharge from the merchant-configured spec_groups
         (source of truth), never from the client-submitted price."""
         group_defs = specs_map.get(str(dish.id)) or []
@@ -501,7 +480,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     order_items_data = []
     for item_in in body.items:
         if item_in.qty <= 0:
-            return error_response(code=400, msg=f"商品数量必须大于0:{item_in.name}")
+            return error_response(code=400, msg=f"商品数量必须大于0:{item_in.name}"), None, None
 
         if item_in.dish_id:
             dish_result = await db.execute(
@@ -511,17 +490,17 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             )
             dish = dish_result.scalar_one_or_none()
             if not dish:
-                return error_response(code=400, msg=f"菜品不存在:{item_in.name}")
+                return error_response(code=400, msg=f"菜品不存在:{item_in.name}"), None, None
             if not dish.available:
-                return error_response(code=400, msg=f"菜品已下架:{dish.name}")
+                return error_response(code=400, msg=f"菜品已下架:{dish.name}"), None, None
             if dish.stock is not None and dish.stock <= 0:
-                return error_response(code=400, msg=f"dish sold out: {dish.name}")
+                return error_response(code=400, msg=f"dish sold out: {dish.name}"), None, None
             if dish.stock is not None and dish.stock < item_in.qty:
-                return error_response(code=400, msg=f"dish stock not enough: {dish.name}, left {dish.stock}")
+                return error_response(code=400, msg=f"dish stock not enough: {dish.name}, left {dish.stock}"), None, None
             try:
                 spec_delta = _resolve_spec_delta(dish, item_in)
             except ValueError as exc:
-                return error_response(code=400, msg=str(exc))
+                return error_response(code=400, msg=str(exc)), None, None
             unit_price = float(dish.price) + spec_delta
             base_name = str(dish.name or "")
             submitted_name = str(item_in.name or "").strip()
@@ -534,9 +513,56 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             if dish.stock is not None:
                 dish.stock -= item_in.qty
         else:
-            return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}")
+            return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}"), None, None
         real_total += unit_price * item_in.qty
         order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty))
+
+    return None, real_total, order_items_data
+
+
+@router.post("/orders")
+async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    from datetime import datetime as _dt, timedelta
+    from decimal import Decimal
+    from app.models.coupon import Coupon
+    from app.models.coupon_template import CouponTemplate
+
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    if early_response is not None:
+        return early_response
+
+    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
+        tenant, tenant_id, body, db
+    )
+
+    request_id = (body.request_id or "").strip() or None
+
+    (
+        early_response,
+        customer_id,
+        dining_session_id,
+        dining_participant_id,
+        order_type,
+        parent_order_id,
+        session_for_pickup,
+    ) = await _resolve_create_order_dining_context(
+        body, request, db, tenant_id, payment_mode, is_table_account
+    )
+    if early_response is not None:
+        return early_response
+
+    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
+
+    applied_coupon_id = None
+    coupon_discount = Decimal("0")
+
+    await _cleanup_stale_pending_payment_orders(tenant_id, db)
+
+    early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
+        body, db, tenant_id
+    )
+    if early_response is not None:
+        return early_response
 
     # BUG-2: 建单时仅验证优惠券，不标记 USED，改为 LOCKED（支付时再核销）
     if body.coupon_id:
