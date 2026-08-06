@@ -2,6 +2,7 @@ import { createOrder, createWxPayOrder, getOrderStatus } from '@/api/order'
 import { joinByEntranceCode } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { isDiningIdentityError } from '@/utils/dining'
+import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的下单 + 支付 + 待支付恢复 + 结账授权这一整条链路。这是全部
 // 拆解里风险最高的一块——直接碰真金白银和订单记录，一旦哪个环节漏传状态，
@@ -66,7 +67,12 @@ export function useCheckout({
         items: successItems.value,
         createdTs: Date.now(),
       }))
-    } catch (e) {}
+    } catch (e) {
+      // 这份本地快照是"顾客支付到一半、小程序被强制退出"的兜底——存不进去
+      // 不会立刻影响这一次支付，但下次冷启动就没有这份"我还欠一次支付"的
+      // 记录了，值得报一下，不能悄悄丢掉。
+      reportError('checkout.save_pending_payment', e)
+    }
   }
 
   const restorePendingPaymentOrder = () => {
@@ -83,6 +89,9 @@ export function useCheckout({
       successTotal.value = Number(record.total || record.payAmount || 0)
       return true
     } catch (e) {
+      // 存储读出来的内容损坏/不是合法 JSON——理论上不该发生，一旦发生就意味着
+      // "断线重连恢复待支付订单"这条安全网直接失效了，必须能看见。
+      reportError('checkout.restore_pending_payment', e)
       return false
     }
   }
@@ -150,6 +159,10 @@ export function useCheckout({
       }
       return false
     } catch (e) {
+      // 底层网络失败本身已经在 api/request.js 里报过一次了，这里单独再报一次
+      // 是因为"对账失败"这件事本身有独立的排查价值——能单独统计"待支付订单
+      // 恢复失败率"，不用从一堆通用网络错误里去猜。
+      reportError('checkout.recover_pending_payment', e)
       return false
     } finally {
       recoveringPayment = false

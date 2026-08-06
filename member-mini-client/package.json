@@ -1,12 +1,15 @@
 {
   "name": "member-mini-client",
   "version": "1.0.0",
-  "description": "多租户会员管理 SaaS 平台顾客端",
+  "description": "开心点单小程序",
   "scripts": {
     "dev:h5": "uni",
     "build:h5": "uni build",
     "dev:mp-weixin": "uni -p mp-weixin",
-    "build:mp-weixin": "uni build -p mp-weixin && node scripts/copy-vant.mjs && node scripts/postbuild-mp-weixin.mjs"
+    "build:mp-weixin": "uni build -p mp-weixin && node scripts/copy-vant.mjs && node scripts/postbuild-mp-weixin.mjs",
+    "test": "vitest run && npm run test:legacy",
+    "test:watch": "vitest",
+    "test:legacy": "node --test \"tests/**/*.test.mjs\""
   },
   "dependencies": {
     "@dcloudio/uni-app": "^3.0.0-alpha-5000820260420001",
@@ -26,6 +29,7 @@
     "sass": "^1.99.0",
     "typescript": "^5.3.3",
     "vite": "5.2.8",
+    "vitest": "^1.6.1",
     "vue-tsc": "^1.8.27"
   }
 }

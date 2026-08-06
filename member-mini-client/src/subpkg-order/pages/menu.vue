@@ -1077,6 +1077,14 @@ export default {
 
   onLoad: function (options) {
     return (async () => {
+      // 第1批：把"扫码到首屏可交互"这一个总耗时拆成三段，才知道 6-7 秒具体花在
+      // 冷启动、等接口、还是渲染上——只有一个总数没法对症下药。scanStartedAt 在这里
+      // 就读走（consumeStart 读到即删），后面 menuReady.then 里不能再读一次，
+      // 所以先存进局部变量传下去。
+      const onLoadStartedAt = Date.now()
+      const scanStartedAt = consumeStart('scan_to_interactive')
+      if (scanStartedAt) recordSample('stage_cold_start_to_onload', onLoadStartedAt - scanStartedAt)
+
       this.tableNo = options.table || 'A01'
       this.shopId = options.shop || uni.getStorageSync('tenant_id') || ''
       if (options.activity) this.todayActivity = decodeURIComponent(options.activity)
@@ -1097,8 +1105,14 @@ export default {
       // 不用等 sessionReady（本桌身份/历史订单同步）一起完成，那些不影响首屏能不能点餐。
       // 非扫码进来的场景（比如从"我的"页正常打开）consumeStart 拿不到起点，直接跳过。
       menuReady.then(() => {
-        const startedAt = consumeStart('scan_to_interactive')
-        if (startedAt) recordSample('scan_to_interactive', Date.now() - startedAt)
+        const menuReadyAt = Date.now()
+        recordSample('stage_onload_to_menu_ready', menuReadyAt - onLoadStartedAt)
+        if (scanStartedAt) recordSample('scan_to_interactive', menuReadyAt - scanStartedAt)
+        // nextTick 之后才是"数据已经写进真实 DOM"的时机，用它来近似"渲染完成"，
+        // 比 menuReady resolve 那一刻（数据到手但可能还没画出来）更贴近顾客真实感知。
+        nextTick(() => {
+          recordSample('stage_menu_ready_to_render', Date.now() - menuReadyAt)
+        })
         // 第1批：优惠券预拉，别等顾客点开购物车才现拉。故意错开一点延迟，把带宽/CPU
         // 优先让给刚刚渲染出来的菜单，不跟首屏抢；顾客通常也要选几件商品才会点开购物车，
         // 这点延迟基本感觉不到。

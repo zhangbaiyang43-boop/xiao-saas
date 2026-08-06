@@ -3,6 +3,7 @@ import { getCurrentDiningOrders } from '@/api/order'
 import { bindDiningParticipant } from '@/api/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 import { orderModeText } from '../utils/orderText.js'
+import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的"拼桌身份"这条链路——建立/校验本桌身份、绑定当前参与者、
 // 拉取本桌所有订单并同步进 myOrders。这是全部拆解里最基础的一块：桌台账单、
@@ -47,7 +48,11 @@ export function useDiningSession({
     if (!tenantId) return
     try {
       await bindDiningParticipant({ tenant_id: tenantId, participant_token: diningParticipantToken.value }, { authRedirect: false })
-    } catch (e) {}
+    } catch (e) {
+      // 绑不上参与者身份不阻断当前这次操作（原来就是静默跳过），但单独用
+      // 这个 scene 报一下，方便跟"这一桌的拼单人数/权限出问题"这类客诉对上号。
+      reportError('dining.bind_participant', e)
+    }
   }
 
   const diningOrderQuery = () => ({

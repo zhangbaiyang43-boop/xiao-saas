@@ -55,7 +55,25 @@ export function getStats(metric) {
   }
 }
 
-const TRACKED_METRICS = ['scan_to_interactive', 'menu_api', 'cart_open', 'submit_order']
+// stage_* 三个是把 scan_to_interactive 这一个总耗时拆开看的分段埋点（第 0 批只有
+// 一个总数，看不出 6-7 秒到底花在冷启动、等接口、还是渲染上，没法对症下药）：
+// - stage_cold_start_to_onload：小程序冷启动（含包下载/注入/路由）到 menu.vue
+//   的 onLoad 真正跑起来，这段完全在小程序框架和网络里，业务代码基本管不到。
+// - stage_onload_to_menu_ready：onLoad 跑起来到店铺设置+菜单数据都拿到，
+//   这段是接口耗时，慢的话应该去查请求本身或者要不要加缓存。
+// - stage_menu_ready_to_render：数据到手到页面真正渲染出来（nextTick 之后），
+//   这段慢大多是数据量或渲染本身的问题。
+// 三段加起来约等于 scan_to_interactive（后者继续保留，图的是能跟第 0 批的历史
+// 数据直接对比，不因为拆分就断了趋势线）。
+const TRACKED_METRICS = [
+  'scan_to_interactive',
+  'stage_cold_start_to_onload',
+  'stage_onload_to_menu_ready',
+  'stage_menu_ready_to_render',
+  'menu_api',
+  'cart_open',
+  'submit_order',
+]
 
 export function getAllStats() {
   return TRACKED_METRICS.map(getStats)

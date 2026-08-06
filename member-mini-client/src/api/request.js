@@ -1,5 +1,6 @@
 import { config } from '../config'
 import { recordSample } from '../utils/perf'
+import { reportError } from '../utils/monitor'
 
 // 第0批性能埋点：只认这两个 URL，命中就顺手记一笔耗时，不用改任何调用方。
 // 后端已经在响应头里带了 X-Process-Time-Ms（服务端处理耗时），一并存进 meta 里，
@@ -110,6 +111,10 @@ const request = (options) => {
           const error = new Error(toFriendlyMessage('', statusCode))
           error.statusCode = statusCode || body.code
           error.code = body.code || statusCode
+          // 401/403 大多是"登录态过期"这种预期内的正常事件，不是代码 bug，
+          // 单独用 auth_error 这个 scene 报，方便以后在后台把它跟真正的接口
+          // 故障分开看，不要混在一起互相掩盖。
+          reportError('api.auth_error', error, { url: options.url })
           if (authRedirect) redirectToGuest()
           reject(error)
           return
@@ -118,10 +123,13 @@ const request = (options) => {
         const error = new Error(toFriendlyMessage(body.msg || body.message || body.detail, statusCode))
         error.statusCode = statusCode
         error.code = body.code
+        reportError('api.error', error, { url: options.url, statusCode, code: body.code })
         reject(error)
       },
       fail: (err) => {
-        reject(new Error(toFriendlyMessage(err.errMsg)))
+        const error = new Error(toFriendlyMessage(err.errMsg))
+        reportError('api.network_fail', error, { url: options.url, errMsg: err.errMsg })
+        reject(error)
       }
     })
   })

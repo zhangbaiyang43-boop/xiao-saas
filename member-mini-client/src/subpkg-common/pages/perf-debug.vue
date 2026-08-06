@@ -22,7 +22,10 @@ import { ref } from 'vue'
 import { getAllStats, clearAll } from '@/utils/perf'
 
 const LABELS = {
-  scan_to_interactive: '扫码到首屏可交互',
+  scan_to_interactive: '扫码到首屏可交互（总）',
+  stage_cold_start_to_onload: '　├ 冷启动到页面开始加载',
+  stage_onload_to_menu_ready: '　├ 加载到菜单数据齐全',
+  stage_menu_ready_to_render: '　└ 数据齐全到渲染完成',
   menu_api: '菜单接口耗时',
   cart_open: '购物车打开耗时',
   submit_order: '提交订单耗时',
