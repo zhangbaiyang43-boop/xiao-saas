@@ -163,33 +163,31 @@ def serialize_order(order: Order, order_items: list, checkout_requested_at: str 
         ],
     }
 
-@router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    from datetime import datetime as _dt, timedelta
-    from decimal import Decimal
-    from app.models.menu_item import MenuItem
-    from app.models.coupon import Coupon
-    from app.models.coupon_template import CouponTemplate
-    from app.api.v1.menu import load_menu_specs
 
+async def _prepare_create_order_tenant_and_replay(body: OrderCreate, db: AsyncSession):
+    """Validate tenant/business hours and replay idempotent create_order requests.
+
+    Returns (early_response, tenant, tenant_id). When early_response is not None,
+    the caller must return it immediately and ignore tenant.
+    """
     tenant_id = body.shop
     if not tenant_id:
-        return error_response(code=400, msg="缺少shop参数")
+        return error_response(code=400, msg="缺少shop参数"), None, tenant_id
     TenantContext.set_tenant_id(tenant_id)
 
     tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
-        return error_response(code=404, msg="商户不存在")
+        return error_response(code=404, msg="商户不存在"), None, tenant_id
     if not tenant.status:
-        return error_response(code=403, msg="商户已停业，暂不接受点餐")
+        return error_response(code=403, msg="商户已停业，暂不接受点餐"), None, tenant_id
     from app.models.tenant_config import TenantConfig
 
     config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
     tenant_config = config_result.scalar_one_or_none()
     business_info = (tenant_config.business_info or {}) if tenant_config else {}
     if not business_info.get("is_open", True):
-        return error_response(code=400, msg="门店休息中，暂不接受点餐")
+        return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
 
     request_id = (body.request_id or "").strip() or None
     if request_id:
@@ -202,18 +200,29 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             replay_items = list(replay_items_result.scalars().all())
             replay_data = serialize_order(replay_order, replay_items)
             replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
-            return success_response(
-                data={
-                    **replay_data,
-                    "order_id": replay_data["id"],
-                    "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
-                    "next_action": build_order_next_action(replay_payment_mode),
-                    "pay_amount": float(replay_order.total),
-                    "payment_mode": replay_payment_mode,
-                },
-                msg="order already created, please pay",
+            return (
+                success_response(
+                    data={
+                        **replay_data,
+                        "order_id": replay_data["id"],
+                        "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
+                        "next_action": build_order_next_action(replay_payment_mode),
+                        "pay_amount": float(replay_order.total),
+                        "payment_mode": replay_payment_mode,
+                    },
+                    msg="order already created, please pay",
+                ),
+                None,
+                tenant_id,
             )
 
+    return None, tenant, tenant_id
+
+
+async def _resolve_create_order_payment_mode(
+    tenant: Tenant, tenant_id: str, body: OrderCreate, db: AsyncSession
+) -> tuple[str, bool, bool, bool]:
+    """Resolve payment_mode and derived flags from tenant defaults and table zone."""
     payment_mode = (tenant.payment_mode if tenant else "prepay")
     table_no_for_zone = (body.table or "").strip()
     if table_no_for_zone:
@@ -240,6 +249,27 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     is_postpay = payment_mode == "postpay"
     is_table_account = payment_mode == "table_account"
     pay_later_mode = is_postpay or is_table_account
+    return payment_mode, is_postpay, is_table_account, pay_later_mode
+
+
+@router.post("/orders")
+async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    from datetime import datetime as _dt, timedelta
+    from decimal import Decimal
+    from app.models.menu_item import MenuItem
+    from app.models.coupon import Coupon
+    from app.models.coupon_template import CouponTemplate
+    from app.api.v1.menu import load_menu_specs
+
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    if early_response is not None:
+        return early_response
+
+    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
+        tenant, tenant_id, body, db
+    )
+
+    request_id = (body.request_id or "").strip() or None
 
     customer_id = getattr(request.state, "customer_id", None)
     if customer_id:

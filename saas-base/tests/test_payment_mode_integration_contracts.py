@@ -40,8 +40,9 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('payment_mode', TENANT_SOURCE)
         self.assertIn('"payment_mode"', MENU_API_SOURCE)
         create_source = function_source(ORDERS_SOURCE, "create_order")
-        self.assertIn('tenant.payment_mode', create_source)
-        self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', create_source)
+        resolve_source = function_source(ORDERS_SOURCE, "_resolve_create_order_payment_mode")
+        self.assertIn('tenant.payment_mode', resolve_source)
+        self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', resolve_source)
 
     def test_prepay_mode_returns_payment_action_and_uses_wxpay_only_after_order_exists(self):
         create_source = function_source(ORDERS_SOURCE, "create_order")

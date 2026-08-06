@@ -64,12 +64,13 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn("payment_mode", ORDER_MODEL_SOURCE)
 
     def test_create_order_branches_by_tenant_payment_mode(self):
-        source = function_source(ORDERS_SOURCE, "create_order")
-        self.assertIn("tenant.payment_mode", source)
-        self.assertIn('payment_mode == "prepay"', source)
-        self.assertIn('payment_mode == "postpay"', source)
-        self.assertIn('payment_mode == "table_account"', source)
-        self.assertIn('"need_payment": payment_mode == "prepay"', source)
+        resolve_source = function_source(ORDERS_SOURCE, "_resolve_create_order_payment_mode")
+        create_source = function_source(ORDERS_SOURCE, "create_order")
+        self.assertIn("tenant.payment_mode", resolve_source)
+        self.assertIn('is_postpay = payment_mode == "postpay"', resolve_source)
+        self.assertIn('is_table_account = payment_mode == "table_account"', resolve_source)
+        self.assertIn('payment_mode = "prepay"', resolve_source)
+        self.assertIn('"need_payment": payment_mode == "prepay"', create_source)
 
     def test_unpaid_pay_later_orders_can_enter_kitchen_and_print(self):
         source = function_source(ORDERS_SOURCE, "create_order")

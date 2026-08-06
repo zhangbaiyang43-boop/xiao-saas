@@ -50,7 +50,8 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
     def test_order_is_created_before_payment_request(self):
         create_order_source = function_source("create_order")
         create_pay_source = function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE)
-        self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', create_order_source)
+        resolve_source = function_source("_resolve_create_order_payment_mode")
+        self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', resolve_source)
         self.assertIn('status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment"', create_order_source)
         self.assertIn('payment_status="unpaid"', create_order_source)
         self.assertIn('"need_payment": payment_mode == "prepay"', create_order_source)
