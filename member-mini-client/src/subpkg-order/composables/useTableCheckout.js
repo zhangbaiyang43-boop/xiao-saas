@@ -1,5 +1,6 @@
 import { requestTableCheckout } from '@/api/order'
 import { isDiningIdentityError } from '@/utils/dining'
+import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的桌台账单结账流程——顾客点"去结账"通知服务员、
 // "撤销呼叫"（继续加菜时）、"本桌已结账"的拦截提示。这是 HIGH 风险层里相对
@@ -81,6 +82,10 @@ export function useTableCheckout({
         const rebuilt = await ensureDiningSession(true)
         if (rebuilt) return performTableCheckout(true)
       }
+      // 走到这里说明呼叫结账最终失败了（要么不是身份问题，要么重建身份后重试
+      // 还是失败）——单独用这个 scene 报一下，方便统计"呼叫服务员失败率"，
+      // 不用从一堆通用网络错误里去猜是不是这个功能出了问题。
+      reportError('table_checkout.request_failed', e, { isRetry })
       uni.showToast({ title: '呼叫失败，请重试', icon: 'none' })
     }
   }

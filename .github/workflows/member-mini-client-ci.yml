@@ -1,0 +1,44 @@
+name: member-mini-client CI
+
+# 这是个 monorepo（saas-base/admin-h5/member-mini-client 都在同一个仓库里），
+# 只在 member-mini-client 目录有改动时才跑，不要浪费 CI 分钟数去为其它项目
+# 的改动重复跑这一套跟它们完全无关的检查。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'member-mini-client/**'
+      - '.github/workflows/member-mini-client-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'member-mini-client/**'
+      - '.github/workflows/member-mini-client-ci.yml'
+
+defaults:
+  run:
+    working-directory: member-mini-client
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: member-mini-client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build (H5)
+        run: npm run build:h5

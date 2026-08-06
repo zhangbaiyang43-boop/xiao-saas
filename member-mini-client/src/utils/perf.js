@@ -29,7 +29,6 @@ export function recordSample(metric, durationMs, meta) {
   samples.push({ t: Date.now(), ms: Math.round(durationMs), meta: meta || undefined })
   if (samples.length > MAX_SAMPLES) samples.splice(0, samples.length - MAX_SAMPLES)
   writeSamples(metric, samples)
-  // eslint-disable-next-line no-console
   console.log(`[perf] ${metric}: ${Math.round(durationMs)}ms`, meta || '')
 }
 
@@ -81,6 +80,9 @@ export function getAllStats() {
 
 export function clearAll() {
   TRACKED_METRICS.forEach((metric) => {
+    // 这是纯本地的性能自测采样，清不掉顶多下次自测面板看到的还是旧数据，
+    // 不影响任何真实业务，够不上上报错误的门槛，刻意留空。
+    // eslint-disable-next-line no-empty
     try { uni.removeStorageSync(STORAGE_PREFIX + metric) } catch {}
   })
 }
@@ -89,6 +91,8 @@ export function clearAll() {
 // 页面 JS 上下文会换掉，普通的内存变量存不住，只能落本地存储）。consumeStart 读到即删，
 // 避免同一个起点被后面的非扫码场景（比如页面内其它跳转）重复消费。
 export function markStart(name) {
+  // 同上：记不下这个起点时间戳，最多这一次的性能采样缺一条，不影响点餐主流程。
+  // eslint-disable-next-line no-empty
   try { uni.setStorageSync(START_MARK_PREFIX + name, Date.now()) } catch {}
 }
 

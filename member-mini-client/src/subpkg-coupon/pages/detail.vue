@@ -119,6 +119,8 @@ export default {
 
     // 去点餐：优惠券在结算时自动核销，不再需要店员扫码——回到点餐页并定位到"点餐"标签
     const goOrder = () => {
+      // 写不进这个本地标记最多回到点餐页时没有自动定位到"点餐"标签，不影响能不能点餐。
+      // eslint-disable-next-line no-empty
       try { uni.setStorageSync('menu_focus_tab', 'order') } catch (_) {}
       const pages = getCurrentPages()
       const idx = pages.findIndex(p => (p.route || '').indexOf('subpkg-order/pages/menu') !== -1)

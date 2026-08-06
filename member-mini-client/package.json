@@ -9,7 +9,8 @@
     "build:mp-weixin": "uni build -p mp-weixin && node scripts/copy-vant.mjs && node scripts/postbuild-mp-weixin.mjs",
     "test": "vitest run && npm run test:legacy",
     "test:watch": "vitest",
-    "test:legacy": "node --test \"tests/**/*.test.mjs\""
+    "test:legacy": "node --test \"tests/**/*.test.mjs\"",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@dcloudio/uni-app": "^3.0.0-alpha-5000820260420001",
@@ -26,6 +27,8 @@
     "@dcloudio/uni-stacktracey": "3.0.0-alpha-5000820260420001",
     "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5000820260420001",
     "@types/node": "^20.11.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^9.33.0",
     "sass": "^1.99.0",
     "typescript": "^5.3.3",
     "vite": "5.2.8",

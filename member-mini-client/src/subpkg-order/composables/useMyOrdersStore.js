@@ -1,4 +1,5 @@
 import { cancelOrder } from '@/api/order'
+import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的"本地订单列表"持久化 + 取消订单。myOrders 是本设备/本桌
 // 在这个店見过的订单列表，存本地（不是从后端整体拉取的权威列表，权威列表靠
@@ -16,14 +17,18 @@ export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStat
   const storageKey = () => 'my_orders_' + shopId.value + '_' + tableNo.value
 
   function saveMyOrders() {
-    try { uni.setStorageSync(storageKey(), JSON.stringify(myOrders.value)) } catch (e) {}
+    try { uni.setStorageSync(storageKey(), JSON.stringify(myOrders.value)) } catch (e) {
+      reportError('my_orders.save', e)
+    }
   }
 
   function loadMyOrders() {
     try {
       const raw = uni.getStorageSync(storageKey())
       if (raw) myOrders.value = JSON.parse(raw)
-    } catch (e) {}
+    } catch (e) {
+      reportError('my_orders.load', e)
+    }
   }
 
   const doCancelOrder = (order) => {
@@ -42,7 +47,8 @@ export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStat
             showSuccess.value = false
           }
           uni.showToast({ title: '订单已取消', icon: 'success', duration: 1200 })
-        } catch {
+        } catch (e) {
+          reportError('my_orders.cancel', e, { orderId: order.id })
           uni.showToast({ title: '取消失败，请重试', icon: 'none', duration: 1200 })
         }
       }

@@ -108,7 +108,10 @@ export default {
         areaHeightPx.value = Math.max(0, info.windowHeight - topPx - bottomClearPx)
         posX.value = restMarginPx()
         posY.value = Math.max(0, Math.min(maxPosY(), areaHeightPx.value * DEFAULT_Y_RATIO))
-      } catch {}
+      } catch {
+        // 读不到系统信息就用不了自适应定位，气泡保持默认位置，不影响点餐主流程。
+        // eslint-disable-next-line no-empty
+      }
     }
 
     onMounted(setupGeometry)
@@ -211,6 +214,8 @@ export default {
     let calloutTimer = null
     watch(() => props.tone, (val, oldVal) => {
       if (!oldVal || val === oldVal) return
+      // 震动只是个反馈锦上添花，设备不支持或权限没开时静默跳过，不影响状态切换本身。
+      // eslint-disable-next-line no-empty
       try { uni.vibrateShort({ type: 'light' }) } catch (_) {}
       justChanged.value = false
       showChangeCallout.value = false

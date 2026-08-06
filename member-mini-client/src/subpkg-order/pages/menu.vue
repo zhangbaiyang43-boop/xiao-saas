@@ -381,6 +381,7 @@ import { getMenuItems, getShopInfo, createOrder, createWxPayOrder, getOrderStatu
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
 import { consumeStart, recordSample } from '@/utils/perf'
+import { reportError } from '@/utils/monitor'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
 import SpecSheet from '../components/SpecSheet.vue'
@@ -861,7 +862,9 @@ export default {
             selectedCouponId.value = null
           }
         }
-      } catch {}
+      } catch (e) {
+        reportError('menu.refresh_coupons', e)
+      }
     }
 
     const openCart = () => {
@@ -986,7 +989,11 @@ export default {
       } catch { return null }
     }
     const writeMenuCache = (items, version) => {
-      try { uni.setStorageSync(menuCacheKey(), { items, version, cachedAt: Date.now() }) } catch {}
+      // 写缓存失败不影响这一次能不能看到菜单（数据已经从接口拿到了），但会
+      // 悄悄拖慢下一次进店——缓存一直写不进去，顾客每次都要等接口，值得报一下。
+      try { uni.setStorageSync(menuCacheKey(), { items, version, cachedAt: Date.now() }) } catch (e) {
+        reportError('menu.write_cache', e)
+      }
     }
 
     const loadMenu = async () => {
@@ -1058,7 +1065,6 @@ export default {
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
-      availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       successDiscount, wechatPayAmount, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,

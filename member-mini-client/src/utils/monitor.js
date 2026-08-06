@@ -28,7 +28,6 @@ export function reportError(scene, err, extra) {
   const message = err?.message || err?.errMsg || String(err || '')
   const entry = { t: Date.now(), scene, message: String(message).slice(0, 200), extra: extra || undefined }
 
-  // eslint-disable-next-line no-console
   console.error(`[error] ${scene}:`, message, extra || '')
 
   try {
@@ -53,5 +52,7 @@ export function getRecentErrors() {
 }
 
 export function clearErrors() {
+  // 清不掉本地错误采样列表不影响任何真实业务，刻意留空。
+  // eslint-disable-next-line no-empty
   try { uni.removeStorageSync(STORAGE_KEY) } catch {}
 }

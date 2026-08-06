@@ -225,7 +225,10 @@ export default {
           newCustomerCouponPreview.value = res.data?.new_customer_coupon_preview || null
           inviteRewardEnabled.value = Boolean(res.data?.invite_reward_enabled)
         }
-      } catch (e) {}
+      } catch (e) {
+        // 拿不到店铺的新客券预览/邀请开关配置，页面照常展示，只是少一块引导，不阻塞主流程。
+        // eslint-disable-next-line no-empty
+      }
     }
     const goInvite = () => uni.navigateTo({ url: '/subpkg-member/pages/invite' })
 
@@ -272,6 +275,8 @@ export default {
     const saveTableOrders = () => {
       const key = tableOrdersStorageKey()
       if (!key) return
+      // 写不进本地缓存最多下次少看到一次悬浮气泡的历史订单，真实下单数据在服务端，不影响主流程。
+      // eslint-disable-next-line no-empty
       try { uni.setStorageSync(key, JSON.stringify(tableOrders.value)) } catch (e) {}
     }
     const activeTableOrders = computed(() =>

@@ -97,6 +97,9 @@ export function useCheckout({
   }
 
   const clearPendingPaymentOrder = () => {
+    // 清不掉一个本地的"待支付"缓存 key 本身不影响这次流程——最多下次冷启动时
+    // 多一次没必要的对账，够不上单独报错的门槛，这里是刻意留空，不是漏处理。
+    // eslint-disable-next-line no-empty
     try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
     pendingOrderId.value = ''
     paymentFailed.value = false

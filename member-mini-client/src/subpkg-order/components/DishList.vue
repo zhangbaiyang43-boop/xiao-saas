@@ -53,7 +53,7 @@
       <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
         <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
         <view
-          v-for="(dish, dishIdx) in dishesByCategory(cat)"
+          v-for="dish in dishesByCategory(cat)"
           :key="dish.id"
           class="dish-item"
           :class="{ 'dish-item--featured': isFeatured(dish), 'dish-item--soldout': isSoldOut(dish) }"

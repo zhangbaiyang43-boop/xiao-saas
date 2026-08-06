@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { getMemberProfile, getMembershipGrowth, joinByEntranceCode } from '@/api/auth'
 import { saveCustomerSession } from '@/utils/auth'
 import { getCustomerCoupons } from '@/api/coupon'
+import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的"会员登录 + 拉会员资料"整条流程——手机号授权登录、
 // 登录后刷新会员卡片数据、判断"当前算不算有会员身份"。之所以是 MEDIUM 而不是
@@ -67,7 +68,12 @@ export function useMemberAuth({
           nextUpgradeAmount: Math.max(0, Number(g.next_level?.threshold || 0) - Number(g.yearly_consumption || 0)),
         }
       }
-    } catch { }
+    } catch (e) {
+      // 会员卡资料拉取失败时顾客只会看到一张空白/不完整的会员卡，自己不知道
+      // 是网络问题还是账号问题——这里之前是彻底静默的，加上上报才能看见
+      // "拉资料失败率"，不用等顾客投诉"我的会员卡怎么是空的"才知道。
+      reportError('member_auth.load_status', e)
+    }
     finally { memberLoading.value = false }
   }
 

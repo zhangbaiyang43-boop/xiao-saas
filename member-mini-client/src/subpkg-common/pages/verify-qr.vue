@@ -192,13 +192,19 @@ export default {
           this.verify = data
           this.$nextTick(() => this.drawQr())
         }
-      } catch (_) {}
+      } catch (_) {
+        // 本地缓存读取/解析失败就当没有缓存，照常走接口，不影响核销流程。
+        // eslint-disable-next-line no-empty
+      }
     },
 
     _saveCache(data) {
       try {
         uni.setStorageSync(this._cacheKey(), JSON.stringify({ ...data, _ts: Date.now() }))
-      } catch (_) {}
+      } catch (_) {
+        // 缓存写入失败最多下次少一次离线兜底，不影响这一次的核销结果。
+        // eslint-disable-next-line no-empty
+      }
     },
 
     _isOnline() {
@@ -267,8 +273,10 @@ export default {
           minText:    minAmt > 0 ? `满¥${minAmt}可用` : '无门槛使用',
           expireText,
         }
-        // 震动庆祝
+        // 震动庆祝——纯反馈效果，设备不支持时静默跳过。
+        // eslint-disable-next-line no-empty
         try { uni.vibrateLong() } catch (_) {}
+        // eslint-disable-next-line no-empty
         setTimeout(() => { try { uni.vibrateShort() } catch (_) {} }, 600)
       } catch (_) {
         // 发券检测失败不影响主流程
@@ -377,7 +385,10 @@ export default {
           this.stopRefresh()
           return true
         }
-      } catch (_) {}
+      } catch (_) {
+        // 这次查询失败不改变券状态，下一轮轮询会重试，不阻塞用户看到的核销页面。
+        // eslint-disable-next-line no-empty
+      }
       return false
     },
 
@@ -386,6 +397,8 @@ export default {
       this.error    = ''
       this.stopPolling()
       this.stopRefresh()
+      // 震动只是庆祝反馈，设备不支持时静默跳过，不影响核销成功状态本身。
+      // eslint-disable-next-line no-empty
       try { uni.vibrateLong() } catch (_) {}
       if (doToast) uni.showToast({ title: '核销成功', icon: 'success' })
       // 异步检测新券，不阻塞成功页面显示
