@@ -127,7 +127,7 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn("*payment_status_filter", source)
 
     def test_pay_later_coupon_lifecycle_is_closed(self):
-        create_source = function_source(ORDERS_SOURCE, "create_order")
+        create_source = function_source(ORDERS_SOURCE, "_apply_create_order_coupon")
         status_source = lifecycle_method_source("update_order_status")
         settle_source = lifecycle_method_source("settle_table")
         self.assertIn("_mark_order_coupon_used_if_locked", ORDERS_SOURCE)

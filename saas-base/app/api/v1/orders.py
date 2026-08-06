@@ -520,13 +520,67 @@ async def _validate_create_order_items_and_compute_total(
     return None, real_total, order_items_data
 
 
-@router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    from datetime import datetime as _dt, timedelta
+async def _apply_create_order_coupon(
+    body: OrderCreate,
+    customer_id: int | None,
+    tenant_id: str,
+    real_total: float,
+    db: AsyncSession,
+):
+    """Validate and lock a coupon for create_order.
+
+    Returns (early_response, applied_coupon_id, coupon_discount). When early_response is
+    not None, the caller must return it immediately.
+    """
+    from datetime import datetime as _dt
     from decimal import Decimal
+
     from app.models.coupon import Coupon
     from app.models.coupon_template import CouponTemplate
 
+    applied_coupon_id = None
+    coupon_discount = Decimal("0")
+
+    # BUG-2: 建单时仅验证优惠券，不标记 USED，改为 LOCKED（支付时再核销）
+    if body.coupon_id:
+        if not customer_id:
+            return error_response(code=401, msg="请先登录后使用优惠券"), applied_coupon_id, coupon_discount
+        coupon_result = await db.execute(
+            select(Coupon).where(
+                Coupon.id == body.coupon_id,
+                Coupon.customer_id == customer_id,
+                Coupon.tenant_id == tenant_id,
+                Coupon.status == "UNUSED",
+                Coupon.expire_time > _dt.utcnow(),
+            )
+            .with_for_update()
+        )
+        coupon = coupon_result.scalar_one_or_none()
+        if not coupon:
+            return error_response(code=400, msg="优惠券不可用或已失效"), applied_coupon_id, coupon_discount
+
+        tpl = await db.get(CouponTemplate, coupon.template_id)
+        if not tpl:
+            return error_response(code=400, msg="优惠券规则不存在"), applied_coupon_id, coupon_discount
+
+        min_amount = float(tpl.min_amount or 0)
+        if real_total < min_amount:
+            return error_response(code=400, msg="未达到优惠券使用门槛"), applied_coupon_id, coupon_discount
+
+        if tpl.type == "PERCENT":
+            raw_discount = real_total * float(tpl.value or 0) / 100
+        else:
+            raw_discount = float(tpl.value or 0)
+        # 红线兜底：不管模板配置得对不对，实际减免不超过这一单实付金额的安全比例
+        coupon_discount = Decimal(str(cap_discount_amount(raw_discount, real_total)))
+        coupon.status = "LOCKED"
+        applied_coupon_id = coupon.id
+
+    return None, applied_coupon_id, coupon_discount
+
+
+@router.post("/orders")
+async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
     early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
     if early_response is not None:
         return early_response
@@ -553,9 +607,6 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
 
     is_staff_order = getattr(request.state, "token_type", None) == "merchant"
 
-    applied_coupon_id = None
-    coupon_discount = Decimal("0")
-
     await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
     early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
@@ -564,40 +615,11 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     if early_response is not None:
         return early_response
 
-    # BUG-2: 建单时仅验证优惠券，不标记 USED，改为 LOCKED（支付时再核销）
-    if body.coupon_id:
-        if not customer_id:
-            return error_response(code=401, msg="请先登录后使用优惠券")
-        coupon_result = await db.execute(
-            select(Coupon).where(
-                Coupon.id == body.coupon_id,
-                Coupon.customer_id == customer_id,
-                Coupon.tenant_id == tenant_id,
-                Coupon.status == "UNUSED",
-                Coupon.expire_time > _dt.utcnow(),
-            )
-            .with_for_update()
-        )
-        coupon = coupon_result.scalar_one_or_none()
-        if not coupon:
-            return error_response(code=400, msg="优惠券不可用或已失效")
-
-        tpl = await db.get(CouponTemplate, coupon.template_id)
-        if not tpl:
-            return error_response(code=400, msg="优惠券规则不存在")
-
-        min_amount = float(tpl.min_amount or 0)
-        if real_total < min_amount:
-            return error_response(code=400, msg="未达到优惠券使用门槛")
-
-        if tpl.type == "PERCENT":
-            raw_discount = real_total * float(tpl.value or 0) / 100
-        else:
-            raw_discount = float(tpl.value or 0)
-        # 红线兜底：不管模板配置得对不对，实际减免不超过这一单实付金额的安全比例
-        coupon_discount = Decimal(str(cap_discount_amount(raw_discount, real_total)))
-        coupon.status = "LOCKED"
-        applied_coupon_id = coupon.id
+    early_response, applied_coupon_id, coupon_discount = await _apply_create_order_coupon(
+        body, customer_id, tenant_id, real_total, db
+    )
+    if early_response is not None:
+        return early_response
 
     final_total = max(real_total - float(coupon_discount), 0)
 

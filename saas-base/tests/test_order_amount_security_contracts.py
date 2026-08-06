@@ -41,7 +41,7 @@ class OrderAmountSecurityContractsTest(unittest.TestCase):
         self.assertLess(source.index("if item_in.qty <= 0"), source.index("real_total += unit_price * item_in.qty"))
 
     def test_invalid_coupon_is_rejected_instead_of_silently_ignored(self):
-        source = function_source("create_order")
+        source = function_source("_apply_create_order_coupon")
         self.assertIn("if body.coupon_id:", source)
         self.assertIn("优惠券不可用或已失效", source)
         self.assertIn("优惠券规则不存在", source)
