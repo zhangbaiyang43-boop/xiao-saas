@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 LIFECYCLE_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_lifecycle_service.py"
 ).read_text(encoding="utf-8-sig")
@@ -28,7 +31,7 @@ def function_source(source: str, name: str) -> str:
 
 class MemberAssetIdempotencyContractsTest(unittest.TestCase):
     def test_payment_success_is_the_only_asset_mutation_entry(self):
-        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
         mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
         notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
         pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
@@ -68,14 +71,14 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         )
 
     def test_coupon_asset_queries_are_tenant_scoped(self):
-        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
 
         self.assertIn("Coupon.tenant_id == str(order.tenant_id)", success_source)
         self.assertIn("Coupon.customer_id == int(customer_id)", success_source)
 
     def test_balance_is_not_mutated_by_order_payment(self):
         # 余额业务线已下线：下单、支付、mock-pay 都不应该再触碰 MemberAccount。
-        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
         create_order_source = function_source(ORDERS_SOURCE, "create_order")
         pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
         mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
@@ -86,7 +89,7 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         self.assertNotIn("MemberAccount", mock_source)
 
     def test_points_use_order_id_as_idempotency_reference(self):
-        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
         apply_source = function_source(MEMBERSHIP_SOURCE, "apply_consumption")
         add_points_source = function_source(MEMBERSHIP_SOURCE, "add_points")
 

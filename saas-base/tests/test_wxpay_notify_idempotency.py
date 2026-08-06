@@ -134,6 +134,10 @@ def restore_stubs():
 
 def install_stubs():
     global _ORIGINAL_MODULES
+
+    async def _noop_async(*args, **kwargs):
+        return None
+
     modules = {
         "app": types.ModuleType("app"),
         "app.api": types.ModuleType("app.api"),
@@ -149,7 +153,12 @@ def install_stubs():
         "app.models.order": types.ModuleType("app.models.order"),
         "app.models.tenant": types.ModuleType("app.models.tenant"),
         "app.services": types.ModuleType("app.services"),
+        "app.services.consumption_service": types.ModuleType("app.services.consumption_service"),
         "app.services.coupon_service": types.ModuleType("app.services.coupon_service"),
+        "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
+        "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
+        "app.services.order_print_service": types.ModuleType("app.services.order_print_service"),
+        "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
         "app.services.wxpay_service": types.ModuleType("app.services.wxpay_service"),
     }
     _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
@@ -167,6 +176,23 @@ def install_stubs():
     modules["app.models.order"].OrderItem = type("FakeOrderItem", (), {})
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
+    modules["app.services.coupon_service"]._mark_order_coupon_used_if_locked = _noop_async
+    modules["app.services.coupon_service"]._set_order_coupon_status_if_locked = _noop_async
+    modules["app.services.coupon_service"]._unlock_order_coupon_if_locked = _noop_async
+    modules["app.services.consumption_service"]._record_order_consumption = _noop_async
+    modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
+    modules["app.services.order_payment_service"]._on_payment_success = _noop_async
+    modules["app.services.order_payment_service"]._recover_wxpay_order_if_paid = _noop_async
+    modules["app.services.order_stock_service"]._restore_order_stock = _noop_async
+    modules["app.services.order_print_service"].MAX_PRINT_RETRY_ATTEMPTS = 3
+    modules["app.services.order_print_service"]._compose_merchant_note_with_print_meta = lambda note, meta: note
+    modules["app.services.order_print_service"]._get_print_meta = lambda order: {}
+    modules["app.services.order_print_service"]._print_paid_order_ticket = _noop_async
+    modules["app.services.order_print_service"]._print_paid_order_ticket_background = _noop_async
+    modules["app.services.order_print_service"]._serialize_print_meta = lambda order: {}
+    modules["app.services.order_print_service"]._spawn_background_print_task = lambda *args, **kwargs: None
+    modules["app.services.order_print_service"]._split_merchant_note_and_print_meta = lambda note: (note, {})
+    modules["app.services.order_print_service"].can_reprint_order = lambda order, print_type="kitchen": (True, None)
     modules["app.services.wxpay_service"].WxPayService = FakeWxPayService
 
 

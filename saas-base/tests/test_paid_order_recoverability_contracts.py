@@ -4,14 +4,18 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 LIFECYCLE_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_lifecycle_service.py"
 ).read_text(encoding="utf-8-sig")
 WXPAY_SOURCE = (ROOT / "app" / "services" / "wxpay_service.py").read_text(encoding="utf-8-sig")
 
 
-def function_source(name: str) -> str:
-    lines = ORDERS_SOURCE.splitlines()
+def function_source(name: str, *, source: str | None = None) -> str:
+    text = source if source is not None else ORDERS_SOURCE
+    lines = text.splitlines()
     start = next(
         (idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(")),
         None,
@@ -58,7 +62,7 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
     def test_wxpay_service_can_query_order_for_callback_loss_recovery(self):
         self.assertIn("async def query_order_by_out_trade_no", WXPAY_SOURCE)
         self.assertIn("trade_state", ORDERS_SOURCE)
-        self.assertIn("WXPAY_ORDER_RECOVERED", ORDERS_SOURCE)
+        self.assertIn("WXPAY_ORDER_RECOVERED", PAYMENT_SERVICE_SOURCE)
 
     def test_consumer_order_query_recovers_paid_pending_payment_order(self):
         get_my_order_source = class_method_source("get_my_order")
@@ -72,7 +76,7 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
         self.assertIn("await self.db.commit()", list_orders_source)
 
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):
-        recover_source = function_source("_recover_wxpay_order_if_paid")
+        recover_source = function_source("_recover_wxpay_order_if_paid", source=PAYMENT_SERVICE_SOURCE)
         self.assertIn("query_order_by_out_trade_no", recover_source)
         self.assertIn('pay_resource.get("trade_state") != "SUCCESS"', recover_source)
         self.assertIn("with_for_update()", recover_source)

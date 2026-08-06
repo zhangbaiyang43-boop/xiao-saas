@@ -232,6 +232,7 @@ def install_stubs():
         "app.services.feieyun_service": types.ModuleType("app.services.feieyun_service"),
         "app.services.kuaimai_service": types.ModuleType("app.services.kuaimai_service"),
         "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
+        "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
         "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
     }
     _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
@@ -256,6 +257,8 @@ def install_stubs():
     modules["app.services.consumption_service"]._record_order_consumption = _noop_async
     modules["app.services.order_stock_service"]._restore_order_stock = _noop_async
     modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
+    modules["app.services.order_payment_service"]._on_payment_success = _noop_async
+    modules["app.services.order_payment_service"]._recover_wxpay_order_if_paid = _noop_async
     modules["app.services.feieyun_service"].build_order_ticket = lambda order, order_items: "ticket"
     modules["app.services.feieyun_service"].print_order = lambda *args: True
     modules["app.services.kuaimai_service"].KUAIMAI_ORDER_TEMPLATE_ID = "1634998374"

@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 LIFECYCLE_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_lifecycle_service.py"
 ).read_text(encoding="utf-8-sig")
@@ -48,7 +51,7 @@ def lifecycle_method_source(name: str) -> str:
 
 class PaymentModeConcurrencyContractsTest(unittest.TestCase):
     def test_payment_success_and_notify_are_locked_and_idempotent(self):
-        success_source = function_source(ORDERS_SOURCE, "_on_payment_success")
+        success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
         notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
         mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
         self.assertIn('if getattr(order, "payment_status", None) == "paid"', success_source)

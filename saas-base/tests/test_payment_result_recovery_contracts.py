@@ -12,6 +12,9 @@ MENU_SOURCE = (
     / "menu.vue"
 ).read_text(encoding="utf-8-sig")
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 LIFECYCLE_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_lifecycle_service.py"
 ).read_text(encoding="utf-8-sig")
@@ -52,7 +55,7 @@ def function_source(source: str, name: str) -> str:
 class PaymentResultRecoveryContractsTest(unittest.TestCase):
     def test_backend_order_query_recovers_paid_wxpay_order(self):
         get_my_order = function_source(LIFECYCLE_SERVICE_SOURCE, "get_my_order")
-        recover = function_source(ORDERS_SOURCE, "_recover_wxpay_order_if_paid")
+        recover = function_source(PAYMENT_SERVICE_SOURCE, "_recover_wxpay_order_if_paid")
         self.assertIn("_recover_wxpay_order_if_paid(order, self.db)", get_my_order)
         self.assertIn("query_order_by_out_trade_no", recover)
         self.assertIn('pay_resource.get("trade_state") != "SUCCESS"', recover)
