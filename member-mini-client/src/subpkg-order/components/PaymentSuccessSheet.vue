@@ -100,6 +100,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .success-mask {
   align-items: center;
   justify-content: center;
@@ -190,6 +192,25 @@ export default {
 
 
 .order-status-text { font-size: 26rpx; font-weight: 700; color: var(--text-2); }
+
+.order-status-bar.pending {
+  background: #fef9c3;
+}
+.order-status-bar.preparing {
+  background: var(--brand);
+  animation: status-pulse 1.5s ease-in-out infinite;
+}
+.order-status-bar.done {
+  background: #fbbf24;
+}
+.order-status-bar.pending .order-status-text { color: #92400e; }
+.order-status-bar.preparing .order-status-text { color: #fff; font-size: 30rpx; }
+.order-status-bar.done .order-status-text { color: #78350f; font-size: 30rpx; }
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.82; }
+}
 
 
 
@@ -363,6 +384,23 @@ export default {
   font-size: 27rpx;
   font-weight: 800;
   line-height: 1.55;
+}
+
+.success-sheet .order-status-bar.pending,
+.success-sheet .order-status-bar.preparing {
+  background: #ecfbf3;
+}
+
+.success-sheet .order-status-bar.done {
+  background: #f0fdf4;
+}
+
+.success-sheet .order-status-bar.warning {
+  background: #fff7ed;
+}
+
+.success-sheet .order-status-bar.warning .order-status-text {
+  color: #9a6a21;
 }
 
 
@@ -600,5 +638,23 @@ export default {
   color: var(--text-3);
   font-size: 22rpx;
   line-height: 1.55;
+}
+
+@keyframes successSheetIn {
+  from { transform: translateY(28rpx); opacity: .92; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes successCheckIn {
+  0% { transform: scale(.82); opacity: 0; }
+  70% { transform: scale(1.04); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .success-sheet,
+  .success-sheet .success-check {
+    animation: none;
+  }
 }
 </style>

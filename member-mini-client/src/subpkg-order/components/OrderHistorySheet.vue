@@ -160,6 +160,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .orders-list {
   flex: 1;
   width: 100%;
@@ -176,6 +178,35 @@ export default {
   border: 2rpx solid var(--order-status-border, #bae6fd);
   background: var(--order-status-bg, #eff8ff);
   box-sizing: border-box;
+}
+
+.table-status-card--canceled {
+  --order-status-main: #ef4444;
+  --order-status-soft: #fee2e2;
+  --order-status-bg: #fff1f2;
+  --order-status-border: #fecdd3;
+}
+
+.table-status-card--paid {
+  --order-status-main: #0ea5e9;
+  --order-status-soft: #e0f2fe;
+  --order-status-bg: #eff8ff;
+  --order-status-border: #bae6fd;
+}
+
+.table-status-card--accepted {
+  --order-status-main: #f59e0b;
+  --order-status-soft: #fef3c7;
+  --order-status-bg: #fffbeb;
+  --order-status-border: #fde68a;
+}
+
+.table-status-card--served,
+.table-status-card--completed {
+  --order-status-main: var(--brand);
+  --order-status-soft: #dcfce7;
+  --order-status-bg: #ecfdf5;
+  --order-status-border: #bbf7d0;
 }
 
 
@@ -449,6 +480,25 @@ export default {
   white-space: nowrap;
 }
 
+.order-progress-step.done .order-progress-line {
+  background: var(--brand);
+}
+
+.order-progress-step.done .order-progress-dot,
+.order-progress-step.active .order-progress-dot {
+  background: var(--brand);
+  color: #fff;
+}
+
+.order-progress-step.active .order-progress-dot {
+  box-shadow: 0 0 0 8rpx #dcfce7;
+}
+
+.order-progress-step.done .order-progress-title,
+.order-progress-step.active .order-progress-title {
+  color: var(--text-1);
+}
+
 
 
 .current-order-title-line {
@@ -644,5 +694,14 @@ export default {
   text { font-size: 30rpx; font-weight: 900; }
   background: var(--brand);
   text { color: #fff; }
+}
+
+.orders-secondary-btn--canceled {
+  background: var(--text-1);
+}
+
+.orders-secondary-btn--completed {
+  background: #f3f5f7;
+  text { color: var(--text-2); }
 }
 </style>

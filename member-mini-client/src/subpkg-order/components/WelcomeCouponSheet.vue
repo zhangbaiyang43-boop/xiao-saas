@@ -52,6 +52,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .closed-mask {
   position: fixed;
   inset: 0;

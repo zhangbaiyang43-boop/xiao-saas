@@ -169,6 +169,8 @@ export default {
 </script>
 
 <style lang="scss">
+@import '../styles/_shared.scss';
+
 .table-account-sheet {
   background: #f6f7f8;
   padding-bottom: 0;
