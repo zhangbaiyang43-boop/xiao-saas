@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 TENANT_SOURCE = (ROOT / "app" / "api" / "v1" / "tenant.py").read_text(encoding="utf-8-sig")
 MENU_API_SOURCE = (ROOT / "app" / "api" / "v1" / "menu.py").read_text(encoding="utf-8-sig")
 MINIAPP_MENU_SOURCE = (
@@ -42,7 +45,7 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
 
     def test_prepay_mode_returns_payment_action_and_uses_wxpay_only_after_order_exists(self):
         create_source = function_source(ORDERS_SOURCE, "create_order")
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment"', create_source)
         self.assertIn('"need_payment": payment_mode == "prepay"', create_source)
         self.assertIn('"next_action": build_order_next_action(payment_mode)', create_source)
@@ -57,7 +60,7 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
 
     def test_postpay_and_table_account_submit_without_wxpay_and_show_success(self):
         create_source = function_source(ORDERS_SOURCE, "create_order")
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('"postpay": "order_success"', ORDERS_SOURCE)
         self.assertIn('"table_account": "table_order_success"', ORDERS_SOURCE)
         self.assertIn('payment_mode in ("postpay", "table_account")', create_source)

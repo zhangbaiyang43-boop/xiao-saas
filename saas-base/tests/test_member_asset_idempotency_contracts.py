@@ -32,9 +32,9 @@ def function_source(source: str, name: str) -> str:
 class MemberAssetIdempotencyContractsTest(unittest.TestCase):
     def test_payment_success_is_the_only_asset_mutation_entry(self):
         success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
-        mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
-        notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        mock_source = function_source(PAYMENT_SERVICE_SOURCE, "mock_pay_order")
+        notify_source = function_source(PAYMENT_SERVICE_SOURCE, "wxpay_notify")
+        pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
 
         self.assertIn("locked_coupon.status = \"USED\"", success_source)
         self.assertIn("apply_consumption", success_source)
@@ -45,9 +45,9 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         self.assertLess(notify_source.index("with_for_update()"), notify_source.index("_on_payment_success"))
 
     def test_failed_or_cancelled_payment_does_not_mutate_assets(self):
-        confirm_pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        confirm_pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         cancel_source = function_source(LIFECYCLE_SERVICE_SOURCE, "cancel_order")
-        notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
+        notify_source = function_source(PAYMENT_SERVICE_SOURCE, "wxpay_notify")
 
         self.assertIn('if order.status != "pending_payment"', confirm_pay_source)
         self.assertIn('if trade_state != "SUCCESS"', notify_source)
@@ -58,7 +58,7 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         self.assertNotIn("acc.balance", cancel_source)
 
     def test_duplicate_callbacks_are_blocked_before_asset_mutation(self):
-        notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
+        notify_source = function_source(PAYMENT_SERVICE_SOURCE, "wxpay_notify")
         # _on_payment_success (the only place that mutates coupon/points/consumption assets)
         # must be gated behind an explicit order.status == "pending_payment" check, so a
         # retried/duplicate WeChat callback for an order that's already been processed (paid,
@@ -80,8 +80,8 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         # 余额业务线已下线：下单、支付、mock-pay 都不应该再触碰 MemberAccount。
         success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
         create_order_source = function_source(ORDERS_SOURCE, "create_order")
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
-        mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
+        pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
+        mock_source = function_source(PAYMENT_SERVICE_SOURCE, "mock_pay_order")
 
         self.assertNotIn("MemberAccount", success_source)
         self.assertNotIn("MemberAccount", create_order_source)

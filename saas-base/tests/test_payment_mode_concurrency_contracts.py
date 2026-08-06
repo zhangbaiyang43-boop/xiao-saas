@@ -52,8 +52,8 @@ def lifecycle_method_source(name: str) -> str:
 class PaymentModeConcurrencyContractsTest(unittest.TestCase):
     def test_payment_success_and_notify_are_locked_and_idempotent(self):
         success_source = function_source(PAYMENT_SERVICE_SOURCE, "_on_payment_success")
-        notify_source = function_source(ORDERS_SOURCE, "wxpay_notify")
-        mock_source = function_source(ORDERS_SOURCE, "mock_pay_order")
+        notify_source = function_source(PAYMENT_SERVICE_SOURCE, "wxpay_notify")
+        mock_source = function_source(PAYMENT_SERVICE_SOURCE, "mock_pay_order")
         self.assertIn('if getattr(order, "payment_status", None) == "paid"', success_source)
         self.assertIn('return None, 0.0', success_source)
         self.assertIn('order.payment_status = "paid"', success_source)
@@ -64,7 +64,7 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         self.assertIn('_on_payment_success(order, db, payment_method="mock")', mock_source)
 
     def test_free_or_zero_amount_payment_path_locks_before_marking_paid(self):
-        pay_source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('if pay_amount <= 0:', pay_source)
         self.assertIn('select(Order).where(Order.id == int(order_id)).with_for_update()', pay_source)
         self.assertIn('_on_payment_success(order, db, payment_method="free")', pay_source)

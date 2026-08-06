@@ -8,6 +8,9 @@ MENU_SOURCE = (
 ).read_text(encoding="utf-8-sig")
 ORDER_API_SOURCE = (ROOT.parent / "member-mini-client" / "src" / "api" / "order.js").read_text(encoding="utf-8-sig")
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 DINING_SOURCE = (ROOT / "app" / "api" / "v1" / "dining_sessions.py").read_text(encoding="utf-8-sig")
 CARD_SOURCE = (ROOT.parent / "member-mini-client" / "src" / "subpkg-member" / "pages" / "card.vue").read_text(encoding="utf-8-sig")
 
@@ -55,7 +58,7 @@ class UnauthenticatedBasicOrderContractsTest(unittest.TestCase):
         self.assertIn("js_code: options.js_code || undefined", ORDER_API_SOURCE)
 
     def test_backend_pay_accepts_js_code_without_customer_id(self):
-        create_pay = py_function_source(ORDERS_SOURCE, "create_wxpay_order")
+        create_pay = py_function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn("js_code: Optional[str] = None", ORDERS_SOURCE)
         self.assertIn("body.js_code", create_pay)
         self.assertIn("WechatService().code2session", create_pay)

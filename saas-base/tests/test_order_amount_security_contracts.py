@@ -4,10 +4,14 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 
 
-def function_source(name: str) -> str:
-    lines = ORDERS_SOURCE.splitlines()
+def function_source(name: str, *, source: str | None = None) -> str:
+    text = source if source is not None else ORDERS_SOURCE
+    lines = text.splitlines()
     start = next(
         (idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(")),
         None,
@@ -54,7 +58,7 @@ class OrderAmountSecurityContractsTest(unittest.TestCase):
         self.assertNotIn("pay_amount", schema)
 
     def test_wxpay_amount_uses_server_order_total(self):
-        source = function_source("create_wxpay_order")
+        source = function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE)
         self.assertIn("pay_amount = float(order.total)", source)
         self.assertIn("amount_fen = max(1, round(pay_amount * 100))", source)
         self.assertLess(source.index("pay_amount = float(order.total)"), source.index("create_jsapi_order"))

@@ -8,6 +8,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "app" / "api" / "v1" / "orders.py"
+PAYMENT_SERVICE_PATH = ROOT / "app" / "services" / "order_payment_service.py"
 
 
 class FakeColumn:
@@ -198,11 +199,23 @@ def install_stubs():
 
 def load_orders_module():
     install_stubs()
+    payment_spec = importlib.util.spec_from_file_location(
+        "order_payment_service_under_test",
+        PAYMENT_SERVICE_PATH,
+    )
+    payment_module = importlib.util.module_from_spec(payment_spec)
+    assert payment_spec.loader is not None
+    sys.modules["app.services.order_payment_service"] = payment_module
+    payment_spec.loader.exec_module(payment_module)
+    payment_module.select = fake_select
+
     spec = importlib.util.spec_from_file_location("orders_under_test", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)
     module.select = fake_select
+    _ORIGINAL_MODULES["app.api.v1.orders"] = sys.modules.get("app.api.v1.orders")
+    sys.modules["app.api.v1.orders"] = module
     return module
 
 

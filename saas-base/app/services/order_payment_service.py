@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.config import settings
 from app.core.logger import logger
 from app.core.tenant_context import TenantContext
 from app.models.order import Order
@@ -180,3 +181,298 @@ async def _on_payment_success(
     # Print order ticket after payment. Printing failures are recoverable and must not affect payment state.
     await _print_paid_order_ticket(order, db, reason="payment_success")
     return coupon_data, 0.0
+
+
+async def mock_pay_order(order_id: str, body, request, db: AsyncSession):
+    """Mock payment for development only."""
+    import traceback
+
+    from app.models.order import OrderItem
+
+    from app.core.response import error_response, success_response
+
+    if not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
+        return error_response(code=403, msg="mock pay is only available in debug mode")
+    try:
+        customer_id = getattr(request.state, "customer_id", None)
+        result = await db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
+        order = result.scalar_one_or_none()
+        if not order:
+            return error_response(code=404, msg="order not found")
+        if order.status != "pending_payment":
+            return error_response(code=400, msg="该订单已支付或已取消")
+        if order.customer_id:
+            if not customer_id or int(customer_id) != int(order.customer_id):
+                return error_response(code=403, msg="forbidden")
+        elif order.participant_id:
+            from app.models.dining import DiningParticipant
+            from app.services.dining_session_service import hash_participant_token
+
+            owns_order = False
+            if body.participant_token:
+                participant_result = await db.execute(
+                    select(DiningParticipant).where(
+                        DiningParticipant.id == order.participant_id,
+                        DiningParticipant.guest_token_hash == hash_participant_token(body.participant_token),
+                    )
+                )
+                owns_order = participant_result.scalar_one_or_none() is not None
+            if not owns_order:
+                return error_response(code=403, msg="forbidden")
+        else:
+            return error_response(code=403, msg="forbidden")
+
+        from app.api.v1.orders import _on_payment_success
+
+        coupon_data, _ = await _on_payment_success(order, db, payment_method="mock")
+        await db.commit()
+        await db.refresh(order)
+
+        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+        order_items = list(items_result.scalars().all())
+
+        from app.api.v1.orders import serialize_order
+
+        return success_response(
+            data={**serialize_order(order, order_items), "coupon": coupon_data},
+            msg="支付成功",
+        )
+    except Exception as e:
+        logger.error(f"mock_pay_order error: {e}\n{traceback.format_exc()}")
+        return error_response(code=500, msg=f"支付处理失败: {str(e)}")
+
+
+async def create_wxpay_order(order_id: str, body, request, db: AsyncSession):
+    """Create a WeChat JSAPI payment order for direct merchant mode."""
+    import traceback
+
+    from fastapi import HTTPException
+
+    from app.core.response import success_response
+
+    try:
+        from app.models.tenant import Tenant
+        from app.services.wxpay_service import WxPayService
+
+        customer_id = getattr(request.state, "customer_id", None)
+        openid = getattr(request.state, "openid", None)
+
+        result = await db.execute(select(Order).where(Order.id == int(order_id)))
+        order = result.scalar_one_or_none()
+        if not order:
+            raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
+        if getattr(order, "payment_mode", "prepay") != "prepay":
+            raise HTTPException(status_code=400, detail={"success": False, "code": "PAYMENT_NOT_REQUIRED", "message": "该订单无需在线支付"})
+        if order.status != "pending_payment":
+            raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
+        if order.customer_id:
+            if not customer_id or int(customer_id) != int(order.customer_id):
+                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+        elif order.participant_id:
+            from app.models.dining import DiningParticipant
+            from app.services.dining_session_service import hash_participant_token
+
+            owns_order = False
+            if body.participant_token:
+                participant_result = await db.execute(
+                    select(DiningParticipant).where(
+                        DiningParticipant.id == order.participant_id,
+                        DiningParticipant.guest_token_hash == hash_participant_token(body.participant_token),
+                    )
+                )
+                owns_order = participant_result.scalar_one_or_none() is not None
+            if not owns_order:
+                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+        else:
+            raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+
+        tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == order.tenant_id))
+        tenant = tenant_result.scalar_one_or_none()
+
+        pay_amount = float(order.total)
+
+        if pay_amount <= 0:
+            locked_order_result = await db.execute(
+                select(Order).where(Order.id == int(order_id)).with_for_update()
+            )
+            order = locked_order_result.scalar_one_or_none()
+            if not order or order.status != "pending_payment":
+                raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
+            from app.api.v1.orders import _on_payment_success
+
+            free_coupon_data, _ = await _on_payment_success(order, db, payment_method="free")
+            await db.commit()
+            await db.refresh(order)
+            from app.models.order import OrderItem
+
+            free_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
+            free_order_items = list(free_items_result.scalars().all())
+            from app.api.v1.orders import serialize_order
+
+            return success_response(
+                data={
+                    **serialize_order(order, free_order_items),
+                    "free": True,
+                    "coupon": free_coupon_data,
+                },
+                msg="订单已完成，无需支付",
+            )
+
+        svc = WxPayService(tenant) if tenant else None
+        if svc and svc.enabled:
+            locked_order_result = await db.execute(
+                select(Order).where(Order.id == int(order_id)).with_for_update()
+            )
+            order = locked_order_result.scalar_one_or_none()
+            if not order or order.status != "pending_payment":
+                raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
+            await db.commit()
+
+            if not openid and body.js_code:
+                from app.services.wechat_service import WechatService
+                wechat_result = await WechatService().code2session(body.js_code)
+                openid = wechat_result.get("openid")
+            if not openid:
+                raise HTTPException(status_code=400, detail={"success": False, "code": "NEED_WECHAT_CODE", "message": "缺少微信支付身份，请重新发起支付"})
+            amount_fen = max(1, round(pay_amount * 100))
+            notify_url = f"{settings.H5_ORDER_BASE_URL}/api/v1/orders/wxpay-notify"
+            pay_params = await svc.create_jsapi_order(
+                openid=openid,
+                out_trade_no=str(order.id),
+                amount_fen=amount_fen,
+                description=f"{tenant.name}-点餐订单",
+                notify_url=notify_url,
+            )
+            required_fields = ["timeStamp", "nonceStr", "package", "signType", "paySign"]
+            if not pay_params or any(f not in pay_params for f in required_fields):
+                missing_fields = [f for f in required_fields if f not in (pay_params or {})]
+                logger.error(
+                    "[WXPAY_PARAMS_INVALID] order_id=%s tenant_id=%s pay_params_type=%s missing_fields=%s pay_params=%s",
+                    order.id, order.tenant_id, type(pay_params).__name__, missing_fields, str(pay_params)[:500] if pay_params else None,
+                )
+                raise HTTPException(status_code=502, detail={"success": False, "code": "WXPAY_PARAMS_INVALID", "message": "微信支付参数生成失败"})
+            return success_response(
+                data={"pay_params": pay_params, "free": False, "order_id": str(order.id)},
+                msg="please request WeChat payment",
+            )
+
+        logger.warning(
+            "[WXPAY_NOT_CONFIGURED] tenant_id=%s order_id=%s debug=%s wx_pay_enabled=%s wx_mchid_configured=%s",
+            order.tenant_id,
+            order.id,
+            settings.DEBUG,
+            bool(getattr(tenant, "wx_pay_enabled", False)) if tenant else False,
+            bool(getattr(tenant, "wx_mchid", None)) if tenant else False,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "success": False,
+                "code": "WXPAY_NOT_CONFIGURED",
+                "message": "wechat pay not configured",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_wxpay_order error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail={"success": False, "code": "PAYMENT_INTERNAL_ERROR", "message": "支付服务异常，请稍后重试"})
+
+
+async def wxpay_notify(request, db: AsyncSession):
+    """Handle WeChat Pay notify for direct merchant mode."""
+    import traceback
+
+    from app.models.tenant import Tenant
+    from app.services.wxpay_service import WxPayService
+
+    try:
+        headers = dict(request.headers)
+        raw_body = await request.body()
+
+        resource = None
+        tenant_id = request.query_params.get("tenant_id")
+        matched_tenant = None
+        if tenant_id:
+            tenant_result = await db.execute(
+                select(Tenant).where(
+                    Tenant.tenant_id == tenant_id,
+                    Tenant.wx_pay_enabled == True,
+                    Tenant.wx_mchid.isnot(None),
+                )
+            )
+            matched_tenant = tenant_result.scalar_one_or_none()
+            if matched_tenant:
+                svc = WxPayService(matched_tenant)
+                if svc.enabled:
+                    resource = svc.verify_notify(headers, raw_body)
+
+        if not resource:
+            tenant_result = await db.execute(
+                select(Tenant).where(Tenant.wx_pay_enabled == True, Tenant.wx_mchid.isnot(None))
+            )
+            tenants = tenant_result.scalars().all()
+            for t in tenants:
+                svc = WxPayService(t)
+                if not svc.enabled:
+                    continue
+                resource = svc.verify_notify(headers, raw_body)
+                if resource:
+                    matched_tenant = t
+                    break
+        if not resource:
+            logger.warning("wxpay notify verify failed: no matched merchant cert")
+            return {"code": "FAIL", "message": "验证失败"}
+
+        out_trade_no = resource.get("out_trade_no", "")
+        trade_state = resource.get("trade_state", "")
+        if trade_state != "SUCCESS":
+            return {"code": "SUCCESS", "message": "ok"}
+
+        result = await db.execute(select(Order).where(Order.id == int(out_trade_no)).with_for_update())
+        order = result.scalar_one_or_none()
+        if not order:
+            return {"code": "SUCCESS", "message": "ok"}
+        if order.status not in ("pending_payment", "cancelled", "rejected"):
+            return {"code": "SUCCESS", "message": "ok"}
+        if matched_tenant and str(order.tenant_id) != str(matched_tenant.tenant_id):
+            logger.warning(
+                f"wxpay notify tenant mismatch: order_id={out_trade_no} "
+                f"order_tenant_id={order.tenant_id} notify_tenant_id={matched_tenant.tenant_id}"
+            )
+            return {"code": "FAIL", "message": "tenant mismatch"}
+
+        paid_fen = resource.get("amount", {}).get("total")
+        if paid_fen is not None:
+            expected_fen = round(float(order.total) * 100)
+            if int(paid_fen) != expected_fen:
+                logger.error(
+                    "[WXPAY_AMOUNT_MISMATCH] order_id=%s expected_fen=%s paid_fen=%s",
+                    out_trade_no, expected_fen, paid_fen,
+                )
+                return {"code": "FAIL", "message": "amount mismatch"}
+
+        if order.status == "pending_payment":
+            from app.api.v1.orders import _on_payment_success
+
+            await _on_payment_success(order, db, payment_method="wxpay")
+            await db.commit()
+            logger.info(f"微信支付回调成功: order_id={out_trade_no}")
+            return {"code": "SUCCESS", "message": "ok"}
+
+        if getattr(order, "refund_status", None) == "success":
+            return {"code": "SUCCESS", "message": "ok"}
+        logger.error(
+            "[WXPAY_NOTIFY_RACE_WITH_CANCEL] order_id=%s order_status=%s -- WeChat confirmed "
+            "payment after this order was already %s locally; auto-refunding instead of fulfilling",
+            out_trade_no, order.status, order.status,
+        )
+        from app.api.v1.orders import _refund_orphaned_wxpay_payment
+
+        await _refund_orphaned_wxpay_payment(order, db)
+        await db.commit()
+        return {"code": "SUCCESS", "message": "ok"}
+
+    except Exception as e:
+        logger.error(f"wxpay_notify error: {e}\n{traceback.format_exc()}")
+        return {"code": "FAIL", "message": str(e)}

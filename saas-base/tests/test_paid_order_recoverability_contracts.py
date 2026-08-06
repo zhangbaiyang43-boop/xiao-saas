@@ -49,7 +49,7 @@ def class_method_source(name: str) -> str:
 class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
     def test_order_is_created_before_payment_request(self):
         create_order_source = function_source("create_order")
-        create_pay_source = function_source("create_wxpay_order")
+        create_pay_source = function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE)
         self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', create_order_source)
         self.assertIn('status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment"', create_order_source)
         self.assertIn('payment_status="unpaid"', create_order_source)
@@ -61,7 +61,7 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
 
     def test_wxpay_service_can_query_order_for_callback_loss_recovery(self):
         self.assertIn("async def query_order_by_out_trade_no", WXPAY_SOURCE)
-        self.assertIn("trade_state", ORDERS_SOURCE)
+        self.assertIn("trade_state", PAYMENT_SERVICE_SOURCE)
         self.assertIn("WXPAY_ORDER_RECOVERED", PAYMENT_SERVICE_SOURCE)
 
     def test_consumer_order_query_recovers_paid_pending_payment_order(self):

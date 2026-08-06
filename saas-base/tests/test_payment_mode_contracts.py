@@ -4,6 +4,9 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+PAYMENT_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "order_payment_service.py"
+).read_text(encoding="utf-8-sig")
 LIFECYCLE_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_lifecycle_service.py"
 ).read_text(encoding="utf-8-sig")
@@ -134,7 +137,7 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn('coupon.status = "LOCKED"', create_source)
 
     def test_wxpay_endpoint_rejects_non_prepay_orders(self):
-        source = function_source(ORDERS_SOURCE, "create_wxpay_order")
+        source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn("PAYMENT_NOT_REQUIRED", source)
         self.assertIn('getattr(order, "payment_mode", "prepay") != "prepay"', source)
 
