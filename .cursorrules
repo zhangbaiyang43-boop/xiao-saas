@@ -1,0 +1,49 @@
+# 给 Cursor 的工作范围与安全边界
+
+你被引入这个仓库，只负责**维护 `member-mini-client`（点餐小程序）和 `admin-h5`（后台管理端）里的简单页面内容**——文案、价格/文字类静态展示、图片路径、简单的样式微调。你**不了解**这两个子项目背后的业务逻辑和历史坑，下面这些是必须先知道、且必须遵守的边界。不确定某次改动是否越界时，先停下来问，不要自己猜着改。
+
+## 仓库结构，别搞错位置
+
+这是一个 monorepo，仓库根目录下 `member-mini-client`、`admin-h5`、`saas-base` 是三个独立的子项目：
+- `member-mini-client`：uni-app 微信小程序（顾客点餐/会员端）。
+- `admin-h5`：Vue3 + Vite + Ant Design Vue + Pinia 的后台管理 SPA。
+- `saas-base`：Python 后端（FastAPI 之类），**跟你无关，不要碰**。
+
+## member-mini-client：真正的源码只在 src/ 下
+
+`member-mini-client/` 目录下**只有 `src/` 里的内容是当前在用的源码**。真正的构建入口是 `src/main.ts`（见 `member-mini-client/index.html`）。历史上这个目录根下曾经有一整套跟 `src/` 平行、结构几乎一样的死代码（`App.vue`、`pages.json`、`pages/`、`subpkg-*`、`api/`、`utils/`、`config.js` 等），是完全不相关的旧小程序遗留文件，2026-08-06 已确认并删除。**如果你想改的内容看起来存在于 `member-mini-client/` 根目录而不是 `member-mini-client/src/` 下，几乎可以肯定你找错文件了**——一定要在 `src/` 里再找一遍对应文件，不要在根目录重新创建这类文件。
+
+页面文案/图片相关的典型位置：
+- 点餐页：`src/subpkg-order/pages/menu.vue` 及其 `src/subpkg-order/components/*.vue`（首页横幅、菜单展示、下单流程的各个弹层组件）。
+- 文案/格式化相关的纯函数集中在 `src/subpkg-order/composables/useOrderFormatters.js`、`useOrderStatusPoll.js` 等 `use*.js` 文件里——**这些文件里的函数是业务逻辑，不是"内容"，除非用户明确要求改文案字符串，否则不要动这些文件里的任何计算/条件分支**。
+- 静态图片在 `src/static/`，`design-assets/` 是设计稿参考图，不参与构建，不用管。
+
+## admin-h5：中文编码是这个项目最容易踩的坑
+
+改任何带中文的文件之前，先读一遍 `admin-h5/ENCODING.md`。核心规则：
+- 所有源码必须是 UTF-8，改完中文内容后必须跑 `npm run check`（先做乱码扫描 `check:text`，再做 `build`），**不要只用终端里的中文显示效果判断有没有乱码**，PowerShell 默认代码页会骗你。
+- 页面代码在 `admin-h5/src/`，用 Pinia 做状态管理、Ant Design Vue 做组件库，改样式优先复用已有的 Ant Design Vue 组件属性，不要为了一个文案调整引入新的 UI 库或写一堆新 CSS。
+
+## 什么算"简单内容"，可以直接改
+
+- 页面里的中文文案字符串、按钮文字、提示语、说明文字。
+- 图片/图标的路径引用（前提是新图片文件本身已经放好，不需要你去处理图片资源）。
+- 明显是纯展示的样式微调（间距、颜色、字号）——且不影响响应式布局、不引入新的全局样式。
+
+## 什么绝对不能动，先问再说
+
+- 任何 `.js`/`.ts` 里的函数逻辑、条件分支、状态管理（`ref`/`computed`/`store`/Pinia）、API 调用（`@/api/*`、`src/api/*`）。
+- `member-mini-client/eslint.config.js`、`vite.config.ts`、`vitest.config.js`、`package.json` 里的依赖版本、`.github/workflows/*`——这些是构建/CI 配置，改错会导致整个仓库的自动化检查失败，而你可能看不到这个后果。
+- `.env`、`saas-base/`、任何跟部署/服务器相关的文件。
+- `member-mini-client` 根目录下如果又出现了跟 `src/` 结构类似的文件——见上面"仓库结构"一节，先确认这不是在重新制造已经删除过的死代码。
+- 不要新增/删除 npm 依赖（`package.json` 的 `dependencies`/`devDependencies`），内容类改动不应该需要装新包。
+
+## 改完之后，必须做
+
+- `member-mini-client`：在 `member-mini-client/` 目录下跑 `npm run lint` 和 `npm test`，确认没有新增的 error（warning 如果是你这次改动引入的也要看一眼是不是该顺手清掉）。
+- `admin-h5`：在 `admin-h5/` 目录下跑 `npm run check`（同时做编码扫描和构建），确认通过。
+- 用一两句话说清楚"改了什么文件、改了什么内容"，不要只说"已完成"。
+
+## Git：不要自己 commit/push
+
+改完之后**只把改动摆在工作区，不要自己执行 `git commit` 或 `git push`**。这个仓库的 CLAUDE.md 里给 Claude Code 开了自动提交推送的常设授权，但那是针对熟悉这个项目历史和架构的助手的，**不适用于你**——由用户看过 diff、或者让 Claude Code 复核一遍之后再提交。
