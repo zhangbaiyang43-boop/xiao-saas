@@ -252,24 +252,27 @@ async def _resolve_create_order_payment_mode(
     return payment_mode, is_postpay, is_table_account, pay_later_mode
 
 
-@router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    from datetime import datetime as _dt, timedelta
-    from decimal import Decimal
-    from app.models.menu_item import MenuItem
-    from app.models.coupon import Coupon
-    from app.models.coupon_template import CouponTemplate
-    from app.api.v1.menu import load_menu_specs
+async def _resolve_create_order_dining_context(
+    body: OrderCreate,
+    request: Request,
+    db: AsyncSession,
+    tenant_id: str,
+    payment_mode: str,
+    is_table_account: bool,
+):
+    """Resolve dining session, participant identity, and add-on parent for create_order.
 
-    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
-    if early_response is not None:
-        return early_response
-
-    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
-        tenant, tenant_id, body, db
-    )
-
-    request_id = (body.request_id or "").strip() or None
+    Returns (
+        early_response,
+        customer_id,
+        dining_session_id,
+        dining_participant_id,
+        order_type,
+        parent_order_id,
+        session_for_pickup,
+    ). When early_response is not None, the caller must return it immediately.
+    """
+    from datetime import datetime as _dt
 
     customer_id = getattr(request.state, "customer_id", None)
     if customer_id:
@@ -287,21 +290,21 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     if is_staff_order:
         merchant_tenant_id = getattr(request.state, "tenant_id", None)
         if not merchant_tenant_id or merchant_tenant_id != tenant_id:
-            return error_response(code=403, msg="无权为该门店下单")
+            return error_response(code=403, msg="无权为该门店下单"), customer_id, None, None, None, None, None
         if payment_mode not in ("postpay", "table_account"):
-            return error_response(code=400, msg="预付模式暂不支持代客加单")
+            return error_response(code=400, msg="预付模式暂不支持代客加单"), customer_id, None, None, None, None, None
         if body.coupon_id:
-            return error_response(code=400, msg="代客加单不支持使用优惠券")
+            return error_response(code=400, msg="代客加单不支持使用优惠券"), customer_id, None, None, None, None, None
         table_no = (body.table or "").strip()
         if not table_no:
-            return error_response(code=400, msg="缺少桌号")
+            return error_response(code=400, msg="缺少桌号"), customer_id, None, None, None, None, None
 
         from app.services.dining_session_service import DiningSessionService
 
         try:
             session = await DiningSessionService(db).get_or_create_open_session_for_staff(tenant_id, table_no)
         except ValueError as exc:
-            return error_response(code=400, msg=str(exc))
+            return error_response(code=400, msg=str(exc)), customer_id, None, None, None, None, None
 
         dining_session_id = session.id
         session_for_pickup = session
@@ -337,7 +340,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         )
         session = session_result.scalar_one_or_none()
         if not session:
-            return error_response(code=400, msg="dining session not found")
+            return error_response(code=400, msg="dining session not found"), customer_id, None, None, None, None, None
         session_for_pickup = session
 
         participant_filters = [
@@ -351,7 +354,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         elif body.client_id:
             participant_filters.append(DiningParticipant.client_id == body.client_id)
         else:
-            return error_response(code=400, msg="缺少本桌身份，请重新扫码")
+            return error_response(code=400, msg="缺少本桌身份，请重新扫码"), customer_id, None, None, None, None, None
 
         participant_result = await db.execute(select(DiningParticipant).where(*participant_filters))
         participant = participant_result.scalar_one_or_none()
@@ -360,7 +363,7 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             # 项目里全局约定代表"需要重新登录"，小程序端的通用拦截器会把它们当成会员登录
             # 失效处理（清掉 customer_token、弹微信授权框），如果这里复用 403 会把一次可以
             # 静默重试的本桌身份问题误导成"你必须先注册会员"，这正是历史上真实发生过的 bug。
-            return error_response(code=409, msg="本桌身份已失效，请重新扫码")
+            return error_response(code=409, msg="本桌身份已失效，请重新扫码"), customer_id, None, None, None, None, None
 
         dining_session_id = session.id
         dining_participant_id = participant.id
@@ -383,7 +386,45 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
         session.last_activity_at = _dt.utcnow()
 
     if is_table_account and not dining_session_id:
-        return error_response(code=400, msg="桌台账单模式需要重新扫码进入本桌")
+        return error_response(code=400, msg="桌台账单模式需要重新扫码进入本桌"), customer_id, None, None, None, None, None
+
+    return None, customer_id, dining_session_id, dining_participant_id, order_type, parent_order_id, session_for_pickup
+
+
+@router.post("/orders")
+async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    from datetime import datetime as _dt, timedelta
+    from decimal import Decimal
+    from app.models.menu_item import MenuItem
+    from app.models.coupon import Coupon
+    from app.models.coupon_template import CouponTemplate
+    from app.api.v1.menu import load_menu_specs
+
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    if early_response is not None:
+        return early_response
+
+    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
+        tenant, tenant_id, body, db
+    )
+
+    request_id = (body.request_id or "").strip() or None
+
+    (
+        early_response,
+        customer_id,
+        dining_session_id,
+        dining_participant_id,
+        order_type,
+        parent_order_id,
+        session_for_pickup,
+    ) = await _resolve_create_order_dining_context(
+        body, request, db, tenant_id, payment_mode, is_table_account
+    )
+    if early_response is not None:
+        return early_response
+
+    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
 
     applied_coupon_id = None
     coupon_discount = Decimal("0")

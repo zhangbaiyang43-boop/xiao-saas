@@ -13,7 +13,7 @@ from app.models.dining import DiningParticipant, DiningSession
 from app.models.menu_item import MenuItem
 from app.models.order import OrderItem
 from app.models.tenant import Tenant
-from app.api.v1.orders import OrderCreate, OrderItemIn, create_order
+from app.api.v1.orders import OrderCreate, OrderItemIn, _resolve_create_order_dining_context, create_order
 from app.services.dining_session_service import hash_participant_token
 from app.utils.id_generator import generate_snowflake_id
 
@@ -104,7 +104,7 @@ class AppendOrderReadsDiningSessionUnderLockTest(unittest.IsolatedAsyncioTestCas
         )
 
     async def test_append_order_read_is_a_locking_read(self):
-        source = inspect.getsource(create_order)
+        source = inspect.getsource(_resolve_create_order_dining_context)
         # The dining_session_id branch's SELECT must use with_for_update(), same as
         # settle_table's own session lock, so the two serialize against each other on
         # production MySQL instead of racing on a stale snapshot.

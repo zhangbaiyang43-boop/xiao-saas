@@ -122,7 +122,7 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn("pendingPaymentOrders", ADMIN_ORDER_MANAGE_SOURCE)
 
     def test_pay_later_add_on_uses_any_active_session_order_as_parent(self):
-        source = function_source(ORDERS_SOURCE, "create_order")
+        source = function_source(ORDERS_SOURCE, "_resolve_create_order_dining_context")
         self.assertIn('payment_status_filter = [Order.payment_status == "paid"] if payment_mode == "prepay" else []', source)
         self.assertIn("*payment_status_filter", source)
 

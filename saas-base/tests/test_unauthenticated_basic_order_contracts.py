@@ -67,11 +67,11 @@ class UnauthenticatedBasicOrderContractsTest(unittest.TestCase):
         self.assertIn('"NEED_WECHAT_CODE"', create_pay)
 
     def test_anonymous_order_create_and_table_order_query_use_participant_token(self):
-        create_order = py_function_source(ORDERS_SOURCE, "create_order")
+        dining_context = py_function_source(ORDERS_SOURCE, "_resolve_create_order_dining_context")
         list_current = py_function_source(DINING_SOURCE, "list_current_dining_orders")
-        self.assertIn('customer_id = getattr(request.state, "customer_id", None)', create_order)
-        self.assertIn("elif body.client_id", create_order)
-        self.assertIn("DiningParticipant.client_id == body.client_id", create_order)
+        self.assertIn('customer_id = getattr(request.state, "customer_id", None)', dining_context)
+        self.assertIn("elif body.client_id", dining_context)
+        self.assertIn("DiningParticipant.client_id == body.client_id", dining_context)
         self.assertIn("participant_token", list_current)
         self.assertIn("if not participant_token and not customer_id", list_current)
         self.assertIn("list_session_orders", list_current)
