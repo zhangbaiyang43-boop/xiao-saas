@@ -45,7 +45,7 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', resolve_source)
 
     def test_prepay_mode_returns_payment_action_and_uses_wxpay_only_after_order_exists(self):
-        create_source = function_source(ORDERS_SOURCE, "create_order")
+        create_source = function_source(ORDERS_SOURCE, "_persist_create_order_and_build_response")
         pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment"', create_source)
         self.assertIn('"need_payment": payment_mode == "prepay"', create_source)
@@ -60,7 +60,7 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         )
 
     def test_postpay_and_table_account_submit_without_wxpay_and_show_success(self):
-        create_source = function_source(ORDERS_SOURCE, "create_order")
+        create_source = function_source(ORDERS_SOURCE, "_persist_create_order_and_build_response")
         pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('"postpay": "order_success"', ORDERS_SOURCE)
         self.assertIn('"table_account": "table_order_success"', ORDERS_SOURCE)

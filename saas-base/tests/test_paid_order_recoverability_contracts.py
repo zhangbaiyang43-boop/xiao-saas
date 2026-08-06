@@ -48,7 +48,7 @@ def class_method_source(name: str) -> str:
 
 class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
     def test_order_is_created_before_payment_request(self):
-        create_order_source = function_source("create_order")
+        create_order_source = function_source("_persist_create_order_and_build_response")
         create_pay_source = function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE)
         resolve_source = function_source("_resolve_create_order_payment_mode")
         self.assertIn('payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"', resolve_source)

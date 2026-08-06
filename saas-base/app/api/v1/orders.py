@@ -579,50 +579,27 @@ async def _apply_create_order_coupon(
     return None, applied_coupon_id, coupon_discount
 
 
-@router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
-    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
-    if early_response is not None:
-        return early_response
-
-    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
-        tenant, tenant_id, body, db
-    )
-
-    request_id = (body.request_id or "").strip() or None
-
-    (
-        early_response,
-        customer_id,
-        dining_session_id,
-        dining_participant_id,
-        order_type,
-        parent_order_id,
-        session_for_pickup,
-    ) = await _resolve_create_order_dining_context(
-        body, request, db, tenant_id, payment_mode, is_table_account
-    )
-    if early_response is not None:
-        return early_response
-
-    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
-
-    await _cleanup_stale_pending_payment_orders(tenant_id, db)
-
-    early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
-        body, db, tenant_id
-    )
-    if early_response is not None:
-        return early_response
-
-    early_response, applied_coupon_id, coupon_discount = await _apply_create_order_coupon(
-        body, customer_id, tenant_id, real_total, db
-    )
-    if early_response is not None:
-        return early_response
-
-    final_total = max(real_total - float(coupon_discount), 0)
-
+async def _persist_create_order_and_build_response(
+    *,
+    body: OrderCreate,
+    db: AsyncSession,
+    tenant_id: str,
+    request_id: str | None,
+    customer_id: int | None,
+    dining_session_id: int | None,
+    dining_participant_id: int | None,
+    order_type: str | None,
+    parent_order_id: int | None,
+    session_for_pickup,
+    payment_mode: str,
+    pay_later_mode: bool,
+    is_staff_order: bool,
+    applied_coupon_id: int | None,
+    coupon_discount,
+    final_total: float,
+    order_items_data: list,
+):
+    """Persist order + items, schedule pay-later print, and build create_order response."""
     # 取餐牌号跟着"这一桌这次吃饭"走，不是跟着"这一单"走：显式传了就用显式的（顺便把这个
     # 号同步成这一桌接下来所有加单共享的值），没传就继承这一桌已经登记过的号，避免同一桌
     # 每加一单都要前台重新填一遍。
@@ -718,6 +695,71 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
             "payment_mode": payment_mode,
         },
         msg="order created, please pay",
+    )
+
+
+@router.post("/orders")
+async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    if early_response is not None:
+        return early_response
+
+    payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
+        tenant, tenant_id, body, db
+    )
+
+    request_id = (body.request_id or "").strip() or None
+
+    (
+        early_response,
+        customer_id,
+        dining_session_id,
+        dining_participant_id,
+        order_type,
+        parent_order_id,
+        session_for_pickup,
+    ) = await _resolve_create_order_dining_context(
+        body, request, db, tenant_id, payment_mode, is_table_account
+    )
+    if early_response is not None:
+        return early_response
+
+    is_staff_order = getattr(request.state, "token_type", None) == "merchant"
+
+    await _cleanup_stale_pending_payment_orders(tenant_id, db)
+
+    early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
+        body, db, tenant_id
+    )
+    if early_response is not None:
+        return early_response
+
+    early_response, applied_coupon_id, coupon_discount = await _apply_create_order_coupon(
+        body, customer_id, tenant_id, real_total, db
+    )
+    if early_response is not None:
+        return early_response
+
+    final_total = max(real_total - float(coupon_discount), 0)
+
+    return await _persist_create_order_and_build_response(
+        body=body,
+        db=db,
+        tenant_id=tenant_id,
+        request_id=request_id,
+        customer_id=customer_id,
+        dining_session_id=dining_session_id,
+        dining_participant_id=dining_participant_id,
+        order_type=order_type,
+        parent_order_id=parent_order_id,
+        session_for_pickup=session_for_pickup,
+        payment_mode=payment_mode,
+        pay_later_mode=pay_later_mode,
+        is_staff_order=is_staff_order,
+        applied_coupon_id=applied_coupon_id,
+        coupon_discount=coupon_discount,
+        final_total=final_total,
+        order_items_data=order_items_data,
     )
 
 

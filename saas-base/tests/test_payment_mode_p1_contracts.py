@@ -47,7 +47,7 @@ def lifecycle_method_source(name: str) -> str:
 
 class PaymentModeP1ContractsTest(unittest.TestCase):
     def test_create_order_returns_order_id_and_backend_next_action(self):
-        create_source = function_source(ORDERS_SOURCE, "create_order")
+        create_source = function_source(ORDERS_SOURCE, "_persist_create_order_and_build_response")
         action_source = function_source(ORDERS_SOURCE, "build_order_next_action")
         self.assertIn('"prepay": "pay"', ORDERS_SOURCE)
         self.assertIn('"postpay": "order_success"', ORDERS_SOURCE)
