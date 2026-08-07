@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from pydantic import BaseModel as PydanticBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,7 +121,13 @@ async def update_profile(data: UpdateTenantProfileRequest, db: AsyncSession = De
     if error:
         return error
 
-    updated = await service.update_tenant_profile(tenant, **data.model_dump(exclude_unset=True))
+    payload = data.model_dump(exclude_unset=True)
+    if "logo_url" in payload:
+        from app.core.cos import is_allowed_cos_url
+        if not is_allowed_cos_url(payload.get("logo_url")):
+            return error_response(code=400, msg="门店 Logo 仅支持本项目 COS 地址，请先上传图片")
+
+    updated = await service.update_tenant_profile(tenant, **payload)
     return success_response(
         data={
             "tenant_id": updated.tenant_id,
@@ -133,6 +139,36 @@ async def update_profile(data: UpdateTenantProfileRequest, db: AsyncSession = De
         },
         msg="更新成功",
     )
+
+
+@router.post("/upload-logo", response_model=RespVo)
+async def upload_shop_logo(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """上传门店 Logo 到 COS（最长边 512，WebP），返回公开 URL；需再调 profile 保存。"""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        return error_response(code=400, msg="仅支持 jpg/png/webp/gif")
+    content = await file.read()
+    if len(content) > 3 * 1024 * 1024:
+        return error_response(code=400, msg="图片不能超过 3MB")
+    from starlette.concurrency import run_in_threadpool
+    from app.core.cos import IMAGE_LOGO_MAX_DIMENSION, process_image, sniff_image_content_type, upload_image
+    if not sniff_image_content_type(content):
+        return error_response(code=400, msg="文件内容不是有效图片")
+    try:
+        processed = await run_in_threadpool(process_image, content, IMAGE_LOGO_MAX_DIMENSION)
+    except ValueError:
+        return error_response(code=400, msg="图片内容无效或已损坏")
+    try:
+        url = upload_image(processed, "logo.webp", "image/webp", folder="logo_images")
+        return success_response(data={"url": url}, msg="上传成功")
+    except Exception as e:
+        return error_response(code=500, msg=f"上传失败：{str(e)}")
 
 
 @router.get("/marketing-preview", response_model=RespVo)

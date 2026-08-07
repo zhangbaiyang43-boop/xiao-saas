@@ -8,6 +8,14 @@ export const registerTenant = (data) => request.post('/v1/register', data)
 export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')
 export const updateTenantProfile = (data) => request.put('/v1/tenant/profile', data)
+export const uploadShopLogo = (file) => {
+  const fd = new FormData()
+  fd.append('file', file)
+  return request.post('/v1/tenant/upload-logo', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 60000,
+  })
+}
 export const getTenantSettings = () => request.get('/v1/tenant/settings')
 export const updateTenantSettings = (data) => request.put('/v1/tenant/settings', data)
 export const getMarketingPreview = () => request.get('/v1/tenant/marketing-preview')
