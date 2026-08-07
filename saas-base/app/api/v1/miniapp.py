@@ -10,7 +10,7 @@ from app.core.tenant_context import TenantContext
 from app.core.time_utils import to_utc_iso
 from app.core.logger import logger
 from app.config import settings
-from app.schemas.miniapp import EntryJoinRequest, MiniAppLoginRequest
+from app.schemas.miniapp import EntryJoinRequest
 from app.services.anti_fraud_service import AntiFraudService
 from app.services.commission_service import CommissionService
 from app.services.coupon_service import CouponService
@@ -106,61 +106,6 @@ def build_auto_member_name(phone: str | None) -> str:
     if len(clean_phone) >= 4:
         return f"尾号{clean_phone[-4:]}会员"
     return "小程序顾客"
-
-
-@router.post("/login", response_model=RespVo)
-async def miniapp_login(data: MiniAppLoginRequest, db: AsyncSession = Depends(get_db)):
-    tenant_service = TenantService(db)
-    tenant = await tenant_service.get_tenant(data.store_id)
-    if not tenant or not tenant.status:
-        return error_response(code=404, msg="门店不存在或已停用")
-
-    TenantContext.set_tenant_id(data.store_id)
-    
-    # 閻?code 閹广垹褰?openid
-    wechat_service = WechatService()
-    wechat_result = await wechat_service.code2session(data.code)
-    openid = wechat_result.get("openid")
-    unionid = wechat_result.get("unionid")
-    
-    if not openid:
-        return error_response(code=400, msg="微信登录失败")
-
-    customer_service = CustomerService(db)
-    identity_service = CustomerIdentityService(db)
-    membership_service = MembershipService(db)
-
-    identity = await identity_service.get_by_identity(CHANNEL_MINIAPP, openid)
-    customer = None
-    if identity:
-        customer = await customer_service.get_customer(identity.customer_id)
-
-    if not customer:
-        customer = await customer_service.create_customer(
-            tenant_id=data.store_id,
-            openid=openid,
-            name="小程序顾客",
-            tags=["小程序会员"],
-        )
-        await identity_service.bind_identity(
-            customer_id=customer.id,
-            channel=CHANNEL_MINIAPP,
-            channel_user_id=openid,
-            unionid=unionid
-        )
-        await membership_service.ensure_account(customer)
-
-    token = create_customer_access_token(data.store_id, customer.id, openid=openid)
-    
-    member_account = await membership_service.get_account_by_customer(customer.id)
-    
-    return success_response(data={
-        "token": token,
-        "token_type": "bearer",
-        "store_id": data.store_id,
-        "customer_id": str(customer.id),
-        "profile": await serialize_member_profile(customer, member_account, {}),
-    }, msg="登录成功")
 
 
 @router.post("/entry/join", response_model=RespVo)

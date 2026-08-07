@@ -94,15 +94,6 @@ const request = (options = {}) => {
 }
 
 export const miniappApi = {
-  login: (code, storeId) => request({
-    url: '/api/miniapp/login',
-    method: 'POST',
-    data: {
-      code,
-      store_id: storeId
-    }
-  }),
-
   getProfile: () => request({
     url: '/api/miniapp/member/profile'
   }),
