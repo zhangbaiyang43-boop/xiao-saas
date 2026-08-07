@@ -9,6 +9,7 @@ const CustomerDetail = () => import('../views/CustomerDetail.vue')
 const ConsumptionList = () => import('../views/ConsumptionList.vue')
 const CouponCenter = () => import('../views/CouponCenter.vue')
 const CouponRecords = () => import('../views/CouponRecords.vue')
+const MarketingEffectiveness = () => import('../views/MarketingEffectiveness.vue')
 const Distribution = () => import('../views/Distribution.vue')
 const StaffReferral = () => import('../views/StaffReferral.vue')
 const EntranceCodeList = () => import('../views/EntranceCodeList.vue')
@@ -53,6 +54,7 @@ const routes = [
       { path: 'consumptions', name: 'ConsumptionList', component: ConsumptionList },
       { path: 'coupons', name: 'CouponCenter', component: CouponCenter },
       { path: 'coupon-records', name: 'CouponRecords', component: CouponRecords },
+      { path: 'marketing-effectiveness', name: 'MarketingEffectiveness', component: MarketingEffectiveness },
       { path: 'distribution', name: 'Distribution', component: Distribution },
       { path: 'staff-referral', name: 'StaffReferral', component: StaffReferral },
       { path: 'coupon-send', redirect: '/coupons' },

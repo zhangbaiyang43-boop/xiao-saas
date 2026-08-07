@@ -1,18 +1,49 @@
 from sqlalchemy import func, select
 from datetime import datetime, timedelta
 
+from app.models.commission_record import CommissionRecord
 from app.models.consumption import Consumption
 from app.models.coupon import Coupon
 from app.models.coupon_template import CouponTemplate
 from app.models.customer import Customer
 from app.models.dining import DiningSession
 from app.models.order import Order, OrderItem
+from app.models.point_ledger import PointLedger
 from app.services.base_service import BaseService
 
 # 同一桌同一天出现这么多个"首单新客"，就值得商家点开看一眼是不是真的一桌坐了
 # 这么多人——不是硬性拦截线，只是给人工核实用的提示阈值，正常大桌聚餐很容易
 # 超过，不代表一定有问题。
 TABLE_NEW_CUSTOMER_ALERT_THRESHOLD = 4
+
+MARKETING_RULE_ORDER = [
+    "entry_coupon",
+    "consumption_coupon",
+    "new_customer_coupon",
+    "recall_coupon",
+    "points_reward_coupon",
+    "invite_reward",
+    "staff_referral",
+]
+
+MARKETING_RULE_LABELS = {
+    "entry_coupon": "进店券",
+    "consumption_coupon": "复购券",
+    "new_customer_coupon": "新客券",
+    "recall_coupon": "召回券",
+    "points_reward_coupon": "积分兑券",
+    "invite_reward": "老带新",
+    "staff_referral": "员工推荐",
+}
+
+COUPON_MARKETING_RULE_TYPES = {
+    "entry_coupon",
+    "consumption_coupon",
+    "new_customer_coupon",
+    "recall_coupon",
+    "points_reward_coupon",
+    "invite_reward",
+}
 
 
 class StatisticsService(BaseService):
@@ -195,6 +226,53 @@ class StatisticsService(BaseService):
             )
         )
 
+        week_start = now - timedelta(days=7)
+        recent_customer_rows = (await self.db.execute(
+            select(Order.customer_id)
+            .where(
+                Order.tenant_id == tenant_id,
+                Order.payment_status == "paid",
+                Order.customer_id.isnot(None),
+                Order.created_at >= week_start,
+            )
+            .distinct()
+        )).all()
+        recent_customer_ids = [row[0] for row in recent_customer_rows]
+        if recent_customer_ids:
+            first_paid_rows = (await self.db.execute(
+                select(Order.customer_id, func.min(Order.created_at))
+                .where(
+                    Order.tenant_id == tenant_id,
+                    Order.payment_status == "paid",
+                    Order.customer_id.in_(recent_customer_ids),
+                )
+                .group_by(Order.customer_id)
+            )).all()
+            repeat_customers_7d = sum(
+                1 for _, first_at in first_paid_rows if first_at < week_start
+            )
+        else:
+            repeat_customers_7d = 0
+
+        points_issued_month = int(await self.db.scalar(
+            select(func.coalesce(func.sum(PointLedger.points), 0))
+            .where(
+                PointLedger.tenant_id == tenant_id,
+                PointLedger.points > 0,
+                PointLedger.created_at >= month_start,
+            )
+        ) or 0)
+
+        points_redeemed_coupons_month = int(await self.db.scalar(
+            select(func.count(Coupon.id))
+            .join(CouponTemplate, CouponTemplate.id == Coupon.template_id)
+            .where(
+                Coupon.tenant_id == tenant_id,
+                CouponTemplate.description == "points_reward_coupon",
+                Coupon.created_at >= month_start,
+            )
+        ) or 0)
+
         return {
             "today_consumption": float(today_consumption or 0),
             "today_new_members": int(today_new_members or 0),
@@ -224,6 +302,9 @@ class StatisticsService(BaseService):
             "consumption_amount": float(await self.db.scalar(
                 select(func.coalesce(func.sum(Consumption.amount), 0)).filter(Consumption.tenant_id == tenant_id)
             ) or 0),
+            "repeat_customers_7d": int(repeat_customers_7d),
+            "points_issued_month": points_issued_month,
+            "points_redeemed_coupons_month": points_redeemed_coupons_month,
             "second_order_conversion": await self._second_order_conversion(tenant_id),
         }
 
@@ -317,3 +398,154 @@ class StatisticsService(BaseService):
             "trend_7d": trend_7d,
             "top_dishes_7d": top_dishes_7d,
         }
+
+    async def _coupon_rule_window_stats(
+        self,
+        tenant_id: str,
+        rule_type: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[int, float | None, float]:
+        coupon_filters = [
+            Coupon.tenant_id == tenant_id,
+            CouponTemplate.tenant_id == tenant_id,
+            CouponTemplate.description == rule_type,
+            Coupon.created_at >= start,
+            Coupon.created_at < end,
+        ]
+        issued_count = int(await self.db.scalar(
+            select(func.count(Coupon.id))
+            .join(CouponTemplate, CouponTemplate.id == Coupon.template_id)
+            .where(*coupon_filters)
+        ) or 0)
+        redeemed_count = int(await self.db.scalar(
+            select(func.count(Coupon.id))
+            .join(CouponTemplate, CouponTemplate.id == Coupon.template_id)
+            .where(*coupon_filters, Coupon.status == "USED")
+        ) or 0)
+        redemption_rate = round(redeemed_count / issued_count, 4) if issued_count > 0 else None
+        gmv = float(await self.db.scalar(
+            select(func.coalesce(func.sum(Order.total), 0))
+            .select_from(Order)
+            .join(Coupon, Order.coupon_id == Coupon.id)
+            .join(CouponTemplate, Coupon.template_id == CouponTemplate.id)
+            .where(
+                Order.tenant_id == tenant_id,
+                Order.payment_status == "paid",
+                *coupon_filters,
+            )
+        ) or 0)
+        return issued_count, redemption_rate, gmv
+
+    async def _referral_headcount(
+        self,
+        tenant_id: str,
+        inviter_type: str,
+        start: datetime,
+        end: datetime,
+    ) -> int:
+        return int(await self.db.scalar(
+            select(func.count(Customer.id)).where(
+                Customer.tenant_id == tenant_id,
+                Customer.inviter_type == inviter_type,
+                Customer.created_at >= start,
+                Customer.created_at < end,
+            )
+        ) or 0)
+
+    async def _referral_invitee_gmv(
+        self,
+        tenant_id: str,
+        inviter_type: str,
+        start: datetime,
+        end: datetime,
+    ) -> float:
+        invitee_ids_result = await self.db.execute(
+            select(Customer.id).where(
+                Customer.tenant_id == tenant_id,
+                Customer.inviter_type == inviter_type,
+                Customer.created_at >= start,
+                Customer.created_at < end,
+            )
+        )
+        invitee_ids = [row[0] for row in invitee_ids_result.all()]
+        if not invitee_ids:
+            return 0.0
+        return float(await self.db.scalar(
+            select(func.coalesce(func.sum(Order.total), 0)).where(
+                Order.tenant_id == tenant_id,
+                Order.payment_status == "paid",
+                Order.customer_id.in_(invitee_ids),
+                Order.created_at >= start,
+                Order.created_at < end,
+            )
+        ) or 0)
+
+    async def _staff_commission_window_stats(
+        self,
+        tenant_id: str,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[int, float | None]:
+        base_filters = [
+            CommissionRecord.tenant_id == tenant_id,
+            CommissionRecord.receiver_type == "staff",
+            CommissionRecord.source_type == "FIRST_VERIFY",
+            CommissionRecord.level == 1,
+            CommissionRecord.created_at >= start,
+            CommissionRecord.created_at < end,
+        ]
+        issued_count = int(await self.db.scalar(
+            select(func.count(CommissionRecord.id)).where(*base_filters)
+        ) or 0)
+        settled_count = int(await self.db.scalar(
+            select(func.count(CommissionRecord.id)).where(
+                *base_filters,
+                CommissionRecord.status == "SETTLED",
+            )
+        ) or 0)
+        redemption_rate = round(settled_count / issued_count, 4) if issued_count > 0 else None
+        return issued_count, redemption_rate
+
+    async def marketing_effectiveness(self, start: datetime, end: datetime) -> list[dict]:
+        tenant_id = self.require_tenant_id()
+        rows: list[dict] = []
+
+        for rule_type in MARKETING_RULE_ORDER:
+            if rule_type in COUPON_MARKETING_RULE_TYPES:
+                issued_count, redemption_rate, gmv = await self._coupon_rule_window_stats(
+                    tenant_id, rule_type, start, end
+                )
+                referral_headcount = None
+                if rule_type == "invite_reward":
+                    referral_headcount = await self._referral_headcount(
+                        tenant_id, "customer", start, end
+                    )
+                    gmv = await self._referral_invitee_gmv(tenant_id, "customer", start, end)
+                rows.append({
+                    "rule_type": rule_type,
+                    "label": MARKETING_RULE_LABELS[rule_type],
+                    "metric_kind": "coupon",
+                    "issued_count": issued_count,
+                    "redemption_rate": redemption_rate,
+                    "gmv": round(gmv, 2),
+                    "referral_headcount": referral_headcount,
+                })
+                continue
+
+            issued_count, redemption_rate = await self._staff_commission_window_stats(
+                tenant_id, start, end
+            )
+            referral_headcount = await self._referral_headcount(tenant_id, "staff", start, end)
+            gmv = await self._referral_invitee_gmv(tenant_id, "staff", start, end)
+            rows.append({
+                "rule_type": rule_type,
+                "label": MARKETING_RULE_LABELS[rule_type],
+                "metric_kind": "commission",
+                "issued_count": issued_count,
+                "redemption_rate": redemption_rate,
+                "gmv": round(gmv, 2),
+                "referral_headcount": referral_headcount,
+            })
+
+        return rows

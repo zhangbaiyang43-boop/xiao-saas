@@ -74,6 +74,8 @@ export const getWeworkEvents = (params) => request.get('/v1/wework/events', { pa
 
 export const getDashboardStats = () => request.get('/v1/stats/dashboard')
 export const getTableCouponActivity = () => request.get('/v1/stats/table-coupon-activity')
+export const getMarketingEffectiveness = (days = 30) =>
+  request.get('/v1/stats/marketing-effectiveness', { params: { days } })
 export const getMerchantSystemStatus = () => request.get('/v1/merchant/system-status')
 
 export const getDistributionSettings = () => request.get('/v1/distribution/settings')

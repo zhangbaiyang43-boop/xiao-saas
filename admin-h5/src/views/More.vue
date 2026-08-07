@@ -100,7 +100,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ShopOutlined, QrcodeOutlined, GiftOutlined, ClusterOutlined, TeamOutlined, SettingOutlined, LogoutOutlined, RightOutlined, FieldTimeOutlined, UsergroupAddOutlined } from '@ant-design/icons-vue'
+import { ShopOutlined, QrcodeOutlined, GiftOutlined, ClusterOutlined, TeamOutlined, SettingOutlined, LogoutOutlined, RightOutlined, FieldTimeOutlined, UsergroupAddOutlined, BarChartOutlined } from '@ant-design/icons-vue'
 import { getTenantProfile } from '../api'
 import { clearSession } from '../utils/session'
 
@@ -119,6 +119,7 @@ const operationItems = computed(() => [
 // 二级入口了，这里不再放一个平级的顶层导航项。
 const marketingItems = [
   { label: '优惠券管理', desc: '发券规则 · 领券活动', path: '/coupons', icon: GiftOutlined, bg: '#fdf4ff', color: '#9333ea' },
+  { label: '营销效果', desc: '按渠道看发券/核销/GMV/裂变', path: '/marketing-effectiveness', icon: BarChartOutlined, bg: '#fef9c3', color: '#ca8a04' },
   { label: '分销', desc: '老带新奖励，分销员管理', path: '/distribution', icon: ClusterOutlined, bg: '#eff6ff', color: '#2563eb' },
   { label: '员工推荐', desc: '员工/亲友带客佣金', path: '/staff-referral', icon: UsergroupAddOutlined, bg: '#fff7ed', color: '#ea580c' },
   { label: '会员列表', desc: '查看所有会员及消费记录', path: '/customers', icon: TeamOutlined, bg: '#f0fdf4', color: '#16a34a' },

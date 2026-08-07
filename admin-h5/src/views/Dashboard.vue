@@ -57,6 +57,18 @@
         />
       </div>
 
+      <!-- 会员极简看板：weekly 扫一眼会员体系是否在跑 -->
+      <div class="section-block animate-in" style="animation-delay:.045s">
+        <StatCard
+          title="会员总数"
+          :value="memberPulse.total"
+          prefix=""
+          :precision="0"
+          :items="memberPulseItems"
+          :loading="!statsLoaded"
+        />
+      </div>
+
       <!-- 近7天营业额趋势 -->
       <div class="section-block animate-in" style="animation-delay:.05s">
         <TrendChart title="近7天营业额" :data="overview.trend7d" :loading="!statsLoaded" />
@@ -137,6 +149,7 @@ import TrendChart from '../components/TrendChart.vue'
 const router = useRouter()
 const merchant = ref({ name: '', is_open: true, is_new_merchant: false })
 const stats = ref({ todayNewMembers: 0, secondOrderConversion: null })
+const memberPulse = ref({ total: 0, repeat7d: 0, pointsIssued: 0, pointsRedeemed: 0 })
 // pending/preparing/canSettle 是"现在这一刻要不要处理"的实时状态，跟"今天赚了多少钱"
 // 是两回事，继续从当前订单列表现算；营收/订单数/客单价/环比/趋势/热销榜这些是"日结果"
 // 类指标，统一交给后端按 payment_status 算，不再用前端这份订单列表自己拼营业额
@@ -176,6 +189,12 @@ const reportItems = computed(() => [
   { label: '订单数', value: overview.value.todayOrderCount },
   { label: '客单价', value: overview.value.todayAov ? `¥${overview.value.todayAov}` : '-' },
   { label: '新会员', value: stats.value.todayNewMembers },
+])
+
+const memberPulseItems = computed(() => [
+  { label: '7日回头客', value: memberPulse.value.repeat7d },
+  { label: '本月积分发放', value: memberPulse.value.pointsIssued },
+  { label: '本月积分核销', value: memberPulse.value.pointsRedeemed },
 ])
 
 // 首单→二单转化率：新客最该被盯的一个指标——比注册数、领券数都更能说明菜品/价格/
@@ -316,6 +335,12 @@ async function loadStats(pollMeta = {}) {
         if (r?.code !== 200) return
         const d = r.data || {}
         stats.value = { todayNewMembers: d.today_new_members || 0, secondOrderConversion: d.second_order_conversion || null }
+        memberPulse.value = {
+          total: d.customer_count || 0,
+          repeat7d: d.repeat_customers_7d || 0,
+          pointsIssued: d.points_issued_month || 0,
+          pointsRedeemed: d.points_redeemed_coupons_month || 0,
+        }
         overview.value = {
           todayOrderCount: d.today_order_count || 0,
           todayRevenue: d.today_revenue || 0,

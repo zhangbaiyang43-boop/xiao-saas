@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,3 +36,21 @@ async def table_coupon_activity(request: Request, date: str | None = None, db: A
             return error_response(code=400, msg="date 格式应为 YYYY-MM-DD")
     data = await StatisticsService(db).table_coupon_activity(day)
     return success_response(data=data, msg="ok")
+
+
+@router.get("/marketing-effectiveness", response_model=RespVo)
+@tenant_limit()
+@cache_result("stats:marketing_effectiveness", ttl=60)
+async def marketing_effectiveness(request: Request, days: int = 30, db: AsyncSession = Depends(get_db)):
+    end = datetime.utcnow()
+    start = end - timedelta(days=days)
+    data = await StatisticsService(db).marketing_effectiveness(start, end)
+    return success_response(
+        data={
+            "rows": data,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "days": days,
+        },
+        msg="ok",
+    )
