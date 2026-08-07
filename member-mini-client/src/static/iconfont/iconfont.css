@@ -1,8 +1,8 @@
 @font-face {
   font-family: "iconfont"; /* Project id 5214694 */
-  src: url('iconfont.woff2?t=1785470532620') format('woff2'),
-       url('iconfont.woff?t=1785470532620') format('woff'),
-       url('iconfont.ttf?t=1785470532620') format('truetype');
+  src: url('iconfont.woff2?t=1786083295951') format('woff2'),
+       url('iconfont.woff?t=1786083295951') format('woff'),
+       url('iconfont.ttf?t=1786083295951') format('truetype');
 }
 
 .iconfont {
@@ -13,13 +13,8 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 小程序 WXSS 渲染伪元素时，::before/::after 生成的内容不总是能可靠继承宿主
-   元素的 font-family——不显式在伪元素自己身上再声明一次，content 里的私有区
-   编码会被兜底字体渲染成乱码，而不是图标本身。这份文件是从 iconfont.cn 重新
-   导出覆盖的，每次重新导出都要记得把这条规则加回来。 */
-.iconfont:before,
-.iconfont:after {
-  font-family: "iconfont" !important;
+.icon-return:before {
+  content: "\e81a";
 }
 
 .icon-wifi:before {
