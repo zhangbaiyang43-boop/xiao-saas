@@ -16,7 +16,11 @@ from app.services.commission_service import CommissionService
 from app.services.coupon_service import CouponService
 from app.services.customer_operation_log_service import CustomerOperationLogService
 from app.services.customer_service import CustomerService
-from app.services.customer_identity_service import CHANNEL_MINIAPP, CustomerIdentityService
+from app.services.customer_identity_service import (
+    CHANNEL_MINIAPP,
+    CustomerIdentityService,
+    JoinResolutionOutcome,
+)
 from app.services.entrance_code_service import EntranceCodeService
 from app.services.membership_service import MembershipService
 from app.services.tenant_service import TenantService
@@ -219,12 +223,10 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
         auto_member_name = build_auto_member_name(phone)
 
         customer_id_for_log = None
-        customer_service = CustomerService(db)
         identity_service = CustomerIdentityService(db)
         membership_service = MembershipService(db)
         coupon_service = CouponService(db)
         operation_log_service = CustomerOperationLogService(db)
-        customer_service.set_tenant_id(tenant_id)
         identity_service.set_tenant_id(tenant_id)
         membership_service.set_tenant_id(tenant_id)
         coupon_service.set_tenant_id(tenant_id)
@@ -232,199 +234,79 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
         commission_service = CommissionService(db)
         commission_service.set_tenant_id(tenant_id)
 
-        customer = None
-        is_new_customer = False
-        phone_customer = await customer_service.get_customer_by_phone_any_status(data.phone, tenant_id) if data.phone else None
-        logger.info(
-            f"phone lookup result - phone: {data.phone}, found: {bool(phone_customer)}, "
-            f"customer_id: {getattr(phone_customer, 'id', None)}, "
-            f"customer_phone: {getattr(phone_customer, 'phone', None)}"
+        resolution = await identity_service.resolve_customer_for_join(
+            phone=data.phone,
+            phone_verified=phone_verified,
+            openid=openid,
+            unionid=unionid,
+            auto_member_name=auto_member_name,
         )
 
-        async def update_join_customer_info(existing_customer):
-            update_data = {}
-            if existing_customer.name in (None, "", "会员", "小程序顾客"):
-                update_data["name"] = auto_member_name
-            if data.phone and existing_customer.phone != data.phone:
-                update_data["phone"] = data.phone
-            if openid and existing_customer.openid != openid:
-                openid_customer = await customer_service.get_customer_by_openid_any_status(openid, tenant_id)
-                if not openid_customer or openid_customer.id == existing_customer.id:
-                    update_data["openid"] = openid
-                else:
-                    logger.info(
-                        f"当前 customer.openid 已被其他会员占用，跳过更新 - "
-                        f"current_customer_id: {existing_customer.id}, openid_customer_id: {openid_customer.id}"
-                    )
-            if update_data:
-                logger.info(f"更新会员信息 - customer_id: {existing_customer.id}, update_data: {update_data}")
-                return await customer_service.update_customer(existing_customer.id, **update_data)
-            return existing_customer
+        if resolution.outcome == JoinResolutionOutcome.UNVERIFIED_PHONE_BLOCKED:
+            await operation_log_service.record(
+                customer_id=resolution.blocked_customer_id,
+                action="miniapp_join_unverified_phone_rebind_blocked",
+                source="miniapp",
+                actor_type="customer",
+                phone=data.phone,
+                openid=openid,
+                detail={
+                    "message": "手填手机号匹配到已有会员但未经微信验证，已拒绝绑定",
+                    "scene": data.scene,
+                },
+            )
+            return error_response(code=409, msg="该手机号已绑定其他会员，请使用微信授权手机号完成登录")
 
-        identity = await identity_service.get_by_identity(CHANNEL_MINIAPP, openid)
-        identity_customer_id = identity.customer_id if identity else None
+        if resolution.outcome == JoinResolutionOutcome.CUSTOMER_DISABLED:
+            await operation_log_service.record(
+                customer_id=resolution.blocked_customer_id,
+                action="miniapp_join_blocked_disabled",
+                source="miniapp",
+                actor_type="customer",
+                phone=data.phone,
+                openid=openid,
+                detail={
+                    "message": "会员已停用，阻止小程序入会",
+                    "scene": data.scene,
+                    "matched_by": resolution.matched_by,
+                    "blocked_customer_id": str(resolution.blocked_customer_id),
+                },
+            )
+            return error_response(code=403, msg="会员已停用，请联系商家")
 
-        # Phone is the member account key in the MVP. The WeChat openid is only the login
-        # credential and can be rebound when the same device switches to another phone.
-        #
-        # 但这个"顶号"能力必须只对手机号本人开放：如果当前微信身份（openid）本来就不是
-        # 这个账号的绑定身份，又是靠一个没经过微信验证的手填手机号才匹配上的，那就没有
-        # 任何证据证明操作者真的拥有这个手机号——必须拒绝，引导用户走"微信授权手机号"
-        # 验证流程，而不是直接把账号让出去。
-        if phone_customer:
-            already_owns = bool(identity_customer_id) and identity_customer_id == phone_customer.id
-            if not phone_verified and not already_owns:
-                logger.warning(
-                    f"未验证手机号匹配到已有会员，拒绝自动绑定 - "
-                    f"phone_customer_id: {phone_customer.id}, openid: {openid}, phone: {data.phone}"
-                )
-                await operation_log_service.record(
-                    customer_id=phone_customer.id,
-                    action="miniapp_join_unverified_phone_rebind_blocked",
-                    source="miniapp",
-                    actor_type="customer",
-                    phone=data.phone,
-                    openid=openid,
-                    detail={
-                        "message": "手填手机号匹配到已有会员但未经微信验证，已拒绝绑定",
-                        "scene": data.scene,
-                    },
-                )
-                return error_response(code=409, msg="该手机号已绑定其他会员，请使用微信授权手机号完成登录")
-            customer = phone_customer
-            if customer.status != 1:
-                await operation_log_service.record(
-                    customer_id=customer.id,
-                    action="miniapp_join_blocked_disabled",
-                    source="miniapp",
-                    actor_type="customer",
-                    phone=data.phone,
-                    openid=openid,
-                    detail={
-                        "message": "会员已停用，阻止小程序入会",
-                        "scene": data.scene,
-                        "matched_by": "phone",
-                        "blocked_customer_id": str(customer.id),
-                    },
-                )
-                return error_response(code=403, msg="会员已停用，请联系商家")
-            logger.info(f"手机号找到会员 - customer_id: {customer.id}, phone: {data.phone}")
-            if identity_customer_id and identity_customer_id != customer.id:
-                logger.info(
-                    f"手机号已切换会员，openid 从旧会员迁移到当前手机号会员 - "
-                    f"old_customer_id: {identity_customer_id}, new_customer_id: {customer.id}, phone: {data.phone}"
-                )
-                await operation_log_service.record(
-                    customer_id=customer.id,
-                    action="miniapp_phone_switch",
-                    source="miniapp",
-                    actor_type="customer",
-                    phone=data.phone,
-                    openid=openid,
-                    detail={
-                        "message": "同一微信身份切换手机号登录，已重新绑定到当前手机号会员",
-                        "scene": data.scene,
-                        "old_customer_id": str(identity_customer_id),
-                        "new_customer_id": str(customer.id),
-                    },
-                )
-            await identity_service.rebind_identity(
+        customer = resolution.customer
+        is_new_customer = resolution.is_new_customer
+
+        if resolution.phone_switch_old_customer_id is not None:
+            await operation_log_service.record(
                 customer_id=customer.id,
-                channel=CHANNEL_MINIAPP,
-                channel_user_id=openid,
+                action="miniapp_phone_switch",
+                source="miniapp",
+                actor_type="customer",
                 phone=data.phone,
-                unionid=unionid
+                openid=openid,
+                detail={
+                    "message": "同一微信身份切换手机号登录，已重新绑定到当前手机号会员",
+                    "scene": data.scene,
+                    "old_customer_id": str(resolution.phone_switch_old_customer_id),
+                    "new_customer_id": str(customer.id),
+                },
             )
-            logger.info(f"重绑 identity（已有会员）- customer_id: {customer.id}, openid: {openid}")
-            customer = await update_join_customer_info(customer)
 
-        if not customer and identity_customer_id:
-            # 手机号没查到匹配（顾客换手机号了），但这个微信身份本来就有账号——必须复用
-            # 它，不能借口"手机号没查到"就当成新客户另建一个：那样会把老账号的积分/
-            # 等级/优惠券/消费记录全部撇下，顾客只是换个手机号登录，资产却"清零"了。
-            existing_customer = await customer_service.get_customer_any_status(identity_customer_id)
-            if existing_customer:
-                if existing_customer.status != 1:
-                    await operation_log_service.record(
-                        customer_id=existing_customer.id,
-                        action="miniapp_join_blocked_disabled",
-                        source="miniapp",
-                        actor_type="customer",
-                        phone=data.phone,
-                        openid=openid,
-                        detail={
-                            "message": "会员已停用，阻止小程序入会",
-                            "scene": data.scene,
-                            "matched_by": "identity",
-                            "blocked_customer_id": str(existing_customer.id),
-                        },
-                    )
-                    return error_response(code=403, msg="会员已停用，请联系商家")
-                logger.info(
-                    f"identity 找到已有会员（手机号已更换）- customer_id: {existing_customer.id}, "
-                    f"old_phone: {existing_customer.phone}, new_phone: {data.phone}"
-                )
-                await operation_log_service.record(
-                    customer_id=existing_customer.id,
-                    action="miniapp_phone_number_changed",
-                    source="miniapp",
-                    actor_type="customer",
-                    phone=data.phone,
-                    openid=openid,
-                    detail={
-                        "message": "同一微信身份填写了新手机号，已更新账号手机号并保留原有资产",
-                        "scene": data.scene,
-                        "old_phone": existing_customer.phone,
-                    },
-                )
-                customer = await update_join_customer_info(existing_customer)
-                is_new_customer = False
-
-        if not customer:
-            customer_openid = openid
-            openid_customer = await customer_service.get_customer_by_openid_any_status(openid, tenant_id)
-            if openid_customer:
-                customer_openid = f"phone:{data.phone}"
-                logger.info(
-                    f"openid 已绑定到其他会员，当前用手机号注册新会员 - "
-                    f"openid_customer_id: {openid_customer.id}, phone: {data.phone}"
-                )
-            customer = await customer_service.create_customer(
-                tenant_id=tenant_id,
-                openid=customer_openid,
-                name=auto_member_name,
-                phone=data.phone,
-                tags=["小程序会员"],
-            )
-            if data.phone and customer.phone != data.phone:
-                logger.warning(
-                    f"create_customer returned mismatched phone - "
-                    f"customer_id: {customer.id}, customer_phone: {customer.phone}, request_phone: {data.phone}"
-                )
-                matched_phone_customer = await customer_service.get_customer_by_phone_any_status(data.phone, tenant_id)
-                if matched_phone_customer and matched_phone_customer.id != customer.id:
-                    customer = matched_phone_customer
-                    is_new_customer = False
-                else:
-                    customer = await customer_service.update_customer(
-                        customer.id,
-                        phone=data.phone,
-                        name=customer.name or auto_member_name,
-                    )
-                    is_new_customer = False
-            else:
-                is_new_customer = True
-            logger.info(f"新会员已建 - customer_id: {customer.id}, is_new_customer: {is_new_customer}")
-
-            # 绑定 identity
-            await identity_service.rebind_identity(
+        if resolution.phone_changed_old_phone is not None:
+            await operation_log_service.record(
                 customer_id=customer.id,
-                channel=CHANNEL_MINIAPP,
-                channel_user_id=openid,
+                action="miniapp_phone_number_changed",
+                source="miniapp",
+                actor_type="customer",
                 phone=data.phone,
-                unionid=unionid
+                openid=openid,
+                detail={
+                    "message": "同一微信身份填写了新手机号，已更新账号手机号并保留原有资产",
+                    "scene": data.scene,
+                    "old_phone": resolution.phone_changed_old_phone,
+                },
             )
-            logger.info(f"重绑 identity（新会员）- customer_id: {customer.id}, openid: {openid}")
 
         await membership_service.ensure_account(customer)
         if is_new_customer and data.invite_code:
