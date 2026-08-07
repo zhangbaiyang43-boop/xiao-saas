@@ -30,12 +30,24 @@ def js_function_source(source: str, name: str) -> str:
 
 def py_function_source(source: str, name: str) -> str:
     lines = source.splitlines()
-    start = next((idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(")), None)
+    start = next(
+        (
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith(f"async def {name}(") or line.startswith(f"    async def {name}(")
+        ),
+        None,
+    )
     assert start is not None, f"{name} source not found"
+    is_class_method = lines[start].startswith("    async def")
     end = len(lines)
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
-        if line.startswith("@router.") or line.startswith("async def ") or line.startswith("class "):
+        if is_class_method:
+            if line.startswith("    async def ") or line.startswith("    def "):
+                end = idx
+                break
+        elif line.startswith("@router.") or line.startswith("async def ") or line.startswith("class "):
             end = idx
             break
     return "\n".join(lines[start:end])

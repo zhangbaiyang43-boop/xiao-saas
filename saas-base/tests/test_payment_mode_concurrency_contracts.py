@@ -20,14 +20,25 @@ DINING_MIGRATION_SOURCE = (
 def function_source(source: str, name: str) -> str:
     lines = source.splitlines()
     start = next(
-        (idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(") or line.startswith(f"def {name}(") ),
+        (
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith(f"async def {name}(")
+            or line.startswith(f"def {name}(")
+            or line.startswith(f"    async def {name}(")
+        ),
         None,
     )
     assert start is not None, f"{name} source not found"
+    is_class_method = lines[start].startswith("    async def")
     end = len(lines)
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
-        if line.startswith("@router.") or line.startswith("class ") or line.startswith("async def ") or line.startswith("def "):
+        if is_class_method:
+            if line.startswith("    async def ") or line.startswith("    def "):
+                end = idx
+                break
+        elif line.startswith("@router.") or line.startswith("class ") or line.startswith("async def ") or line.startswith("def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -59,16 +70,16 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         self.assertIn('order.payment_status = "paid"', success_source)
         self.assertIn('order.status = "pending"', success_source)
         self.assertIn('with_for_update()', notify_source)
-        self.assertIn('_on_payment_success(order, db, payment_method="wxpay")', notify_source)
+        self.assertIn('self._on_payment_success(order, payment_method="wxpay")', notify_source)
         self.assertIn('with_for_update()', mock_source)
-        self.assertIn('_on_payment_success(order, db, payment_method="mock")', mock_source)
+        self.assertIn('self._on_payment_success(order, payment_method="mock")', mock_source)
 
     def test_free_or_zero_amount_payment_path_locks_before_marking_paid(self):
         pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('if pay_amount <= 0:', pay_source)
         self.assertIn('select(Order).where(Order.id == int(order_id)).with_for_update()', pay_source)
-        self.assertIn('_on_payment_success(order, db, payment_method="free")', pay_source)
-        self.assertIn('await db.commit()', pay_source)
+        self.assertIn('self._on_payment_success(order, payment_method="free")', pay_source)
+        self.assertIn('await self.db.commit()', pay_source)
 
     def test_active_dining_session_creation_uses_unique_active_key_and_retry(self):
         self.assertIn('active_key = f"{tenant_id}:{table_no}"', DINING_SERVICE_SOURCE)

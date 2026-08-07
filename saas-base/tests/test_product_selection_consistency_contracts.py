@@ -47,7 +47,7 @@ class ProductSelectionConsistencyContractsTest(unittest.TestCase):
     def test_backend_persists_legal_display_name_without_trusting_price_or_foreign_dish(self):
         self.assertIn("MenuItem.id == item_in.dish_id", ORDERS_SOURCE)
         self.assertIn("MenuItem.tenant_id == tenant_id", ORDERS_SOURCE)
-        self.assertIn("unit_price = float(dish.price)", ORDERS_SOURCE)
+        self.assertIn("unit_price = _numeric_float(dish.price)", ORDERS_SOURCE)
         self.assertIn("submitted_name = str(item_in.name or \"\").strip()", ORDERS_SOURCE)
         self.assertIn("submitted_name.startswith(base_name)", ORDERS_SOURCE)
         self.assertIn("name = submitted_name[:64] if submitted_name", ORDERS_SOURCE)

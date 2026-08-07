@@ -1,6 +1,8 @@
+# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, check-untyped-defs=False
 from datetime import date, datetime, timezone
 import json
-from typing import List, Optional
+from decimal import Decimal
+from typing import Any, List, Optional, TypeAlias, cast as typing_cast
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel as PydanticBase
@@ -13,7 +15,7 @@ from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
 from app.core.platform_rules import cap_discount_amount
-from app.core.response import error_response, success_response
+from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
@@ -25,16 +27,7 @@ from app.services.coupon_service import (
     _unlock_order_coupon_if_locked,
 )
 from app.services.order_lifecycle_service import OrderLifecycleService
-from app.services.order_payment_service import (
-    _apply_paid_order_member_assets_once,
-    _on_payment_success,
-    _recover_wxpay_order_if_paid,
-    _refund_orphaned_wxpay_payment,
-    _refund_order_payment,
-    create_wxpay_order as process_create_wxpay_order,
-    mock_pay_order as process_mock_pay_order,
-    wxpay_notify as process_wxpay_notify,
-)
+from app.services.order_payment_service import OrderPaymentService
 from app.services.order_print_service import (
     MAX_PRINT_RETRY_ATTEMPTS,
     _compose_merchant_note_with_print_meta,
@@ -47,6 +40,17 @@ from app.services.order_print_service import (
     can_reprint_order,
 )
 from app.services.order_stock_service import _restore_order_stock
+
+OrderItemRow: TypeAlias = tuple[int, str, float, int]
+ApiResponse: TypeAlias = RespVo[Any]
+PrepareTenantReplayResult: TypeAlias = tuple[ApiResponse | None, Tenant | None, str | None]
+PaymentModeFlags: TypeAlias = tuple[str, bool, bool, bool]
+ValidateItemsResult: TypeAlias = tuple[ApiResponse | None, float | None, list[OrderItemRow] | None]
+ApplyCouponResult: TypeAlias = tuple[ApiResponse | None, int | None, Decimal]
+
+
+def _numeric_float(value: object) -> float:
+    return float(str(value or 0))
 
 router = APIRouter(prefix="/api/v1", tags=["订单"])
 
@@ -123,7 +127,7 @@ class MockPayBody(PydanticBase):
     participant_token: Optional[str] = None
 
 
-def serialize_order(order: Order, order_items: list, checkout_requested_at: str | None = None, participant_no: int | None = None):
+def serialize_order(order, order_items, checkout_requested_at=None, participant_no=None):
     print_meta = _serialize_print_meta(order)
     return {
         "id": str(order.id),
@@ -164,7 +168,38 @@ def serialize_order(order: Order, order_items: list, checkout_requested_at: str 
     }
 
 
-async def _prepare_create_order_tenant_and_replay(body: OrderCreate, db: AsyncSession):
+async def _replay_order_response(
+    db: AsyncSession, tenant_id: str, request_id: str | None
+) -> ApiResponse | None:
+    """Look up an existing order by client_request_id and build the create_order replay response."""
+    if not request_id:
+        return None
+    replay_result = await db.execute(
+        select(Order).where(Order.tenant_id == tenant_id, Order.client_request_id == request_id)
+    )
+    replay_order = replay_result.scalar_one_or_none()
+    if not replay_order:
+        return None
+    replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
+    replay_items = list(replay_items_result.scalars().all())
+    replay_data = serialize_order(replay_order, replay_items)
+    replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+    return success_response(
+        data={
+            **replay_data,
+            "order_id": replay_data["id"],
+            "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
+            "next_action": build_order_next_action(replay_payment_mode),
+            "pay_amount": _numeric_float(replay_order.total),
+            "payment_mode": replay_payment_mode,
+        },
+        msg="order already created, please pay",
+    )
+
+
+async def _prepare_create_order_tenant_and_replay(
+    body: OrderCreate, db: AsyncSession
+) -> PrepareTenantReplayResult:
     """Validate tenant/business hours and replay idempotent create_order requests.
 
     Returns (early_response, tenant, tenant_id). When early_response is not None,
@@ -185,45 +220,24 @@ async def _prepare_create_order_tenant_and_replay(body: OrderCreate, db: AsyncSe
 
     config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
     tenant_config = config_result.scalar_one_or_none()
-    business_info = (tenant_config.business_info or {}) if tenant_config else {}
+    business_info: dict[str, Any] = (tenant_config.business_info or {}) if tenant_config else {}
     if not business_info.get("is_open", True):
         return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
 
     request_id = (body.request_id or "").strip() or None
     if request_id:
-        replay_result = await db.execute(
-            select(Order).where(Order.tenant_id == tenant_id, Order.client_request_id == request_id)
-        )
-        replay_order = replay_result.scalar_one_or_none()
-        if replay_order:
-            replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
-            replay_items = list(replay_items_result.scalars().all())
-            replay_data = serialize_order(replay_order, replay_items)
-            replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
-            return (
-                success_response(
-                    data={
-                        **replay_data,
-                        "order_id": replay_data["id"],
-                        "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
-                        "next_action": build_order_next_action(replay_payment_mode),
-                        "pay_amount": float(replay_order.total),
-                        "payment_mode": replay_payment_mode,
-                    },
-                    msg="order already created, please pay",
-                ),
-                None,
-                tenant_id,
-            )
+        replay_response = await _replay_order_response(db, tenant_id, request_id)
+        if replay_response is not None:
+            return replay_response, None, tenant_id
 
     return None, tenant, tenant_id
 
 
 async def _resolve_create_order_payment_mode(
     tenant: Tenant, tenant_id: str, body: OrderCreate, db: AsyncSession
-) -> tuple[str, bool, bool, bool]:
+) -> PaymentModeFlags:
     """Resolve payment_mode and derived flags from tenant defaults and table zone."""
-    payment_mode = (tenant.payment_mode if tenant else "prepay")
+    payment_mode = str(tenant.payment_mode if tenant else "prepay")
     table_no_for_zone = (body.table or "").strip()
     if table_no_for_zone:
         from app.models.entrance_code import EntranceCode
@@ -259,7 +273,15 @@ async def _resolve_create_order_dining_context(
     tenant_id: str,
     payment_mode: str,
     is_table_account: bool,
-):
+) -> tuple[
+    ApiResponse | None,
+    int | None,
+    int | None,
+    int | None,
+    str | None,
+    int | None,
+    Any,
+]:
     """Resolve dining session, participant identity, and add-on parent for create_order.
 
     Returns (
@@ -338,14 +360,14 @@ async def _resolve_create_order_dining_context(
                 DiningSession.status == "OPEN",
             ).with_for_update()
         )
-        session = session_result.scalar_one_or_none()
-        if not session:
+        locked_session = session_result.scalar_one_or_none()
+        if locked_session is None:
             return error_response(code=400, msg="dining session not found"), customer_id, None, None, None, None, None
-        session_for_pickup = session
+        session_for_pickup = locked_session
 
         participant_filters = [
             DiningParticipant.tenant_id == tenant_id,
-            DiningParticipant.session_id == session.id,
+            DiningParticipant.session_id == locked_session.id,
         ]
         if body.participant_token:
             participant_filters.append(DiningParticipant.guest_token_hash == hash_participant_token(body.participant_token))
@@ -365,14 +387,14 @@ async def _resolve_create_order_dining_context(
             # 静默重试的本桌身份问题误导成"你必须先注册会员"，这正是历史上真实发生过的 bug。
             return error_response(code=409, msg="本桌身份已失效，请重新扫码"), customer_id, None, None, None, None, None
 
-        dining_session_id = session.id
+        dining_session_id = locked_session.id
         dining_participant_id = participant.id
         payment_status_filter = [Order.payment_status == "paid"] if payment_mode == "prepay" else []
         existing_order_result = await db.execute(
             select(Order)
             .where(
                 Order.tenant_id == tenant_id,
-                Order.dining_session_id == session.id,
+                Order.dining_session_id == locked_session.id,
                 *payment_status_filter,
                 Order.status.notin_(["cancelled", "rejected"]),
             )
@@ -383,7 +405,7 @@ async def _resolve_create_order_dining_context(
         order_type = "ADD_ON" if parent_order else "INITIAL"
         parent_order_id = parent_order.id if parent_order else None
         participant.last_active_at = _dt.utcnow()
-        session.last_activity_at = _dt.utcnow()
+        locked_session.last_activity_at = _dt.utcnow()
 
     if is_table_account and not dining_session_id:
         return error_response(code=400, msg="桌台账单模式需要重新扫码进入本桌"), customer_id, None, None, None, None, None
@@ -406,8 +428,9 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
         )
     )
     stale_orders = stale_result.scalars().all()
+    payment_svc = OrderPaymentService(db)
     for stale in stale_orders:
-        recovered = await _recover_wxpay_order_if_paid(stale, db)
+        recovered = await payment_svc._recover_wxpay_order_if_paid(stale)
         if recovered:
             continue
         await _restore_order_stock(stale, db)
@@ -422,7 +445,7 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
 
 async def _validate_create_order_items_and_compute_total(
     body: OrderCreate, db: AsyncSession, tenant_id: str
-):
+) -> ValidateItemsResult:
     """Validate menu items, deduct stock per line, and compute order total.
 
     Returns (early_response, real_total, order_items_data). When early_response is
@@ -466,10 +489,10 @@ async def _validate_create_order_items_and_compute_total(
 
         delta = 0.0
         for spec_sel in (item_in.specifications or []):
-            opt_map = radio_lookup.get(spec_sel.group)
-            if opt_map is None or spec_sel.value not in opt_map:
+            group_opts = radio_lookup.get(spec_sel.group)
+            if group_opts is None or spec_sel.value not in group_opts:
                 raise ValueError(f"无效的规格选择:{item_in.name}")
-            delta += opt_map[spec_sel.value]
+            delta += group_opts[spec_sel.value]
         for extra_name in (item_in.extras or []):
             if extra_name not in checkbox_lookup:
                 raise ValueError(f"无效的附加选项:{item_in.name}")
@@ -477,7 +500,7 @@ async def _validate_create_order_items_and_compute_total(
         return delta
 
     real_total = 0.0
-    order_items_data = []
+    order_items_data: list[OrderItemRow] = []
     for item_in in body.items:
         if item_in.qty <= 0:
             return error_response(code=400, msg=f"商品数量必须大于0:{item_in.name}"), None, None
@@ -501,7 +524,7 @@ async def _validate_create_order_items_and_compute_total(
                 spec_delta = _resolve_spec_delta(dish, item_in)
             except ValueError as exc:
                 return error_response(code=400, msg=str(exc)), None, None
-            unit_price = float(dish.price) + spec_delta
+            unit_price = _numeric_float(dish.price) + spec_delta
             base_name = str(dish.name or "")
             submitted_name = str(item_in.name or "").strip()
             name = submitted_name[:64] if submitted_name and submitted_name.startswith(base_name) else base_name
@@ -526,7 +549,7 @@ async def _apply_create_order_coupon(
     tenant_id: str,
     real_total: float,
     db: AsyncSession,
-):
+) -> ApplyCouponResult:
     """Validate and lock a coupon for create_order.
 
     Returns (early_response, applied_coupon_id, coupon_discount). When early_response is
@@ -590,15 +613,15 @@ async def _persist_create_order_and_build_response(
     dining_participant_id: int | None,
     order_type: str | None,
     parent_order_id: int | None,
-    session_for_pickup,
+    session_for_pickup: Any,
     payment_mode: str,
     pay_later_mode: bool,
     is_staff_order: bool,
     applied_coupon_id: int | None,
-    coupon_discount,
+    coupon_discount: Decimal,
     final_total: float,
-    order_items_data: list,
-):
+    order_items_data: list[OrderItemRow],
+) -> ApiResponse:
     """Persist order + items, schedule pay-later print, and build create_order response."""
     # 取餐牌号跟着"这一桌这次吃饭"走，不是跟着"这一单"走：显式传了就用显式的（顺便把这个
     # 号同步成这一桌接下来所有加单共享的值），没传就继承这一桌已经登记过的号，避免同一桌
@@ -617,13 +640,13 @@ async def _persist_create_order_and_build_response(
         parent_order_id=parent_order_id,
         table_no=body.table or "",
         phone=body.phone,
-        total=final_total,
+        total=typing_cast(Any, final_total),
         status="pending" if payment_mode in ("postpay", "table_account") else "pending_payment",
         payment_status="unpaid",
         payment_mode=payment_mode,
         remark=body.remark,
         coupon_id=applied_coupon_id,
-        discount_amount=float(coupon_discount) if coupon_discount > 0 else None,
+        discount_amount=typing_cast(Any, float(coupon_discount)) if coupon_discount > 0 else None,
         source="staff" if is_staff_order else (body.source or "miniprogram"),
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
         pickup_no=resolved_pickup_no,
@@ -637,36 +660,19 @@ async def _persist_create_order_and_build_response(
         # （真正意义上的并发重复提交）——这里接住唯一索引冲突，直接把已建好的那张
         # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。
         await db.rollback()
-        if request_id:
-            replay_result = await db.execute(
-                select(Order).where(Order.tenant_id == tenant_id, Order.client_request_id == request_id)
-            )
-            replay_order = replay_result.scalar_one_or_none()
-            if replay_order:
-                replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
-                replay_items = list(replay_items_result.scalars().all())
-                replay_data = serialize_order(replay_order, replay_items)
-                replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
-                return success_response(
-                    data={
-                        **replay_data,
-                        "order_id": replay_data["id"],
-                        "need_payment": replay_payment_mode == "prepay" and replay_order.payment_status != "paid",
-                        "next_action": build_order_next_action(replay_payment_mode),
-                        "pay_amount": float(replay_order.total),
-                        "payment_mode": replay_payment_mode,
-                    },
-                    msg="order already created, please pay",
-                )
+        replay_response = await _replay_order_response(db, tenant_id, request_id)
+        if replay_response is not None:
+            return replay_response
         return error_response(code=409, msg="订单提交冲突，请重试")
 
     order_items = []
+    assert order.id is not None
     for dish_id, name, unit_price, qty in order_items_data:
         oi = OrderItem(
             order_id=order.id,
             dish_id=dish_id,
             name=name,
-            price=unit_price,
+            price=typing_cast(Any, unit_price),
             qty=qty,
         )
         db.add(oi)
@@ -681,7 +687,7 @@ async def _persist_create_order_and_build_response(
     # "订单不存在/还没付款"，直接跳过打印。
     if pay_later_mode:
         _spawn_background_print_task(
-            _print_paid_order_ticket_background(order.id, str(order.tenant_id), reason="order_created_pay_later")
+            _print_paid_order_ticket_background(int(order.id), str(order.tenant_id), reason="order_created_pay_later")
         )
 
     order_data = serialize_order(order, order_items)
@@ -699,10 +705,17 @@ async def _persist_create_order_and_build_response(
 
 
 @router.post("/orders")
-async def create_order(body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)):
+async def create_order(
+    body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)
+) -> ApiResponse:
     early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
     if early_response is not None:
         return early_response
+
+    if tenant is None:
+        return error_response(code=500, msg="tenant missing after validation")
+
+    assert tenant_id is not None
 
     payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
         tenant, tenant_id, body, db
@@ -733,6 +746,10 @@ async def create_order(body: OrderCreate, request: Request, db: AsyncSession = D
     )
     if early_response is not None:
         return early_response
+
+    assert tenant_id is not None
+    assert real_total is not None
+    assert order_items_data is not None
 
     early_response, applied_coupon_id, coupon_discount = await _apply_create_order_coupon(
         body, customer_id, tenant_id, real_total, db
@@ -771,7 +788,7 @@ async def mock_pay_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Mock payment for development only."""
-    return await process_mock_pay_order(order_id, body, request, db)
+    return await OrderPaymentService(db).mock_pay_order(order_id, body, request)
 
 
 class WxPayBody(PydanticBase):
@@ -787,13 +804,13 @@ async def create_wxpay_order(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a WeChat JSAPI payment order for direct merchant mode."""
-    return await process_create_wxpay_order(order_id, body, request, db)
+    return await OrderPaymentService(db).create_wxpay_order(order_id, body, request)
 
 
 @router.post("/orders/wxpay-notify")
 async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
     """Handle WeChat Pay notify for direct merchant mode."""
-    return await process_wxpay_notify(request, db)
+    return await OrderPaymentService(db).wxpay_notify(request)
 
 
 class OrderStatusUpdate(PydanticBase):

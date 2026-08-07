@@ -1,15 +1,20 @@
 import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, TYPE_CHECKING, Optional
 
 from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from app.core.response import error_response, success_response
+from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem
 from app.services.base_service import BaseService
+
+if TYPE_CHECKING:
+    from app.api.v1.orders import OrderStatusUpdate
+
+ApiResponse = RespVo[Any]
 
 
 def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> bool:
@@ -22,7 +27,7 @@ def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> b
 
 
 class OrderLifecycleService(BaseService):
-    async def update_order_pickup_no(self, order_id: int, pickup_no_raw: str) -> dict:
+    async def update_order_pickup_no(self, order_id: int, pickup_no_raw: str) -> ApiResponse:
         tenant_id = self.require_tenant_id()
         result = await self.db.execute(
             select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
@@ -62,7 +67,7 @@ class OrderLifecycleService(BaseService):
             msg="取餐牌号已更新",
         )
 
-    async def update_merchant_note(self, order_id: int, note: str) -> dict:
+    async def update_merchant_note(self, order_id: int, note: str) -> ApiResponse:
         from app.services.order_print_service import (
             _compose_merchant_note_with_print_meta,
             _split_merchant_note_and_print_meta,
@@ -87,12 +92,13 @@ class OrderLifecycleService(BaseService):
         *,
         customer_id: int | None,
         participant_token: str | None,
-    ) -> dict:
+    ) -> ApiResponse:
         from app.models.coupon import Coupon as _Coupon
 
-        from app.api.v1.orders import _recover_wxpay_order_if_paid, _refund_order_payment
+        from app.services.order_payment_service import OrderPaymentService
         from app.services.order_stock_service import _restore_order_stock
 
+        payment_svc = OrderPaymentService(self.db)
         result = await self.db.execute(select(Order).where(Order.id == order_id).with_for_update())
         order = result.scalar_one_or_none()
         if not order:
@@ -116,13 +122,13 @@ class OrderLifecycleService(BaseService):
             if not owns_order:
                 return error_response(code=403, msg="forbidden")
         if order.status == "pending_payment" and getattr(order, "payment_mode", "prepay") == "prepay":
-            if await _recover_wxpay_order_if_paid(order, self.db):
+            if await payment_svc._recover_wxpay_order_if_paid(order):
                 await self.db.commit()
                 return error_response(code=400, msg="订单已支付，请刷新查看最新状态")
         if order.status not in ("pending_payment", "pending"):
             return error_response(code=400, msg="订单已支付或已完成，无法取消")
         if getattr(order, "payment_status", None) == "paid":
-            refund_result = await _refund_order_payment(order, self.db, reason="customer_cancel")
+            refund_result = await payment_svc._refund_order_payment(order, reason="customer_cancel")
             if not refund_result["success"]:
                 await self.db.rollback()
                 return error_response(code=502, msg=f"取消失败，退款处理异常，请稍后重试或联系客服：{refund_result['error']}")
@@ -141,9 +147,10 @@ class OrderLifecycleService(BaseService):
         *,
         customer_id: int | None,
         participant_token: str | None,
-    ) -> dict:
-        from app.api.v1.orders import _recover_wxpay_order_if_paid
+    ) -> ApiResponse:
+        from app.services.order_payment_service import OrderPaymentService
 
+        payment_svc = OrderPaymentService(self.db)
         result = await self.db.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if not order:
@@ -168,7 +175,7 @@ class OrderLifecycleService(BaseService):
             if not owns_order:
                 return error_response(code=403, msg="forbidden")
 
-        recovered = await _recover_wxpay_order_if_paid(order, self.db)
+        recovered = await payment_svc._recover_wxpay_order_if_paid(order)
         if recovered:
             await self.db.commit()
             await self.db.refresh(order)
@@ -176,7 +183,7 @@ class OrderLifecycleService(BaseService):
         reward_coupon = None
         if order.reward_coupon_snapshot:
             try:
-                reward_coupon = json.loads(order.reward_coupon_snapshot)
+                reward_coupon = json.loads(str(order.reward_coupon_snapshot))
             except Exception:
                 reward_coupon = None
 
@@ -200,14 +207,14 @@ class OrderLifecycleService(BaseService):
         status: Optional[str] = None,
         page: Optional[int] = None,
         page_size: Optional[int] = None,
-    ) -> dict:
+    ) -> ApiResponse:
         from datetime import timedelta as _td
 
         from app.api.v1.orders import (
             TABLE_CLOSE_BLOCKING_STATUSES,
-            _recover_wxpay_order_if_paid,
             serialize_order,
         )
+        from app.services.order_payment_service import OrderPaymentService
         from app.services.order_print_service import (
             MAX_PRINT_RETRY_ATTEMPTS,
             _get_print_meta,
@@ -281,9 +288,10 @@ class OrderLifecycleService(BaseService):
         orders = result.scalars().all()
 
         recovered_any = False
+        payment_svc = OrderPaymentService(self.db)
         for order in orders:
             if order.status == "pending_payment":
-                recovered_any = (await _recover_wxpay_order_if_paid(order, self.db)) or recovered_any
+                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order)) or recovered_any
             print_meta = _get_print_meta(order)
             if (
                 getattr(order, "payment_status", None) == "paid"
@@ -298,14 +306,15 @@ class OrderLifecycleService(BaseService):
                 await self.db.refresh(order)
 
         order_ids = [o.id for o in orders]
-        items_by_order = {}
+        items_by_order: dict[int, list[OrderItem]] = {}
         if order_ids:
             items_result = await self.db.execute(
                 select(OrderItem).where(OrderItem.order_id.in_(order_ids))
             )
             all_items = items_result.scalars().all()
             for item in all_items:
-                items_by_order.setdefault(item.order_id, []).append(item)
+                if item.order_id is not None:
+                    items_by_order.setdefault(item.order_id, []).append(item)
 
         session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
         checkout_requested_by_session = {}
@@ -328,7 +337,7 @@ class OrderLifecycleService(BaseService):
         rows = [
             serialize_order(
                 o,
-                items_by_order.get(o.id, []),
+                items_by_order.get(o.id or 0, []),
                 checkout_requested_at=checkout_requested_by_session.get(getattr(o, "dining_session_id", None)),
                 participant_no=participant_ordinals.get(getattr(o, "participant_id", None)),
             )
@@ -345,13 +354,13 @@ class OrderLifecycleService(BaseService):
             )
         return success_response(data=rows)
 
-    async def create_review(self, order_id: int, *, customer_id: int, rating: int, content: str | None) -> dict:
+    async def create_review(self, order_id: int, *, customer_id: int, rating: int, content: str | None) -> ApiResponse:
         from datetime import datetime as _dt
 
         from app.models.order_review import OrderReview
 
         if not 1 <= rating <= 5:
-            return error_response(code=400, msg="璇勫垎闇€鍦?-5涔嬮棿")
+            return error_response(code=400, msg="评分需在1-5之间")
 
         result = await self.db.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
@@ -380,7 +389,7 @@ class OrderLifecycleService(BaseService):
         await self.db.commit()
         return success_response(data={"id": str(review.id), "rating": review.rating}, msg="review submitted")
 
-    async def list_reviews(self) -> dict:
+    async def list_reviews(self) -> ApiResponse:
         from app.models.order_review import OrderReview
 
         tenant_id = self.require_tenant_id()
@@ -400,14 +409,12 @@ class OrderLifecycleService(BaseService):
             for r in reviews
         ])
 
-    async def update_order_status(self, order_id: int, body) -> dict:
+    async def update_order_status(self, order_id: int, body: "OrderStatusUpdate") -> ApiResponse:
         from app.api.v1.orders import (
             ORDER_ALLOWED_TRANSITIONS,
             ORDER_MERCHANT_TARGET_STATUSES,
-            _apply_paid_order_member_assets_once,
-            _recover_wxpay_order_if_paid,
-            _refund_order_payment,
         )
+        from app.services.order_payment_service import OrderPaymentService
         from app.services.consumption_service import _record_order_consumption
         from app.services.coupon_service import (
             _mark_order_coupon_used_if_locked,
@@ -419,6 +426,7 @@ class OrderLifecycleService(BaseService):
         if body.status not in ORDER_MERCHANT_TARGET_STATUSES:
             return error_response(code=400, msg="invalid status")
         TenantContext.set_tenant_id(tenant_id)
+        payment_svc = OrderPaymentService(self.db)
         result = await self.db.execute(
             select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
         )
@@ -440,12 +448,12 @@ class OrderLifecycleService(BaseService):
             and current_status == "pending_payment"
             and getattr(order, "payment_mode", "prepay") == "prepay"
         ):
-            if await _recover_wxpay_order_if_paid(order, self.db):
+            if await payment_svc._recover_wxpay_order_if_paid(order):
                 await self.db.commit()
                 return error_response(code=409, msg="订单已支付，请刷新查看最新状态")
 
         if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) == "paid":
-            refund_result = await _refund_order_payment(order, self.db, reason=f"merchant_{body.status}")
+            refund_result = await payment_svc._refund_order_payment(order, reason=f"merchant_{body.status}")
             if not refund_result["success"]:
                 await self.db.rollback()
                 return error_response(code=502, msg=f"操作失败，退款处理异常，请稍后重试：{refund_result['error']}")
@@ -465,7 +473,7 @@ class OrderLifecycleService(BaseService):
                 marked_offline_paid = _mark_order_offline_paid(order)
             await _mark_order_coupon_used_if_locked(order, self.db)
             if marked_offline_paid:
-                await _apply_paid_order_member_assets_once(order, self.db)
+                await payment_svc._apply_paid_order_member_assets_once(order)
         await self.db.commit()
         await self.db.refresh(order)
         if just_settled:
@@ -481,12 +489,12 @@ class OrderLifecycleService(BaseService):
             msg="状态已更新",
         )
 
-    async def settle_table(self, body: dict, *, closed_by: str) -> dict:
+    async def settle_table(self, body: dict[str, Any], *, closed_by: str) -> ApiResponse:
         from app.api.v1.orders import (
             TABLE_CLOSE_BLOCKING_STATUSES,
             TABLE_CLOSE_DONE_STATUSES,
-            _apply_paid_order_member_assets_once,
         )
+        from app.services.order_payment_service import OrderPaymentService
         from app.models.dining import DiningSession
         from app.services.consumption_service import _record_order_consumption
         from app.services.coupon_service import _mark_order_coupon_used_if_locked
@@ -558,6 +566,7 @@ class OrderLifecycleService(BaseService):
         # 只要是 done 就该跟着这次结账一起推进到 settled，是否需要补标线下已付款交给下面
         # payment_mode 的判断去管，不应该影响"要不要把它算作已结账"这件事。
         settlement_orders = [o for o in table_orders if o.status == "done"]
+        payment_svc = OrderPaymentService(self.db)
         for o in settlement_orders:
             o.status = "settled"
             settled_count += 1
@@ -570,7 +579,7 @@ class OrderLifecycleService(BaseService):
             if getattr(o, "payment_mode", "prepay") in ("table_account", "postpay"):
                 if _mark_order_offline_paid(o):
                     paid_synced_count += 1
-                    await _apply_paid_order_member_assets_once(o, self.db)
+                    await payment_svc._apply_paid_order_member_assets_once(o)
             await _mark_order_coupon_used_if_locked(o, self.db)
             total += float(o.total or 0)
         await self.db.commit()

@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 30
 
     # 测试套件自带 aiosqlite 内存库，不依赖真实 MySQL/Redis（本地用无效 DATABASE_URL
-    # + REDIS_ENABLED=false 模拟无服务环境，全量 398 passed / 26 failed 与基线一致）。
+    # + REDIS_ENABLED=false 模拟无服务环境，全量 399 passed / 26 failed 与基线一致）。
     # 若将来有测试意外连真实库，再在此处加 service container 或 DATABASE_URL 覆盖。
     env:
       REDIS_ENABLED: 'false'
@@ -46,5 +46,8 @@ jobs:
           pytest tests/ -v --tb=short 2>&1 | tee pytest-output.log
           exit 0
 
-      - name: Verify known baseline (398 passed / 26 frontend contract failures)
+      - name: Verify known baseline (399 passed / 26 frontend contract failures)
         run: python scripts/check_pytest_baseline.py pytest-output.log
+
+      - name: Run scoped mypy (create_order split)
+        run: mypy

@@ -56,7 +56,7 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
     def test_backend_order_query_recovers_paid_wxpay_order(self):
         get_my_order = function_source(LIFECYCLE_SERVICE_SOURCE, "get_my_order")
         recover = function_source(PAYMENT_SERVICE_SOURCE, "_recover_wxpay_order_if_paid")
-        self.assertIn("_recover_wxpay_order_if_paid(order, self.db)", get_my_order)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", get_my_order)
         self.assertIn("query_order_by_out_trade_no", recover)
         self.assertIn('pay_resource.get("trade_state") != "SUCCESS"', recover)
         self.assertIn("_on_payment_success", recover)

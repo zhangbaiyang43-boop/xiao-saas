@@ -1,6 +1,8 @@
 import asyncio
 import json
+from collections.abc import Coroutine
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -74,7 +76,9 @@ def _db_print_status_to_meta_status(order: Order) -> str | None:
     return None
 
 
-def _mark_order_print_state(order: Order, status: str, printed_at=None) -> None:
+def _mark_order_print_state(
+    order: Order, status: str, printed_at: datetime | None = None
+) -> None:
     if hasattr(order, "print_status"):
         order.print_status = status
     if status == "SUCCESS" and hasattr(order, "printed_at"):
@@ -190,7 +194,7 @@ async def _print_paid_order_ticket(
         tenant_obj = tenant_result.scalar_one_or_none()
         config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == str(order.tenant_id)))
         config_obj = config_result.scalar_one_or_none()
-        business_info = (config_obj.business_info or {}) if config_obj else {}
+        business_info: dict[str, Any] = (config_obj.business_info or {}) if config_obj else {}
         provider = business_info.get("printer_provider") or "feieyun"
         provider_task_id = None
 
@@ -269,10 +273,10 @@ async def _print_paid_order_ticket(
             items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
             order_items = list(items_result.scalars().all())
             ticket = build_order_ticket(order, order_items)
-            result = await print_order(tenant_obj.feieyun_sn, tenant_obj.feieyun_key, ticket)
-            if result == "unknown":
+            feie_result = await print_order(tenant_obj.feieyun_sn, tenant_obj.feieyun_key, ticket)
+            if feie_result == "unknown":
                 raise PrintResultUnknownError("FEIEYUN_PRINT_RESULT_UNKNOWN")
-            if result != "success":
+            if feie_result != "success":
                 raise RuntimeError("FEIEYUN_PRINT_FAILED")
         else:
             raise RuntimeError("PRINTER_CONFIG_INCOMPLETE")
@@ -331,10 +335,10 @@ async def _print_paid_order_ticket(
 # 坑（"Save a reference to the result of this function"）。对于打印这种失败了也不会有人
 # 立刻发现的后台任务，这个坑一旦踩中会很难查，所以这里维护一个模块级的引用集合，任务
 # 跑完自动从集合里摘掉。
-_background_print_tasks: set = set()
+_background_print_tasks: set[asyncio.Task[None]] = set()
 
 
-def _spawn_background_print_task(coro) -> None:
+def _spawn_background_print_task(coro: Coroutine[Any, Any, Any]) -> None:
     task = asyncio.create_task(coro)
     _background_print_tasks.add(task)
     task.add_done_callback(_background_print_tasks.discard)

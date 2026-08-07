@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-EXPECTED_PASSED = 398
+EXPECTED_PASSED = 399
 EXPECTED_FAILED = 26
 
 

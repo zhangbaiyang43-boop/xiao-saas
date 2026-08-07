@@ -13,14 +13,23 @@ def function_source(name: str, *, source: str | None = None) -> str:
     text = source if source is not None else ORDERS_SOURCE
     lines = text.splitlines()
     start = next(
-        (idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(")),
+        (
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith(f"async def {name}(") or line.startswith(f"    async def {name}(")
+        ),
         None,
     )
     assert start is not None, f"{name} source not found"
+    is_class_method = lines[start].startswith("    async def")
     end = len(lines)
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
-        if line.startswith("@router.") or line.startswith("class ") or line.startswith("async def "):
+        if is_class_method:
+            if line.startswith("    async def ") or line.startswith("    def "):
+                end = idx
+                break
+        elif line.startswith("@router.") or line.startswith("class ") or line.startswith("async def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -30,8 +39,8 @@ class OrderAmountSecurityContractsTest(unittest.TestCase):
     def test_menu_item_price_is_loaded_from_server_with_tenant_scope(self):
         source = function_source("_validate_create_order_items_and_compute_total")
         self.assertIn("MenuItem.tenant_id == tenant_id", source)
-        self.assertIn("unit_price = float(dish.price)", source)
-        self.assertLess(source.index("unit_price = float(dish.price)"), source.index("real_total += unit_price * item_in.qty"))
+        self.assertIn("unit_price = _numeric_float(dish.price)", source)
+        self.assertLess(source.index("unit_price = _numeric_float(dish.price)"), source.index("real_total += unit_price * item_in.qty"))
 
     def test_invalid_quantity_and_missing_dish_id_are_rejected_before_total_calculation(self):
         source = function_source("_validate_create_order_items_and_compute_total")
@@ -59,9 +68,9 @@ class OrderAmountSecurityContractsTest(unittest.TestCase):
 
     def test_wxpay_amount_uses_server_order_total(self):
         source = function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE)
-        self.assertIn("pay_amount = float(order.total)", source)
+        self.assertIn("pay_amount = float(order.total or 0)", source)
         self.assertIn("amount_fen = max(1, round(pay_amount * 100))", source)
-        self.assertLess(source.index("pay_amount = float(order.total)"), source.index("create_jsapi_order"))
+        self.assertLess(source.index("pay_amount = float(order.total or 0)"), source.index("create_jsapi_order"))
 
 
 if __name__ == "__main__":

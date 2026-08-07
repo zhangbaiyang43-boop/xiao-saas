@@ -12,11 +12,11 @@ from app.models.order import Order
 from app.models.tenant import Tenant
 from app.api.v1.orders import (
     OrderStatusUpdate,
-    _refund_orphaned_wxpay_payment,
     cancel_order,
     update_order_status,
     wxpay_notify,
 )
+from app.services.order_payment_service import OrderPaymentService
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -88,7 +88,7 @@ class RefundOrphanedWxpayPaymentTest(RaceReconciliationTestBase):
         fake_wxpay.enabled = True
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay):
-            result = await _refund_orphaned_wxpay_payment(order, self.db)
+            result = await OrderPaymentService(self.db)._refund_orphaned_wxpay_payment(order)
 
         self.assertTrue(result["success"])
         self.assertEqual(order.status, "cancelled")  # must not resurrect the order
@@ -105,7 +105,7 @@ class RefundOrphanedWxpayPaymentTest(RaceReconciliationTestBase):
         fake_wxpay.refund.side_effect = RuntimeError("wxpay gateway timeout")
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay):
-            result = await _refund_orphaned_wxpay_payment(order, self.db)
+            result = await OrderPaymentService(self.db)._refund_orphaned_wxpay_payment(order)
 
         self.assertFalse(result["success"])
         self.assertEqual(order.status, "rejected")
@@ -117,7 +117,7 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
     async def test_cancel_order_refuses_when_wechat_already_paid(self):
         order = await self._make_order()
 
-        with patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)):
+        with patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)):
             result = await cancel_order(str(order.id), make_request(), db=self.db)
 
         self.assertEqual(result.code, 400)
@@ -127,7 +127,7 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
     async def test_cancel_order_proceeds_normally_when_wechat_not_paid(self):
         order = await self._make_order()
 
-        with patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
+        with patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
             result = await cancel_order(str(order.id), make_request(), db=self.db)
 
         self.assertEqual(result.code, 200)
@@ -137,7 +137,7 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
     async def test_update_order_status_refuses_reject_when_wechat_already_paid(self):
         order = await self._make_order()
 
-        with patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)):
+        with patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)):
             result = await update_order_status(
                 str(order.id),
                 OrderStatusUpdate(status="rejected"),
@@ -171,7 +171,7 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
 
         auto_refund = AsyncMock()
 
-        async def fake_refund(order_obj, db_obj):
+        async def fake_refund(order_obj):
             order_obj.refund_status = "success"
             order_obj.refund_amount = order_obj.total
             return {"success": True, "amount": float(order_obj.total), "error": None}
@@ -179,8 +179,8 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         auto_refund.side_effect = fake_refund
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
-             patch("app.api.v1.orders._refund_orphaned_wxpay_payment", new=auto_refund), \
-             patch("app.api.v1.orders._on_payment_success", new=AsyncMock()) as on_success:
+             patch.object(OrderPaymentService, "_refund_orphaned_wxpay_payment", new=auto_refund), \
+             patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock()) as on_success:
             response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
 
         self.assertEqual(response["code"], "SUCCESS")
@@ -199,7 +199,7 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         auto_refund = AsyncMock()
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
-             patch("app.api.v1.orders._refund_orphaned_wxpay_payment", new=auto_refund):
+             patch.object(OrderPaymentService, "_refund_orphaned_wxpay_payment", new=auto_refund):
             response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
 
         self.assertEqual(response["code"], "SUCCESS")
@@ -211,13 +211,13 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         fake_wxpay.enabled = True
         fake_wxpay.verify_notify = lambda headers, raw_body: self._resource
 
-        async def fake_on_success(order_obj, db_obj, payment_method="wxpay"):
+        async def fake_on_success(order_obj, payment_method="wxpay"):
             order_obj.payment_status = "paid"
             order_obj.status = "pending"
             return None, 0.0
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
-             patch("app.api.v1.orders._on_payment_success", new=AsyncMock(side_effect=fake_on_success)) as on_success:
+             patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock(side_effect=fake_on_success)) as on_success:
             response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
 
         self.assertEqual(response["code"], "SUCCESS")

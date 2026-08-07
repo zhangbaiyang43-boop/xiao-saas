@@ -66,9 +66,10 @@ class StaleOrderCleanupLoopRestoresStockTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_loop_iteration_restores_stock_for_cancelled_stale_order(self):
         from app.main import _stale_order_cleanup_once
+        from app.services.order_payment_service import OrderPaymentService
 
         with patch("app.core.database.AsyncSessionLocal", self.SessionLocal), \
-             patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
+             patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
             await _stale_order_cleanup_once()
 
         verify_db = self.SessionLocal()

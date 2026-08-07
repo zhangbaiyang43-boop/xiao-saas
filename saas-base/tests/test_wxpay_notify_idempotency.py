@@ -160,6 +160,7 @@ def install_stubs():
         "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
         "app.services.order_print_service": types.ModuleType("app.services.order_print_service"),
         "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
+        "app.services.base_service": types.ModuleType("app.services.base_service"),
         "app.services.wxpay_service": types.ModuleType("app.services.wxpay_service"),
     }
     _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
@@ -169,8 +170,16 @@ def install_stubs():
     modules["app.config"].settings = types.SimpleNamespace(H5_ORDER_BASE_URL="https://example.com", DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
-    modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
-    modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}
+    import importlib.util
+
+    response_spec = importlib.util.spec_from_file_location(
+        "app.core.response", ROOT / "app" / "core" / "response.py"
+    )
+    assert response_spec and response_spec.loader
+    real_response = importlib.util.module_from_spec(response_spec)
+    response_spec.loader.exec_module(real_response)
+    modules["app.core.response"] = real_response
+    sys.modules["app.core.response"] = real_response
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.models.order"].Order = FakeOrder
@@ -182,9 +191,21 @@ def install_stubs():
     modules["app.services.coupon_service"]._unlock_order_coupon_if_locked = _noop_async
     modules["app.services.consumption_service"]._record_order_consumption = _noop_async
     modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
-    modules["app.services.order_payment_service"]._on_payment_success = _noop_async
-    modules["app.services.order_payment_service"]._recover_wxpay_order_if_paid = _noop_async
+    modules["app.services.order_payment_service"].OrderPaymentService = type(
+        "OrderPaymentService",
+        (),
+        {
+            "__init__": lambda self, db: setattr(self, "db", db),
+            "_on_payment_success": _noop_async,
+            "_recover_wxpay_order_if_paid": _noop_async,
+        },
+    )
     modules["app.services.order_stock_service"]._restore_order_stock = _noop_async
+    modules["app.services.base_service"].BaseService = type(
+        "BaseService",
+        (),
+        {"__init__": lambda self, db: setattr(self, "db", db)},
+    )
     modules["app.services.order_print_service"].MAX_PRINT_RETRY_ATTEMPTS = 3
     modules["app.services.order_print_service"]._compose_merchant_note_with_print_meta = lambda note, meta: note
     modules["app.services.order_print_service"]._get_print_meta = lambda order: {}
@@ -235,7 +256,7 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
             "print_jobs": 0,
         }
 
-        async def fake_on_payment_success(order_obj, db_obj, payment_method="wxpay"):
+        async def fake_on_payment_success(self, order_obj, payment_method="wxpay"):
             side_effects["payment_updates"] += 1
             side_effects["coupon_writeoffs"] += 1
             side_effects["points_changes"] += 1
@@ -245,7 +266,8 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
             order_obj.status = "pending"
             return None, 0
 
-        module._on_payment_success = fake_on_payment_success
+        payment_module = sys.modules["app.services.order_payment_service"]
+        payment_module.OrderPaymentService._on_payment_success = fake_on_payment_success
 
         results = [
             asyncio.run(module.wxpay_notify(FakeRequest(), db))

@@ -4,6 +4,9 @@ import pathlib
 import sys
 import types
 import unittest
+from typing import Generic, Optional, TypeVar
+
+from pydantic import BaseModel
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -245,6 +248,18 @@ def install_stubs():
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}
+
+    _RespT = TypeVar("_RespT")
+
+    class FakeRespVo(BaseModel, Generic[_RespT]):
+        # Mirrors app.core.response.RespVo's shape so FastAPI can build a real
+        # response field from `-> ApiResponse` (= RespVo[Any]) return annotations
+        # when orders.py is exec'd in isolation here.
+        code: int = 200
+        msg: str = "ok"
+        data: Optional[_RespT] = None
+
+    modules["app.core.response"].RespVo = FakeRespVo
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = FakeOrderItem
@@ -257,14 +272,20 @@ def install_stubs():
     modules["app.services.consumption_service"]._record_order_consumption = _noop_async
     modules["app.services.order_stock_service"]._restore_order_stock = _noop_async
     modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
-    modules["app.services.order_payment_service"]._on_payment_success = _noop_async
-    modules["app.services.order_payment_service"]._recover_wxpay_order_if_paid = _noop_async
-    modules["app.services.order_payment_service"].mock_pay_order = _noop_async
-    modules["app.services.order_payment_service"].create_wxpay_order = _noop_async
-    modules["app.services.order_payment_service"].wxpay_notify = _noop_async
-    modules["app.services.order_payment_service"]._apply_paid_order_member_assets_once = _noop_async
-    modules["app.services.order_payment_service"]._refund_order_payment = _noop_async
-    modules["app.services.order_payment_service"]._refund_orphaned_wxpay_payment = _noop_async
+    class FakeOrderPaymentService:
+        def __init__(self, db):
+            self.db = db
+
+        _on_payment_success = _noop_async
+        _recover_wxpay_order_if_paid = _noop_async
+        mock_pay_order = _noop_async
+        create_wxpay_order = _noop_async
+        wxpay_notify = _noop_async
+        _apply_paid_order_member_assets_once = _noop_async
+        _refund_order_payment = _noop_async
+        _refund_orphaned_wxpay_payment = _noop_async
+
+    modules["app.services.order_payment_service"].OrderPaymentService = FakeOrderPaymentService
     modules["app.services.feieyun_service"].build_order_ticket = lambda order, order_items: "ticket"
     modules["app.services.feieyun_service"].print_order = lambda *args: True
     modules["app.services.kuaimai_service"].KUAIMAI_ORDER_TEMPLATE_ID = "1634998374"

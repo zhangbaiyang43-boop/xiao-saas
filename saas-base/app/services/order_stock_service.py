@@ -18,10 +18,10 @@ async def _restore_order_stock(order: Order, db: AsyncSession) -> None:
 
     items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
     order_items = items_result.scalars().all()
-    qty_by_dish_id: dict = {}
+    qty_by_dish_id: dict[int, int] = {}
     for item in order_items:
-        if item.dish_id:
-            qty_by_dish_id[item.dish_id] = qty_by_dish_id.get(item.dish_id, 0) + item.qty
+        if item.dish_id is not None:
+            qty_by_dish_id[item.dish_id] = qty_by_dish_id.get(item.dish_id, 0) + int(item.qty or 0)
     if not qty_by_dish_id:
         return
 
@@ -29,5 +29,6 @@ async def _restore_order_stock(order: Order, db: AsyncSession) -> None:
         select(MenuItem).where(MenuItem.id.in_(qty_by_dish_id.keys())).with_for_update()
     )
     for dish in dishes_result.scalars().all():
-        if dish.stock is not None:
-            dish.stock = dish.stock + qty_by_dish_id.get(dish.id, 0)
+        dish_id = dish.id
+        if dish_id is not None and dish.stock is not None:
+            dish.stock = dish.stock + qty_by_dish_id.get(dish_id, 0)

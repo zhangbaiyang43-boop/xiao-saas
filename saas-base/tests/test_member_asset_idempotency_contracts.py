@@ -93,7 +93,7 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         apply_source = function_source(MEMBERSHIP_SOURCE, "apply_consumption")
         add_points_source = function_source(MEMBERSHIP_SOURCE, "add_points")
 
-        self.assertIn("consumption_id=order.id", success_source)
+        self.assertIn("consumption_id=int(order.id or 0)", success_source)
         self.assertIn("ref_id=str(consumption_id or \"\")", apply_source)
         self.assertIn("PointLedger", add_points_source)
         self.assertIn("MemberAccount.tenant_id == tenant_id", apply_source)

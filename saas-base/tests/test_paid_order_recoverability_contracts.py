@@ -17,14 +17,23 @@ def function_source(name: str, *, source: str | None = None) -> str:
     text = source if source is not None else ORDERS_SOURCE
     lines = text.splitlines()
     start = next(
-        (idx for idx, line in enumerate(lines) if line.startswith(f"async def {name}(")),
+        (
+            idx
+            for idx, line in enumerate(lines)
+            if line.startswith(f"async def {name}(") or line.startswith(f"    async def {name}(")
+        ),
         None,
     )
     assert start is not None, f"{name} source not found"
+    is_class_method = lines[start].startswith("    async def")
     end = len(lines)
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
-        if line.startswith("@router.") or line.startswith("class ") or line.startswith("async def "):
+        if is_class_method:
+            if line.startswith("    async def ") or line.startswith("    def "):
+                end = idx
+                break
+        elif line.startswith("@router.") or line.startswith("class ") or line.startswith("async def "):
             end = idx
             break
     return "\n".join(lines[start:end])
@@ -67,13 +76,13 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
 
     def test_consumer_order_query_recovers_paid_pending_payment_order(self):
         get_my_order_source = class_method_source("get_my_order")
-        self.assertIn("_recover_wxpay_order_if_paid(order, self.db)", get_my_order_source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", get_my_order_source)
         self.assertIn('"payment_status": order.payment_status', get_my_order_source)
 
     def test_merchant_order_query_recovers_paid_pending_payment_orders(self):
         list_orders_source = class_method_source("list_orders")
         self.assertIn('if order.status == "pending_payment"', list_orders_source)
-        self.assertIn("_recover_wxpay_order_if_paid(order, self.db)", list_orders_source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", list_orders_source)
         self.assertIn("await self.db.commit()", list_orders_source)
 
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):

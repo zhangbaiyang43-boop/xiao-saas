@@ -68,9 +68,10 @@ class PendingPaymentReconcileLoopTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovers_paid_order_past_the_short_threshold(self):
         from app.main import _pending_payment_reconcile_once
+        from app.services.order_payment_service import OrderPaymentService
 
         with patch("app.core.database.AsyncSessionLocal", self.SessionLocal), \
-             patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)) as mock_recover:
+             patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)) as mock_recover:
             await _pending_payment_reconcile_once()
 
         # Only the order past PENDING_PAYMENT_RECONCILE_AFTER_SECONDS should even be checked --
@@ -80,9 +81,10 @@ class PendingPaymentReconcileLoopTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_never_cancels_or_touches_stock_itself(self):
         from app.main import _pending_payment_reconcile_once
+        from app.services.order_payment_service import OrderPaymentService
 
         with patch("app.core.database.AsyncSessionLocal", self.SessionLocal), \
-             patch("app.api.v1.orders._recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
+             patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=False)):
             await _pending_payment_reconcile_once()
 
         verify_db = self.SessionLocal()

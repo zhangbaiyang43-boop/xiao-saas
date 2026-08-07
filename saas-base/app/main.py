@@ -142,9 +142,12 @@ async def _stale_order_cleanup_once():
         )
         stale = result.scalars().all()
         if stale:
-            from app.api.v1.orders import _recover_wxpay_order_if_paid, _restore_order_stock
+            from app.api.v1.orders import _restore_order_stock
+            from app.services.order_payment_service import OrderPaymentService
+
+            payment_svc = OrderPaymentService(db)
         for o in stale:
-            recovered = await _recover_wxpay_order_if_paid(o, db)
+            recovered = await payment_svc._recover_wxpay_order_if_paid(o)
             if recovered:
                 continue
             await _restore_order_stock(o, db)
@@ -187,11 +190,12 @@ async def _pending_payment_reconcile_once():
         pending = result.scalars().all()
         if not pending:
             return
-        from app.api.v1.orders import _recover_wxpay_order_if_paid
+        from app.services.order_payment_service import OrderPaymentService
 
+        payment_svc = OrderPaymentService(db)
         recovered_any = False
         for o in pending:
-            if await _recover_wxpay_order_if_paid(o, db):
+            if await payment_svc._recover_wxpay_order_if_paid(o):
                 recovered_any = True
         if recovered_any:
             await db.commit()
