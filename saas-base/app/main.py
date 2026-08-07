@@ -26,9 +26,9 @@ from app.api.v1.wework import router as wework_router
 from app.api.v1.channel_entries import router as channel_entries_router
 from app.api.v1.public_channel import router as public_channel_router
 from app.api.v1.h5_landing import router as h5_landing_router
-from app.api.v1.marketing_templates import router as marketing_template_router
 from app.api.v1.menu import router as menu_router
 from app.api.v1.orders import router as order_router
+from app.api.v1.perf import router as perf_router
 from app.api.v1.super_admin import router as super_admin_router
 from app.config import settings
 from app.core.database import async_engine
@@ -96,9 +96,9 @@ app.include_router(stats_router)
 app.include_router(channel_entries_router)
 app.include_router(public_channel_router)
 app.include_router(h5_landing_router)
-app.include_router(marketing_template_router, prefix="/api/admin")
 app.include_router(menu_router)
 app.include_router(order_router)
+app.include_router(perf_router)
 app.include_router(queue_router)
 app.include_router(super_admin_router)
 
@@ -361,14 +361,6 @@ async def startup():
             await ensure_tenant_schema(conn)
             await ensure_queue_ticket_schema(conn)
             await conn.run_sync(Base.metadata.create_all)
-
-    # 初始化营销模
-    from app.core.database import AsyncSessionLocal
-    from app.services.marketing_template_init import MarketingTemplateInitService
-
-    async with AsyncSessionLocal() as session:
-        init_service = MarketingTemplateInitService(session)
-        await init_service.init_default_templates()
 
     # 启动超时订单后台清理任务
     asyncio.create_task(_stale_order_cleanup_loop())

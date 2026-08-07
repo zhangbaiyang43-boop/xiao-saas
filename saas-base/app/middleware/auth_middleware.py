@@ -44,11 +44,11 @@ WHITELIST = {
     "/api/v1/wework/callback",
     "/api/v1/member/login-or-create",
     "/api/v1/entrance-codes/resolve",
-    "/api/v1/miniapp/login",
     "/api/v1/miniapp/entry/join",
     "/api/v1/open/pos/verify",
     "/api/v1/orders/wxpay-notify",
     "/api/v1/dining-sessions/resolve",
+    "/api/v1/perf/report",
 }
 
 WHITELIST_PREFIXES = [

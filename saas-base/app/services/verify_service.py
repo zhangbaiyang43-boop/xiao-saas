@@ -166,15 +166,6 @@ class VerifyService(BaseService):
         await self._update_customer_last_consume(coupon.customer_id)
         template = await self._get_template_for_coupon(coupon)
         await self._trigger_commission(coupon, template)
-        # 营销模板（MarketingTemplate/MerchantTemplateRule）自动发券链路已停用：它和
-        # CouponService 自己的 rule_type 发券（new_customer_coupon/consumption_coupon/
-        # recall_coupon/entry_coupon，CouponCenter.vue 里能看到、能控的那一套）是两套完全
-        # 独立的自动发券系统，同一次核销/首扫事件会各自触发一次，各自随机算金额门槛，
-        # 商家和顾客看到的"优惠券"因此可能来自两套不同的账本，数字对不上。
-        # 启用这套模板系统的管理页（MarketingTemplateList/Detail.vue）已经被删掉，没有
-        # 任何界面能再看到或关掉它——只保留 CouponService 这一套，停用触发点，不删表/
-        # 不删 service，避免影响历史已发的券。
-        # await self._trigger_marketing_template(coupon.tenant_id, coupon.customer_id, "after_verify")
         await self._trigger_consumption_coupon(coupon)
 
         return {
@@ -276,21 +267,6 @@ class VerifyService(BaseService):
             from app.core.logger import logger
 
             logger.error(f"分销分佣生成失败: {e}")
-
-    async def _trigger_marketing_template(self, tenant_id: int, customer_id: int, trigger_type: str):
-        try:
-            from app.services.marketing_template_service import MarketingTemplateService
-
-            service = MarketingTemplateService(self.db)
-            rules = await service.get_trigger_rules(tenant_id, trigger_type)
-
-            for rule in rules:
-                if not await service.check_coupon_already_issued(tenant_id, customer_id, rule.rule_code):
-                    await service.issue_coupon_by_rule(tenant_id, customer_id, rule.rule_code)
-        except Exception as e:
-            from app.core.logger import logger
-
-            logger.error(f"营销模触发失败: {e}")
 
     async def _trigger_consumption_coupon(self, coupon: Coupon):
         try:

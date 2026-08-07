@@ -263,26 +263,7 @@ class EntranceCodeService(BaseService):
         await self.db.commit()
         await self.db.refresh(entrance_code)
 
-        # 同上（见 verify_service.py 里同样的停用说明）：营销模板自动发券链路已停用，
-        # 只保留 CouponService 自己的 rule_type 发券这一套系统。
-        # await self._trigger_first_scan_marketing_template(entrance_code.tenant_id, customer_id)
-
         return entrance_code
-
-    async def _trigger_first_scan_marketing_template(self, tenant_id: int, customer_id: int):
-        """Trigger first scan marketing template."""
-        try:
-            from app.services.marketing_template_service import MarketingTemplateService
-            
-            service = MarketingTemplateService(self.db)
-            rules = await service.get_trigger_rules(tenant_id, "first_scan")
-            
-            for rule in rules:
-                if not await service.check_coupon_already_issued(tenant_id, customer_id, rule.rule_code):
-                    await service.issue_coupon_by_rule(tenant_id, customer_id, rule.rule_code)
-        except Exception as e:
-            from app.core.logger import logger
-            logger.error(f"首次扫码营销触发失败: {e}")
 
     async def ensure_new_customer_coupon_template(self, entrance_code: EntranceCode) -> CouponTemplate:
         if entrance_code.coupon_template_id:

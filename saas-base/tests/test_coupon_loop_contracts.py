@@ -346,26 +346,6 @@ class CouponLoopContractsTest(unittest.TestCase):
         # 跟 send_coupons_with_result 的幂等保护是同一个取舍。
         self.assertTrue(should_issue)
 
-    # ── 两套发券系统只保留一套：营销模板引擎的自动触发已经停用 ──────────
-    # 背景：MarketingTemplate/MerchantTemplateRule 这套规则引擎（first_scan/
-    # after_verify）曾经和 CouponService 自己的 rule_type 发券同时挂在扫码
-    # 入会、核销这两个事件上，两边各算各的随机金额，导致商家后台和小程序
-    # 看到的优惠券对不上号。管理这套模板引擎的界面已经被删除、没人能再开关
-    # 它，所以直接停用触发点，只保留 CouponService 这一套有界面管控的系统。
-
-    def test_first_scan_marketing_template_trigger_is_disabled(self):
-        from app.services.entrance_code_service import EntranceCodeService
-
-        source = inspect.getsource(EntranceCodeService.record_member_conversion)
-        self.assertIn("# await self._trigger_first_scan_marketing_template(", source)
-
-    def test_after_verify_marketing_template_trigger_is_disabled(self):
-        source = inspect.getsource(VerifyService)
-        self.assertIn(
-            '# await self._trigger_marketing_template(coupon.tenant_id, coupon.customer_id, "after_verify")',
-            source,
-        )
-
     def test_recall_scheduler_uses_coupon_service_not_marketing_template_engine(self):
         import app.main as main_module
 

@@ -448,6 +448,45 @@ async def platform_stats(db: AsyncSession = Depends(get_db)):
     }, msg="ok")
 
 
+@router.get("/perf-stats", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
+async def perf_stats(db: AsyncSession = Depends(get_db), days: int = 7):
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.models.perf_sample import PerfSample
+
+    since = datetime.utcnow() - timedelta(days=days)
+    result = await db.execute(
+        select(PerfSample.metric, PerfSample.ms)
+        .where(PerfSample.created_at >= since)
+    )
+    by_metric: dict[str, list[int]] = {}
+    for metric, ms in result.all():
+        by_metric.setdefault(metric, []).append(ms)
+
+    def percentile(sorted_ms, p):
+        if not sorted_ms:
+            return 0
+        idx = min(len(sorted_ms) - 1, max(0, -(-int(p) * len(sorted_ms) // 100) - 1))
+        return sorted_ms[idx]
+
+    stats = []
+    for metric, values in by_metric.items():
+        values.sort()
+        stats.append({
+            "metric": metric,
+            "count": len(values),
+            "avg": round(sum(values) / len(values)),
+            "p50": percentile(values, 50),
+            "p95": percentile(values, 95),
+            "min": values[0],
+            "max": values[-1],
+        })
+    stats.sort(key=lambda s: s["metric"])
+    return success_response(data={"days": days, "stats": stats}, msg="ok")
+
+
 @router.post("/merchants/{tenant_id}/seed-test-data", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
 async def seed_merchant_test_data(tenant_id: str, request: Request, db: AsyncSession = Depends(get_db)):
     from app.services.test_data_seed import seed_test_data
