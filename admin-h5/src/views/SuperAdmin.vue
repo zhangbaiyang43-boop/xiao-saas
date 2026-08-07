@@ -33,6 +33,33 @@
       </div>
 
       <div class="section animate-in">
+        <div class="section-title">性能监控（P50/P95）</div>
+        <div v-if="perfStatsLoading" class="loading">加载中...</div>
+        <div v-else-if="perfStatsError" class="empty">加载失败</div>
+        <div v-else-if="!perfStats.length" class="empty">暂无采样数据</div>
+        <table v-else class="perf-table">
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th class="num">样本数</th>
+              <th class="num">均值</th>
+              <th class="num">P50</th>
+              <th class="num">P95</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in perfStats" :key="row.metric">
+              <td>{{ row.metric }}</td>
+              <td class="num">{{ row.count }}</td>
+              <td class="num">{{ row.avg }} ms</td>
+              <td class="num">{{ row.p50 }} ms</td>
+              <td class="num">{{ row.p95 }} ms</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="section animate-in">
         <div class="section-title">开通新商家</div>
         <div class="create-form">
           <input v-model="newMerchant.name" class="form-input" placeholder="* 店铺名称" />
@@ -214,6 +241,9 @@ const pausingPay = ref(false)
 const payConfigResult = ref(null)
 const seedingId = ref('')
 const seedResult = ref(null)
+const perfStats = ref([])
+const perfStatsLoading = ref(false)
+const perfStatsError = ref(false)
 const revealedPhones = reactive(new Set())
 const copySourceId = ref('')
 const copyingPay = ref(false)
@@ -282,6 +312,28 @@ async function doLogin() {
   finally { logging.value = false }
 }
 
+async function loadPerfStats() {
+  perfStatsLoading.value = true
+  perfStatsError.value = false
+  try {
+    const res = await axios.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
+    if (res.data?.code === 200) {
+      perfStats.value = res.data.data?.stats || []
+    } else {
+      perfStats.value = []
+      perfStatsError.value = true
+    }
+  } catch (e) {
+    if (e?.response?.status === 401) authed.value = false
+    else {
+      perfStats.value = []
+      perfStatsError.value = true
+    }
+  } finally {
+    perfStatsLoading.value = false
+  }
+}
+
 async function loadData() {
   loadingList.value = true
   try {
@@ -291,6 +343,7 @@ async function loadData() {
     ])
     if (statsRes.data?.code === 200) Object.assign(stats, statsRes.data.data)
     if (listRes.data?.code === 200) merchants.value = listRes.data.data
+    loadPerfStats()
   } catch (e) {
     if (e?.response?.status === 401) authed.value = false
     else {
@@ -532,6 +585,10 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .filter-chip { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-card); color: var(--text-2); font-size: 12px; font-weight: 700; cursor: pointer; }
 .filter-chip.active { border-color: var(--brand); background: var(--brand-light); color: var(--success); }
 .loading, .empty { text-align: center; color: var(--text-3); padding: 24px 0; font-size: 14px; }
+.perf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.perf-table th, .perf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
+.perf-table th.num, .perf-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.perf-table th { color: var(--text-3); font-weight: 700; font-size: 12px; }
 .merchant-list { display: grid; gap: 10px; }
 .merchant-card { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; background: var(--bg-page); border-radius: 10px; }
 .mc-left { min-width: 0; }

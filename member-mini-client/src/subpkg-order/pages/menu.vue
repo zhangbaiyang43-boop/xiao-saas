@@ -186,11 +186,15 @@
       :available-coupons="availableCoupons"
       :confirm-payment-label="confirmPaymentLabel"
       :wechat-pay-amount="wechatPayAmount"
+      :expected-points="expectedOrderPoints"
+      :is-member="isMember"
+      :is-logged-in="isCustomerLoggedIn"
+      :member-level-label="memberLevelLabel"
+      :member-summary-text="checkoutMemberSummaryText"
       :can-submit-order="canSubmitOrder"
       :ordering="ordering"
       :paying="paying"
       :pay-button-text="payButtonText"
-      :format-price="formatPrice"
       @close="closeOrderConfirm"
       @show-table-hint="showTableHint"
       @toggle-items-expanded="toggleItemsExpanded"
@@ -380,7 +384,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { getMenuItems, getShopInfo } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
-import { consumeStart, recordSample } from '@/utils/perf'
+import { consumeStart, flushPending, recordSample } from '@/utils/perf'
 import { reportError } from '@/utils/monitor'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
@@ -680,6 +684,26 @@ export default {
       formatPrice,
     })
     const wechatPayAmount = computed(() => finalPrice.value)
+    const expectedOrderPoints = computed(() => {
+      if (wechatPayAmount.value <= 0) return 0
+      const multiplier = bannerInfo.value?.pointMultiplier || 1
+      return Math.floor(wechatPayAmount.value * multiplier)
+    })
+    const checkoutMemberSummaryText = computed(() => {
+      if (wechatPayAmount.value <= 0) return ''
+      const points = String(expectedOrderPoints.value)
+      if (isMember.value) {
+        let text = confirmationText.memberSummaryMember
+          .replace('{level}', memberLevelLabel.value || '普通会员')
+          .replace('{points}', points)
+        if (availableCoupons.value.length > 0) {
+          text += confirmationText.memberSummaryMemberCoupons
+            .replace('{count}', String(availableCoupons.value.length))
+        }
+        return text
+      }
+      return confirmationText.memberSummaryGuest.replace('{points}', points)
+    })
     const isPrepayMode = computed(() => paymentMode.value === 'prepay')
     const confirmPaymentLabel = computed(() => {
       if (paymentMode.value === 'table_account') return confirmationText.tableAccount
@@ -793,9 +817,19 @@ export default {
     }
 
     const clearCart = () => {
-      cart.value = {}
-      specCartItems.value = []
-      showCart.value = false
+      if (!totalCount.value) return
+      uni.showModal({
+        title: '清空购物车',
+        content: `确定要清空已选的${totalCount.value}件商品吗？`,
+        confirmText: '清空',
+        confirmColor: '#ff3018',
+        success: (res) => {
+          if (res.confirm) {
+            cart.value = {}
+            specCartItems.value = []
+          }
+        },
+      })
     }
 
     const simpleCartItems = computed(() =>
@@ -852,15 +886,10 @@ export default {
         const now = Date.now()
         const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
         availableCoupons.value = list
-        const eligible = list.filter(c => totalPrice.value >= Number(c.min_amount || c.threshold_amount || 0))
-        const keepExistingChoice = selectedCouponId.value && eligible.some(c => c.id === selectedCouponId.value)
+        const keepExistingChoice = selectedCouponId.value && couponPickerList.value.some(c => c.id === selectedCouponId.value && c.eligible)
         if (!keepExistingChoice) {
-          if (eligible.length) {
-            eligible.sort(compareCouponPriority)
-            selectedCouponId.value = eligible[0].id
-          } else {
-            selectedCouponId.value = null
-          }
+          const best = couponPickerList.value.find(c => c.eligible)
+          selectedCouponId.value = best ? best.id : null
         }
       } catch (e) {
         reportError('menu.refresh_coupons', e)
@@ -924,51 +953,71 @@ export default {
       return min > 0 ? `新客立减¥${amount}，满${min.toFixed(0)}元可用` : `新客立减¥${amount}，授权手机号立得`
     })
 
+    const applyShopInfoState = (d) => {
+      deliveryEnabled.value = !!d.delivery_enabled
+      paymentMode.value = normalizePaymentMode(d.payment_mode)
+      shopCreatedAt.value = d.created_at || d.create_time || d.createdAt || d.register_time || ''
+      const realShopName = d.name || d.shop_name || d.tenant_name || ''
+      if (realShopName) {
+        shopName.value = realShopName
+        uni.setStorageSync('tenant_name', realShopName)
+        uni.setNavigationBarTitle({ title: realShopName + ' \u70b9\u9910' })
+      }
+      shopLogo.value = d.logo || d.logo_url || ''
+      if (Array.isArray(d.remark_chips) && d.remark_chips.length) {
+        remarkChips.value = d.remark_chips
+      }
+      if (Array.isArray(d.order_remark_chips) && d.order_remark_chips.length) {
+        orderRemarkChips.value = d.order_remark_chips
+      }
+      if (Array.isArray(d.category_order) && d.category_order.length) {
+        categoryOrder.value = d.category_order
+      }
+      if (d.entry_coupon?.coupon_id) {
+        entryCoupon.value = d.entry_coupon
+      }
+      newCustomerCouponPreview.value = d.new_customer_coupon_preview || null
+      couponReminderTemplateId.value = d.coupon_reminder_template_id || ''
+      if (d.is_open === false) {
+        storeClosed.value = true
+        closedNotice.value = d.closed_notice || d.business_hours || ''
+      } else {
+        storeClosed.value = false
+      }
+    }
+
+    const shopInfoCacheKey = () => 'shop_info_cache_' + (shopId.value || '')
+    const readShopInfoCache = () => {
+      try {
+        const cached = uni.getStorageSync(shopInfoCacheKey())
+        return cached && cached.data ? cached.data : null
+      } catch { return null }
+    }
+    const writeShopInfoCache = (data) => {
+      try { uni.setStorageSync(shopInfoCacheKey(), { data, cachedAt: Date.now() }) } catch (e) {
+        reportError('menu.write_shop_info_cache', e)
+      }
+    }
+
     const loadShopSettings = async () => {
       if (!shopId.value) return
+      const cachedData = readShopInfoCache()
+      if (cachedData) applyShopInfoState(cachedData)
       try {
         const res = await getShopInfo(shopId.value)
         if (res?.code === 200 && res?.data) {
           const d = res.data
-          deliveryEnabled.value = !!d.delivery_enabled
-          paymentMode.value = normalizePaymentMode(d.payment_mode)
-          shopCreatedAt.value = d.created_at || d.create_time || d.createdAt || d.register_time || ''
-          const realShopName = d.name || d.shop_name || d.tenant_name || ''
-          if (realShopName) {
-            shopName.value = realShopName
-            uni.setStorageSync('tenant_name', realShopName)
-            uni.setNavigationBarTitle({ title: realShopName + ' \u70b9\u9910' })
-          }
-          shopLogo.value = d.logo || d.logo_url || ''
-          if (Array.isArray(d.remark_chips) && d.remark_chips.length) {
-            remarkChips.value = d.remark_chips
-          }
-          if (Array.isArray(d.order_remark_chips) && d.order_remark_chips.length) {
-            orderRemarkChips.value = d.order_remark_chips
-          }
-          if (Array.isArray(d.category_order) && d.category_order.length) {
-            categoryOrder.value = d.category_order
-          }
-          if (d.entry_coupon?.coupon_id) {
-            entryCoupon.value = d.entry_coupon
-            // is_new 是后端算好的"这张是不是这次调用才发的"——同一天重复进店只会拿到
-            // 同一张已发过的进店券（is_new:false），不重复提示，只在真正新发时提醒一次，
-            // 不然这张后端已经在默默发放的券，顾客永远不知道自己刚刚薅到了。
-            if (d.entry_coupon.is_new) {
-              uni.showToast({
-                title: `已发放进店券 ¥${formatPrice(d.entry_coupon.amount)}，满${Number(d.entry_coupon.threshold || 0).toFixed(0)}元可用`,
-                icon: 'none',
-                duration: 3000,
-              })
-            }
-          }
-          newCustomerCouponPreview.value = d.new_customer_coupon_preview || null
-          couponReminderTemplateId.value = d.coupon_reminder_template_id || ''
-          if (d.is_open === false) {
-            storeClosed.value = true
-            closedNotice.value = d.closed_notice || d.business_hours || ''
-          } else {
-            storeClosed.value = false
+          applyShopInfoState(d)
+          writeShopInfoCache(d)
+          // 进店券到账提示和距离计算必须只在这次真实网络响应里触发一次——如果
+          // 挪进 applyShopInfoState，缓存命中那次调用也会触发，会出现重复弹
+          // toast、重复请求距离接口的问题。
+          if (d.entry_coupon?.is_new) {
+            uni.showToast({
+              title: `已发放进店券 ¥${formatPrice(d.entry_coupon.amount)}，满${Number(d.entry_coupon.threshold || 0).toFixed(0)}元可用`,
+              icon: 'none',
+              duration: 3000,
+            })
           }
           if (d.lat && d.lng) loadDistance(d.lat, d.lng)
         }
@@ -1065,7 +1114,7 @@ export default {
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
-      successDiscount, wechatPayAmount, canSubmitOrder, payButtonText,
+      successDiscount, wechatPayAmount, expectedOrderPoints, checkoutMemberSummaryText, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
       memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
@@ -1160,6 +1209,7 @@ export default {
   onHide: function () {
     this.stopStatusPoll()
     this.stopTablePresencePoll()
+    flushPending()
   },
   onUnload: function () {
     this.stopStatusPoll()

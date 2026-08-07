@@ -25,7 +25,6 @@
     >
 
       <view v-if="lastOrderItems.length" class="reorder-bar">
-        <text class="reorder-label">再来一单</text>
         <scroll-view scroll-x class="reorder-scroll">
           <view class="reorder-chips">
             <view
@@ -40,7 +39,7 @@
           </view>
         </scroll-view>
         <view class="reorder-all-btn" @click="$emit('reorder-all')">
-          <text class="reorder-all-text">全部再来一份</text>
+          <text class="iconfont icon-return reorder-all-icon"></text>
         </view>
       </view>
 
@@ -480,15 +479,6 @@ export default {
 
 
 
-.reorder-label {
-  font-size: 22rpx;
-  color: var(--text-3);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-
-
 .reorder-scroll {
   flex: 1;
   white-space: nowrap;
@@ -519,10 +509,6 @@ export default {
 .reorder-chip-name {
   font-size: 22rpx;
   color: #065f46;
-  max-width: 120rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 
@@ -538,18 +524,21 @@ export default {
 
 .reorder-all-btn {
   flex-shrink: 0;
+  width: 56rpx;
+  height: 56rpx;
   background: var(--brand);
-  border-radius: 28rpx;
-  padding: 6rpx 18rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 
 
-.reorder-all-text {
-  font-size: 22rpx;
+.reorder-all-icon {
   color: #fff;
-  font-weight: 700;
-  white-space: nowrap;
+  font-size: 28rpx;
+  line-height: 1;
 }
 
 

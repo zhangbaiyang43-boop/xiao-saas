@@ -60,6 +60,9 @@ export function useMemberAuth({
           couponCount: coupons.length,
           coupons,
           points: Number(p.points || 0),
+          pointMultiplier: Number(
+            (g.levels || []).find(l => l.code === (p.level_code || g.level_code))?.point_multiplier || 1
+          ),
           // 这三个字段之前从未被 /v1/member/profile 填过，进度条永远不渲染，
           // 现在改从与 growth.vue 同一个 /v1/member/membership 取数，避免两处
           // 各算一套对不上号。

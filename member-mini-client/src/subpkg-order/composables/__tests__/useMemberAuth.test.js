@@ -105,7 +105,15 @@ describe('useMemberAuth', () => {
       getCustomerCoupons.mockResolvedValue({ data: [{ id: 'c1' }, { id: 'c2' }] })
       getMembershipGrowth.mockResolvedValue({
         code: 200,
-        data: { yearly_consumption: 300, next_level: { threshold: 1000 }, level_code: 'LV2' },
+        data: {
+          yearly_consumption: 300,
+          next_level: { threshold: 1000 },
+          level_code: 'LV2',
+          levels: [
+            { code: 'LV1', point_multiplier: 1 },
+            { code: 'LV2', point_multiplier: 1.2 },
+          ],
+        },
       })
       const { state, auth } = setup()
 
@@ -119,11 +127,48 @@ describe('useMemberAuth', () => {
         levelCode: 'LV2',
         couponCount: 2,
         points: 120,
+        pointMultiplier: 1.2,
         growth: 300,
         nextGrowth: 1000,
         nextUpgradeAmount: 700,
       })
       expect(state.memberLoading.value).toBe(false)
+    })
+
+    it('growthRes 带 levels 时按当前 level_code 写入 pointMultiplier', async () => {
+      uni.getStorageSync.mockImplementation((key) => (key === 'customer_token' ? 'tok_1' : ''))
+      getMemberProfile.mockResolvedValue({
+        code: 200,
+        data: { name: '李四', is_member: true, level_code: 'LV3', level: '金卡会员' },
+      })
+      getCustomerCoupons.mockResolvedValue({ data: [] })
+      getMembershipGrowth.mockResolvedValue({
+        code: 200,
+        data: {
+          level_code: 'LV3',
+          levels: [
+            { code: 'LV1', point_multiplier: 1 },
+            { code: 'LV3', point_multiplier: 1.5 },
+          ],
+        },
+      })
+      const { state, auth } = setup()
+
+      await auth.loadMemberStatus()
+
+      expect(state.bannerInfo.value.pointMultiplier).toBe(1.5)
+    })
+
+    it('growthRes 没有 levels 时 pointMultiplier 退回 1', async () => {
+      uni.getStorageSync.mockImplementation((key) => (key === 'customer_token' ? 'tok_1' : ''))
+      getMemberProfile.mockResolvedValue({ code: 200, data: { name: '王五', is_member: true } })
+      getCustomerCoupons.mockResolvedValue({ data: [] })
+      getMembershipGrowth.mockResolvedValue({ code: 200, data: { level_code: 'LV1' } })
+      const { state, auth } = setup()
+
+      await auth.loadMemberStatus()
+
+      expect(state.bannerInfo.value.pointMultiplier).toBe(1)
     })
 
     it('拉取成功但没有任何会员标识时，isMember 为 false', async () => {

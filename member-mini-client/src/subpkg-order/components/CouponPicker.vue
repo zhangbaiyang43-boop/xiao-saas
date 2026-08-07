@@ -2,31 +2,62 @@
   <view class="mask" @click="$emit('cancel')">
     <view class="coupon-picker-sheet" @click.stop>
       <view class="cp-head">
-        <text class="cp-title">选择优惠券</text>
+        <text class="cp-title">优惠券</text>
+        <text v-if="summaryText" class="cp-summary">{{ summaryText }}</text>
         <text class="cp-close iconfont icon-close" @click="$emit('cancel')"></text>
       </view>
       <scroll-view class="cp-list" scroll-y>
-        <view class="cp-option" :class="{ 'cp-option--on': !selectedCouponId }" @click="$emit('select-coupon', null)">
-          <view class="cp-option-main">
-            <text class="cp-option-name">不使用优惠券</text>
-          </view>
-          <text :class="['cp-radio-icon', 'iconfont', !selectedCouponId ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
-        </view>
         <view
-          v-for="c in couponPickerList"
+          v-if="bestCoupon"
+          class="cp-option cp-option--best"
+          :class="{ 'cp-option--on': selectedCouponId === bestCoupon.id }"
+          @click="$emit('select-coupon', bestCoupon)"
+        >
+          <view class="cp-best-badge"><text>最划算</text></view>
+          <view class="cp-option-amount"><text>¥{{ couponPickerAmount(bestCoupon) }}</text></view>
+          <view class="cp-option-main">
+            <text class="cp-option-name">{{ bestCoupon.name || '优惠券' }}</text>
+            <text class="cp-option-cond">{{ couponPickerCondText(bestCoupon) }}</text>
+          </view>
+          <text :class="['cp-radio-icon', 'iconfont', selectedCouponId === bestCoupon.id ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
+        </view>
+
+        <view
+          v-for="c in otherEligibleCoupons"
           :key="c.id"
           class="cp-option"
-          :class="{ 'cp-option--on': selectedCouponId === c.id, 'cp-option--disabled': !c.eligible }"
+          :class="{ 'cp-option--on': selectedCouponId === c.id }"
           @click="$emit('select-coupon', c)"
         >
           <view class="cp-option-amount"><text>¥{{ couponPickerAmount(c) }}</text></view>
           <view class="cp-option-main">
             <text class="cp-option-name">{{ c.name || '优惠券' }}</text>
-            <text class="cp-option-cond">{{ c.eligible ? couponPickerCondText(c) : '还差' + formatPrice(Math.max(0, Number(c.min_amount || c.threshold_amount || 0) - totalPrice)) + '元可用' }}</text>
+            <text class="cp-option-cond">{{ couponPickerCondText(c) }}</text>
           </view>
           <text :class="['cp-radio-icon', 'iconfont', selectedCouponId === c.id ? 'icon-roundcheckfill' : 'icon-roundcheck']"></text>
         </view>
+
+        <view v-if="ineligibleCoupons.length" class="cp-section">
+          <text class="cp-section-title">还差一点点</text>
+          <view
+            v-for="c in ineligibleCoupons"
+            :key="c.id"
+            class="cp-option cp-option--disabled"
+            @click="$emit('select-coupon', c)"
+          >
+            <view class="cp-option-amount"><text>¥{{ couponPickerAmount(c) }}</text></view>
+            <view class="cp-option-main">
+              <text class="cp-option-name">{{ c.name || '优惠券' }}</text>
+              <text class="cp-option-cond">还差{{ formatPrice(Math.max(0, Number(c.min_amount || c.threshold_amount || 0) - totalPrice)) }}元可用</text>
+            </view>
+          </view>
+        </view>
+
         <view v-if="!couponPickerList.length" class="cp-empty"><text>暂无可用优惠券</text></view>
+
+        <view class="cp-skip-wrap">
+          <text class="cp-skip-link" @click="$emit('select-coupon', null)">不使用优惠券</text>
+        </view>
       </scroll-view>
     </view>
   </view>
@@ -49,6 +80,28 @@ export default {
     formatPrice: { type: Function, required: true },
   },
   emits: ['cancel', 'select-coupon'],
+  computed: {
+    eligibleCoupons() {
+      return this.couponPickerList.filter(c => c.eligible)
+    },
+    bestCoupon() {
+      return this.eligibleCoupons[0] || null
+    },
+    otherEligibleCoupons() {
+      return this.eligibleCoupons.slice(1)
+    },
+    ineligibleCoupons() {
+      return this.couponPickerList.filter(c => !c.eligible)
+    },
+    selectedCouponItem() {
+      if (!this.selectedCouponId) return null
+      return this.couponPickerList.find(c => c.id === this.selectedCouponId) || null
+    },
+    summaryText() {
+      if (!this.selectedCouponItem) return ''
+      return `已为您自动选用最划算的一张，已减¥${this.couponPickerAmount(this.selectedCouponItem)}`
+    },
+  },
 }
 </script>
 
@@ -78,9 +131,21 @@ export default {
 
 
 .cp-title {
+  display: block;
   font-size: 32rpx;
   font-weight: 900;
   color: var(--text-1);
+}
+
+
+
+.cp-summary {
+  display: block;
+  margin-top: 8rpx;
+  padding: 0 48rpx;
+  font-size: 24rpx;
+  color: var(--text-3);
+  line-height: 1.4;
 }
 
 
@@ -112,6 +177,7 @@ export default {
 
 
 .cp-option {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 20rpx;
@@ -125,6 +191,15 @@ export default {
 
 
 
+.cp-option--best {
+  border-width: 3rpx;
+  border-color: var(--brand);
+  background: #ecfbf3;
+  padding-top: 36rpx;
+}
+
+
+
 .cp-option--on {
   border-color: var(--brand);
   background: #ecfbf3;
@@ -134,6 +209,22 @@ export default {
 
 .cp-option--disabled {
   opacity: .5;
+}
+
+
+
+.cp-best-badge {
+  position: absolute;
+  top: 12rpx;
+  left: 20rpx;
+  height: 36rpx;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text { color: #fff; font-size: 20rpx; font-weight: 900; }
 }
 
 
@@ -192,9 +283,43 @@ export default {
 
 
 
+.cp-section {
+  margin-top: 8rpx;
+  padding-top: 8rpx;
+}
+
+
+
+.cp-section-title {
+  display: block;
+  margin: 0 4rpx 12rpx;
+  font-size: 22rpx;
+  color: var(--text-3);
+  font-weight: 700;
+}
+
+
+
 .cp-empty {
-  padding: 64rpx 0;
+  padding: 64rpx 0 24rpx;
   text-align: center;
   text { color: var(--text-3); font-size: 26rpx; }
+}
+
+
+
+.cp-skip-wrap {
+  padding: 12rpx 0 8rpx;
+  text-align: center;
+}
+
+
+
+.cp-skip-link {
+  display: inline-block;
+  padding: 16rpx 8rpx;
+  font-size: 26rpx;
+  color: var(--text-3);
+  text-decoration: underline;
 }
 </style>

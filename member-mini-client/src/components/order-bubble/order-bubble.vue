@@ -1,5 +1,5 @@
 <template>
-  <view v-if="visible">
+  <view v-if="visible && geometryReady">
     <!-- 可拖区域：明确像素高宽，供贴边与纵向 clamp 使用；pointer-events 透传给气泡本身。 -->
     <view class="ob-area" :style="{ top: topRpx + 'rpx', height: areaHeightPx + 'px' }">
       <view
@@ -66,6 +66,7 @@ export default {
     const pxPerRpx = ref(1)
     const areaWidthPx = ref(0)
     const areaHeightPx = ref(0)
+    const geometryReady = ref(false)
     const bubbleWidthPx = computed(() => BUBBLE_WIDTH_RPX * pxPerRpx.value)
     const bubbleHeightPx = computed(() => BUBBLE_HEIGHT_RPX * pxPerRpx.value)
 
@@ -110,6 +111,8 @@ export default {
         posY.value = Math.max(0, Math.min(maxPosY(), areaHeightPx.value * DEFAULT_Y_RATIO))
       } catch {
         // 读不到系统信息就用不了自适应定位，气泡保持默认位置，不影响点餐主流程。
+      } finally {
+        geometryReady.value = true
       }
     }
 
@@ -243,6 +246,7 @@ export default {
     })
 
     return {
+      geometryReady,
       areaHeightPx, viewStyle, snapping,
       onTouchStart, onTouchMove, onTouchEnd, onSnapTransitionEnd,
       showHint, dismissHint, hintBottomRpx,

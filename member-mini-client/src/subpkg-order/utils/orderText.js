@@ -10,10 +10,13 @@ export const orderModeText = {
 
 export const confirmationText = {
   title: '确认订单', tableMissing: '未识别桌号，请重新扫码',
-  selectedItems: '已选商品', clear: '清空已选商品',
+  selectedItems: '已选商品', clear: '清空',
   remark: '备注', remarkPlaceholder: '其他要求…', goodsAmount: '商品金额', coupon: '优惠券', couponAvailable: '张可用', couponNone: '暂无可用', noThreshold: '无门槛', thresholdPrefix: '满',
   payable: '应付金额', wechatPay: '微信支付', tableAccount: '桌台账单', postpay: '餐后付款', payNow: '立即支付', submitTableAccount: '提交到桌台账单', submitOrder: '提交订单',
-  orderRemark: '整单备注', orderRemarkPlaceholder: '例如：一起上菜、全部打包、需要儿童餐具', orderRemarkEmpty: '无', unavailable: '当前不可下单', confirming: '正在确认订单…', paying: '正在发起支付…', currency: '¥', close: 'x', arrow: '>'
+  orderRemark: '整单备注', orderRemarkPlaceholder: '例如：一起上菜、全部打包、需要儿童餐具', orderRemarkEmpty: '无', unavailable: '当前不可下单', confirming: '正在确认订单…', paying: '正在发起支付…', currency: '¥', close: 'x', arrow: '>',
+  memberSummaryMember: '{level} · 本单预计+{points}积分',
+  memberSummaryMemberCoupons: ' · {count}张可用',
+  memberSummaryGuest: '本单预计可得 {points} 积分，加入会员解锁专属券',
 }
 
 export const successText = {

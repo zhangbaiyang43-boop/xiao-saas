@@ -73,6 +73,7 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
     finalPrice,
     showCouponPicker,
     couponPickerList,
+    compareCouponPriority,
     openCouponPicker,
     closeCouponPicker,
     pickCoupon,

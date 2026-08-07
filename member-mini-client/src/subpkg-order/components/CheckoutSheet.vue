@@ -13,6 +13,14 @@
           <text v-if="!tableNo" class="summary-table-tip">{{ confirmationText.tableMissing }}</text>
         </view>
 
+        <view
+          v-if="memberSummaryText"
+          class="member-summary-card"
+          :class="{ 'member-summary-card--member': isMember, 'member-summary-card--guest': !isMember }"
+        >
+          <text class="member-summary-text">{{ memberSummaryText }}</text>
+        </view>
+
         <view class="confirm-card selected-items-section">
           <view class="selected-items-summary" @click="$emit('toggle-items-expanded')">
             <view class="selected-items-title-wrap">
@@ -34,11 +42,14 @@
                   <view class="counter-btn minus sm" @click="$emit('remove-from-cart', item)"><text class="iconfont icon-move"></text></view>
                   <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === (item.specKey || item.id) }">{{ item.qty }}</text>
                   <view class="counter-btn plus sm" @click="$emit('increase-cart-item', item)"><text class="iconfont icon-add"></text></view>
-                  <text class="cart-row-price">{{ confirmationText.currency }}{{ formatPrice(item.price * item.qty) }}</text>
+                  <text class="cart-row-price">{{ confirmationText.currency }}{{ (item.price * item.qty).toFixed(2) }}</text>
                 </view>
               </view>
             </scroll-view>
-            <view class="cart-clear-line" @click="$emit('clear-cart')"><text class="iconfont icon-delete"></text><text>{{ confirmationText.clear }}</text></view>
+            <view class="cart-clear-line" @click="$emit('clear-cart')">
+              <text class="iconfont icon-delete"></text>
+              <text>{{ confirmationText.clear }}</text>
+            </view>
           </view>
         </view>
 
@@ -119,12 +130,15 @@ export default {
     availableCoupons: { type: Array, default: () => [] },
     confirmPaymentLabel: { type: String, default: '' },
     wechatPayAmount: { type: Number, default: 0 },
+    expectedPoints: { type: Number, default: 0 },
+    isMember: { type: Boolean, default: false },
+    isLoggedIn: { type: Boolean, default: false },
+    memberLevelLabel: { type: String, default: '' },
+    memberSummaryText: { type: String, default: '' },
     canSubmitOrder: { type: Boolean, default: false },
     ordering: { type: Boolean, default: false },
     paying: { type: Boolean, default: false },
     payButtonText: { type: String, default: '' },
-    // 纯查询/格式化函数直接从父组件原样传进来（不是在这里重写一份同名逻辑）。
-    formatPrice: { type: Function, required: true },
   },
   emits: [
     'close',
@@ -183,6 +197,40 @@ export default {
 
 
 .order-summary-card--missing { background: #fff7ed; border-color: #fed7aa; }
+
+
+.member-summary-card {
+  padding: 16rpx 24rpx;
+  border-radius: var(--radius-card);
+  margin-bottom: 18rpx;
+  display: flex;
+  align-items: center;
+  min-height: 56rpx;
+  box-sizing: border-box;
+}
+
+
+.member-summary-card--member {
+  background: #f0f7ff;
+  border: 1rpx solid #d6e8ff;
+}
+
+
+.member-summary-card--guest {
+  background: #f8fafc;
+  border: 1rpx solid #e8edf2;
+}
+
+
+.member-summary-text {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #475467;
+  line-height: 1.4;
+}
+
+
+.member-summary-card--member .member-summary-text { color: #1d4f91; }
 
 
 .summary-mode-pill { height: 46rpx; padding: 0 18rpx; border-radius: 999rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; text { color: #fff; font-size: 24rpx; font-weight: 900; } }
@@ -245,7 +293,17 @@ export default {
 .cart-row-price { min-width: 82rpx; text-align: right; font-size: 30rpx; font-weight: 900; color: var(--brand); }
 
 
-.cart-clear-line { height: 58rpx; display: flex; align-items: center; justify-content: flex-end; gap: 6rpx; text { color: #c8ccd1; font-size: 23rpx; font-weight: 700; } .iconfont { color: #c8ccd1; font-size: 24rpx; line-height: 26rpx; } }
+.cart-clear-line {
+  margin-top: 4rpx;
+  padding: 18rpx 0 4rpx;
+  border-top: 1rpx solid #f0f2f4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  text { color: var(--text-3); font-size: 24rpx; font-weight: 700; }
+  .iconfont { color: var(--text-3); font-size: 26rpx; line-height: 28rpx; }
+}
 
 
 .order-preference-section { padding: 26rpx 28rpx; }

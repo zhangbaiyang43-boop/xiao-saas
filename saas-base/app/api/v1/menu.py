@@ -110,40 +110,50 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
     config = await svc.get_tenant_config(shop)
     biz = (config.business_info or {}) if config else {}
 
-    # 静默发放进店券（Plan B）：登录用户进入菜单时自动领取
-    entry_coupon = None
+    # 静默发放进店券、新客券预览、邀请奖励开关三者互不依赖，并发执行以缩短
+    # shop/info 响应时间；各任务使用独立 AsyncSession，不能共用外层 db。
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.services.commission_service import CommissionService
+    from app.services.coupon_service import CouponService
+
     customer_id = getattr(request.state, "customer_id", None)
-    if customer_id:
+
+    async def _issue_entry_coupon():
+        if not customer_id:
+            return None
         try:
-            from app.services.coupon_service import CouponService
-            cs = CouponService(db)
-            entry_coupon = await cs.issue_entry_coupon(int(customer_id))
+            async with AsyncSessionLocal() as session:
+                cs = CouponService(session)
+                return await cs.issue_entry_coupon(int(customer_id))
         except Exception:
-            pass
+            return None
 
-    # 首单钩子：未登录顾客也要能在点餐页/登录按钮上看到"新客立减¥X"的具体数字，
-    # 不发券、不判断是否已是老客，纯预览——真正是否发得出、发多少由入会时的
-    # issue_auto_coupon 决定，这里只是提前把同一份配置算出来的数字亮出来。
-    new_customer_coupon_preview = None
-    try:
-        from app.services.coupon_service import CouponService
-        preview_cs = CouponService(db)
-        preview_cs.set_tenant_id(shop)
-        new_customer_coupon_preview = await preview_cs.preview_new_customer_coupon()
-    except Exception:
-        pass
+    async def _preview_new_customer_coupon():
+        try:
+            async with AsyncSessionLocal() as session:
+                preview_cs = CouponService(session)
+                preview_cs.set_tenant_id(shop)
+                return await preview_cs.preview_new_customer_coupon()
+        except Exception:
+            return None
 
-    # 老带新双边奖励：顾客端"邀请好友"入口要不要展示，取决于这家店有没有开这条则——
-    # 关掉的话入口不该出现，不然顾客点进去只会看到"暂未开启"，白点一次。
-    invite_reward_enabled = False
-    try:
-        from app.services.commission_service import CommissionService
-        dist_cs = CommissionService(db)
-        dist_cs.set_tenant_id(shop)
-        distribution_rules = await dist_cs.get_distribution_rules()
-        invite_reward_enabled = bool(distribution_rules.get("invite_reward_enabled", False))
-    except Exception:
-        pass
+    async def _get_invite_reward_enabled():
+        try:
+            async with AsyncSessionLocal() as session:
+                dist_cs = CommissionService(session)
+                dist_cs.set_tenant_id(shop)
+                distribution_rules = await dist_cs.get_distribution_rules()
+                return bool(distribution_rules.get("invite_reward_enabled", False))
+        except Exception:
+            return False
+
+    entry_coupon, new_customer_coupon_preview, invite_reward_enabled = await asyncio.gather(
+        _issue_entry_coupon(),
+        _preview_new_customer_coupon(),
+        _get_invite_reward_enabled(),
+    )
 
     return success_response(data={
         "tenant_id": tenant.tenant_id,

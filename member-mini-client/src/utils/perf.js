@@ -2,9 +2,48 @@
 // 目的是给后续每一项"进页/结算"优化提供一把能验证效果的尺子，不是长期的生产监控方案——
 // 真要看全量用户的分布，以后再考虑上报到后端聚合。
 
+import { getOrCreateDiningClientId } from './dining'
+
+const REPORT_URL = 'https://api.zhangbaiyang.com/api/v1/perf/report'
+
 const STORAGE_PREFIX = 'perf_samples_'
 const START_MARK_PREFIX = 'perf_start_'
 const MAX_SAMPLES = 60 // 每个指标只留最近 60 条，够算 P50/P95，又不会把本地存储撑爆
+
+let pendingBatch = []
+let flushTimer = null
+const FLUSH_BATCH_SIZE = 10
+const FLUSH_DELAY_MS = 5000
+
+function scheduleFlush() {
+  if (flushTimer) return
+  flushTimer = setTimeout(() => { flushTimer = null; flushPending() }, FLUSH_DELAY_MS)
+}
+
+export function flushPending() {
+  if (!pendingBatch.length) return
+  const batch = pendingBatch
+  pendingBatch = []
+  try {
+    uni.request({
+      url: REPORT_URL,
+      method: 'POST',
+      data: {
+        tenant_id: uni.getStorageSync('tenant_id') || '',
+        client_id: getOrCreateDiningClientId(),
+        samples: batch,
+      },
+      timeout: 8000,
+      // 这里刻意不写 success/fail 回调——上报成不成功都不需要知道，写了回调
+      // 反而容易手滑加个 uni.showToast 之类的东西，把一个静默的后台上报变成
+      // 会打扰用户的东西。真要排查上报有没有送达，看后端 perf_sample 表有没有
+      // 新数据就行，不需要客户端自己再搞一套确认机制。
+    })
+  } catch {
+    // 上报这一批失败/丢了不重试、不塞回队列——性能自测数据丢一批不影响任何
+    // 业务，硬要保证送达反而会增加复杂度和重试请求本身的开销，本末倒置。
+  }
+}
 
 function readSamples(metric) {
   try {
@@ -30,6 +69,12 @@ export function recordSample(metric, durationMs, meta) {
   if (samples.length > MAX_SAMPLES) samples.splice(0, samples.length - MAX_SAMPLES)
   writeSamples(metric, samples)
   console.log(`[perf] ${metric}: ${Math.round(durationMs)}ms`, meta || '')
+  pendingBatch.push({ metric, ms: Math.round(durationMs), meta: meta ? JSON.stringify(meta).slice(0, 500) : undefined })
+  if (pendingBatch.length >= FLUSH_BATCH_SIZE) {
+    flushPending()
+  } else {
+    scheduleFlush()
+  }
 }
 
 function percentile(sortedMs, p) {
