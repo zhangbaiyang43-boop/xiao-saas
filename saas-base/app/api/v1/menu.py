@@ -174,6 +174,9 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         "new_customer_coupon_preview": new_customer_coupon_preview,  # 新客券预览，None 表示该店未开启
         "invite_reward_enabled": invite_reward_enabled,  # 邀请奖励是否开启，决定"邀请好友"入口显不显示
         "coupon_reminder_template_id": settings.WECHAT_COUPON_REMINDER_TEMPLATE_ID or "",  # 空字符串表示提醒功能还没配置模板，前端应隐藏"提醒我"按钮
+        "queue_reminder_template_id": settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID or "",  # 空字符串表示排队订阅消息未配置
+        "order_success_template_id": settings.WECHAT_ORDER_SUCCESS_TEMPLATE_ID or "",  # 点餐成功通知
+        "pickup_reminder_template_id": settings.WECHAT_PICKUP_REMINDER_TEMPLATE_ID or "",  # 取餐提醒
     })
 
 
@@ -339,6 +342,8 @@ async def upload_menu_image(
         processed = await run_in_threadpool(process_image, content)
     except ValueError:
         return error_response(code=400, msg="图片内容无效或已损坏")
+    except RuntimeError as e:
+        return error_response(code=500, msg=str(e))
     try:
         url = upload_image(processed, "dish.webp", "image/webp", folder="dish_images")
         return success_response(data={"url": url}, msg="上传成功")

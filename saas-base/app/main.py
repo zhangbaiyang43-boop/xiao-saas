@@ -283,7 +283,6 @@ async def _coupon_expiry_reminder_loop():
     from app.models.coupon import Coupon
     from app.models.coupon_template import CouponTemplate
     from app.models.customer import Customer
-    from app.models.tenant import Tenant
     from app.services.wechat_service import WechatService
     from sqlalchemy.future import select as _select
 
@@ -321,16 +320,15 @@ async def _coupon_expiry_reminder_loop():
                             coupon.remind_sent_at = now
                             continue
                         template = await db.get(CouponTemplate, coupon.template_id)
-                        tenant = await db.get(Tenant, coupon.tenant_id)
 
+                        # 模板「优惠券到期提醒」关键词顺序：优惠券名称 → 有效期 → 备注
                         sent = await wechat.send_subscribe_message(
                             openid=customer.openid,
                             template_id=template_id,
                             data={
-                                "thing1": {"value": (tenant.name if tenant else "门店")[:20]},
-                                "amount2": {"value": f"¥{float(template.value):.0f}" if template else ""},
-                                "time3": {"value": coupon.expire_time.strftime("%Y-%m-%d %H:%M")},
-                                "thing4": {"value": "还没用完，记得回来点单哦"},
+                                "thing1": {"value": ((template.name if template else "优惠券") or "优惠券")[:20]},
+                                "time2": {"value": coupon.expire_time.strftime("%Y-%m-%d %H:%M")},
+                                "thing3": {"value": "还没用完，记得回来点单哦"},
                             },
                         )
                         if sent:

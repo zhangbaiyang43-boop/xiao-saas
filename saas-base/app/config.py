@@ -32,9 +32,13 @@ class Settings(BaseSettings):
     WECHAT_APP_ID: str = ""
     WECHAT_APP_: str = ""
     WECHAT_APP_SECRET: str = ""
-    # 优惠券到期提醒的订阅消息模板 ID，需要在微信公众平台的"订阅消息"里申请对应模板后
-    # 手动填入——没填的话提醒功能整体不生效（前端不显示"提醒我"按钮，后台循环直接跳过）。
-    WECHAT_COUPON_REMINDER_TEMPLATE_ID: str = ""
+    # 小程序订阅消息模板 ID（微信公众平台 → 订阅消息 → 我的模板）。
+    # 空字符串表示该能力未配置：前端不申请对应授权，后台也不发送。
+    # 字段名（thing1/time2…）必须与选用模板时的关键词顺序一致，改模板后要同步改发送 data。
+    WECHAT_COUPON_REMINDER_TEMPLATE_ID: str = "ufLleND4WNNqN-sZubt4sZP25XVaH1XSin2Dew3uwSc"
+    WECHAT_QUEUE_REMINDER_TEMPLATE_ID: str = "g0qjXdu6Y76_xr7186_NRlMoolEWS9-B0XaeO5OAEpo"
+    WECHAT_ORDER_SUCCESS_TEMPLATE_ID: str = "GPbNB8JgaI7zBbZZHlMtv4n9NlPBcAQSIF25dzbaD2Q"
+    WECHAT_PICKUP_REMINDER_TEMPLATE_ID: str = "Z20rjKIxj2jnXswL6vVVz0dg6xNlcDpvLXb4luFBv-k"
     H5_ORDER_BASE_URL: str = "https://saas.zhangbaiyang.com"
     PUBLIC_BASE_URL: str = "https://saas.zhangbaiyang.com"
 
