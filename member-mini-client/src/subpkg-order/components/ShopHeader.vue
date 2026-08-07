@@ -2,13 +2,32 @@
   <view class="shop-header">
     <view class="shop-header-row">
       <image v-if="shopLogo" class="shop-logo" :src="shopLogo" mode="aspectFill" />
+      <view v-else class="shop-logo shop-logo--placeholder">
+        <text class="shop-logo-char">{{ logoChar }}</text>
+      </view>
       <view class="shop-title-main">
-        <text class="shop-name">{{ shopName }}</text>
-        <view class="shop-meta-row" @click="$emit('show-table-hint')">
-          <text class="shop-table-text">{{ tableDisplayText }}</text>
-          <text class="shop-meta-dot">·</text>
-          <text class="shop-mode-text">{{ orderModeDisplayText }}</text>
-          <text class="shop-meta-arrow iconfont icon-roundright"></text>
+        <view class="shop-name-row">
+          <text class="shop-name">{{ shopName }}</text>
+          <text class="shop-status" :class="{ 'shop-status--closed': storeClosed }">
+            {{ storeClosed ? '已打烊' : '营业中' }}
+          </text>
+        </view>
+        <view class="shop-chip-row">
+          <view class="shop-chip shop-chip--table" @click="$emit('show-table-hint')">
+            <text class="shop-chip-text">{{ tableDisplayText }}</text>
+            <text class="shop-chip-arrow iconfont icon-roundright"></text>
+          </view>
+          <view class="shop-chip shop-chip--mode">
+            <text class="shop-chip-text">{{ orderModeDisplayText }}</text>
+          </view>
+        </view>
+        <view v-if="dishCount > 0 || couponCount > 0" class="shop-sub-row">
+          <text v-if="dishCount > 0" class="shop-sub-item">
+            今日可点 <text class="shop-sub-em">{{ dishCount }}</text> 道
+          </text>
+          <text v-if="couponCount > 0" class="shop-sub-item">
+            优惠券 <text class="shop-sub-em">{{ couponCount }}</text> 张可用
+          </text>
         </view>
       </view>
     </view>
@@ -16,9 +35,8 @@
 </template>
 
 <script>
-// 从 menu.vue 拆出来的顶部门店信息栏（门店 logo/名称/桌号/点餐模式）。纯展示
-// 组件，不带任何业务逻辑——点击都只 emit 出去，真正的处理函数还是原来
-// menu.vue 里的 showTableHint，一行都没有改。
+// 门店头条（方案 B）：Logo + 店名 + 营业状态 + 桌号/堂食芯片 + 轻量副文案。
+// 纯展示，点击桌号芯片只 emit show-table-hint，逻辑仍在 menu.vue。
 export default {
   name: 'ShopHeader',
   props: {
@@ -26,57 +44,60 @@ export default {
     shopName: { type: String, default: '' },
     tableDisplayText: { type: String, default: '' },
     orderModeDisplayText: { type: String, default: '' },
+    storeClosed: { type: Boolean, default: false },
+    dishCount: { type: Number, default: 0 },
+    couponCount: { type: Number, default: 0 },
   },
   emits: ['show-table-hint'],
+  computed: {
+    logoChar() {
+      const name = String(this.shopName || '').trim()
+      return name ? name.slice(0, 1) : '店'
+    },
+  },
 }
 </script>
 
 <style lang="scss">
 .shop-header {
   position: relative;
-  height: calc(220rpx + env(safe-area-inset-top));
-  min-height: calc(220rpx + env(safe-area-inset-top));
-  max-height: calc(220rpx + env(safe-area-inset-top));
-  background: var(--brand) url('/static/order/shop-cover-default.jpg') right bottom / cover no-repeat;
-  padding: calc(28rpx + env(safe-area-inset-top)) 32rpx 24rpx;
+  flex-shrink: 0;
+  background: var(--bg-card);
+  padding: 24rpx 32rpx 20rpx;
   box-sizing: border-box;
-  overflow: hidden;
 }
-
-
-
-/* 门店封面图目前是通用素材，不分商户；等 admin-h5 有了真正的封面上传入口，
-   这层叠加渐变可以继续用，只需要把 url() 换成商户自己的封面图。
-   background-position 用 right bottom：这张图的餐桌/菜品在右下方，居中裁剪
-   会把菜品裁掉一截、只剩空景。
-   这张图本身左侧就是渐变到浅色的留白（跟首页"立即点餐"卡片同一张风格的图），
-   之前又在上面叠了一层深绿色遮罩、文字还留白色——两层"提亮对比度"的手段叠加，
-   把照片本身糊成一片。首页卡片那次是对的做法：不加遮罩，直接把文字换成深色，
-   这里改成同一个做法，照片才能透出来，不然然会一直"雾蒙蒙"。 */
 
 .shop-header-row {
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: center;
-  gap: 18rpx;
-  height: 100%;
-  max-width: calc(100vw - 220rpx);
+  align-items: flex-start;
+  gap: 20rpx;
+  width: 100%;
   box-sizing: border-box;
 }
 
-
-
 .shop-logo {
-  width: 80rpx;
-  height: 80rpx;
-  border-radius: 50%;
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 20rpx;
   flex-shrink: 0;
-  border: 2rpx solid rgba(255,255,255,0.65);
-  background: rgba(255,255,255,0.15);
+  background: #f0f2f5;
 }
 
+.shop-logo--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #ffd89b, #e17055);
+}
 
+.shop-logo-char {
+  color: #fff;
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 1;
+}
 
 .shop-title-main {
   flex: 1;
@@ -84,69 +105,104 @@ export default {
   box-sizing: border-box;
 }
 
-
+.shop-name-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
 
 .shop-name {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  color: #2b1c0f;
-  font-size: 36rpx;
-  font-weight: 600;
-  line-height: 50rpx;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-1, #1a1a1a);
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 48rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.shop-status {
+  flex-shrink: 0;
+  padding: 2rpx 12rpx;
+  border-radius: 8rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+  color: #06ad56;
+  background: rgba(7, 193, 96, 0.12);
+}
 
+.shop-status--closed {
+  color: #999;
+  background: #f0f2f5;
+}
 
-.shop-meta-row {
-  min-height: 72rpx;
-  margin-top: 4rpx;
+.shop-chip-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  width: fit-content;
-  max-width: 100%;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+
+.shop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4rpx;
+  height: 48rpx;
+  padding: 0 16rpx;
+  border-radius: 12rpx;
   box-sizing: border-box;
 }
 
+.shop-chip--table {
+  background: #1a1a1a;
+}
 
+.shop-chip--table .shop-chip-text,
+.shop-chip--table .shop-chip-arrow {
+  color: #fff;
+}
 
-.shop-table-text {
-  color: #2b1c0f;
-  font-size: 28rpx;
-  line-height: 40rpx;
+.shop-chip--mode {
+  background: #f0f2f5;
+}
+
+.shop-chip--mode .shop-chip-text {
+  color: var(--text-2, #666);
+  font-weight: 500;
+}
+
+.shop-chip-text {
+  font-size: 24rpx;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1;
 }
 
-
-
-.shop-meta-dot {
-  margin: 0 10rpx;
-  color: rgba(58,38,18,0.6);
-  font-size: 28rpx;
-  line-height: 40rpx;
+.shop-chip-arrow {
+  font-size: 22rpx;
+  line-height: 1;
+  opacity: 0.75;
 }
 
-
-
-.shop-mode-text {
-  color: rgba(58,38,18,0.78);
-  font-size: 28rpx;
-  line-height: 40rpx;
-  font-weight: 500;
-  white-space: nowrap;
+.shop-sub-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+  margin-top: 12rpx;
 }
 
+.shop-sub-item {
+  font-size: 22rpx;
+  color: var(--text-3, #999);
+  line-height: 32rpx;
+}
 
-
-.shop-meta-arrow {
-  margin-left: 10rpx;
-  color: rgba(58,38,18,0.55);
-  font-size: 28rpx;
-  line-height: 40rpx;
-  font-weight: 500;
+.shop-sub-em {
+  color: var(--text-2, #666);
+  font-weight: 600;
 }
 </style>

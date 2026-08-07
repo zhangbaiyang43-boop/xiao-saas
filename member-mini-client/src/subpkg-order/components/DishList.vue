@@ -21,8 +21,10 @@
       scroll-y
       :scroll-into-view="scrollTarget"
       scroll-with-animation
-      @scroll="handleScroll"
+      @scroll="onDishScroll"
     >
+
+      <slot name="header"></slot>
 
       <view v-if="lastOrderItems.length" class="reorder-bar">
         <scroll-view scroll-x class="reorder-scroll">
@@ -141,6 +143,9 @@
 // 分类不跟着高亮）。所以把这段查询逻辑一起挪进来，查完只把"当前应该高亮哪个
 // 分类"这个结论通过 active-category-change emit 出去，真正的赋值
 // （activeCategory.value = cat）还是父组件做，不在这里直接改父组件状态。
+//
+// 另：scrollTop 会经 scroll-position 抛给父组件，用于方案1「全宽头部收起 /
+// 迷你条显隐」；门店大头部不在本列表里，这里不做高度/透明度动画。
 export default {
   name: 'DishList',
   props: {
@@ -177,6 +182,7 @@ export default {
   emits: [
     'switch-category',
     'active-category-change',
+    'scroll-position',
     'reorder-item',
     'reorder-all',
     'retry-load',
@@ -190,7 +196,22 @@ export default {
   data() {
     return { scrollThrottleTimer: null }
   },
+  beforeUnmount() {
+    if (this.scrollThrottleTimer) {
+      clearTimeout(this.scrollThrottleTimer)
+      this.scrollThrottleTimer = null
+    }
+  },
   methods: {
+    // 方案1：门店大头部在 menu.vue 全宽区，不在本列表里。这里只把 scrollTop
+    // 抛给父组件决定何时收起头部/露出迷你条；分类高亮仍走下面的节流逻辑。
+    onDishScroll(e) {
+      const scrollTop = e?.detail?.scrollTop
+      if (typeof scrollTop === 'number') {
+        this.$emit('scroll-position', scrollTop)
+      }
+      this.handleScroll()
+    },
     handleScroll() {
       if (this.ignoreScroll) return
       if (this.scrollThrottleTimer) return

@@ -2,34 +2,53 @@
   <view class="order-page">
 
 
+    <!-- 门店头条（方案 B）：全宽压在分类/菜品两列之上。
+    点餐 tab 上滑过阈值后收起，改由迷你条承接；其它 tab 一直显示。 -->
     <ShopHeader
+      v-show="activeTab !== 'order' || headerVisible"
       :shop-logo="shopLogo"
       :shop-name="shopName"
       :table-display-text="tableDisplayText"
       :order-mode-display-text="orderModeDisplayText"
+      :store-closed="storeClosed"
+      :dish-count="allDishes.length"
+      :coupon-count="availableCoupons.length"
       @show-table-hint="showTableHint"
     />
 
-
-    <CouponBar
+    <!-- 点餐 tab 收起后的迷你条：店名 + 桌号芯片。 -->
+    <view
       v-if="activeTab === 'order'"
-      :coupon-bar-visible="couponBarVisible"
-      :coupon-bar-prefix="couponBarPrefix"
-      :coupon-bar-amount="couponBarAmount"
-      :is-customer-logged-in="isCustomerLoggedIn"
-      :new-customer-coupon-preview="newCustomerCouponPreview"
-      :new-customer-hook-text="newCustomerHookText"
-      :member-authorizing="memberAuthorizing"
-      :coupon-nudge-state="couponNudgeState"
-      :total-price="totalPrice"
-      :format-price="formatPrice"
-      @open-coupon-picker="openCouponPicker"
-      @phone-auth="handleMemberCardAuth"
-      @coupon-add-on="goCouponAddOn"
-    />
+      class="mini-shop-bar"
+      :class="{ 'mini-shop-bar--visible': !headerVisible }"
+      @click="showTableHint"
+    >
+      <text class="mini-shop-bar-name">{{ shopName }}</text>
+      <text class="mini-shop-bar-chip">{{ tableDisplayText }}</text>
+    </view>
+
+    <!-- 优惠券条：全宽，在头部/迷你条之下、分类菜品之上（不进右侧滚动区）。 -->
+    <view v-if="activeTab === 'order'" class="order-coupon-wrap">
+      <CouponBar
+        :coupon-bar-visible="couponBarVisible"
+        :coupon-bar-prefix="couponBarPrefix"
+        :coupon-bar-amount="couponBarAmount"
+        :is-customer-logged-in="isCustomerLoggedIn"
+        :new-customer-coupon-preview="newCustomerCouponPreview"
+        :new-customer-hook-text="newCustomerHookText"
+        :member-authorizing="memberAuthorizing"
+        :coupon-nudge-state="couponNudgeState"
+        :total-price="totalPrice"
+        :format-price="formatPrice"
+        @open-coupon-picker="openCouponPicker"
+        @phone-auth="handleMemberCardAuth"
+        @coupon-add-on="goCouponAddOn"
+      />
+    </view>
 
     <DishList
       v-show="activeTab === 'order'"
+      @scroll-position="onDishScrollPosition"
       :categories="categories"
       :active-category="activeCategory"
       :category-scroll-top="categoryScrollTop"
@@ -542,6 +561,18 @@ export default {
     const isCustomerLoggedIn = ref(Boolean(uni.getStorageSync('customer_token')))
     const authStateVersion = ref(0)
     const activeTab = ref('order')
+
+    // 方案1：全宽 ShopHeader 在两列之上；列表 scrollTop 过阈值后收起并露出迷你条。
+    const HEADER_COLLAPSE_SCROLL = 48
+    const headerVisible = ref(true)
+    const onDishScrollPosition = (scrollTop) => {
+      if (activeTab.value !== 'order') return
+      headerVisible.value = scrollTop < HEADER_COLLAPSE_SCROLL
+    }
+    // 切回点餐 tab 时复位，避免停在收起态。
+    watch(activeTab, (tab) => {
+      if (tab === 'order') headerVisible.value = true
+    })
     const shopDistance = ref('')
 
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
@@ -1127,6 +1158,7 @@ export default {
       isFeatured, dishPlaceholderStyle,
       lastOrderItems, reorderItem, reorderAll,
       handleActiveCategoryChange, ignoreScroll,
+      headerVisible, onDishScrollPosition,
     }
   },
 
@@ -1225,6 +1257,56 @@ export default {
   background: #f5f6fa;
   display: flex;
   flex-direction: column;
+}
+
+.mini-shop-bar {
+  overflow: hidden;
+  flex-shrink: 0;
+  height: 0;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 0 32rpx;
+  background: var(--bg-card);
+  border-bottom: 1rpx solid transparent;
+  box-sizing: border-box;
+  pointer-events: none;
+  transition: height 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.18s ease;
+}
+
+.mini-shop-bar--visible {
+  height: 72rpx;
+  opacity: 1;
+  border-bottom-color: #edf0f2;
+  pointer-events: auto;
+}
+
+.mini-shop-bar-name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text-1);
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-shop-bar-chip {
+  margin-left: auto;
+  padding: 4rpx 16rpx;
+  border-radius: 8rpx;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+  white-space: nowrap;
+}
+
+.order-coupon-wrap {
+  flex-shrink: 0;
+  background: var(--bg-card);
 }
 
 /* DishList 拆成独立组件后，.menu-body 的 flex:1/min-height:0 是靠"父级是 flex
