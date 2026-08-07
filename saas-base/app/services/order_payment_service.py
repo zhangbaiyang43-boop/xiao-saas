@@ -169,12 +169,14 @@ class OrderPaymentService(BaseService):
                     )
                 )
                 prior_paid_count = int(prior_paid_count_result.scalar() or 0)
-                is_new_customer = prior_paid_count == 0
                 # 第二单是"首单到复购"这条转化漏斗里最关键的一步——比第三单、第十单都更值得
                 # 单独识别出来，用来在客户端给一句专属文案（"欢迎回来，这是你的第二次光临"），
                 # 而不是把所有复购场景都用同一句"又送你一张券"糊弄过去。
                 is_second_order = prior_paid_count == 1
-                rule_type = "new_customer_coupon" if is_new_customer else "consumption_coupon"
+                rule_type = await svc.resolve_consumption_coupon_rule_type(
+                    int(customer_id),
+                    exclude_order_id=int(order.id),
+                )
                 issue_result = await svc.issue_auto_coupon(
                     int(customer_id), rule_type, consumption_amount=float(order.total or 0)
                 )
@@ -270,18 +272,12 @@ class OrderPaymentService(BaseService):
         # 与文案承诺不符。同一套 rule_type 判定逻辑（按已支付订单数区分新客/复购），
         # 发放本身的去重交给 issue_auto_coupon 自己的幂等保护（_dedup_issue_lock）。
         try:
-            prior_paid_count_result = await self.db.execute(
-                select(func.count(Order.id)).where(
-                    Order.tenant_id == order.tenant_id,
-                    Order.customer_id == customer_id,
-                    Order.payment_status == "paid",
-                    Order.id != order.id,
-                )
-            )
-            prior_paid_count = int(prior_paid_count_result.scalar() or 0)
-            rule_type = "new_customer_coupon" if prior_paid_count == 0 else "consumption_coupon"
             coupon_svc = CouponService(self.db)
             coupon_svc.set_tenant_id(tenant_id)
+            rule_type = await coupon_svc.resolve_consumption_coupon_rule_type(
+                customer_id,
+                exclude_order_id=int(order.id or 0),
+            )
             await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
         except Exception as e:
             logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")

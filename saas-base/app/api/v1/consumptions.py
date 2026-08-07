@@ -73,9 +73,14 @@ async def create_consumption(data: CreateConsumptionRequest, request: Request, d
     TenantContext.set_tenant_id(consumption.tenant_id)
 
     coupon_service = CouponService(db)
+    coupon_service.set_tenant_id(tenant_id)
+    rule_type = await coupon_service.resolve_consumption_coupon_rule_type(
+        data.customer_id,
+        exclude_consumption_id=int(consumption.id),
+    )
     coupon_result = await coupon_service.issue_auto_coupon(
         data.customer_id,
-        "consumption_coupon",
+        rule_type,
         consumption_amount=float(data.amount)
     )
 

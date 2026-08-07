@@ -120,6 +120,52 @@ class CouponService(BaseService):
                 merged[key] = rule
         return merged
 
+    async def resolve_consumption_coupon_rule_type(
+        self,
+        customer_id: int,
+        *,
+        exclude_order_id: int | None = None,
+        exclude_consumption_id: int | None = None,
+    ) -> str:
+        """Return new_customer_coupon vs consumption_coupon from cross-channel history.
+
+        Counts paid orders and manual consumptions together so online checkout and
+        back-office entry stay in sync when deciding first-consumption rewards.
+        """
+        from app.models.consumption import Consumption
+        from app.models.order import Order
+
+        tenant_id = self.require_tenant_id()
+
+        order_filters = [
+            Order.tenant_id == tenant_id,
+            Order.customer_id == customer_id,
+            Order.payment_status == "paid",
+        ]
+        if exclude_order_id is not None:
+            order_filters.append(Order.id != exclude_order_id)
+
+        order_count_result = await self.db.execute(
+            select(func.count(Order.id)).where(*order_filters)
+        )
+        order_count = int(order_count_result.scalar() or 0)
+
+        consumption_filters = [
+            Consumption.tenant_id == tenant_id,
+            Consumption.customer_id == customer_id,
+        ]
+        if exclude_consumption_id is not None:
+            consumption_filters.append(Consumption.id != exclude_consumption_id)
+
+        consumption_count_result = await self.db.execute(
+            select(func.count(Consumption.id)).where(*consumption_filters)
+        )
+        consumption_count = int(consumption_count_result.scalar() or 0)
+
+        if order_count + consumption_count > 0:
+            return "consumption_coupon"
+        return "new_customer_coupon"
+
     async def preview_new_customer_coupon(self) -> dict | None:
         """未登录顾客也能看到的"首单钩子"文案数据源：只读、不发券、不查重复领取，
         单纯把 new_customer_coupon 这条则算出来的面额/门槛/有效期报给前端展示用。
