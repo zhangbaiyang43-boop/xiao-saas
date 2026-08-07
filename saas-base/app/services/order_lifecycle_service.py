@@ -442,6 +442,7 @@ class OrderLifecycleService(BaseService):
             )
         if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
             return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
+        entered_done = body.status == "done"
 
         if (
             body.status in ("rejected", "cancelled")
@@ -478,6 +479,14 @@ class OrderLifecycleService(BaseService):
         await self.db.refresh(order)
         if just_settled:
             await _record_order_consumption(order, self.db)
+        if entered_done:
+            # 取餐提醒：仅首次切入 done 时发（idempotent 早退已挡住重复）；失败不影响改状态。
+            try:
+                from app.services.subscribe_message_service import send_pickup_reminder_subscribe
+                await send_pickup_reminder_subscribe(self.db, order)
+            except Exception:
+                from app.core.logger import logger
+                logger.exception(f"pickup reminder subscribe failed order_id={order.id}")
         return success_response(
             data={
                 "id": str(order.id),

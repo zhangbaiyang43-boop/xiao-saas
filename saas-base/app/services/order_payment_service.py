@@ -220,6 +220,14 @@ class OrderPaymentService(BaseService):
 
         # Print order ticket after payment. Printing failures are recoverable and must not affect payment state.
         await _print_paid_order_ticket(order, self.db, reason="payment_success")
+
+        # 点餐成功订阅消息：依赖顾客支付前 requestSubscribeMessage 授权；失败不影响支付主流程。
+        try:
+            from app.services.subscribe_message_service import send_order_success_subscribe
+            await send_order_success_subscribe(self.db, order)
+        except Exception as e:
+            logger.warning(f"post-payment order success subscribe failed: {e}")
+
         return cast(PostPaymentCouponData | None, coupon_data), 0.0
 
 

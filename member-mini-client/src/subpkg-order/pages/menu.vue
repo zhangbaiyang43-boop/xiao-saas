@@ -941,6 +941,9 @@ export default {
       refreshAvailableCoupons()
     }
 
+    const orderSuccessTemplateId = ref('')
+    const pickupReminderTemplateId = ref('')
+
     const {
       goCheckout, cancelCheckoutAuth, handleCheckoutAuth,
       confirmPay,
@@ -955,6 +958,7 @@ export default {
       ordering, tableSessionClosed, paymentMode,
       reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
       totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
+      orderSuccessTemplateId, pickupReminderTemplateId,
       wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
       normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
     })
@@ -1009,6 +1013,8 @@ export default {
       }
       newCustomerCouponPreview.value = d.new_customer_coupon_preview || null
       couponReminderTemplateId.value = d.coupon_reminder_template_id || ''
+      orderSuccessTemplateId.value = d.order_success_template_id || ''
+      pickupReminderTemplateId.value = d.pickup_reminder_template_id || ''
       if (d.is_open === false) {
         storeClosed.value = true
         closedNotice.value = d.closed_notice || d.business_hours || ''

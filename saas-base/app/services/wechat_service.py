@@ -151,4 +151,11 @@ class WechatService:
         with urllib.request.urlopen(request, timeout=10) as response:
             result = json.loads(response.read().decode("utf-8"))
 
-        return result.get("errcode", 0) == 0
+        errcode = result.get("errcode", 0)
+        if errcode != 0:
+            from app.core.logger import logger
+            logger.warning(
+                f"subscribe send failed errcode={errcode} errmsg={result.get('errmsg')} template_id={template_id}"
+            )
+            return False
+        return True

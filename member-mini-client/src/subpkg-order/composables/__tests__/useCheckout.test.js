@@ -66,6 +66,8 @@ function setup(overrides = {}) {
     wechatPayAmount: ref(20),
     isPrepayMode: ref(true),
     canSubmitOrder: ref(true),
+    orderSuccessTemplateId: ref('tmpl-order-success'),
+    pickupReminderTemplateId: ref('tmpl-pickup'),
   }
   const callbacks = {
     wxLogin: vi.fn(() => Promise.resolve('wx_code')),
@@ -126,6 +128,20 @@ describe('useCheckout', () => {
   })
 
   describe('performSubmitOrder - 提交成功', () => {
+    it('提交前申请点餐成功与取餐提醒订阅消息', async () => {
+      const { checkout } = setup()
+      createOrder.mockResolvedValue({ data: { id: 'order_1', need_payment: false } })
+
+      await checkout.performSubmitOrder()
+
+      expect(uni.requestSubscribeMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tmplIds: ['tmpl-order-success', 'tmpl-pickup'],
+        })
+      )
+      expect(createOrder).toHaveBeenCalled()
+    })
+
     it('免单（need_payment:false）时直接标记成功，不再走微信支付', async () => {
       const { state, checkout, callbacks } = setup()
       createOrder.mockResolvedValue({

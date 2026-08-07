@@ -29,6 +29,7 @@ export function useCheckout({
   ordering, tableSessionClosed, paymentMode,
   reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
   totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
+  orderSuccessTemplateId, pickupReminderTemplateId,
   wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
   normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
 }) {
@@ -248,6 +249,26 @@ export function useCheckout({
     }
   }
 
+  // 支付前申请点餐成功 + 取餐提醒授权（一次性额度，拒绝也不阻断下单）。
+  const requestOrderSubscribeMessages = async () => {
+    const ids = [
+      orderSuccessTemplateId?.value,
+      pickupReminderTemplateId?.value,
+    ].filter(Boolean).slice(0, 3)
+    if (!ids.length) return
+    await new Promise((resolve) => {
+      try {
+        uni.requestSubscribeMessage({
+          tmplIds: ids,
+          complete: resolve,
+          fail: resolve,
+        })
+      } catch (e) {
+        resolve()
+      }
+    })
+  }
+
   // performSubmitOrder 拆出来是为了让"本桌身份失效，重建后自动重试一次"这条路径能
   // 递归调用自己而不撞上 submitOrder 自己的 ordering.value 重入锁（锁在整个下单+支付
   // 期间一直是 true，递归调用外层 submitOrder 会被这把锁直接挡回来）。
@@ -255,6 +276,8 @@ export function useCheckout({
     try {
       const sessionReady = await ensureDiningSession()
       if (!sessionReady || tableSessionClosed.value) throw new Error(tableSessionClosed.value ? '本桌已结束，请重新扫码点餐' : '本桌点餐会话不可用，请重新扫码')
+      // 必须在用户点击提交的手势链里调用，否则微信不会弹授权框。
+      await requestOrderSubscribeMessages()
       const payload = {
         table: tableNo.value,
         shop: shopId.value,
@@ -393,6 +416,8 @@ export function useCheckout({
     paying.value = true
     paymentFailed.value = false
     try {
+      // 待支付恢复等只走 confirmPay 的路径，也要再申请一次（已授权时微信通常不再弹框）。
+      await requestOrderSubscribeMessages()
       if (await recoverPendingPaymentResult()) return true
       if (showCheckoutAuth.value) authActionStatus.value = 'paying'
       let jsCode = ''

@@ -17,7 +17,10 @@ globalThis.uni = {
   reLaunch: vi.fn(),
   requestPayment: vi.fn(() => Promise.resolve()),
   login: vi.fn((opts) => opts?.success?.({ code: 'mock_code' })),
-  requestSubscribeMessage: vi.fn((opts) => opts?.complete?.()),
+  requestSubscribeMessage: vi.fn((opts) => {
+    opts?.complete?.()
+    opts?.success?.({})
+  }),
   getLocation: vi.fn((opts) => opts?.fail?.()),
   setNavigationBarTitle: vi.fn(),
 }
