@@ -501,6 +501,7 @@ import pollingManager from '../utils/pollingManager'
 import { useOrderAlert } from '../composables/useOrderAlert'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
+import { sortMerchantOrders } from '../utils/orderListSort'
 
 function decodeJwtPayload(token) {
   try {
@@ -919,7 +920,6 @@ function paymentMethodText(method, paymentStatus) {
 }
 
 const sortedOrders = computed(() => {
-  const p = { pending: 0, preparing: 1, done: 2, settled: 3, rejected: 4, cancelled: 5, pending_payment: 6 }
   let list = statusFilter.value
     ? orders.value.filter(o => o.status === statusFilter.value)
     : orders.value.filter(o => o.status !== 'pending_payment')
@@ -931,9 +931,8 @@ const sortedOrders = computed(() => {
       o.items.some(item => (item.name || '').includes(q))
     )
   }
-  // 状态优先级不变（待接单永远最先看到）；同一优先级内之前是接口原始顺序，现在按
-  // 下单时间从早到晚排——不然高峰期同时来好几单待接单，老板看不出该先做哪个。
-  return [...list].sort((a, b) => (p[a.status] ?? 9) - (p[b.status] ?? 9) || a.createdAt.localeCompare(b.createdAt))
+  // 后端 list_orders 按 created_at DESC；工作台有意二次排序：履约态 FIFO、终态/查看态最新优先。
+  return sortMerchantOrders(list)
 })
 
 const LIST_PAGE_SIZE = 20
