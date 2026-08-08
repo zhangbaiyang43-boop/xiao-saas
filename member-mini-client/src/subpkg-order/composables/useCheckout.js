@@ -327,8 +327,18 @@ export function useCheckout({
         return false
       }
       const rawMsg = err?.message || ''
-      if (rawMsg.includes('会话') || rawMsg.includes('重新扫码') || rawMsg.includes('本桌')) tableSessionClosed.value = true
-      const msg = rawMsg || toastText.submitOrderFailed
+      // 409 /「本桌身份」可恢复：只提示重新扫码，绝不能标成 tableSessionClosed
+      // （否则会伪装成「本桌用餐已结束」，且阻断后续 ensureDiningSession）。
+      // 只有明确的会话结束文案才关桌。
+      if (
+        !isDiningIdentityError(err)
+        && (rawMsg.includes('用餐已结束') || rawMsg.includes('本桌已结束') || rawMsg.includes('会话已关闭'))
+      ) {
+        tableSessionClosed.value = true
+      }
+      const msg = isDiningIdentityError(err)
+        ? (rawMsg || toastText.tableSessionUnavailable)
+        : (rawMsg || toastText.submitOrderFailed)
       uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
       return false
     }

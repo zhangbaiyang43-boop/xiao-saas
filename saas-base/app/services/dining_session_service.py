@@ -451,7 +451,11 @@ class DiningSessionService:
                 participant.customer_id = customer_id
             if openid and not participant.openid:
                 participant.openid = openid
-            if not participant.guest_token_hash:
+            # 必须让 DB hash 与返回给客户端的 raw_token 一致。
+            # 旧逻辑只在 hash 为空时写入：当客户端 token 对不上、却靠 customer_id/
+            # client_id 找回同一人时，前面已经 mint 了新 token，若不覆盖 hash，
+            # 客户端会存下无效 token，后续 createOrder 永久 409。
+            if participant.guest_token_hash != token_hash:
                 participant.guest_token_hash = token_hash
             return participant, raw_token
 
@@ -492,6 +496,8 @@ class DiningSessionService:
             if not existing:
                 raise
             existing.last_active_at = now
+            if existing.guest_token_hash != token_hash:
+                existing.guest_token_hash = token_hash
             return existing, raw_token
         return new_participant, raw_token
 

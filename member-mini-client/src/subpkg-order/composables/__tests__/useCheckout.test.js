@@ -264,6 +264,24 @@ describe('useCheckout', () => {
       expect(ok).toBe(false)
       expect(callbacks.ensureDiningSession).not.toHaveBeenCalledWith(true)
     })
+
+    it('409 身份失效重试仍失败时，不把本桌标成用餐已结束', async () => {
+      const { state, checkout, callbacks } = setup()
+      const identityError = new Error('本桌身份已失效，请重新扫码')
+      identityError.code = 409
+      isDiningIdentityError.mockImplementation((err) => err === identityError || String(err?.code) === '409')
+      createOrder.mockRejectedValue(identityError)
+      callbacks.ensureDiningSession.mockResolvedValue(true)
+
+      const ok = await checkout.performSubmitOrder()
+
+      expect(ok).toBe(false)
+      expect(createOrder).toHaveBeenCalledTimes(2)
+      expect(state.tableSessionClosed.value).toBe(false)
+      expect(uni.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: expect.stringContaining('本桌身份') }),
+      )
+    })
   })
 
   describe('performSubmitOrder - 结账授权失效（401/403）', () => {
