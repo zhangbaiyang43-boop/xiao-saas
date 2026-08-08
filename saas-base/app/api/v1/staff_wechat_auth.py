@@ -1,6 +1,8 @@
 """Staff WeChat OAuth + bind + trusted device login APIs."""
 
-from __future__ import annotations
+# NOTE: Do NOT use `from __future__ import annotations` here.
+# FastAPI + Pydantic must resolve endpoint body models (e.g. BindConfirmRequest)
+# at route-registration time; postponed annotations break uvicorn import on prod.
 
 from urllib.parse import quote
 
