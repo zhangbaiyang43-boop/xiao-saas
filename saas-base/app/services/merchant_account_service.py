@@ -170,7 +170,7 @@ class MerchantAccountService:
         if not account:
             return error_response(code=404, msg="员工不存在")
         if not account.username:
-            return error_response(code=400, msg="请先设置备用登录账号")
+            return error_response(code=400, msg="请先设置登录账号")
         pw_err = validate_staff_password(password)
         if pw_err:
             return error_response(code=400, msg=pw_err)
@@ -204,7 +204,7 @@ class MerchantAccountService:
         await self.db.commit()
         await self.db.refresh(account)
         await invalidate_account_auth_cache(account.id)
-        return success_response(data=await serialize_account(self.db, account), msg="备用登录已设置")
+        return success_response(data=await serialize_account(self.db, account), msg="登录账号已设置")
 
     async def authenticate(self, *, tenant_id: str, username: str, password: str):
         account = await self.get_by_username(tenant_id, username)

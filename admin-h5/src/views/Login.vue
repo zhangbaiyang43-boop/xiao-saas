@@ -4,7 +4,7 @@
       <div class="brand-top">
         <div class="brand-icon"><ShopOutlined style="font-size:28px;color:#fff" /></div>
         <h1>开心点单商家后台</h1>
-        <p>老板验证码登录 · 员工备用账号登录</p>
+        <p>老板验证码登录 · 员工账号密码登录</p>
       </div>
 
       <a-alert
@@ -64,19 +64,15 @@
       </div>
 
       <div v-else style="padding:8px 20px 16px">
-        <div class="hint-card" style="margin-bottom:14px">
-          员工微信登录请从「开心点单」小程序进入员工工作台。
-        </div>
-        <form class="backup-form" @submit.prevent="handleStaffLogin">
-          <div class="backup-title">备用账号登录</div>
+        <form class="staff-form" @submit.prevent="handleStaffLogin">
           <div style="margin-bottom:12px">
-            <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="门店手机号" maxlength="11" autocomplete="tel" />
+            <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="请输入门店手机号" maxlength="11" autocomplete="tel" />
           </div>
           <div style="margin-bottom:12px">
-            <input v-model="staffForm.username" class="native-input" placeholder="员工账号" autocomplete="username" />
+            <input v-model="staffForm.username" class="native-input" placeholder="请输入员工账号" autocomplete="username" />
           </div>
           <div style="margin-bottom:12px">
-            <input v-model="staffForm.password" class="native-input" type="password" placeholder="密码" autocomplete="current-password" />
+            <input v-model="staffForm.password" class="native-input" type="password" placeholder="请输入密码" autocomplete="current-password" />
           </div>
           <button type="submit" class="submit-btn tap-shrink" :disabled="loading" style="margin-top:8px;background:#334155">
             {{ loading ? '登录中...' : '登录' }}
@@ -211,7 +207,7 @@ const handleLogin = async () => {
 }
 
 const handleStaffLogin = async () => {
-  // Password backup login is user-initiated only. Never auto-call /login/staff.
+  // Staff H5 password login is user-initiated only. Never auto-call /login/staff.
   const shop_phone = String(staffForm.value.shop_phone || '').trim()
   const username = String(staffForm.value.username || '').trim()
   const password = String(staffForm.value.password || '')
@@ -373,12 +369,7 @@ onBeforeUnmount(clearCountdown)
   height: 1px;
   background: #e2e8f0;
 }
-.backup-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: #334155;
-}
+.staff-form { margin: 0; }
 .shop-choices { margin-bottom: 14px; }
 .shop-choice {
   width: 100%;

@@ -1,28 +1,21 @@
-# 员工「小程序微信身份 + 可信设备」
+# 员工「小程序微信身份 + 可信设备」（退出主链，代码保留）
+
+> **Phase 1 产品主路径已切回商家 H5 密码登录**（门店手机号 + 员工账号 + 密码 → Waiter/Kitchen）。
+> 本文档描述的小程序 / handoff 链为历史实现，默认关闭，后续物理清理前勿当正式入口。
 
 ## 硬规则
 
-【微信只负责证明“你是谁”，Role/Permission永远来自 merchant_account 数据库。】
-
-【员工微信身份统一由开心点单小程序提供，不依赖公众号网页 OAuth。】
-
-【小程序身份和 H5 工作台通过短时、单次 Handoff 连接，不共享长期微信凭证。】
-
-【长期可信凭证只存在 HttpOnly Cookie，openid、wx.login code、session_key 都不能成为 H5 权限凭证。】
+【Role/Permission永远来自 merchant_account 数据库。】
 
 【Authentication Provider 可以替换，但 Authorization 不允许跟着重写。】
 
-## 主链路
+## 历史链路（已非产品主路径）
 
 老板生成小程序码 → 员工扫码绑定（wx.login → code2session）→ 一次性 Handoff → H5 `/staff-handoff#t=` → HttpOnly `staff_device` + 短 JWT → Waiter/Kitchen 工作台。
 
-日常：小程序「员工工作台」→ wx.login → handoff → H5。
-
-备用：admin-h5 账号密码登录。
-
 ## Feature flags
 
-- `STAFF_MINIPROGRAM_AUTH_ENABLED=true`（主）
+- `STAFF_MINIPROGRAM_AUTH_ENABLED=false`（默认关闭；生产也应为 false）
 - `STAFF_OFFICIAL_ACCOUNT_OAUTH_ENABLED=false`（旧公众号 OAuth，代码保留，默认关闭）
 
 ## 复用

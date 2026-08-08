@@ -1,24 +1,28 @@
 /**
- * TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除
+ * Phase 1: StaffManage no longer exposes TEMP/formal bind QR as product UI.
+ * TEMP scanner helpers may remain in the repo for a later cleanup phase.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const repoRoot = path.resolve(root, '..')
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8')
 const assert = (cond, msg) => {
   if (!cond) throw new Error(msg)
 }
 
 const staffManage = read('src/views/StaffManage.vue')
-assert(staffManage.includes('TEMP_STAFF_SCAN_TEST'), 'TEMP marker')
-assert(staffManage.includes('正式小程序码'), 'formal code label')
-assert(staffManage.includes('开发版测试二维码'), 'test code label distinct')
-assert(staffManage.includes('test_scan_payload'), 'test QR from same-session payload')
-assert(staffManage.includes('我的 → 扫一扫'), 'points to miniapp scan entry')
-assert(staffManage.includes('不要扫上方正式小程序码'), 'warn not to scan formal code')
-assert(staffManage.includes('QRCode.toDataURL'), 'local QR generation')
-assert(staffManage.includes('qrcode_data_url'), 'formal wxacode still primary')
+const api = read('src/api/index.js')
 
-console.log('TEST-FE staffBindTestScan: passed')
+assert(!staffManage.includes('TEMP_STAFF_SCAN_TEST'), 'StaffManage exited TEMP scan UI')
+assert(!staffManage.includes('test_scan_payload'), 'StaffManage exited test QR payload UI')
+assert(!staffManage.includes('createMiniprogramBindSession'), 'StaffManage exited bind session UI')
+assert(!staffManage.includes('生成微信绑定码'), 'WeChat bind CTA removed')
+assert(api.includes('createMiniprogramBindSession'), 'bind session API retained for later cleanup')
+
+const scannerPath = path.join(repoRoot, 'member-mini-client/src/utils/staffBindTestScanner.js')
+assert(fs.existsSync(scannerPath), 'TEMP scanner file retained (cleanup later)')
+
+console.log('TEST-FE staffBindTestScan: passed (UI exited, helpers retained)')

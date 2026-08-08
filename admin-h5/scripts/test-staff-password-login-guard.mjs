@@ -1,7 +1,7 @@
 /**
  * Guards: /login/staff must only be called with complete shop_phone+username+password.
  * Auto paths (device / init) must not reference staffLogin.
- * 公众号 OAuth must not auto-start from Login.
+ * Phase 1: staff password login is the formal H5 entry (not「备用」/ mini-program).
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -25,32 +25,31 @@ const router = read('src/router/index.js')
 const handoff = read('src/views/StaffHandoff.vue')
 const staffManage = read('src/views/StaffManage.vue')
 
-// TEST: API guard rejects incomplete body (source-level contract)
 assert(api.includes("err.code = 'STAFF_LOGIN_INCOMPLETE'"), 'staffLogin must reject incomplete body')
 assert(
   api.includes("request.post('/v1/login/staff', { shop_phone, username, password })"),
   'staffLogin must send exact backend fields',
 )
-assert(api.includes("'/v1/login/staff/handoff'"), 'handoff login API exists')
-assert(api.includes('createMiniprogramBindSession'), 'miniprogram bind session API exists')
+assert(api.includes("'/v1/login/staff/handoff'"), 'handoff login API exists (legacy retained)')
+assert(api.includes('createMiniprogramBindSession'), 'miniprogram bind session API retained')
 
-// TEST: only Login.vue imports/calls staffLogin among these modules
 assert(login.includes('staffLogin'), 'Login.vue must use staffLogin')
 assert(!auth.includes('staffLogin'), 'auth store must not call staffLogin')
 assert(!device.includes('staffLogin'), 'deviceAuth must not call staffLogin')
 assert(auth.includes('staffDeviceLogin'), 'device refresh uses staffDeviceLogin only')
 
-// TEST: handleStaffLogin validates fields before request
 assert(login.includes('请输入员工账号'), 'empty username message')
 assert(login.includes('请输入密码'), 'empty password message')
 assert(login.includes('staffLogin({ shop_phone, username, password })'), 'explicit body fields')
-assert(login.includes('备用账号登录'), 'password fallback remains')
-assert(login.includes('开心点单'), 'points staff to mini-program entry')
+assert(login.includes('员工登录'), 'staff tab formal label')
+assert(login.includes('老板登录'), 'owner tab formal label')
+assert(!login.includes('备用账号登录'), 'backup copy removed from Login')
+assert(!login.includes('员工微信登录'), 'mini-program staff hint removed')
+assert(!login.includes('从小程序进入'), 'mini-program entry hint removed')
 assert(!login.includes('微信快捷登录'), 'OA wechat quick login button removed')
 assert(!login.includes('getStaffWechatOauthStart'), 'Login must not start OA OAuth')
 assert(!login.includes('handleWechatLogin'), 'Login must not auto OAuth handler')
 
-// TEST: onMounted auto path must not call staffLogin / OAuth
 const mountedStart = login.indexOf('onMounted(async')
 const mountedEnd = login.indexOf('onBeforeUnmount(clearCountdown)')
 assert(mountedStart >= 0 && mountedEnd > mountedStart, 'onMounted block markers')
@@ -60,19 +59,20 @@ assert(onMountedBlock.includes('ensureSession'), 'auto path uses ensureSession (
 assert(!onMountedBlock.includes('finishWechatLogin'), 'must not consume OA oauth sid')
 assert(!onMountedBlock.includes('oauth/start'), 'must not redirect to OA oauth')
 
-// TEST: StaffHandoff + router
-assert(router.includes("path: '/staff-handoff'"), 'staff-handoff route registered')
-assert(handoff.includes('staffHandoffLogin'), 'StaffHandoff consumes handoff token')
-assert(handoff.includes("replaceState"), 'StaffHandoff clears fragment')
-assert(staffManage.includes('createMiniprogramBindSession'), 'StaffManage uses mini-program code')
-assert(staffManage.includes('getStaffMiniprogramStatus'), 'StaffManage gates bind UI by feature flag')
-assert(staffManage.includes('mpAuthEnabled'), 'StaffManage bind button respects mpAuthEnabled')
-assert(staffManage.includes('qrcode_data_url'), 'formal bind uses server wxacode data URL')
-// TEMP_STAFF_SCAN_TEST: local QR for test_scan_payload only (not H5 URL QR primary)
-assert(staffManage.includes('TEMP_STAFF_SCAN_TEST'), 'test scan TEMP marker present')
-assert(staffManage.includes('test_scan_payload'), 'test QR uses API payload')
-assert(staffManage.includes('QRCode.toDataURL'), 'test plain QR generated locally with qrcode lib')
-assert(api.includes("'/v1/staff/miniprogram/status'"), 'miniprogram status API exists')
+assert(router.includes("path: '/staff-handoff'"), 'staff-handoff route retained')
+assert(handoff.includes('staffHandoffLogin'), 'StaffHandoff retained')
+
+// Phase 1 StaffManage: password primary, WeChat bind UI exited
+assert(staffManage.includes('createMerchantAccount'), 'StaffManage creates staff')
+assert(staffManage.includes('username'), 'create/edit includes username')
+assert(staffManage.includes('password'), 'create/edit includes password')
+assert(staffManage.includes('设置登录账号'), 'legacy staff can set login account')
+assert(!staffManage.includes('createMiniprogramBindSession'), 'StaffManage exited MP bind UI')
+assert(!staffManage.includes('生成微信绑定码'), 'WeChat bind button removed from StaffManage')
+assert(!staffManage.includes('正式小程序码'), 'formal wxacode UI removed from StaffManage')
+assert(!staffManage.includes('备用账号登录'), 'backup login copy removed from StaffManage')
+
+assert(api.includes("'/v1/staff/miniprogram/status'"), 'miniprogram status API retained')
 assert(read('src/api/request.js').includes("hostname === 'saas.zhangbaiyang.com'"), 'prod H5 uses same-origin /api')
 assert(read('src/api/request.js').includes("return '/api'"), 'prod H5 baseURL is /api')
 

@@ -136,27 +136,6 @@
             <text class="card-arrow">›</text>
           </view>
 
-          <view v-if="staffMpAuthEnabled" class="service-divider"></view>
-          <view v-if="staffMpAuthEnabled" class="service-row" @click="goStaffWorkbench">
-            <view class="service-icon"><text class="iconfont icon-order"></text></view>
-            <view class="service-copy">
-              <text class="service-name">员工工作台</text>
-              <text class="service-desc">门店员工从这里进入岗位工作台</text>
-            </view>
-            <text class="card-arrow">›</text>
-          </view>
-
-          <!-- TEMP_STAFF_SCAN_TEST -->
-          <!-- 正式小程序上线后删除 -->
-          <view class="service-divider"></view>
-          <view class="service-row" @click="goStaffBindTestScan">
-            <view class="service-icon"><text class="iconfont icon-scan"></text></view>
-            <view class="service-copy">
-              <text class="service-name">扫一扫</text>
-              <text class="service-desc">开发测试</text>
-            </view>
-            <text class="card-arrow">›</text>
-          </view>
         </view>
       </view>
 
@@ -174,9 +153,7 @@
 <script>
 import { computed, ref } from 'vue'
 import { getMemberProfile, entryJoin } from '@/api/auth'
-import { getStaffMiniprogramStatus } from '@/api/staff'
 import { getShopInfo, getOrderStatus } from '@/api/order'
-import { scanStaffBindTestCode } from '@/utils/staffBindTestScanner'
 import { clearCustomerSession, saveCustomerSession } from '@/utils/auth'
 import { scanStoreCode } from '@/utils/scan'
 import { formatMoney, formatPhone } from '@/utils'
@@ -224,18 +201,6 @@ export default {
     const isLoggedIn = ref(false)
     const recentOrder = ref(null)
     const authorizing = ref(false)
-    // Fail-closed: hide staff entry until status confirms enabled.
-    const staffMpAuthEnabled = ref(false)
-
-    const loadStaffMpAuthFlag = async () => {
-      try {
-        const res = await getStaffMiniprogramStatus()
-        staffMpAuthEnabled.value = Boolean(res?.data?.enabled)
-      } catch {
-        staffMpAuthEnabled.value = false
-      }
-    }
-
     const currentStoreName = computed(() =>
       customer.value.tenant_name ||
       customer.value.shop_name ||
@@ -584,25 +549,6 @@ export default {
       })
     }
 
-    const goStaffWorkbench = () => {
-      if (!staffMpAuthEnabled.value) {
-        uni.showToast({ title: '员工入口未启用', icon: 'none' })
-        return
-      }
-      uni.navigateTo({
-        url: '/subpkg-staff/pages/staff-workbench',
-        fail: (err) => {
-          uni.showToast({ title: '打开失败：' + (err?.errMsg || '请重试'), icon: 'none' })
-        },
-      })
-    }
-
-    // TEMP_STAFF_SCAN_TEST
-    // 正式小程序上线后删除
-    const goStaffBindTestScan = () => {
-      scanStaffBindTestCode()
-    }
-
     const openRecentOrder = () => {
       const table = currentTableNo.value
       const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
@@ -720,10 +666,6 @@ export default {
       goBindPhone,
       goOrders,
       goQueueTake,
-      goStaffWorkbench,
-      staffMpAuthEnabled,
-      goStaffBindTestScan,
-      loadStaffMpAuthFlag,
       openRecentOrder,
       showStoreInfo,
       callStore,
@@ -744,7 +686,6 @@ export default {
   },
   onShow() {
     this.loadProfile()
-    this.loadStaffMpAuthFlag()
     this.startOrderBubblePoll()
   },
   onHide() {

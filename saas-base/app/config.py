@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     ALLOW_MOCK_WECHAT_SESSION: bool = False
 
     # Staff mini-program auth (primary). Uses WECHAT_APP_ID / WECHAT_APP_SECRET via code2session.
-    STAFF_MINIPROGRAM_AUTH_ENABLED: bool = True
+    STAFF_MINIPROGRAM_AUTH_ENABLED: bool = False
     STAFF_MP_BIND_TTL_SECONDS: int = 300
     STAFF_HANDOFF_TTL_SECONDS: int = 60
     STAFF_MP_BIND_PAGE: str = "subpkg-staff/pages/staff-bind"
