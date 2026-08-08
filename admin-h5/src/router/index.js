@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { clearSession, hasValidSession } from '../utils/session'
+import { useAuthStore } from '../stores/auth'
 
 const Login = () => import('../views/Login.vue')
 const Layout = () => import('../views/Layout.vue')
@@ -31,9 +32,11 @@ const QueueDisplay = () => import('../views/QueueDisplay.vue')
 const QueueStatus = () => import('../views/QueueStatus.vue')
 const More = () => import('../views/More.vue')
 const SuperAdmin = () => import('../views/SuperAdmin.vue')
-// H5Order.vue（/h5/:shopId）已下线：这是早期独立于 dining_session/participant_token
-// 体系之外的匿名点餐入口，下的单没有任何身份凭证可供后续接口校验归属。正式点餐
-// 走小程序（member-mini-client）的桌台扫码流程，不要重新挂载这个路由。
+const WaiterWorkbench = () => import('../views/WaiterWorkbench.vue')
+const KitchenWorkbench = () => import('../views/KitchenWorkbench.vue')
+const StaffManage = () => import('../views/StaffManage.vue')
+
+const ownerOnly = { requiresPermission: '*' }
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
@@ -46,46 +49,55 @@ const routes = [
     name: 'Layout',
     component: Layout,
     children: [
-      { path: '', name: 'Dashboard', component: Dashboard },
-      { path: 'entrance-codes', name: 'EntranceCodeList', component: EntranceCodeList },
-      { path: 'channel-entries', name: 'ChannelEntryList', component: ChannelEntryList },
-      { path: 'customers', name: 'CustomerList', component: CustomerList },
-      { path: 'customers/:id', name: 'CustomerDetail', component: CustomerDetail },
-      { path: 'consumptions', name: 'ConsumptionList', component: ConsumptionList },
-      { path: 'coupons', name: 'CouponCenter', component: CouponCenter },
-      { path: 'coupon-records', name: 'CouponRecords', component: CouponRecords },
-      { path: 'marketing-effectiveness', name: 'MarketingEffectiveness', component: MarketingEffectiveness },
-      { path: 'distribution', name: 'Distribution', component: Distribution },
-      { path: 'staff-referral', name: 'StaffReferral', component: StaffReferral },
+      { path: '', name: 'Dashboard', component: Dashboard, meta: ownerOnly },
+      { path: 'waiter', name: 'WaiterWorkbench', component: WaiterWorkbench, meta: { requiresPermission: 'order.view_fulfillment' } },
+      { path: 'kitchen', name: 'KitchenWorkbench', component: KitchenWorkbench, meta: { requiresPermission: 'kitchen.view' } },
+      { path: 'staff', name: 'StaffManage', component: StaffManage, meta: { requiresPermission: 'staff.manage' } },
+      { path: 'entrance-codes', name: 'EntranceCodeList', component: EntranceCodeList, meta: ownerOnly },
+      { path: 'channel-entries', name: 'ChannelEntryList', component: ChannelEntryList, meta: ownerOnly },
+      { path: 'customers', name: 'CustomerList', component: CustomerList, meta: { requiresPermission: 'member.view' } },
+      { path: 'customers/:id', name: 'CustomerDetail', component: CustomerDetail, meta: { requiresPermission: 'member.view' } },
+      { path: 'consumptions', name: 'ConsumptionList', component: ConsumptionList, meta: { requiresPermission: 'member.view' } },
+      { path: 'coupons', name: 'CouponCenter', component: CouponCenter, meta: { requiresPermission: 'marketing.view' } },
+      { path: 'coupon-records', name: 'CouponRecords', component: CouponRecords, meta: { requiresPermission: 'marketing.view' } },
+      { path: 'marketing-effectiveness', name: 'MarketingEffectiveness', component: MarketingEffectiveness, meta: { requiresPermission: 'marketing.view' } },
+      { path: 'distribution', name: 'Distribution', component: Distribution, meta: ownerOnly },
+      { path: 'staff-referral', name: 'StaffReferral', component: StaffReferral, meta: ownerOnly },
       { path: 'coupon-send', redirect: '/coupons' },
       { path: 'coupon-templates', redirect: '/coupons' },
-      { path: 'verify', name: 'Verify', component: Verify },
-      { path: 'orders', name: 'OrderManage', component: OrderManage },
-      { path: 'admin/queue', name: 'QueueManage', component: QueueManage },
+      { path: 'verify', name: 'Verify', component: Verify, meta: ownerOnly },
+      { path: 'orders', name: 'OrderManage', component: OrderManage, meta: ownerOnly },
+      { path: 'admin/queue', name: 'QueueManage', component: QueueManage, meta: ownerOnly },
       { path: 'more', name: 'More', component: More },
-      { path: 'menu', name: 'MenuManage', component: MenuManage },
+      { path: 'menu', name: 'MenuManage', component: MenuManage, meta: ownerOnly },
       { path: 'membership', redirect: '/settings' },
       { path: 'plugins', redirect: '/settings' },
-      { path: 'plugin/:code', name: 'PluginPlaceholder', component: PluginPlaceholder },
-      { path: 'settings', name: 'MerchantSettings', component: MerchantSettings },
-      { path: 'settings/business', name: 'BusinessSettings', component: BusinessSettings },
-      { path: 'settings/payment', name: 'PaymentSettings', component: PaymentSettings },
-      { path: 'settings/devices', name: 'DeviceSettings', component: DeviceSettings },
-      { path: 'settings/notifications', name: 'NotificationSettings', component: NotificationSettings },
-      { path: 'settings/store', name: 'StoreSettings', component: StoreSettings },
-      { path: 'wework-settings', name: 'WeworkSettings', component: WeworkSettings },
+      { path: 'plugin/:code', name: 'PluginPlaceholder', component: PluginPlaceholder, meta: ownerOnly },
+      { path: 'settings', name: 'MerchantSettings', component: MerchantSettings, meta: { requiresPermission: 'settings.store' } },
+      { path: 'settings/business', name: 'BusinessSettings', component: BusinessSettings, meta: { requiresPermission: 'settings.store' } },
+      { path: 'settings/payment', name: 'PaymentSettings', component: PaymentSettings, meta: { requiresPermission: 'settings.payment' } },
+      { path: 'settings/devices', name: 'DeviceSettings', component: DeviceSettings, meta: { requiresPermission: 'settings.printer' } },
+      { path: 'settings/notifications', name: 'NotificationSettings', component: NotificationSettings, meta: ownerOnly },
+      { path: 'settings/store', name: 'StoreSettings', component: StoreSettings, meta: { requiresPermission: 'settings.store' } },
+      { path: 'wework-settings', name: 'WeworkSettings', component: WeworkSettings, meta: ownerOnly },
       { path: 'marketing-templates', redirect: '/coupons' },
-      { path: 'marketing-templates/:id', redirect: '/coupons' }
-    ]
-  }
+      { path: 'marketing-templates/:id', redirect: '/coupons' },
+    ],
+  },
 ]
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes,
 })
 
-router.beforeEach((to, from, next) => {
+function homeForRole(role) {
+  if (role === 'waiter') return '/waiter'
+  if (role === 'kitchen') return '/kitchen'
+  return '/'
+}
+
+router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'
   const isOrder = to.path === '/order'
   const isSuper = to.path === '/super'
@@ -106,13 +118,30 @@ router.beforeEach((to, from, next) => {
 
   if (!isLogin && !validSession) {
     clearSession()
-    next({ path: '/login', query: { reason: '\u767b\u5f55\u5df2\u8fc7\u671f\uff0c\u8bf7\u91cd\u65b0\u767b\u5f55' } })
+    next({ path: '/login', query: { reason: '登录已过期，请重新登录' } })
     return
   }
 
   if (isLogin && validSession) {
-    next('/')
+    const auth = useAuthStore()
+    next(auth.homePath || homeForRole(auth.role))
     return
+  }
+
+  if (validSession) {
+    const auth = useAuthStore()
+    if (!auth.loaded) {
+      await auth.hydrateFromServer()
+    }
+    const required = to.meta?.requiresPermission
+    if (required === '*' && !auth.isOwner) {
+      next(homeForRole(auth.role))
+      return
+    }
+    if (required && required !== '*' && !auth.can(required)) {
+      next(homeForRole(auth.role))
+      return
+    }
   }
 
   next()

@@ -10,14 +10,23 @@ from app.config import settings
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def create_access_token(tenant_id: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(
+    tenant_id: str,
+    expires_delta: Optional[timedelta] = None,
+    *,
+    role: str = "owner",
+    account_id: Optional[int] = None,
+) -> str:
     expire = datetime.utcnow() + (expires_delta or timedelta(days=7))
     payload = {
-        "sub": tenant_id,
+        "sub": str(account_id) if account_id else tenant_id,
         "tenant_id": tenant_id,
         "type": "merchant",
+        "role": role or "owner",
         "exp": expire,
     }
+    if account_id is not None:
+        payload["account_id"] = int(account_id)
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 

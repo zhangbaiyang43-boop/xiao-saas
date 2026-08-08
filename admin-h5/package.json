@@ -9,7 +9,8 @@
     "check:text": "node scripts/check-utf8-text.cjs",
     "test:pickup-ui": "node scripts/test-pickup-no-ui.mjs",
     "test:order-list-sort": "node scripts/test-order-list-sort.mjs",
-    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run build"
+    "test:staff-permissions": "node scripts/test-staff-permissions.mjs",
+    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

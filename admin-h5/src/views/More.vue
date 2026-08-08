@@ -1,11 +1,20 @@
 <template>
   <div class="page-wrap">
     <div class="page-header">
-      <span class="page-title">更多</span>
+      <span class="page-title">{{ auth.isOwner ? '更多' : '我的' }}</span>
+    </div>
+
+    <div v-if="!auth.isOwner" class="section-block animate-in">
+      <a-card :bordered="false">
+        <div style="font-size:16px;font-weight:700">{{ auth.displayName || '员工' }}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:4px">
+          {{ auth.role === 'kitchen' ? '后厨' : '服务员' }} · {{ auth.username || '' }}
+        </div>
+      </a-card>
     </div>
 
     <!-- 店铺信息 -->
-    <div class="section-block animate-in">
+    <div v-if="auth.isOwner" class="section-block animate-in">
       <a-card :bordered="false" class="tap-shrink" style="cursor:pointer" @click="router.push('/settings')">
         <div style="display:flex;align-items:center;gap:14px">
           <div class="store-avatar">
@@ -20,9 +29,7 @@
       </a-card>
     </div>
 
-    <!-- 桌码生成：全店最高频的入口（新开桌、贴纸损坏都要重来），单独抽成一张
-         强调卡片，不跟下面的常规列表条目同一视觉权重，一眼就能看出这是第一优先级。 -->
-    <div class="section-block animate-in" style="animation-delay:.02s">
+    <div v-if="auth.isOwner" class="section-block animate-in" style="animation-delay:.02s">
       <a-card :bordered="false" class="highlight-card tap-shrink" style="cursor:pointer" @click="router.push('/entrance-codes')">
         <div style="display:flex;align-items:center;gap:14px">
           <div class="highlight-icon">
@@ -37,45 +44,52 @@
       </a-card>
     </div>
 
-    <!-- 核心经营：只放 tab 栏没有的功能，"接单""菜单"已经是底部 tab，这里不重复 -->
-    <div class="section-title">核心经营</div>
-    <div class="page-body animate-in" style="animation-delay:.04s">
-      <a-card :bordered="false" :body-style="{ padding: 0 }">
-        <div v-for="(item, idx) in operationItems" :key="item.label" class="menu-item tap-shrink" :style="idx > 0 ? 'border-top:1px solid var(--border)' : ''" @click="router.push(item.path)">
-          <div class="menu-icon" :style="{ background: item.bg }">
-            <component :is="item.icon" :style="{ color: item.color, fontSize: '18px' }" />
+    <template v-if="auth.isOwner">
+      <div class="section-title">核心经营</div>
+      <div class="page-body animate-in" style="animation-delay:.04s">
+        <a-card :bordered="false" :body-style="{ padding: 0 }">
+          <div v-for="(item, idx) in operationItems" :key="item.label" class="menu-item tap-shrink" :style="idx > 0 ? 'border-top:1px solid var(--border)' : ''" @click="router.push(item.path)">
+            <div class="menu-icon" :style="{ background: item.bg }">
+              <component :is="item.icon" :style="{ color: item.color, fontSize: '18px' }" />
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:500;color:var(--text-1)">{{ item.label }}</div>
+              <div style="font-size:12px;color:var(--text-3);margin-top:1px">{{ item.desc }}</div>
+            </div>
+            <RightOutlined style="color:var(--text-3);font-size:12px" />
           </div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:500;color:var(--text-1)">{{ item.label }}</div>
-            <div style="font-size:12px;color:var(--text-3);margin-top:1px">{{ item.desc }}</div>
-          </div>
-          <RightOutlined style="color:var(--text-3);font-size:12px" />
-        </div>
-      </a-card>
-    </div>
+        </a-card>
+      </div>
 
-    <!-- 顾客增长 -->
-    <div class="section-title">顾客增长</div>
-    <div class="page-body animate-in" style="animation-delay:.08s">
-      <a-card :bordered="false" :body-style="{ padding: 0 }">
-        <div v-for="(item, idx) in marketingItems" :key="item.label" class="menu-item tap-shrink" :style="idx > 0 ? 'border-top:1px solid var(--border)' : ''" @click="router.push(item.path)">
-          <div class="menu-icon" :style="{ background: item.bg }">
-            <component :is="item.icon" :style="{ color: item.color, fontSize: '18px' }" />
+      <div class="section-title">顾客增长</div>
+      <div class="page-body animate-in" style="animation-delay:.08s">
+        <a-card :bordered="false" :body-style="{ padding: 0 }">
+          <div v-for="(item, idx) in marketingItems" :key="item.label" class="menu-item tap-shrink" :style="idx > 0 ? 'border-top:1px solid var(--border)' : ''" @click="router.push(item.path)">
+            <div class="menu-icon" :style="{ background: item.bg }">
+              <component :is="item.icon" :style="{ color: item.color, fontSize: '18px' }" />
+            </div>
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:500;color:var(--text-1)">{{ item.label }}</div>
+              <div style="font-size:12px;color:var(--text-3);margin-top:1px">{{ item.desc }}</div>
+            </div>
+            <RightOutlined style="color:var(--text-3);font-size:12px" />
           </div>
-          <div style="flex:1">
-            <div style="font-size:14px;font-weight:500;color:var(--text-1)">{{ item.label }}</div>
-            <div style="font-size:12px;color:var(--text-3);margin-top:1px">{{ item.desc }}</div>
-          </div>
-          <RightOutlined style="color:var(--text-3);font-size:12px" />
-        </div>
-      </a-card>
-    </div>
+        </a-card>
+      </div>
+    </template>
 
-    <!-- 系统设置 -->
-    <div class="section-title">系统设置</div>
+    <div class="section-title">{{ auth.isOwner ? '系统设置' : '账号' }}</div>
     <div class="page-body animate-in" style="animation-delay:.12s">
       <a-card :bordered="false" :body-style="{ padding: 0 }">
-        <div class="menu-item tap-shrink" @click="router.push('/settings')">
+        <div v-if="auth.can('staff.manage')" class="menu-item tap-shrink" @click="router.push('/staff')">
+          <div class="menu-icon" style="background:#eff6ff"><TeamOutlined style="color:#2563eb;font-size:18px" /></div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:500;color:var(--text-1)">员工管理</div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:1px">添加服务员 / 后厨账号</div>
+          </div>
+          <RightOutlined style="color:var(--text-3);font-size:12px" />
+        </div>
+        <div v-if="auth.isOwner" class="menu-item tap-shrink" :style="auth.can('staff.manage') ? 'border-top:1px solid var(--border)' : ''" @click="router.push('/settings')">
           <div class="menu-icon" style="background:var(--bg-page)"><SettingOutlined style="color:var(--text-2);font-size:18px" /></div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:500;color:var(--text-1)">店铺设置</div>
@@ -87,7 +101,7 @@
           <div class="menu-icon" style="background:#fef2f2"><LogoutOutlined style="color:#ef4444;font-size:18px" /></div>
           <div style="flex:1">
             <div style="font-size:14px;font-weight:500;color:#ef4444">退出登录</div>
-            <div style="font-size:12px;color:#fca5a5;margin-top:1px">退出当前商家后台</div>
+            <div style="font-size:12px;color:#fca5a5;margin-top:1px">退出当前账号</div>
           </div>
         </div>
       </a-card>
@@ -102,12 +116,16 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ShopOutlined, QrcodeOutlined, GiftOutlined, ClusterOutlined, TeamOutlined, SettingOutlined, LogoutOutlined, RightOutlined, FieldTimeOutlined, UsergroupAddOutlined, BarChartOutlined } from '@ant-design/icons-vue'
 import { getTenantProfile } from '../api'
-import { clearSession } from '../utils/session'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
 const merchant = ref({ name: '' })
 
-function logout() { clearSession(); router.push('/login') }
+function logout() {
+  auth.clearAuth()
+  router.push('/login')
+}
 
 // 接单管理、菜单管理已经是底部 tab 栏的常驻入口，这里不重复放。
 // 桌码生成是全店最高频功能，已经抽成上面独立的强调卡片，这里不再重复。
@@ -126,7 +144,14 @@ const marketingItems = [
 ]
 
 onMounted(async () => {
-  try { const r = await getTenantProfile(); if (r?.code === 200) merchant.value = { name: r.data?.name || '' } } catch {}
+  if (!auth.isOwner) {
+    merchant.value = { name: auth.displayName || '' }
+    return
+  }
+  try {
+    const r = await getTenantProfile()
+    if (r?.code === 200) merchant.value = { name: r.data?.name || '' }
+  } catch {}
 })
 </script>
 

@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { message } from 'ant-design-vue'
 
 const getBaseURL = () => {
   const envBaseURL = import.meta.env.VITE_API_BASE_URL
@@ -137,7 +138,13 @@ instance.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('tenant_id')
+      ;['role', 'permissions', 'home_path', 'account_id', 'account_name', 'account_username'].forEach((k) => {
+        localStorage.removeItem(k)
+      })
       window.location.href = '/login'
+    }
+    if (error.response && error.response.status === 403) {
+      message.warning(error.response.data?.msg || '当前账号无此权限')
     }
     return Promise.reject(error)
   }

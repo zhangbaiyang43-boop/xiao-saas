@@ -23,6 +23,7 @@ from app.models.dining import DiningSession, DiningParticipant
 from app.models.pickup_no_assignment import PickupNoAssignment
 from app.models.queue_ticket import QueueTicket
 from app.models.staff import Staff
+from app.models.merchant_account import MerchantAccount
 from app.models.perf_sample import PerfSample
 from .tenant import Tenant
 from .customer import Customer
@@ -61,6 +62,7 @@ __all__ = [
     'PickupNoAssignment',
     'QueueTicket',
     'Staff',
+    'MerchantAccount',
     'PerfSample',
 ]
 

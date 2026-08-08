@@ -4,6 +4,13 @@ export const api = request
 
 export const login = (data) => request.post('/v1/login', data)
 export const sendLoginCode = (data) => request.post('/v1/login/code', data)
+export const staffLogin = (data) => request.post('/v1/login/staff', data)
+export const getAuthMe = () => request.get('/v1/auth/me')
+export const getMerchantAccounts = () => request.get('/v1/merchant-accounts')
+export const createMerchantAccount = (data) => request.post('/v1/merchant-accounts', data)
+export const updateMerchantAccount = (id, data) => request.patch(`/v1/merchant-accounts/${id}`, data)
+export const resetMerchantAccountPassword = (id, data) => request.post(`/v1/merchant-accounts/${id}/reset-password`, data)
+export const getWorkbenchOrders = (config) => request.get('/v1/orders/workbench', config)
 export const registerTenant = (data) => request.post('/v1/register', data)
 export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')

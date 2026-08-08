@@ -6,6 +6,7 @@ from app.config import settings
 from app.core.database import get_db
 from app.core.rate_limiter import login_limit, public_limit
 from app.core.response import RespVo, error_response, success_response
+from app.core.permissions import ROLE_OWNER, permission_list
 from app.core.security import create_access_token
 from app.schemas.tenant import LoginRequest, RegisterRequest, normalize_phone
 from app.services.tencent_sms_service import TencentSmsService
@@ -31,6 +32,10 @@ def serialize_tenant_session(tenant, token: str | None = None) -> dict:
         "tenant_id": tenant.tenant_id,
         "name": tenant.name,
         "phone": tenant.phone,
+        "role": ROLE_OWNER,
+        "account_id": None,
+        "permissions": permission_list(ROLE_OWNER),
+        "home_path": "/",
     }
     if token:
         data.update({"token": token, "token_type": "bearer"})
@@ -67,7 +72,7 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     if not await TencentSmsService().verify_login_code(data.phone, data.code):
         return error_response(code=400, msg="验证码错误或已过期")
 
-    token = create_access_token(tenant.tenant_id)
+    token = create_access_token(tenant.tenant_id, role=ROLE_OWNER)
     return success_response(data=serialize_tenant_session(tenant, token), msg="登录成功")
 
 
@@ -93,5 +98,5 @@ async def register(request: Request, data: RegisterRequest, db: AsyncSession = D
         logo_url=data.logo_url,
     )
 
-    token = create_access_token(tenant.tenant_id)
+    token = create_access_token(tenant.tenant_id, role=ROLE_OWNER)
     return success_response(data=serialize_tenant_session(tenant, token), msg="注册成功")

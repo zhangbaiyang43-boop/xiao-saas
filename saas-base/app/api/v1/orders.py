@@ -880,12 +880,20 @@ async def update_order_status(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal, require_order_status_permission
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    if not require_order_status_permission(body.status, principal.role):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
     service = OrderLifecycleService(db)
-    service.set_tenant_id(tenant_id)
+    service.set_tenant_id(principal.tenant_id)
     return await service.update_order_status(int(order_id), body)
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
@@ -899,12 +907,21 @@ async def settle_table(
     db: AsyncSession = Depends(get_db),
 ):
     """Close the current open table session only after all payable orders are finished."""
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_FINANCE_SETTLE
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_FINANCE_SETTLE):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
     service = OrderLifecycleService(db)
-    service.set_tenant_id(tenant_id)
+    service.set_tenant_id(principal.tenant_id)
     closed_by = str(getattr(request.state, "user_id", "") or "merchant")
     return await service.settle_table(body, closed_by=closed_by)
 
@@ -923,14 +940,23 @@ async def get_pickup_no_status(
     db: AsyncSession = Depends(get_db),
 ):
     """商家端号牌选择器：返回启用状态、数量与当前占用（仅本租户）。"""
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_PICKUP_VIEW
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_PICKUP_VIEW):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
     from app.services.pickup_no_service import PickupNoService, load_pickup_settings
 
-    settings = await load_pickup_settings(db, tenant_id)
-    occupied = await PickupNoService(db).list_occupied(tenant_id)
+    settings = await load_pickup_settings(db, principal.tenant_id)
+    occupied = await PickupNoService(db).list_occupied(principal.tenant_id)
     return success_response(
         data={
             "enabled": settings["enabled"],
@@ -952,12 +978,21 @@ async def update_order_pickup_no(
     开桌"而不是"这一单菜"，所以落地到这单所在的 DiningSession 上，并同步给这一桌当前所有
     未取消/拒单的订单——前台只需要在任意一单上填一次，同一桌后面的加单不用再重复填。没有
     会话的单（比如没有走桌台流程的订单）就还是只更新这一单自己。"""
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_PICKUP_ASSIGN, PERM_PICKUP_CHANGE
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    if not (principal.can(PERM_PICKUP_ASSIGN) or principal.can(PERM_PICKUP_CHANGE)):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
     service = OrderLifecycleService(db)
-    service.set_tenant_id(tenant_id)
+    service.set_tenant_id(principal.tenant_id)
     return await service.update_order_pickup_no(int(order_id), body.pickup_no)
 
 
@@ -989,21 +1024,34 @@ async def reprint_order_ticket(
     body: Optional[OrderReprintBody] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_KITCHEN_PRINT_REPRINT
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    print_type = (body.print_type if body else "kitchen") or "kitchen"
+    # Staff may only reprint kitchen tickets; owners keep full reprint capability.
+    if not principal.is_owner:
+        if print_type != "kitchen" or not principal.can(PERM_KITCHEN_PRINT_REPRINT):
+            return JSONResponse(
+                status_code=403,
+                content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+            )
     result = await db.execute(
-        select(Order).where(Order.id == int(order_id), Order.tenant_id == tenant_id)
+        select(Order).where(Order.id == int(order_id), Order.tenant_id == principal.tenant_id)
     )
     order = result.scalar_one_or_none()
     if not order:
         return error_response(code=404, msg="order not found")
-    print_type = (body.print_type if body else "kitchen") or "kitchen"
     allowed, reason = can_reprint_order(order, print_type=print_type)
     if not allowed:
         return error_response(code=400, msg=reason or "order cannot reprint")
-    print_result = await _print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator=tenant_id)
+    print_result = await _print_paid_order_ticket(
+        order, db, manual=True, reason="manual_reprint", operator=str(principal.tenant_id)
+    )
     await db.commit()
     await db.refresh(order)
     return success_response(
@@ -1045,6 +1093,107 @@ async def get_my_order(
     )
 
 
+def serialize_fulfillment_order(order, order_items, *, can_assign_pickup: bool = False) -> dict:
+    """Minimal fulfillment DTO for waiter/kitchen — no money / customer PII."""
+    return {
+        "id": str(order.id),
+        "display_order_no": str(order.id)[-4:],
+        "status": order.status,
+        "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
+        "table_no": order.table_no or "",
+        "pickup_no": getattr(order, "pickup_no", None) or "",
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+        "remark": order.remark or "",
+        "staff_note": getattr(order, "staff_note", None) or "",
+        "dining_session_id": str(order.dining_session_id) if getattr(order, "dining_session_id", None) else None,
+        "order_type": getattr(order, "order_type", None),
+        "order_type_text": ORDER_TYPE_TEXT.get(getattr(order, "order_type", None), ""),
+        "can_assign_pickup_no": bool(can_assign_pickup),
+        "items": [
+            {
+                "name": i.name,
+                "qty": i.qty,
+            }
+            for i in order_items
+        ],
+    }
+
+
+@router.get("/orders/workbench")
+async def list_workbench_orders(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Staff fulfillment feed — role from token; minimal DTO (no finance/member fields)."""
+    from datetime import timedelta as _td
+
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_ORDER_VIEW_FULFILLMENT, PERM_PICKUP_ASSIGN
+    from app.services.pickup_no_service import can_assign_pickup_no, load_pickup_settings
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_ORDER_VIEW_FULFILLMENT):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+
+    tenant_id = principal.tenant_id
+    utc8_now = datetime.now(timezone.utc) + _td(hours=8)
+    today_local = utc8_now.date()
+    day_start_utc = datetime(today_local.year, today_local.month, today_local.day) - _td(hours=8)
+    day_end_utc = day_start_utc + _td(hours=24)
+
+    query = (
+        select(Order)
+        .where(Order.tenant_id == tenant_id)
+        .where(
+            or_(
+                and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
+                Order.status.in_(("pending", "preparing", "done")),
+            )
+        )
+        .where(Order.status.in_(("pending", "preparing", "done", "settled")))
+        .order_by(Order.created_at.asc())
+    )
+    result = await db.execute(query)
+    orders = result.scalars().all()
+    order_ids = [o.id for o in orders]
+    items_by_order: dict[int, list] = {}
+    if order_ids:
+        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id.in_(order_ids)))
+        for item in items_result.scalars().all():
+            items_by_order.setdefault(item.order_id, []).append(item)
+
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+    sessions_by_id = {}
+    session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
+    if session_ids:
+        from app.models.dining import DiningSession
+
+        sessions_result = await db.execute(select(DiningSession).where(DiningSession.id.in_(session_ids)))
+        sessions_by_id = {s.id: s for s in sessions_result.scalars().all()}
+
+    allow_assign = principal.can(PERM_PICKUP_ASSIGN)
+    rows = []
+    for o in orders:
+        dining_session = sessions_by_id.get(getattr(o, "dining_session_id", None))
+        assignable = bool(
+            allow_assign and can_assign_pickup_no(o, pickup_settings, dining_session)
+        )
+        rows.append(
+            serialize_fulfillment_order(
+                o,
+                items_by_order.get(o.id or 0, []),
+                can_assign_pickup=assignable,
+            )
+        )
+    return success_response(data=rows)
+
+
 @router.get("/orders")
 async def list_orders(
     request: Request,
@@ -1059,12 +1208,20 @@ async def list_orders(
     page_size: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant_id = getattr(request.state, "tenant_id", None)
-    token_type = getattr(request.state, "token_type", None)
-    if not tenant_id or token_type != "merchant":
+    from app.core.merchant_auth import get_request_principal
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
         return error_response(code=401, msg="请先登录")
+    # Full order list (money/member fields) is owner-only; staff use /orders/workbench.
+    if not principal.is_owner:
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
     service = OrderLifecycleService(db)
-    service.set_tenant_id(tenant_id)
+    service.set_tenant_id(principal.tenant_id)
     return await service.list_orders(
         date_str=date_str,
         keyword=keyword,

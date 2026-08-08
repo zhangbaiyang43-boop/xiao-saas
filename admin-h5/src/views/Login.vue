@@ -4,7 +4,7 @@
       <div class="brand-top">
         <div class="brand-icon"><ShopOutlined style="font-size:28px;color:#fff" /></div>
         <h1>开心点单商家后台</h1>
-        <p>登录后管理菜单、订单、收款和门店配置</p>
+        <p>老板验证码登录 · 员工账号密码登录</p>
       </div>
 
       <a-alert
@@ -16,10 +16,14 @@
         style="margin:0 20px 12px;border-radius:10px"
       />
 
-      <div style="padding:16px 20px">
+      <div class="mode-tabs">
+        <button type="button" :class="{ active: mode === 'owner' }" @click="mode = 'owner'">老板登录</button>
+        <button type="button" :class="{ active: mode === 'staff' }" @click="mode = 'staff'">员工登录</button>
+      </div>
+
+      <div v-if="mode === 'owner'" style="padding:8px 20px 16px">
         <div style="margin-bottom:12px">
           <input
-            ref="phoneInputRef"
             v-model="loginForm.phone"
             class="native-input"
             type="tel"
@@ -59,6 +63,24 @@
         </button>
       </div>
 
+      <div v-else style="padding:8px 20px 16px">
+        <div style="margin-bottom:12px">
+          <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="门店手机号" maxlength="11" />
+        </div>
+        <div style="margin-bottom:12px">
+          <input v-model="staffForm.username" class="native-input" placeholder="员工登录账号" autocomplete="username" />
+        </div>
+        <div style="margin-bottom:12px">
+          <input v-model="staffForm.password" class="native-input" type="password" placeholder="密码" autocomplete="current-password" />
+        </div>
+        <div class="hint-card">
+          <span>使用老板开通的员工账号。岗位不同，进入不同工作台。</span>
+        </div>
+        <button class="submit-btn tap-shrink" :disabled="loading" @click="handleStaffLogin" style="margin-top:16px">
+          {{ loading ? '登录中...' : '进入工作台' }}
+        </button>
+      </div>
+
       <div style="height:max(24px, env(safe-area-inset-bottom))" />
     </div>
   </div>
@@ -69,20 +91,23 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ShopOutlined } from '@ant-design/icons-vue'
-import { login, sendLoginCode } from '../api'
-import { saveSession } from '../utils/session'
+import { login, sendLoginCode, staffLogin } from '../api'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const route = useRoute()
+const auth = useAuthStore()
+const mode = ref('owner')
 const loading = ref(false)
 const codeSending = ref(false)
 const codeCountdown = ref(0)
 const loginForm = ref({ phone: '', code: '' })
+const staffForm = ref({ shop_phone: '', username: '', password: '' })
 const phoneError = ref('')
 const codeError = ref('')
 let countdownTimer = null
 
-const isPhone = v => /^1\d{10}$/.test(v || '')
+const isPhone = (v) => /^1\d{10}$/.test(v || '')
 const supportMessage = '账号不存在，请联系服务商：15936889988'
 
 const codeButtonText = computed(() => {
@@ -146,9 +171,10 @@ const handleSendCode = async () => {
 }
 
 const persistAndEnter = (data, msg) => {
-  saveSession(data)
+  auth.applySession(data)
   message.success(msg)
-  setTimeout(() => router.replace('/'), 350)
+  const home = data.home_path || (data.role === 'waiter' ? '/waiter' : data.role === 'kitchen' ? '/kitchen' : '/')
+  setTimeout(() => router.replace(home), 350)
 }
 
 const handleLogin = async () => {
@@ -177,6 +203,30 @@ const handleLogin = async () => {
   }
 }
 
+const handleStaffLogin = async () => {
+  if (!isPhone(staffForm.value.shop_phone)) {
+    message.error('请输入正确的门店手机号')
+    return
+  }
+  if (!staffForm.value.username || !staffForm.value.password) {
+    message.error('请输入账号和密码')
+    return
+  }
+  loading.value = true
+  try {
+    const res = await staffLogin(staffForm.value)
+    if (res?.code === 200 && res?.data?.token) {
+      persistAndEnter(res.data, '登录成功')
+      return
+    }
+    message.error(res?.msg || '登录失败')
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '登录失败')
+  } finally {
+    loading.value = false
+  }
+}
+
 onBeforeUnmount(clearCountdown)
 </script>
 
@@ -189,7 +239,6 @@ onBeforeUnmount(clearCountdown)
   padding: 24px 16px;
   background: var(--bg-page);
 }
-
 .login-card {
   width: 100%;
   max-width: 420px;
@@ -198,7 +247,6 @@ onBeforeUnmount(clearCountdown)
   box-shadow: var(--card-shadow);
   overflow: hidden;
 }
-
 .brand-top {
   position: relative;
   padding: 32px 24px 20px;
@@ -208,95 +256,70 @@ onBeforeUnmount(clearCountdown)
   overflow: hidden;
   isolation: isolate;
 }
-.brand-top::before {
-  /* 跟首页/会员详情的 hero 头部同一个柔光效果，登录页也是同一套语言的一部分 */
-  content: '';
-  position: absolute;
-  top: -40%; right: -20%;
-  width: 70%; height: 140%;
-  background: radial-gradient(circle, rgba(255,255,255,.16) 0%, transparent 65%);
-  pointer-events: none;
-  z-index: -1;
-}
-
+.brand-top h1 { margin: 12px 0 6px; font-size: 22px; }
+.brand-top p { margin: 0; opacity: .9; font-size: 13px; }
 .brand-icon {
-  width: 60px;
-  height: 60px;
-  border-radius: 18px;
-  background: rgba(255,255,255,.2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
+  width: 56px; height: 56px; margin: 0 auto; border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.18);
 }
-
-.brand-top h1 {
-  margin: 0 0 6px;
-  font-size: 24px;
-  font-weight: 900;
+.mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px 20px 0;
+}
+.mode-tabs button {
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  border-radius: 10px;
+  padding: 8px;
+  font-size: 14px;
+}
+.mode-tabs button.active {
+  background: #07C160;
+  border-color: #07C160;
   color: #fff;
+  font-weight: 600;
 }
-
-.brand-top p {
-  margin: 0;
-  font-size: 13px;
-  color: rgba(255,255,255,.75);
-}
-
 .native-input {
   width: 100%;
-  height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px 14px;
   font-size: 15px;
   outline: none;
   box-sizing: border-box;
-  background: var(--bg-page);
-  color: var(--text-1);
-  &:focus { border-color: var(--brand); box-shadow: 0 0 0 2px rgba(7,193,96,.15); }
 }
-
-.field-error { color: var(--danger); font-size: 12px; margin-top: 4px; }
-
-.code-input { padding-right: 104px; }
-
+.code-input { padding-right: 110px; }
 .code-btn {
   position: absolute;
-  right: 10px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
-  min-width: 82px;
-  height: 30px;
-  border-radius: 15px;
   border: none;
-  background: var(--brand-light);
-  color: var(--brand-dark);
+  background: transparent;
+  color: #07C160;
   font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  padding: 0 10px;
 }
-.code-btn:disabled { opacity: .55; cursor: not-allowed; }
+.field-error { color: #ef4444; font-size: 12px; margin-top: 6px; }
+.hint-card {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+}
 .submit-btn {
   width: 100%;
-  height: 48px;
-  background: var(--brand);
-  color: #fff;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
+  padding: 13px;
+  background: #07C160;
+  color: #fff;
   font-size: 16px;
-  font-weight: 700;
-  cursor: pointer;
-  &:disabled { opacity: .7; cursor: not-allowed; }
+  font-weight: 600;
 }
-.hint-card {
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--brand-light);
-  margin-top: 8px;
-  strong, span { display: block; }
-  strong { font-size: 13px; font-weight: 700; color: var(--brand-dark); }
-  span { font-size: 12px; margin-top: 3px; color: var(--text-2); }
-}
+.submit-btn:disabled { opacity: .6; }
 </style>
