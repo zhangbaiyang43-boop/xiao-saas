@@ -106,6 +106,16 @@
             <text class="card-arrow">›</text>
           </view>
 
+          <view class="service-divider"></view>
+          <view class="service-row" @click="goQueueTake">
+            <view class="service-icon"><text class="iconfont icon-zuowei"></text></view>
+            <view class="service-copy">
+              <text class="service-name">排队取号</text>
+              <text class="service-desc">{{ hasStoreContext ? '到店排队，叫号微信提醒' : '请先扫码进入门店' }}</text>
+            </view>
+            <text class="card-arrow">›</text>
+          </view>
+
           <view v-if="isLoggedIn && inviteRewardEnabled" class="service-divider"></view>
           <view v-if="isLoggedIn && inviteRewardEnabled" class="service-row" @click="goInvite">
             <view class="service-icon"><text class="iconfont icon-ticket"></text></view>
@@ -517,6 +527,28 @@ export default {
       go('/subpkg-member/pages/consumptions')
     }
 
+    const goQueueTake = () => {
+      const shop = String(uni.getStorageSync('tenant_id') || customer.value.tenant_id || '').trim()
+      if (!shop) {
+        uni.showModal({
+          title: '未识别门店',
+          content: '请先扫描门店码或桌贴码进入门店，再排队取号。',
+          cancelText: '稍后',
+          confirmText: '去扫码',
+          success: ({ confirm }) => {
+            if (confirm) scanStoreCode()
+          },
+        })
+        return
+      }
+      uni.navigateTo({
+        url: `/subpkg-common/pages/queue-take?shop=${encodeURIComponent(shop)}`,
+        fail: (err) => {
+          uni.showToast({ title: '打开失败：' + (err?.errMsg || '请重试'), icon: 'none' })
+        },
+      })
+    }
+
     const openRecentOrder = () => {
       const table = currentTableNo.value
       const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
@@ -633,6 +665,7 @@ export default {
       handleLoginAuth,
       goBindPhone,
       goOrders,
+      goQueueTake,
       openRecentOrder,
       showStoreInfo,
       callStore,
@@ -703,7 +736,7 @@ export default {
   padding: 36rpx;
   background: var(--brand-gradient);
   border-radius: var(--radius-hero);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .identity-top {
@@ -728,7 +761,7 @@ export default {
 }
 
 .identity-avatar-default text {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 38rpx;
   font-weight: 800;
 }
@@ -740,7 +773,7 @@ export default {
 
 .identity-name {
   max-width: 100%;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 40rpx;
   line-height: 56rpx;
   font-weight: 700;
@@ -829,7 +862,7 @@ export default {
   padding: 0 24rpx;
   border-radius: 32rpx;
   background: rgba(255, 255, 255, 0.18);
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 24rpx;
   line-height: 64rpx;
 }
@@ -837,7 +870,7 @@ export default {
 .identity-login-btn {
   height: 72rpx;
   padding: 0 28rpx;
-  background: #fff;
+  background: var(--bg-card);
   color: var(--brand);
   font-size: 26rpx;
   font-weight: 700;

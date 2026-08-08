@@ -22,6 +22,13 @@ describe('queue-take subscribe gesture', () => {
     expect(src).toContain('tmplIds')
   })
 
+  it('queue API 路径不重复 /api 前缀', () => {
+    const src = readFileSync(join(__dirname, '../../api/queue.js'), 'utf8')
+    expect(src).toContain("url: '/queue/customer-tickets'")
+    expect(src).toContain('`${config.apiBaseUrl}/queue/status`')
+    expect(src).not.toMatch(/url:\s*['"`]\/api\/queue\//)
+  })
+
   it('pages.json 注册了排队取号页', () => {
     const pages = JSON.parse(
       readFileSync(join(__dirname, '../../pages.json'), 'utf8'),
