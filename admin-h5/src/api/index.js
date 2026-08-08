@@ -4,7 +4,7 @@ export const api = request
 
 export const login = (data) => request.post('/v1/login', data)
 export const sendLoginCode = (data) => request.post('/v1/login/code', data)
-/** Backup password login only. Never call without trimmed username+password. */
+/** Staff H5 password login. Never call without trimmed username+password. */
 export const staffLogin = (data = {}) => {
   const shop_phone = String(data.shop_phone ?? '').trim()
   const username = String(data.username ?? '').trim()
@@ -14,7 +14,8 @@ export const staffLogin = (data = {}) => {
     err.code = 'STAFF_LOGIN_INCOMPLETE'
     return Promise.reject(err)
   }
-  return request.post('/v1/login/staff', { shop_phone, username, password })
+  // withCredentials: receive/set HttpOnly staff_device on same-origin /api
+  return request.post('/v1/login/staff', { shop_phone, username, password }, { withCredentials: true })
 }
 export const staffWechatLogin = (data) => request.post('/v1/login/staff/wechat', data, { withCredentials: true })
 export const staffDeviceLogin = (data) => request.post('/v1/login/staff/device', data, { withCredentials: true })

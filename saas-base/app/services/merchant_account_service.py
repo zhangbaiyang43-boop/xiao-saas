@@ -177,6 +177,10 @@ class MerchantAccountService:
         account.password_hash = hash_staff_password(password)
         await self.db.commit()
         await invalidate_account_auth_cache(account.id)
+        # Password control changed — invalidate store-device sessions.
+        await StaffTrustedDeviceService(self.db).revoke_all(
+            tenant_id=tenant_id, account_id=int(account.id)
+        )
         return success_response(msg="密码已设置")
 
     async def set_backup_login(
@@ -204,6 +208,10 @@ class MerchantAccountService:
         await self.db.commit()
         await self.db.refresh(account)
         await invalidate_account_auth_cache(account.id)
+        # Password / login-account control changed — invalidate store-device sessions.
+        await StaffTrustedDeviceService(self.db).revoke_all(
+            tenant_id=tenant_id, account_id=int(account.id)
+        )
         return success_response(data=await serialize_account(self.db, account), msg="登录账号已设置")
 
     async def authenticate(self, *, tenant_id: str, username: str, password: str):

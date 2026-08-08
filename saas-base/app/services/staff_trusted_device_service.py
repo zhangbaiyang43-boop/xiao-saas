@@ -37,15 +37,15 @@ def summarize_user_agent(ua: str | None) -> tuple[str | None, str | None]:
     summary = raw[:120]
     lower = raw.lower()
     if "iphone" in lower or "ios" in lower:
-        name = "微信 · iPhone"
+        name = "工作设备 · iPhone"
     elif "android" in lower:
-        name = "微信 · Android"
+        name = "工作设备 · Android"
     elif "windows" in lower:
-        name = "微信 · Windows"
+        name = "工作设备 · Windows"
     elif "mac" in lower:
-        name = "微信 · Mac"
+        name = "工作设备 · Mac"
     else:
-        name = "微信 · 设备"
+        name = "工作设备"
     return name, summary
 
 

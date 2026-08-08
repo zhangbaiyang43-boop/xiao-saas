@@ -27,9 +27,10 @@ const staffManage = read('src/views/StaffManage.vue')
 
 assert(api.includes("err.code = 'STAFF_LOGIN_INCOMPLETE'"), 'staffLogin must reject incomplete body')
 assert(
-  api.includes("request.post('/v1/login/staff', { shop_phone, username, password })"),
+  api.includes("request.post('/v1/login/staff', { shop_phone, username, password }"),
   'staffLogin must send exact backend fields',
 )
+assert(api.includes('withCredentials: true'), 'staffLogin must send credentials for staff_device cookie')
 assert(api.includes("'/v1/login/staff/handoff'"), 'handoff login API exists (legacy retained)')
 assert(api.includes('createMiniprogramBindSession'), 'miniprogram bind session API retained')
 

@@ -1,6 +1,4 @@
-from datetime import timedelta
-
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,11 +14,9 @@ from app.core.permissions import (
     PERM_STAFF_MANAGE,
     PERM_STAFF_VIEW,
     ROLE_OWNER,
-    permission_list,
 )
 from app.core.rate_limiter import login_limit
 from app.core.response import error_response, success_response
-from app.core.security import create_access_token
 from app.schemas.tenant import normalize_phone
 from app.services import staff_bind_token_service as bind_tokens
 from app.services import staff_mp_bind_session_service as mp_bind
@@ -30,7 +26,10 @@ from app.services.staff_miniprogram_provider import (
     build_staff_mp_test_scan_payload,
     staff_miniprogram_auth_enabled,
 )
-from app.services.staff_trusted_device_service import StaffTrustedDeviceService
+from app.services.staff_trusted_device_service import (
+    StaffTrustedDeviceService,
+    decode_device_credential,
+)
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.tenant_service import TenantService
 from slowapi.util import get_remote_address
@@ -75,16 +74,6 @@ def _require_perm(request: Request, permission: str):
     return principal, None
 
 
-def _staff_access_token(tenant_id: str, role: str, account_id: int) -> str:
-    minutes = max(15, int(settings.STAFF_ACCESS_TOKEN_MINUTES or 120))
-    return create_access_token(
-        tenant_id,
-        expires_delta=timedelta(minutes=minutes),
-        role=role,
-        account_id=int(account_id),
-    )
-
-
 @router.get("/auth/me")
 async def auth_me(request: Request, db: AsyncSession = Depends(get_db)):
     principal = get_request_principal(request)
@@ -114,7 +103,12 @@ async def auth_me(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login/staff")
 @login_limit()
-async def staff_login(request: Request, body: StaffLoginRequest, db: AsyncSession = Depends(get_db)):
+async def staff_login(
+    request: Request,
+    response: Response,
+    body: StaffLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
     try:
         phone = normalize_phone(body.shop_phone)
     except ValueError:
@@ -142,23 +136,26 @@ async def staff_login(request: Request, body: StaffLoginRequest, db: AsyncSessio
         return error_response(code=400, msg="账号或密码错误")
 
     await clear_staff_login_failures(tenant.tenant_id, username, client_ip)
-    token = _staff_access_token(tenant.tenant_id, account.role, int(account.id))
-    return success_response(
-        data={
-            "tenant_id": tenant.tenant_id,
-            "name": account.name,
-            "phone": None,
-            "token": token,
-            "token_type": "bearer",
-            "role": account.role,
-            "account_id": str(account.id),
-            "username": account.username,
-            "permissions": permission_list(account.role),
-            "home_path": "/waiter" if account.role == "waiter" else "/kitchen",
-            "auth_method": "staff_password",
-        },
-        msg="登录成功",
+
+    # Store-device trusted login: reuse existing Trusted Device stack (same as handoff).
+    # Wrong/disabled password paths never reach here — no device created on failure.
+    from app.api.v1.staff_wechat_auth import _deliver_device_credential, _read_device_credential
+
+    existing_cred = _read_device_credential(request, None)
+    existing_id, existing_secret = decode_device_credential(existing_cred)
+    issued = await StaffWechatAuthService(db).issue_session_for_account(
+        account,
+        auth_method="staff_password",
+        user_agent=request.headers.get("user-agent"),
+        tenant=tenant,
+        existing_device_id=existing_id,
+        existing_secret=existing_secret,
     )
+    if not issued.get("ok"):
+        return error_response(code=400, msg=issued.get("msg") or "登录失败", data={"code": issued.get("code")})
+
+    data = _deliver_device_credential(response, issued)
+    return success_response(data=data, msg="登录成功")
 
 
 @router.get("/merchant-accounts")

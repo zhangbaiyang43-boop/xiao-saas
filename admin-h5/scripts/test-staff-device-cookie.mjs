@@ -40,4 +40,11 @@ assert(
   'device refresh must call staffDeviceLogin',
 )
 
+// Phase 2 Final Gate: logout → logout-device → clearAuth; must not ensureSession restore.
+const logoutBlock = authStore.match(/async function logoutCurrentDevice\(\) \{[\s\S]*?\n  \}/)?.[0] || ''
+assert(logoutBlock, 'missing logoutCurrentDevice')
+assert(logoutBlock.includes('staffLogoutDevice'), 'logout must call staffLogoutDevice')
+assert(logoutBlock.includes('clearAuth()'), 'logout must clearAuth after logout-device')
+assert(!logoutBlock.includes('ensureSession'), 'logout must not call ensureSession')
+
 console.log('TEST-FE staffDeviceCookie: passed')
