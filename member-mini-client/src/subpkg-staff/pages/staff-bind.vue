@@ -22,6 +22,7 @@
 
 <script>
 import { confirmStaffMpBind, getStaffMiniprogramStatus, previewStaffMpBind } from '@/api/staff'
+import { normalizeStaffBindScene } from '@/utils/staffBindTestScanner'
 
 const wxLogin = () =>
   new Promise((resolve, reject) => {
@@ -31,17 +32,6 @@ const wxLogin = () =>
       fail: () => reject(new Error('微信登录失败')),
     })
   })
-
-const decodeScene = (options = {}) => {
-  let scene = options.scene || options.t || ''
-  if (!scene) return ''
-  try {
-    scene = decodeURIComponent(String(scene))
-  } catch {
-    scene = String(scene)
-  }
-  return scene.trim()
-}
 
 export default {
   data() {
@@ -58,7 +48,8 @@ export default {
     }
   },
   onLoad(options) {
-    this.scene = decodeScene(options)
+    // Official wxacode options.scene and TEMP test navigateTo ?scene= share this path.
+    this.scene = normalizeStaffBindScene(options || {})
     this.loadPreview()
   },
   methods: {

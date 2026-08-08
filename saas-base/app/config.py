@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     STAFF_HANDOFF_TTL_SECONDS: int = 60
     STAFF_MP_BIND_PAGE: str = "subpkg-staff/pages/staff-bind"
     STAFF_MP_WXACODE_ENV_VERSION: str = "release"
+    # TEMP_STAFF_BIND_TEST_SCAN — plain QR transport for develop/trial only. Default off.
+    # Remove after MiniProgram production release verification.
+    STAFF_MINIPROGRAM_TEST_SCAN_ENABLED: bool = False
 
     # Legacy 公众号网页 OAuth — disabled by default; kept for optional re-enable only.
     STAFF_OFFICIAL_ACCOUNT_OAUTH_ENABLED: bool = False

@@ -126,8 +126,16 @@
     <a-modal v-model:open="qrOpen" title="微信绑定" :footer="null" @cancel="stopPoll">
       <div class="qr-box">
         <div class="name">{{ qrStaff?.name }} · {{ roleLabel(qrStaff?.role) }}</div>
+        <div class="section-label">正式绑定</div>
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="微信小程序码" class="qr-img" />
         <div class="hint">请让员工本人使用微信扫一扫</div>
+        <!-- TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification. -->
+        <template v-if="testScanDataUrl">
+          <div class="divider-line" />
+          <div class="section-label">开发版测试</div>
+          <img :src="testScanDataUrl" alt="开发版测试二维码" class="qr-img" />
+          <div class="hint">请在开发版小程序：服务与设置 → 扫一扫测试</div>
+        </template>
         <div class="ttl">{{ ttlText }}</div>
         <div v-if="bindOk" class="ok">✓ 微信绑定成功</div>
         <a-button style="margin-top:12px" block @click="regenQr" :loading="qrLoading">重新生成</a-button>
@@ -139,6 +147,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
+import QRCode from 'qrcode'
 import {
   createMerchantAccount,
   createMiniprogramBindSession,
@@ -166,6 +175,8 @@ const backupSaving = ref(false)
 const qrOpen = ref(false)
 const qrStaff = ref(null)
 const qrDataUrl = ref('')
+// TEMP_STAFF_BIND_TEST_SCAN
+const testScanDataUrl = ref('')
 const qrLoading = ref(false)
 const bindOk = ref(false)
 const expiresAt = ref(0)
@@ -311,6 +322,7 @@ async function regenQr() {
   qrLoading.value = true
   bindOk.value = false
   qrDataUrl.value = ''
+  testScanDataUrl.value = ''
   stopPoll()
   try {
     const res = await createMiniprogramBindSession(qrStaff.value.id)
@@ -323,6 +335,11 @@ async function regenQr() {
     if (!qrDataUrl.value) {
       message.error('员工绑定码生成失败，请稍后重试')
       return
+    }
+    // TEMP_STAFF_BIND_TEST_SCAN — local QR only; never send payload to third-party QR APIs.
+    const testPayload = res.data.test_scan_payload || ''
+    if (testPayload) {
+      testScanDataUrl.value = await QRCode.toDataURL(testPayload, { width: 220, margin: 1 })
     }
     tickTimer = setInterval(() => {
       nowTick.value = Date.now()
@@ -403,6 +420,8 @@ onBeforeUnmount(stopPoll)
 .hint { font-size: 12px; color: #888; margin-top: 8px; }
 .qr-box { text-align: center; padding: 8px 0 4px; }
 .qr-img { width: 220px; height: 220px; margin: 12px auto; display: block; }
+.section-label { font-size: 13px; font-weight: 600; color: #334155; margin-top: 4px; }
+.divider-line { height: 1px; background: #e2e8f0; margin: 16px 0 12px; }
 .ttl { font-size: 14px; color: #666; margin-top: 4px; }
 .ok { color: #07c160; font-weight: 700; margin-top: 10px; }
 .created { text-align: center; padding: 8px 0; }

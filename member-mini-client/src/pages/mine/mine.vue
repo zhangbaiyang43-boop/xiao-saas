@@ -145,6 +145,17 @@
             </view>
             <text class="card-arrow">›</text>
           </view>
+
+          <!-- TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification. -->
+          <view v-if="staffBindTestScanVisible" class="service-divider"></view>
+          <view v-if="staffBindTestScanVisible" class="service-row" @click="goStaffBindTestScan">
+            <view class="service-icon"><text class="iconfont icon-order"></text></view>
+            <view class="service-copy">
+              <text class="service-name">扫一扫测试</text>
+              <text class="service-desc">仅开发版 · 员工绑定测试码</text>
+            </view>
+            <text class="card-arrow">›</text>
+          </view>
         </view>
       </view>
 
@@ -164,6 +175,7 @@ import { computed, ref } from 'vue'
 import { getMemberProfile, entryJoin } from '@/api/auth'
 import { getStaffMiniprogramStatus } from '@/api/staff'
 import { getShopInfo, getOrderStatus } from '@/api/order'
+import { scanStaffBindTestCode, shouldShowStaffBindTestScan } from '@/utils/staffBindTestScanner'
 import { clearCustomerSession, saveCustomerSession } from '@/utils/auth'
 import { scanStoreCode } from '@/utils/scan'
 import { formatMoney, formatPhone } from '@/utils'
@@ -213,13 +225,19 @@ export default {
     const authorizing = ref(false)
     // Fail-closed: hide staff entry until status confirms enabled.
     const staffMpAuthEnabled = ref(false)
+    // TEMP_STAFF_BIND_TEST_SCAN
+    const staffBindTestScanVisible = ref(false)
 
     const loadStaffMpAuthFlag = async () => {
       try {
         const res = await getStaffMiniprogramStatus()
         staffMpAuthEnabled.value = Boolean(res?.data?.enabled)
+        staffBindTestScanVisible.value = shouldShowStaffBindTestScan(
+          Boolean(res?.data?.test_scan_enabled)
+        )
       } catch {
         staffMpAuthEnabled.value = false
+        staffBindTestScanVisible.value = false
       }
     }
 
@@ -584,6 +602,12 @@ export default {
       })
     }
 
+    // TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification.
+    const goStaffBindTestScan = () => {
+      if (!staffBindTestScanVisible.value) return
+      scanStaffBindTestCode()
+    }
+
     const openRecentOrder = () => {
       const table = currentTableNo.value
       const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
@@ -703,6 +727,8 @@ export default {
       goQueueTake,
       goStaffWorkbench,
       staffMpAuthEnabled,
+      staffBindTestScanVisible,
+      goStaffBindTestScan,
       loadStaffMpAuthFlag,
       openRecentOrder,
       showStoreInfo,

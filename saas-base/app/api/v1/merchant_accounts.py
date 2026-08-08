@@ -26,7 +26,11 @@ from app.services import staff_bind_token_service as bind_tokens
 from app.services import staff_mp_bind_session_service as mp_bind
 from app.services.merchant_account_service import MerchantAccountService
 from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
-from app.services.staff_miniprogram_provider import staff_miniprogram_auth_enabled
+from app.services.staff_miniprogram_provider import (
+    build_staff_mp_test_scan_payload,
+    staff_miniprogram_auth_enabled,
+    staff_miniprogram_test_scan_enabled,
+)
 from app.services.staff_trusted_device_service import StaffTrustedDeviceService
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.tenant_service import TenantService
@@ -292,17 +296,20 @@ async def create_miniprogram_bind_session(
     import base64
 
     qrcode_data_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
-    return success_response(
-        data={
-            "session_id": session["session_id"],
-            "expires_at": session["expires_at"],
-            "expires_in": session["expires_in"],
-            "qrcode_data_url": qrcode_data_url,
-            "staff_name": account.name,
-            "role": account.role,
-            "role_label": "服务员" if account.role == "waiter" else "后厨",
-        }
-    )
+    data = {
+        "session_id": session["session_id"],
+        "expires_at": session["expires_at"],
+        "expires_in": session["expires_in"],
+        "qrcode_data_url": qrcode_data_url,
+        "staff_name": account.name,
+        "role": account.role,
+        "role_label": "服务员" if account.role == "waiter" else "后厨",
+    }
+    # TEMP_STAFF_BIND_TEST_SCAN — same scene as wxacode; omit when flag off.
+    # Remove after MiniProgram production release verification.
+    if staff_miniprogram_test_scan_enabled():
+        data["test_scan_payload"] = build_staff_mp_test_scan_payload(session["scene"])
+    return success_response(data=data)
 
 
 @router.get("/merchant-accounts/{account_id}/miniprogram-bind-status")

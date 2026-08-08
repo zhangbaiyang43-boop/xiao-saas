@@ -12,7 +12,8 @@
     "test:staff-permissions": "node scripts/test-staff-permissions.mjs",
     "test:staff-device-cookie": "node scripts/test-staff-device-cookie.mjs",
     "test:staff-password-login-guard": "node scripts/test-staff-password-login-guard.mjs",
-    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run build"
+    "test:staff-bind-test-scan": "node scripts/test-staff-bind-test-scan.mjs",
+    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run test:staff-bind-test-scan && npm run build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
