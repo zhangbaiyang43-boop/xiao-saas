@@ -567,6 +567,8 @@ class StaffRouteDefaultDenyTest(unittest.TestCase):
         self.assertFalse(staff_route_allowed("GET", "/api/v1/stats/dashboard", ROLE_WAITER))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/settle-table", ROLE_KITCHEN))
         self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench/changes", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench/changes", ROLE_KITCHEN))
         self.assertTrue(staff_route_allowed("GET", "/api/v1/orders", ROLE_OWNER))
 
 

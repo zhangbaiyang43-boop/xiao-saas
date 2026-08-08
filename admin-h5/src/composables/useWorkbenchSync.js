@@ -1,8 +1,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { getWorkbenchOrders } from '../api'
+import { getWorkbenchOrderChanges, getWorkbenchOrdersWithCursor } from '../api'
 import { useOrderAlert } from './useOrderAlert'
 import {
   NEW_ORDER_HIGHLIGHT_MS,
+  WORKBENCH_FULL_RECONCILE_INTERVAL_MS,
   WORKBENCH_SYNC_INTERVAL_MS,
   createWorkbenchSyncCore,
   formatSyncAge,
@@ -11,19 +12,30 @@ import {
 
 export {
   NEW_ORDER_HIGHLIGHT_MS,
+  WORKBENCH_FULL_RECONCILE_INTERVAL_MS,
   WORKBENCH_SYNC_INTERVAL_MS,
   diffNewPendingIds,
   formatSyncAge,
   pendingIdsFromOrders,
 } from './workbenchSyncCore'
 
-function unwrapWorkbenchPayload(res) {
-  const raw = res?.data?.data || res?.data || res || []
+function unwrapWorkbenchPayload(payload) {
+  const raw = payload?.data?.data ?? payload?.data ?? payload ?? []
   return Array.isArray(raw) ? raw : []
 }
 
+function readWorkbenchCursor(headers) {
+  if (!headers) return null
+  const value =
+    headers['x-workbench-cursor'] ||
+    headers['X-Workbench-Cursor'] ||
+    headers.get?.('x-workbench-cursor') ||
+    headers.get?.('X-Workbench-Cursor')
+  return value != null && String(value).trim() ? String(value).trim() : null
+}
+
 /**
- * Fixed-terminal workbench sync: visible 5s DB snapshot, visibility/online immediate sync.
+ * Fixed-terminal workbench sync: 5s delta + 60s full reconcile.
  * @param {{ dedupeKey: string, filterStatuses: string[] }} options
  */
 export function useWorkbenchSync(options) {
@@ -84,16 +96,42 @@ export function useWorkbenchSync(options) {
     return isSoundReady()
   })
 
-  async function fetchOrders() {
-    const res = await getWorkbenchOrders({
+  async function fetchFull() {
+    const res = await getWorkbenchOrdersWithCursor({
       meta: {
         dedupe: true,
         dedupeKey,
         fromPolling: Boolean(core?.getState()?.hasBaseline),
         page: 'workbench',
+        rawResponse: true,
       },
     })
-    return unwrapWorkbenchPayload(res)
+    const body = res?.data
+    const list = unwrapWorkbenchPayload(body)
+    const cursor = readWorkbenchCursor(res?.headers)
+    return { orders: list, cursor }
+  }
+
+  async function fetchChanges(cursor) {
+    const res = await getWorkbenchOrderChanges(
+      { cursor },
+      {
+        meta: {
+          dedupe: true,
+          dedupeKey: `${dedupeKey}:changes`,
+          fromPolling: true,
+          page: 'workbench',
+        },
+      },
+    )
+    const data = res?.data?.data || res?.data || res || {}
+    return {
+      items: Array.isArray(data.items) ? data.items : [],
+      removed_ids: Array.isArray(data.removed_ids) ? data.removed_ids : [],
+      next_cursor: data.next_cursor != null ? String(data.next_cursor) : cursor,
+      has_more: Boolean(data.has_more),
+      bootstrap: Boolean(data.bootstrap),
+    }
   }
 
   function filterOrders(raw) {
@@ -135,12 +173,14 @@ export function useWorkbenchSync(options) {
   onMounted(() => {
     ensureAlertProbed()
     core = createWorkbenchSyncCore({
-      fetchOrders,
+      fetchFull,
+      fetchChanges,
       filterOrders,
       playSound: () => {
         playNewOrderBeep()
       },
       intervalMs: WORKBENCH_SYNC_INTERVAL_MS,
+      fullIntervalMs: WORKBENCH_FULL_RECONCILE_INTERVAL_MS,
       highlightMs: NEW_ORDER_HIGHLIGHT_MS,
       onChange: applyState,
     })

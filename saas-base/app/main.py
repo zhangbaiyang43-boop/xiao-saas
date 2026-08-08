@@ -73,7 +73,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
-    expose_headers=["X-Process-Time-Ms"],
+    expose_headers=["X-Process-Time-Ms", "X-Workbench-Cursor"],
 )
 
 app.include_router(login_router)

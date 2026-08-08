@@ -124,6 +124,8 @@ instance.interceptors.response.use(
       fromPolling: Boolean(meta.fromPolling),
       page: meta.page,
     })
+    // Opt-in: callers that need response headers (e.g. workbench cursor).
+    if (meta.rawResponse) return response
     return response.data
   },
   error => {

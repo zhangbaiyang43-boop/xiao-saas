@@ -1139,15 +1139,25 @@ async def list_workbench_orders(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Staff fulfillment feed — role from token; minimal DTO (no finance/member fields)."""
-    from datetime import timedelta as _td
+    """Staff fulfillment feed — role from token; minimal DTO (no finance/member fields).
 
+    Response body stays a bare array (legacy contract). Cursor for Phase 4C delta is
+    returned in the X-Workbench-Cursor response header (snapshot max updated_at/id).
+    Full snapshot may still run bounded print reconciliation (Phase 4B).
+    """
     from app.core.merchant_auth import get_request_principal
     from app.core.permissions import PERM_ORDER_VIEW_FULFILLMENT, PERM_PICKUP_ASSIGN
     from app.services.pickup_no_service import (
         can_assign_pickup_no,
         load_pickup_settings,
         should_defer_kitchen_print,
+    )
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CURSOR_HEADER,
+        cursor_from_orders,
+        is_order_visible_in_workbench,
+        load_order_items_by_order_ids,
+        load_workbench_candidate_orders,
     )
     from fastapi.responses import JSONResponse
 
@@ -1161,44 +1171,24 @@ async def list_workbench_orders(
         )
 
     tenant_id = principal.tenant_id
-    utc8_now = datetime.now(timezone.utc) + _td(hours=8)
-    today_local = utc8_now.date()
-    day_start_utc = datetime(today_local.year, today_local.month, today_local.day) - _td(hours=8)
-    day_end_utc = day_start_utc + _td(hours=24)
-
-    query = (
-        select(Order)
-        .where(Order.tenant_id == tenant_id)
-        .where(
-            or_(
-                and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
-                Order.status.in_(("pending", "preparing", "done")),
-            )
-        )
-        .where(Order.status.in_(("pending", "preparing", "done", "settled")))
-        .order_by(Order.created_at.asc())
-    )
-    result = await db.execute(query)
-    orders = list(result.scalars().all())
+    role = principal.role
+    candidates = await load_workbench_candidate_orders(db, tenant_id)
     pickup_settings = await load_pickup_settings(db, tenant_id)
 
+    # Print recovery stays on FULL only (never on /workbench/changes).
     recovered = await reconcile_print_orders(
         db,
-        orders,
+        candidates,
         trigger="reconcile",
         pickup_settings=pickup_settings,
     )
     if recovered:
         await db.commit()
-        for order in orders:
+        for order in candidates:
             await db.refresh(order)
 
-    order_ids = [o.id for o in orders]
-    items_by_order: dict[int, list] = {}
-    if order_ids:
-        items_result = await db.execute(select(OrderItem).where(OrderItem.order_id.in_(order_ids)))
-        for item in items_result.scalars().all():
-            items_by_order.setdefault(item.order_id, []).append(item)
+    orders = [o for o in candidates if is_order_visible_in_workbench(o, role)]
+    items_by_order = await load_order_items_by_order_ids(db, [o.id for o in orders])
 
     sessions_by_id = {}
     session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
@@ -1223,7 +1213,111 @@ async def list_workbench_orders(
                 defer_kitchen_print=should_defer_kitchen_print(o, pickup_settings),
             )
         )
-    return success_response(data=rows)
+
+    cursor = cursor_from_orders(candidates, fallback_now=datetime.utcnow())
+    response = JSONResponse(content=RespVo(code=200, msg="ok", data=rows).to_response())
+    response.headers[WORKBENCH_CURSOR_HEADER] = cursor
+    return response
+
+
+@router.get("/orders/workbench/changes")
+async def list_workbench_order_changes(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Pure-read workbench delta. No print reconciliation / provider calls."""
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_ORDER_VIEW_FULFILLMENT, PERM_PICKUP_ASSIGN
+    from app.services.pickup_no_service import (
+        can_assign_pickup_no,
+        load_pickup_settings,
+        should_defer_kitchen_print,
+    )
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CHANGES_LIMIT,
+        get_workbench_changes,
+    )
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_ORDER_VIEW_FULFILLMENT):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+
+    try:
+        packed = await get_workbench_changes(
+            db,
+            tenant_id=principal.tenant_id,
+            role=principal.role,
+            cursor=cursor,
+            limit=limit or WORKBENCH_CHANGES_LIMIT,
+        )
+    except ValueError:
+        logger.warning(
+            "workbench_changes invalid_cursor tenant_id=%s",
+            principal.tenant_id,
+        )
+        return JSONResponse(
+            status_code=400,
+            content=RespVo(code=400, msg="INVALID_CURSOR", data=None).to_response(),
+        )
+
+    if packed.get("bootstrap"):
+        return success_response(
+            data={
+                "items": [],
+                "removed_ids": [],
+                "next_cursor": packed["next_cursor"],
+                "has_more": False,
+                "bootstrap": True,
+            }
+        )
+
+    visible_orders = packed["orders"]
+    items_by_order = packed["items_by_order"]
+    pickup_settings = await load_pickup_settings(db, principal.tenant_id)
+
+    sessions_by_id = {}
+    session_ids = {
+        o.dining_session_id for o in visible_orders if getattr(o, "dining_session_id", None)
+    }
+    if session_ids:
+        from app.models.dining import DiningSession
+
+        sessions_result = await db.execute(select(DiningSession).where(DiningSession.id.in_(session_ids)))
+        sessions_by_id = {s.id: s for s in sessions_result.scalars().all()}
+
+    allow_assign = principal.can(PERM_PICKUP_ASSIGN)
+    items = []
+    for o in visible_orders:
+        dining_session = sessions_by_id.get(getattr(o, "dining_session_id", None))
+        assignable = bool(
+            allow_assign and can_assign_pickup_no(o, pickup_settings, dining_session)
+        )
+        items.append(
+            serialize_fulfillment_order(
+                o,
+                items_by_order.get(o.id or 0, []),
+                can_assign_pickup=assignable,
+                defer_kitchen_print=should_defer_kitchen_print(o, pickup_settings),
+            )
+        )
+
+    return success_response(
+        data={
+            "items": items,
+            "removed_ids": packed["removed_ids"],
+            "next_cursor": packed["next_cursor"],
+            "has_more": bool(packed["has_more"]),
+            "bootstrap": False,
+        }
+    )
 
 
 @router.get("/orders")

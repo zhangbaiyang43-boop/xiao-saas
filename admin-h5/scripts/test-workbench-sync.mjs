@@ -1,5 +1,5 @@
 /**
- * Phase 4A: workbench auto-sync + new-pending ID detection.
+ * Phase 4A/4C: workbench sync — full baseline, 5s delta, 60s full reconcile.
  */
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -9,10 +9,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const coreUrl = pathToFileURL(path.join(root, 'src/composables/workbenchSyncCore.js')).href
 const {
+  WORKBENCH_FULL_RECONCILE_INTERVAL_MS,
   WORKBENCH_SYNC_INTERVAL_MS,
+  applyWorkbenchDelta,
   createWorkbenchSyncCore,
   diffNewPendingIds,
   pendingIdsFromOrders,
+  sortOrdersFifo,
 } = await import(coreUrl)
 
 function read(rel) {
@@ -24,6 +27,7 @@ function sleep(ms) {
 }
 
 assert.equal(WORKBENCH_SYNC_INTERVAL_MS, 5000)
+assert.equal(WORKBENCH_FULL_RECONCILE_INTERVAL_MS, 60000)
 
 // --- pure helpers ---
 {
@@ -483,5 +487,372 @@ assert.ok(orderManage.includes('noteNewPendingCount'), 'Owner path kept')
 assert.ok(orderManage.includes('useOrderAlert'), 'Owner still uses useOrderAlert')
 assert.ok(!waiter.includes('WebSocket') && !kitchen.includes('EventSource'), 'no WS/SSE')
 assert.ok(!useSync.includes('WebSocket'), 'sync has no WS')
+assert.ok(useSync.includes('fetchChanges') || useSync.includes('getWorkbenchOrderChanges'), 'delta wired')
+assert.ok(useSync.includes('WORKBENCH_FULL_RECONCILE_INTERVAL_MS'), '60s full wired')
+assert.ok(useSync.includes('getWorkbenchOrdersWithCursor'), 'full cursor wired')
+assert.ok(!useSync.includes('EventSource'), 'no SSE')
+
+const apiSrc = read('src/api/index.js')
+assert.ok(apiSrc.includes('/v1/orders/workbench/changes'), 'changes API')
+
+// --- Phase 4C delta helpers ---
+{
+  const base = [
+    { id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' },
+    { id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' },
+  ]
+  const next = applyWorkbenchDelta(
+    base,
+    [{ id: 'C', status: 'pending', created_at: '2026-08-08T10:02:00Z' }],
+    [],
+    (raw) => raw,
+  )
+  assert.deepEqual(
+    next.map((o) => o.id),
+    ['A', 'B', 'C'],
+  )
+  const removed = applyWorkbenchDelta(next, [], ['A'], (raw) => raw)
+  assert.deepEqual(
+    removed.map((o) => o.id),
+    ['B', 'C'],
+  )
+  const upsert = applyWorkbenchDelta(
+    removed,
+    [{ id: 'B', status: 'preparing', created_at: '2026-08-08T10:01:00Z' }],
+    [],
+    (raw) => raw,
+  )
+  assert.equal(upsert.find((o) => o.id === 'B').status, 'preparing')
+  assert.equal(upsert.filter((o) => o.id === 'B').length, 1)
+  assert.deepEqual(
+    sortOrdersFifo([
+      { id: 'C', created_at: '2026-08-08T10:02:00Z' },
+      { id: 'A', created_at: '2026-08-08T10:00:00Z' },
+    ]).map((o) => o.id),
+    ['A', 'C'],
+  )
+}
+
+// Phase 4C: initial full + 5s delta + 60s full
+{
+  let fullCalls = 0
+  let deltaCalls = 0
+  let cursor = 'C0'
+  let fullData = [
+    { id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' },
+    { id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' },
+  ]
+  let deltaPage = {
+    items: [],
+    removed_ids: [],
+    next_cursor: 'C1',
+    has_more: false,
+  }
+  let sounds = 0
+  const t = createFakeTimers()
+  const c = createWorkbenchSyncCore({
+    fetchFull: async () => {
+      fullCalls += 1
+      return { orders: fullData.map((o) => ({ ...o })), cursor }
+    },
+    fetchChanges: async (cur) => {
+      deltaCalls += 1
+      assert.equal(cur, cursor)
+      const page = {
+        items: deltaPage.items.map((o) => ({ ...o })),
+        removed_ids: [...deltaPage.removed_ids],
+        next_cursor: deltaPage.next_cursor,
+        has_more: deltaPage.has_more,
+      }
+      cursor = page.next_cursor
+      return page
+    },
+    filterOrders: (raw) => raw,
+    playSound: () => {
+      sounds += 1
+    },
+    setTimeoutFn: t.setTimeoutFn,
+    clearTimeoutFn: t.clearTimeoutFn,
+    now: t.now,
+    fullIntervalMs: 60000,
+  })
+  c.start()
+  await sleep(0)
+  assert.equal(fullCalls, 1)
+  assert.equal(deltaCalls, 0)
+  assert.equal(sounds, 0, 'initial baseline no sound')
+
+  // 5s → delta no-change
+  cursor = 'C0'
+  c.getState().cursor // ensure set from full
+  // restore cursor after fetchFull set it to C0
+  t.advance(5000)
+  await sleep(0)
+  assert.equal(deltaCalls, 1)
+  assert.equal(fullCalls, 1)
+
+  // delta new pending C → sound once
+  deltaPage = {
+    items: [{ id: 'C', status: 'pending', created_at: '2026-08-08T10:02:00Z' }],
+    removed_ids: [],
+    next_cursor: 'C2',
+    has_more: false,
+  }
+  t.advance(5000)
+  await sleep(0)
+  assert.equal(deltaCalls, 2)
+  assert.equal(sounds, 1)
+  assert.ok(c.isHighlighted('C'))
+  assert.deepEqual(
+    c.getState().orders.map((o) => o.id),
+    ['A', 'B', 'C'],
+  )
+
+  // removed A
+  deltaPage = {
+    items: [],
+    removed_ids: ['A'],
+    next_cursor: 'C3',
+    has_more: false,
+  }
+  const soundsBeforeRemove = sounds
+  t.advance(5000)
+  await sleep(0)
+  assert.deepEqual(
+    c.getState().orders.map((o) => o.id),
+    ['B', 'C'],
+  )
+  assert.equal(sounds, soundsBeforeRemove, 'removal must not sound')
+
+  // delta failure does not advance cursor
+  const cFail = createWorkbenchSyncCore({
+    fetchFull: async () => ({
+      orders: [{ id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' }],
+      cursor: 'CX',
+    }),
+    fetchChanges: async () => {
+      const err = new Error('network')
+      throw err
+    },
+    filterOrders: (raw) => raw,
+    setTimeoutFn: t.setTimeoutFn,
+    clearTimeoutFn: t.clearTimeoutFn,
+    now: t.now,
+  })
+  cFail.start()
+  await sleep(0)
+  const cur1 = cFail.getState().cursor
+  await cFail.sync('delta')
+  assert.equal(cFail.getState().cursor, cur1)
+  assert.equal(cFail.getState().syncFailed, true)
+
+  // invalid cursor → full
+  let full2 = 0
+  const t3 = createFakeTimers()
+  const c3 = createWorkbenchSyncCore({
+    fetchFull: async () => {
+      full2 += 1
+      return {
+        orders: [{ id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' }],
+        cursor: 'GOOD',
+      }
+    },
+    fetchChanges: async () => {
+      const err = new Error('bad cursor')
+      err.response = { status: 400, data: { code: 400, msg: 'INVALID_CURSOR' } }
+      throw err
+    },
+    filterOrders: (raw) => raw,
+    setTimeoutFn: t3.setTimeoutFn,
+    clearTimeoutFn: t3.clearTimeoutFn,
+    now: t3.now,
+  })
+  c3.start()
+  await sleep(0)
+  assert.equal(full2, 1)
+  await c3.sync('delta')
+  assert.equal(full2, 2)
+
+  // pagination drain
+  let pages = 0
+  const t4 = createFakeTimers()
+  const c4 = createWorkbenchSyncCore({
+    fetchFull: async () => ({
+      orders: [{ id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' }],
+      cursor: 'P0',
+    }),
+    fetchChanges: async () => {
+      pages += 1
+      if (pages === 1) {
+        return {
+          items: [{ id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' }],
+          removed_ids: [],
+          next_cursor: 'P1',
+          has_more: true,
+        }
+      }
+      if (pages === 2) {
+        return {
+          items: [{ id: 'C', status: 'pending', created_at: '2026-08-08T10:02:00Z' }],
+          removed_ids: [],
+          next_cursor: 'P2',
+          has_more: true,
+        }
+      }
+      return {
+        items: [{ id: 'D', status: 'pending', created_at: '2026-08-08T10:03:00Z' }],
+        removed_ids: [],
+        next_cursor: 'P3',
+        has_more: false,
+      }
+    },
+    filterOrders: (raw) => raw,
+    setTimeoutFn: t4.setTimeoutFn,
+    clearTimeoutFn: t4.clearTimeoutFn,
+    now: t4.now,
+  })
+  c4.start()
+  await sleep(0)
+  await c4.sync('delta')
+  assert.equal(pages, 3)
+  assert.deepEqual(
+    c4.getState().orders.map((o) => o.id),
+    ['A', 'B', 'C', 'D'],
+  )
+  assert.equal(c4.getState().cursor, 'P3')
+
+  // 60s periodic full repairs missed pending
+  let sounds5 = 0
+  let full5 = 0
+  const t5 = createFakeTimers()
+  const c5 = createWorkbenchSyncCore({
+    fetchFull: async () => {
+      full5 += 1
+      if (full5 === 1) {
+        return {
+          orders: [
+            { id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' },
+            { id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' },
+          ],
+          cursor: 'F0',
+        }
+      }
+      return {
+        orders: [
+          { id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' },
+          { id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' },
+          { id: 'Z', status: 'pending', created_at: '2026-08-08T10:09:00Z' },
+        ],
+        cursor: 'F1',
+      }
+    },
+    fetchChanges: async () => ({
+      items: [],
+      removed_ids: [],
+      next_cursor: 'F0',
+      has_more: false,
+    }),
+    filterOrders: (raw) => raw,
+    playSound: () => {
+      sounds5 += 1
+    },
+    setTimeoutFn: t5.setTimeoutFn,
+    clearTimeoutFn: t5.clearTimeoutFn,
+    now: t5.now,
+    fullIntervalMs: 60000,
+  })
+  c5.start()
+  await sleep(0)
+  assert.equal(sounds5, 0)
+  t5.advance(60000)
+  await c5.sync('auto')
+  assert.ok(full5 >= 2, 'periodic full should run')
+  assert.equal(sounds5, 1, 'full repair alerts new pending')
+  assert.ok(c5.isHighlighted('Z'))
+
+  // visible / online / manual → full
+  let full6 = 0
+  const t6 = createFakeTimers()
+  const c6 = createWorkbenchSyncCore({
+    fetchFull: async () => {
+      full6 += 1
+      return { orders: [{ id: 'A', status: 'pending' }], cursor: 'V1' }
+    },
+    fetchChanges: async () => ({
+      items: [],
+      removed_ids: [],
+      next_cursor: 'V1',
+      has_more: false,
+    }),
+    filterOrders: (raw) => raw,
+    setTimeoutFn: t6.setTimeoutFn,
+    clearTimeoutFn: t6.clearTimeoutFn,
+    now: t6.now,
+  })
+  c6.start()
+  await sleep(0)
+  assert.equal(full6, 1)
+  c6.setVisible(false)
+  c6.setVisible(true)
+  await sleep(0)
+  assert.equal(full6, 2)
+  c6.setOnline(false)
+  c6.setOnline(true)
+  await sleep(0)
+  assert.equal(full6, 3)
+  await c6.syncNow()
+  assert.equal(full6, 4)
+}
+
+// FG-08: overlap duplicate pending must not re-sound
+{
+  let sounds = 0
+  let fullN = 0
+  const t = createFakeTimers()
+  const c = createWorkbenchSyncCore({
+    fetchFull: async () => {
+      fullN += 1
+      return {
+        orders: [{ id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' }],
+        cursor: 'CUR',
+      }
+    },
+    fetchChanges: async () => ({
+      items: [{ id: 'C', status: 'pending', created_at: '2026-08-08T10:02:00Z' }],
+      removed_ids: [],
+      next_cursor: 'CUR2',
+      has_more: false,
+    }),
+    filterOrders: (raw) => raw,
+    playSound: () => {
+      sounds += 1
+    },
+    setTimeoutFn: t.setTimeoutFn,
+    clearTimeoutFn: t.clearTimeoutFn,
+    now: t.now,
+  })
+  c.start()
+  await sleep(0)
+  await c.sync('delta')
+  assert.equal(sounds, 1)
+  await c.sync('delta')
+  await c.sync('delta')
+  assert.equal(sounds, 1, 'FG-08 overlap duplicate pending must not re-sound')
+  void fullN
+}
+
+// FG-09: duplicate removed_id is idempotent
+{
+  const base = [
+    { id: 'A', status: 'pending', created_at: '2026-08-08T10:00:00Z' },
+    { id: 'B', status: 'pending', created_at: '2026-08-08T10:01:00Z' },
+  ]
+  const once = applyWorkbenchDelta(base, [], ['A'], (raw) => raw)
+  const twice = applyWorkbenchDelta(once, [], ['A', 'A'], (raw) => raw)
+  assert.deepEqual(
+    twice.map((o) => o.id),
+    ['B'],
+  )
+}
 
 console.log('TEST-FE workbenchSync: passed')

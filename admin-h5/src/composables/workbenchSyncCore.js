@@ -1,6 +1,9 @@
 /** Workbench auto-sync core — Order DB is source of truth; polling only triggers sync. */
 
 export const WORKBENCH_SYNC_INTERVAL_MS = 5000
+export const WORKBENCH_FULL_RECONCILE_INTERVAL_MS = 60000
+export const WORKBENCH_DELTA_MAX_PAGES = 5
+export const WORKBENCH_DELTA_FAIL_FALLBACK = 3
 export const NEW_ORDER_HIGHLIGHT_MS = 8000
 
 export function pendingIdsFromOrders(orders) {
@@ -22,6 +25,34 @@ export function diffNewPendingIds(known, current) {
   return news
 }
 
+export function sortOrdersFifo(orders) {
+  return [...(orders || [])].sort((a, b) => {
+    const ta = a?.created_at || ''
+    const tb = b?.created_at || ''
+    if (ta < tb) return -1
+    if (ta > tb) return 1
+    return String(a?.id ?? '').localeCompare(String(b?.id ?? ''))
+  })
+}
+
+export function applyWorkbenchDelta(orders, items, removedIds, filterOrders) {
+  const map = new Map()
+  for (const o of orders || []) {
+    if (o?.id != null) map.set(String(o.id), o)
+  }
+  for (const id of removedIds || []) {
+    map.delete(String(id))
+  }
+  for (const item of items || []) {
+    if (item?.id == null) continue
+    const sid = String(item.id)
+    const keep = filterOrders([item])
+    if (keep.length) map.set(sid, keep[0])
+    else map.delete(sid)
+  }
+  return sortOrdersFifo([...map.values()])
+}
+
 export function formatSyncAge(at, now = Date.now()) {
   if (!at) return '尚未同步'
   const sec = Math.max(0, Math.floor((now - at) / 1000))
@@ -37,24 +68,34 @@ export function formatSyncAge(at, now = Date.now()) {
 /**
  * Framework-free sync controller for unit tests and useWorkbenchSync.
  *
+ * Phase 4C: 5s delta + 60s full. fetchChanges optional → legacy full-every-tick.
+ *
  * @param {object} opts
- * @param {() => Promise<any[]>} opts.fetchOrders
+ * @param {() => Promise<any[]|{orders:any[],cursor?:string}>} opts.fetchFull
+ * @param {(cursor:string) => Promise<{items:any[],removed_ids:string[],next_cursor:string,has_more:boolean}>} [opts.fetchChanges]
+ * @param {() => Promise<any[]>} [opts.fetchOrders] legacy alias for fetchFull
  * @param {(raw: any[]) => any[]} opts.filterOrders
  * @param {() => void} [opts.playSound]
  * @param {() => number} [opts.now]
  * @param {number} [opts.intervalMs]
+ * @param {number} [opts.fullIntervalMs]
  * @param {number} [opts.highlightMs]
  * @param {(state: object) => void} [opts.onChange]
  * @param {(id: string) => void} [opts.setTimeoutFn]
  * @param {(id: any) => void} [opts.clearTimeoutFn]
  */
 export function createWorkbenchSyncCore(opts) {
-  const fetchOrders = opts.fetchOrders
+  const fetchFull = opts.fetchFull || opts.fetchOrders
+  const fetchChanges = opts.fetchChanges || null
+  const useDelta = typeof fetchChanges === 'function'
   const filterOrders = opts.filterOrders
   const playSound = opts.playSound || (() => {})
   const now = opts.now || (() => Date.now())
   const intervalMs = opts.intervalMs ?? WORKBENCH_SYNC_INTERVAL_MS
+  const fullIntervalMs = opts.fullIntervalMs ?? WORKBENCH_FULL_RECONCILE_INTERVAL_MS
   const highlightMs = opts.highlightMs ?? NEW_ORDER_HIGHLIGHT_MS
+  const maxDeltaPages = opts.maxDeltaPages ?? WORKBENCH_DELTA_MAX_PAGES
+  const deltaFailFallback = opts.deltaFailFallback ?? WORKBENCH_DELTA_FAIL_FALLBACK
   const onChange = opts.onChange || (() => {})
   const setTimeoutFn = opts.setTimeoutFn || ((fn, ms) => setTimeout(fn, ms))
   const clearTimeoutFn = opts.clearTimeoutFn || ((id) => clearTimeout(id))
@@ -62,9 +103,13 @@ export function createWorkbenchSyncCore(opts) {
   let orders = []
   let knownPendingIds = new Set()
   let hasBaseline = false
+  let cursor = null
+  let lastFullAt = null
   let initialLoading = false
   let backgroundSyncing = false
   let inFlight = false
+  let fullSyncPending = false
+  let consecutiveDeltaFailures = 0
   let syncFailed = false
   let networkOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true
   let lastSuccessfulSyncAt = null
@@ -75,6 +120,7 @@ export function createWorkbenchSyncCore(opts) {
   const highlightIds = new Set()
   const highlightTimers = new Map()
   let lastNewIds = []
+  let lastMode = null
 
   function emit() {
     onChange(getState())
@@ -85,9 +131,12 @@ export function createWorkbenchSyncCore(opts) {
       orders,
       knownPendingIds: new Set(knownPendingIds),
       hasBaseline,
+      cursor,
+      lastFullAt,
       initialLoading,
       backgroundSyncing,
       inFlight,
+      fullSyncPending,
       syncFailed,
       networkOnline,
       lastSuccessfulSyncAt,
@@ -96,6 +145,8 @@ export function createWorkbenchSyncCore(opts) {
       authStopped,
       highlightIds: new Set(highlightIds),
       lastNewIds: lastNewIds.slice(),
+      lastMode,
+      consecutiveDeltaFailures,
     }
   }
 
@@ -111,7 +162,7 @@ export function createWorkbenchSyncCore(opts) {
     if (!running || authStopped || !pageVisible || !networkOnline) return
     timer = setTimeoutFn(() => {
       timer = null
-      sync()
+      sync('auto')
     }, intervalMs)
   }
 
@@ -136,45 +187,141 @@ export function createWorkbenchSyncCore(opts) {
     highlightIds.clear()
   }
 
-  async function sync() {
-    if (!running || authStopped) return { skipped: true, reason: 'stopped' }
-    if (inFlight) return { skipped: true, reason: 'in_flight' }
+  function commitOrders(list, { allowAlert }) {
+    const filtered = filterOrders(Array.isArray(list) ? list : [])
+    const sorted = sortOrdersFifo(filtered)
+    const currentPending = pendingIdsFromOrders(sorted)
+    let newIds = []
+    if (allowAlert && hasBaseline) {
+      newIds = diffNewPendingIds(knownPendingIds, currentPending)
+    }
+    orders = sorted
+    knownPendingIds = currentPending
+    hasBaseline = true
+    lastSuccessfulSyncAt = now()
+    syncFailed = false
+    lastNewIds = newIds
+    if (newIds.length) {
+      addHighlights(newIds)
+      try {
+        playSound()
+      } catch {
+        /* sound must never break sync */
+      }
+    }
+    return newIds
+  }
 
+  function isInvalidCursorError(err) {
+    const status = err?.response?.status
+    const code = err?.response?.data?.msg || err?.response?.data?.code || err?.code || err?.message
+    return status === 400 && String(code || '').includes('INVALID_CURSOR')
+  }
+
+  function isAuthError(err) {
+    const status = err?.response?.status
+    return status === 401 || status === 403
+  }
+
+  async function runFull() {
+    lastMode = 'full'
+    const raw = await fetchFull()
+    let list
+    let nextCursor = null
+    if (Array.isArray(raw)) {
+      list = raw
+    } else if (raw && typeof raw === 'object') {
+      list = Array.isArray(raw.orders) ? raw.orders : []
+      nextCursor = raw.cursor != null ? String(raw.cursor) : null
+    } else {
+      list = []
+    }
+    const newIds = commitOrders(list, { allowAlert: true })
+    if (nextCursor) cursor = nextCursor
+    lastFullAt = now()
+    consecutiveDeltaFailures = 0
+    fullSyncPending = false
+    emit()
+    return { ok: true, mode: 'full', newIds, orders }
+  }
+
+  async function runDelta() {
+    lastMode = 'delta'
+    if (!cursor) {
+      return runFull()
+    }
+    let pages = 0
+    let workingCursor = cursor
+    let workingOrders = orders
+    while (pages < maxDeltaPages) {
+      pages += 1
+      const page = await fetchChanges(workingCursor)
+      const items = Array.isArray(page?.items) ? page.items : []
+      const removed = Array.isArray(page?.removed_ids) ? page.removed_ids : []
+      const next = page?.next_cursor != null ? String(page.next_cursor) : workingCursor
+      workingOrders = applyWorkbenchDelta(workingOrders, items, removed, filterOrders)
+      workingCursor = next
+      if (!page?.has_more) break
+      if (pages >= maxDeltaPages && page?.has_more) {
+        // Drain safety: fall back to full rather than skip remaining pages.
+        cursor = workingCursor
+        return runFull()
+      }
+    }
+    cursor = workingCursor
+    const newIds = commitOrders(workingOrders, { allowAlert: true })
+    // commitOrders re-filters; keep FIFO from apply
+    orders = sortOrdersFifo(filterOrders(workingOrders))
+    consecutiveDeltaFailures = 0
+    emit()
+    return { ok: true, mode: 'delta', newIds, orders }
+  }
+
+  function shouldFull(mode) {
+    if (mode === 'full') return true
+    if (mode === 'delta') return false
+    if (!useDelta) return true
+    if (!hasBaseline || !cursor) return true
+    if (consecutiveDeltaFailures >= deltaFailFallback) return true
+    if (lastFullAt == null) return true
+    if (now() - lastFullAt >= fullIntervalMs) return true
+    return false
+  }
+
+  async function sync(mode = 'auto') {
+    if (!running || authStopped) return { skipped: true, reason: 'stopped' }
+    if (inFlight) {
+      if (mode === 'full' || shouldFull(mode)) fullSyncPending = true
+      return { skipped: true, reason: 'in_flight' }
+    }
+
+    const wantFull = shouldFull(mode)
     inFlight = true
     if (!hasBaseline) initialLoading = true
     else backgroundSyncing = true
     emit()
 
     try {
-      const raw = await fetchOrders()
-      const list = filterOrders(Array.isArray(raw) ? raw : [])
-      const currentPending = pendingIdsFromOrders(list)
-      let newIds = []
-      if (hasBaseline) {
-        newIds = diffNewPendingIds(knownPendingIds, currentPending)
+      if (wantFull) {
+        return await runFull()
       }
-
-      orders = list
-      knownPendingIds = currentPending
-      hasBaseline = true
-      lastSuccessfulSyncAt = now()
-      syncFailed = false
-      lastNewIds = newIds
-
-      if (newIds.length) {
-        addHighlights(newIds)
-        try {
-          playSound()
-        } catch {
-          /* sound must never break sync */
+      try {
+        return await runDelta()
+      } catch (err) {
+        if (isAuthError(err)) throw err
+        if (isInvalidCursorError(err)) {
+          cursor = null
+          consecutiveDeltaFailures = 0
+          return await runFull()
         }
+        consecutiveDeltaFailures += 1
+        if (consecutiveDeltaFailures >= deltaFailFallback) {
+          return await runFull()
+        }
+        throw err
       }
-
-      emit()
-      return { ok: true, newIds, orders: list }
     } catch (err) {
-      const status = err?.response?.status
-      if (status === 401 || status === 403) {
+      if (isAuthError(err)) {
         authStopped = true
         clearSchedule()
       }
@@ -187,7 +334,15 @@ export function createWorkbenchSyncCore(opts) {
       initialLoading = false
       backgroundSyncing = false
       emit()
-      scheduleNext()
+      if (fullSyncPending && running && !authStopped) {
+        fullSyncPending = false
+        // Priority full after in-flight delta/full finishes.
+        Promise.resolve()
+          .then(() => sync('full'))
+          .catch(() => {})
+      } else {
+        scheduleNext()
+      }
     }
   }
 
@@ -199,7 +354,7 @@ export function createWorkbenchSyncCore(opts) {
     }
     if (pageVisible) {
       emit()
-      sync()
+      sync('full')
     } else {
       clearSchedule()
       emit()
@@ -214,7 +369,7 @@ export function createWorkbenchSyncCore(opts) {
     }
     if (networkOnline) {
       emit()
-      sync()
+      sync('full')
     } else {
       clearSchedule()
       emit()
@@ -226,7 +381,7 @@ export function createWorkbenchSyncCore(opts) {
     running = true
     authStopped = false
     emit()
-    sync()
+    sync('full')
   }
 
   function stop() {
@@ -244,7 +399,8 @@ export function createWorkbenchSyncCore(opts) {
     start,
     stop,
     sync,
-    syncNow: sync,
+    syncNow: () => sync('full'),
+    syncDelta: () => sync('delta'),
     setVisible,
     setOnline,
     getState,

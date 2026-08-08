@@ -27,6 +27,15 @@ export const resetMerchantAccountPassword = (id, data) => request.post(`/v1/merc
 export const setMerchantAccountBackupLogin = (id, data) => request.post(`/v1/merchant-accounts/${id}/backup-login`, data)
 export const revokeStaffDevices = (id) => request.post(`/v1/merchant-accounts/${id}/devices/revoke-all`)
 export const getWorkbenchOrders = (config) => request.get('/v1/orders/workbench', config)
+/** Full workbench snapshot + opaque cursor header (Phase 4C). */
+export const getWorkbenchOrdersWithCursor = (config = {}) =>
+  request.get('/v1/orders/workbench', {
+    ...config,
+    meta: { ...(config.meta || {}), rawResponse: true },
+  })
+/** Pure-read workbench delta. Never triggers print reconciliation. */
+export const getWorkbenchOrderChanges = (params, config) =>
+  request.get('/v1/orders/workbench/changes', { ...(config || {}), params })
 export const registerTenant = (data) => request.post('/v1/register', data)
 export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')

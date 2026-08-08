@@ -86,6 +86,8 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
 
     def test_staff_route_default_deny(self):
         self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench/changes", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench/changes", ROLE_KITCHEN))
         self.assertTrue(staff_route_allowed("PATCH", "/api/v1/orders/123/status", ROLE_WAITER))
         self.assertTrue(staff_route_allowed("PATCH", "/api/v1/orders/123/pickup-no", ROLE_WAITER))
         self.assertFalse(staff_route_allowed("PATCH", "/api/v1/orders/123/pickup-no", ROLE_KITCHEN))
