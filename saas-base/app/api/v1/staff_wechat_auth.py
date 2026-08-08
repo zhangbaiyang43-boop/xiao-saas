@@ -23,6 +23,7 @@ from app.services.staff_trusted_device_service import (
     decode_device_credential,
 )
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
+from app.services.staff_miniprogram_provider import staff_official_account_oauth_enabled
 from app.services.staff_wechat_provider import (
     WechatIdentity,
     get_staff_wechat_provider,
@@ -168,7 +169,23 @@ async def _identity_from_request(
 
 @router.get("/staff/wechat/status")
 async def staff_wechat_status():
-    return success_response(data=staff_wechat_config_status())
+    from app.services.staff_miniprogram_provider import staff_miniprogram_auth_enabled
+
+    status = staff_wechat_config_status()
+    status["official_account_oauth_enabled"] = staff_official_account_oauth_enabled()
+    status["miniprogram_auth_enabled"] = staff_miniprogram_auth_enabled()
+    status["primary_provider"] = (
+        "official_account_oauth" if staff_official_account_oauth_enabled() else "miniprogram"
+    )
+    return success_response(data=status)
+
+
+def _oa_oauth_disabled():
+    return error_response(
+        code=403,
+        msg="公众号员工登录已停用，请从「开心点单」小程序进入员工工作台",
+        data={"code": "official_account_oauth_disabled"},
+    )
 
 
 @router.get("/staff/wechat/oauth/start")
@@ -178,6 +195,8 @@ async def staff_wechat_oauth_start(
     t: str | None = None,
     return_url: str | None = None,
 ):
+    if not staff_official_account_oauth_enabled():
+        return _oa_oauth_disabled()
     purpose = (purpose or "login").strip().lower()
     if purpose not in ("login", "bind"):
         return error_response(code=400, msg="无效的 OAuth 用途")
@@ -215,6 +234,8 @@ async def staff_wechat_oauth_callback(
     state: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
+    if not staff_official_account_oauth_enabled():
+        return _oa_oauth_disabled()
     front = _frontend_base()
 
     def _fail(msg: str) -> RedirectResponse:
@@ -258,6 +279,8 @@ async def staff_wechat_oauth_callback(
 
 @router.get("/staff/wechat/bind/preview")
 async def staff_wechat_bind_preview(t: str, db: AsyncSession = Depends(get_db)):
+    if not staff_official_account_oauth_enabled():
+        return _oa_oauth_disabled()
     result = await StaffWechatAuthService(db).preview_bind(bind_token=t)
     if not result.get("ok"):
         return error_response(code=400, msg=result.get("msg") or "绑定码无效", data=result)
@@ -272,6 +295,8 @@ async def staff_wechat_bind_confirm(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    if not staff_official_account_oauth_enabled():
+        return _oa_oauth_disabled()
     bind_token = (body.bind_token or "").strip()
     identity, sess, err = await _identity_from_request(
         code=body.code, mock_openid=body.mock_openid, session_id=body.session_id
@@ -304,6 +329,8 @@ async def staff_wechat_login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
+    if not staff_official_account_oauth_enabled():
+        return _oa_oauth_disabled()
     identity, sess, err = await _identity_from_request(
         code=body.code, mock_openid=body.mock_openid, session_id=body.session_id
     )

@@ -24,12 +24,12 @@
       </div>
       <div class="right">
         <a-button
-          v-if="!row.wechat_bound && row.status !== 'disabled'"
+          v-if="mpAuthEnabled && !row.wechat_bound && row.status !== 'disabled'"
           size="small"
           type="primary"
           @click.stop="openQr(row)"
         >
-          生成绑定码
+          生成微信绑定码
         </a-button>
         <span class="arrow">›</span>
       </div>
@@ -65,7 +65,7 @@
             <div>可信设备：{{ editing.trusted_device_count || 0 }} 台</div>
             <div class="actions">
               <a-button
-                v-if="!editing.wechat_bound && form.status !== 'disabled'"
+                v-if="mpAuthEnabled && !editing.wechat_bound && form.status !== 'disabled'"
                 size="small"
                 type="primary"
                 @click="openQr(editing)"
@@ -110,18 +110,24 @@
       <div class="created">
         <div class="name">{{ created?.name }}</div>
         <div class="meta">{{ roleLabel(created?.role) }} · 微信未绑定</div>
-        <a-button type="primary" block style="margin-top:16px" @click="openQr(created); createdOpen=false">
+        <a-button
+          v-if="mpAuthEnabled"
+          type="primary"
+          block
+          style="margin-top:16px"
+          @click="openQr(created); createdOpen=false"
+        >
           生成微信绑定码
         </a-button>
       </div>
     </a-modal>
 
-    <!-- 绑定二维码 -->
+    <!-- 微信小程序绑定码 -->
     <a-modal v-model:open="qrOpen" title="微信绑定" :footer="null" @cancel="stopPoll">
       <div class="qr-box">
         <div class="name">{{ qrStaff?.name }} · {{ roleLabel(qrStaff?.role) }}</div>
-        <img v-if="qrDataUrl" :src="qrDataUrl" alt="绑定二维码" class="qr-img" />
-        <div class="hint">请让员工本人使用微信扫码</div>
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="微信小程序码" class="qr-img" />
+        <div class="hint">请让员工本人使用微信扫一扫</div>
         <div class="ttl">{{ ttlText }}</div>
         <div v-if="bindOk" class="ok">✓ 微信绑定成功</div>
         <a-button style="margin-top:12px" block @click="regenQr" :loading="qrLoading">重新生成</a-button>
@@ -133,12 +139,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import QRCode from 'qrcode'
 import {
   createMerchantAccount,
-  createWechatBindToken,
+  createMiniprogramBindSession,
   getMerchantAccounts,
-  getWechatBindStatus,
+  getMiniprogramBindStatus,
+  getStaffMiniprogramStatus,
   revokeStaffDevices,
   setMerchantAccountBackupLogin,
   unbindStaffWechat,
@@ -147,6 +153,7 @@ import {
 
 const list = ref([])
 const loading = ref(false)
+const mpAuthEnabled = ref(false)
 const modalOpen = ref(false)
 const saving = ref(false)
 const editing = ref(null)
@@ -187,13 +194,29 @@ function statusLabel(s) {
 async function load() {
   loading.value = true
   try {
-    const res = await getMerchantAccounts()
+    const [res, st] = await Promise.all([
+      getMerchantAccounts(),
+      getStaffMiniprogramStatus().catch(() => null),
+    ])
     list.value = res?.data?.data || res?.data || []
+    mpAuthEnabled.value = Boolean(st?.data?.enabled)
   } catch {
     message.error('加载失败')
   } finally {
     loading.value = false
   }
+}
+
+async function openQr(row) {
+  if (!mpAuthEnabled.value) {
+    message.warning('员工小程序绑定未启用')
+    return
+  }
+  if (!row?.id) return
+  qrStaff.value = row
+  qrOpen.value = true
+  bindOk.value = false
+  await regenQr()
 }
 
 function openCreate() {
@@ -283,34 +306,30 @@ function stopPoll() {
   }
 }
 
-async function openQr(row) {
-  if (!row?.id) return
-  qrStaff.value = row
-  qrOpen.value = true
-  bindOk.value = false
-  await regenQr()
-}
-
 async function regenQr() {
   if (!qrStaff.value?.id) return
   qrLoading.value = true
   bindOk.value = false
+  qrDataUrl.value = ''
   stopPoll()
   try {
-    const res = await createWechatBindToken(qrStaff.value.id)
+    const res = await createMiniprogramBindSession(qrStaff.value.id)
     if (res?.code !== 200) {
-      message.error(res?.msg || '生成失败')
+      message.error(res?.msg || '员工绑定码生成失败，请稍后重试')
       return
     }
-    const url = res.data.binding_url
     expiresAt.value = Date.parse(res.data.expires_at) || Date.now() + (res.data.expires_in || 300) * 1000
-    qrDataUrl.value = await QRCode.toDataURL(url, { width: 220, margin: 1 })
+    qrDataUrl.value = res.data.qrcode_data_url || ''
+    if (!qrDataUrl.value) {
+      message.error('员工绑定码生成失败，请稍后重试')
+      return
+    }
     tickTimer = setInterval(() => {
       nowTick.value = Date.now()
     }, 1000)
     pollTimer = setInterval(async () => {
       try {
-        const st = await getWechatBindStatus(qrStaff.value.id)
+        const st = await getMiniprogramBindStatus(qrStaff.value.id)
         if (st?.data?.status === 'bound') {
           bindOk.value = true
           stopPoll()
@@ -322,7 +341,7 @@ async function regenQr() {
       }
     }, 2500)
   } catch (e) {
-    message.error(e?.response?.data?.msg || '生成失败')
+    message.error(e?.response?.data?.msg || '员工绑定码生成失败，请稍后重试')
   } finally {
     qrLoading.value = false
   }

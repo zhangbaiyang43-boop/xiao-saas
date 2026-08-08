@@ -165,22 +165,18 @@ class StaffWechatAuthService:
             "role_label": "服务员" if account.role == "waiter" else "后厨",
         }
 
-    async def confirm_bind(
+    async def bind_wechat_identity(
         self,
         *,
-        bind_token: str,
+        tenant_id: str,
+        account_id: int,
         identity: WechatIdentity,
-        user_agent: str | None = None,
     ) -> dict[str, Any]:
-        # Re-validate before consume.
-        peek = await bind_tokens.peek_bind_token(bind_token)
-        if not peek:
-            return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
-
-        account = await self._get_account(peek["tenant_id"], int(peek["account_id"]))
+        """Bind (app_id, openid) → merchant_account. Does NOT issue JWT/device/handoff."""
+        account = await self._get_account(tenant_id, int(account_id))
         if not account or account.status != "active":
             return {"ok": False, "code": "account_invalid", "msg": "员工账号不可用"}
-        if account.tenant_id != peek["tenant_id"]:
+        if account.tenant_id != tenant_id:
             return {"ok": False, "code": "tenant_mismatch", "msg": "绑定失败"}
         role = parse_staff_role(account.role)
         if role not in STAFF_ROLES:
@@ -191,20 +187,12 @@ class StaffWechatAuthService:
         )
         if existing:
             if existing.openid == identity.openid:
-                # Idempotent re-bind same wechat → refresh device.
-                consumed = await bind_tokens.consume_bind_token(bind_token)
-                if not consumed:
-                    return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
-                return await self._issue_with_device(account, auth_method="staff_wechat", user_agent=user_agent)
+                return {"ok": True, "idempotent": True, "account": account}
             return {
                 "ok": False,
                 "code": "already_bound",
                 "msg": "该员工已绑定微信，请老板先解除绑定",
             }
-
-        consumed = await bind_tokens.consume_bind_token(bind_token)
-        if not consumed:
-            return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
 
         binding = MerchantAccountWechatBinding(
             id=generate_snowflake_id(),
@@ -223,7 +211,91 @@ class StaffWechatAuthService:
             account.id,
             account.tenant_id,
         )
-        return await self._issue_with_device(account, auth_method="staff_wechat", user_agent=user_agent)
+        return {"ok": True, "idempotent": False, "account": account}
+
+    async def confirm_bind(
+        self,
+        *,
+        bind_token: str,
+        identity: WechatIdentity,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        # Legacy H5 bind path (OA). Re-validate before consume.
+        peek = await bind_tokens.peek_bind_token(bind_token)
+        if not peek:
+            return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
+
+        account = await self._get_account(peek["tenant_id"], int(peek["account_id"]))
+        if not account or account.status != "active":
+            return {"ok": False, "code": "account_invalid", "msg": "员工账号不可用"}
+        if account.tenant_id != peek["tenant_id"]:
+            return {"ok": False, "code": "tenant_mismatch", "msg": "绑定失败"}
+        role = parse_staff_role(account.role)
+        if role not in STAFF_ROLES:
+            return {"ok": False, "code": "role_invalid", "msg": "该账号不支持微信绑定"}
+
+        existing = await self.get_active_binding_for_account(
+            tenant_id=account.tenant_id, account_id=int(account.id), app_id=identity.app_id
+        )
+        if existing:
+            if existing.openid == identity.openid:
+                consumed = await bind_tokens.consume_bind_token(bind_token)
+                if not consumed:
+                    return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
+                return await self._issue_with_device(account, auth_method="staff_wechat", user_agent=user_agent)
+            return {
+                "ok": False,
+                "code": "already_bound",
+                "msg": "该员工已绑定微信，请老板先解除绑定",
+            }
+
+        consumed = await bind_tokens.consume_bind_token(bind_token)
+        if not consumed:
+            return {"ok": False, "code": "bind_token_invalid", "msg": "绑定码已失效，请让老板重新生成"}
+
+        bound = await self.bind_wechat_identity(
+            tenant_id=account.tenant_id,
+            account_id=int(account.id),
+            identity=identity,
+        )
+        if not bound.get("ok"):
+            return bound
+        return await self._issue_with_device(bound["account"], auth_method="staff_wechat", user_agent=user_agent)
+
+    async def issue_session_for_account(
+        self,
+        account: MerchantAccount,
+        *,
+        auth_method: str,
+        user_agent: str | None = None,
+        tenant: Tenant | None = None,
+        existing_device_id: str | None = None,
+        existing_secret: str | None = None,
+    ) -> dict[str, Any]:
+        """Issue JWT + trusted device. Prefer rotate existing device when same account.
+
+        If cookie belongs to a different account, create a new device (cookie replaced).
+        """
+        if existing_device_id and existing_secret:
+            from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice
+
+            row = (
+                await self.db.execute(
+                    select(MerchantAccountTrustedDevice).where(
+                        MerchantAccountTrustedDevice.device_id == existing_device_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if row and int(row.merchant_account_id) == int(account.id):
+                refreshed = await self.refresh_device(
+                    device_id=existing_device_id, secret=existing_secret, user_agent=user_agent
+                )
+                if refreshed.get("ok"):
+                    refreshed["auth_method"] = auth_method
+                    return refreshed
+        return await self._issue_with_device(
+            account, auth_method=auth_method, user_agent=user_agent, tenant=tenant
+        )
 
     async def login_with_identity(
         self,

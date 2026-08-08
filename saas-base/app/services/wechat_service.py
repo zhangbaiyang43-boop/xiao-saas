@@ -159,3 +159,50 @@ class WechatService:
             )
             return False
         return True
+
+    async def get_wxacode_unlimit(
+        self,
+        *,
+        scene: str,
+        page: str,
+        env_version: str = "release",
+        width: int = 430,
+    ) -> bytes:
+        """Generate unlimited mini-program code image bytes (getwxacodeunlimit).
+
+        Reuses cached access_token. Never logs access_token / app secret.
+        """
+        scene = (scene or "").strip()
+        page = (page or "").strip().lstrip("/")
+        if not scene or len(scene) > 32:
+            raise ValueError("invalid_scene")
+        if not page:
+            raise ValueError("invalid_page")
+
+        access_token = await self.get_access_token()
+        if not access_token:
+            raise RuntimeError("wechat access_token unavailable")
+
+        payload = json.dumps(
+            {
+                "scene": scene,
+                "page": page,
+                "check_path": False,
+                "env_version": env_version or "release",
+                "width": int(width or 430),
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token={urllib.parse.quote(access_token)}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=12) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            error = json.loads(body.decode("utf-8"))
+            errcode = error.get("errcode")
+            raise RuntimeError(f"wxacode_failed errcode={errcode} errmsg={error.get('errmsg')}")
+        return body

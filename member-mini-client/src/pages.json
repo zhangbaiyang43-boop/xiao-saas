@@ -168,6 +168,29 @@
           }
         }
       ]
+    },
+    {
+      "root": "subpkg-staff",
+      "pages": [
+        {
+          "path": "pages/staff-bind",
+          "style": {
+            "navigationBarTitleText": "员工绑定"
+          }
+        },
+        {
+          "path": "pages/staff-workbench",
+          "style": {
+            "navigationBarTitleText": "员工工作台"
+          }
+        },
+        {
+          "path": "pages/staff-webview",
+          "style": {
+            "navigationBarTitleText": "员工工作台"
+          }
+        }
+      ]
     }
   ],
   "preloadRule": {

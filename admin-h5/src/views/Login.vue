@@ -4,7 +4,7 @@
       <div class="brand-top">
         <div class="brand-icon"><ShopOutlined style="font-size:28px;color:#fff" /></div>
         <h1>开心点单商家后台</h1>
-        <p>老板验证码登录 · 员工微信快捷登录</p>
+        <p>老板验证码登录 · 员工备用账号登录</p>
       </div>
 
       <a-alert
@@ -64,37 +64,9 @@
       </div>
 
       <div v-else style="padding:8px 20px 16px">
-        <div v-if="wechatError" class="hint-card" style="margin-bottom:12px;color:#b45309">
-          {{ wechatError }}
+        <div class="hint-card" style="margin-bottom:14px">
+          员工微信登录请从「开心点单」小程序进入员工工作台。
         </div>
-        <button
-          type="button"
-          class="submit-btn tap-shrink"
-          :disabled="loading"
-          @click="handleWechatLogin"
-          style="margin-bottom:14px;background:#07C160"
-        >
-          {{ loading ? '登录中...' : '微信快捷登录' }}
-        </button>
-        <div v-if="!inWechat" class="hint-card" style="margin-bottom:14px">
-          请在微信中打开以使用微信快捷登录
-        </div>
-
-        <div v-if="shopChoices.length" class="shop-choices">
-          <div class="hint-card" style="margin-bottom:8px">请选择工作门店</div>
-          <button
-            v-for="item in shopChoices"
-            :key="item.account_id"
-            type="button"
-            class="shop-choice"
-            @click="chooseShop(item)"
-          >
-            <strong>{{ item.shop_name }}</strong>
-            <span>{{ item.role_label }} · {{ item.staff_name }}</span>
-          </button>
-        </div>
-
-        <div class="divider"><span>或</span></div>
         <form class="backup-form" @submit.prevent="handleStaffLogin">
           <div class="backup-title">备用账号登录</div>
           <div style="margin-bottom:12px">
@@ -123,20 +95,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ShopOutlined } from '@ant-design/icons-vue'
 import {
-  getStaffWechatOauthStart,
-  getStaffWechatStatus,
   login,
   sendLoginCode,
   staffLogin,
-  staffWechatLogin,
 } from '../api'
 import { useAuthStore } from '../stores/auth'
-import {
-  clearOauthAttempted,
-  isWechatBrowser,
-  markOauthAttempted,
-  wasOauthAttemptedRecently,
-} from '../utils/deviceAuth'
 
 const router = useRouter()
 const route = useRoute()
@@ -149,10 +112,6 @@ const loginForm = ref({ phone: '', code: '' })
 const staffForm = ref({ shop_phone: '', username: '', password: '' })
 const phoneError = ref('')
 const codeError = ref('')
-const wechatError = ref('')
-const inWechat = ref(isWechatBrowser())
-const shopChoices = ref([])
-const oauthSessionId = ref('')
 let countdownTimer = null
 
 const isPhone = (v) => /^1\d{10}$/.test(v || '')
@@ -293,93 +252,14 @@ const handleStaffLogin = async () => {
   }
 }
 
-const finishWechatLogin = async (payload) => {
-  const res = await staffWechatLogin(payload)
-  if (res?.code === 200 && res.data?.multiple_accounts) {
-    shopChoices.value = res.data.accounts || []
-    oauthSessionId.value = res.data.session_id || payload.session_id || ''
-    wechatError.value = '请选择工作门店'
-    return
-  }
-  if (res?.code === 200 && res?.data?.token) {
-    clearOauthAttempted()
-    persistAndEnter(res.data, '登录成功')
-    return
-  }
-  wechatError.value = res?.msg || '微信登录失败'
-}
-
-const chooseShop = async (item) => {
-  loading.value = true
-  try {
-    await finishWechatLogin({
-      session_id: oauthSessionId.value || String(route.query.sid || ''),
-      account_id: item.account_id,
-    })
-  } catch (e) {
-    wechatError.value = e?.response?.data?.msg || '微信登录失败'
-  } finally {
-    loading.value = false
-  }
-}
-
-const handleWechatLogin = async () => {
-  wechatError.value = ''
-  if (!inWechat.value) {
-    wechatError.value = '请在微信中打开'
-    return
-  }
-  if (wasOauthAttemptedRecently()) {
-    wechatError.value = '微信登录失败，请使用下方备用账号登录，或稍后重试'
-    return
-  }
-  loading.value = true
-  try {
-    const status = await getStaffWechatStatus()
-    const cfg = status?.data || {}
-    if (!cfg.configured && !cfg.mock_allowed) {
-      wechatError.value = '微信员工登录尚未配置，请使用备用账号登录'
-      return
-    }
-    markOauthAttempted()
-    const start = await getStaffWechatOauthStart({ purpose: 'login' })
-    const url = start?.data?.authorize_url
-    if (!url) {
-      wechatError.value = start?.msg || '无法启动微信登录'
-      clearOauthAttempted()
-      return
-    }
-    window.location.href = url
-  } catch (e) {
-    clearOauthAttempted()
-    wechatError.value = e?.response?.data?.msg || '微信登录失败'
-  } finally {
-    loading.value = false
-  }
-}
-
 onMounted(async () => {
-  if (route.query.mode === 'staff' || route.query.oauth) {
+  if (route.query.mode === 'staff') {
     mode.value = 'staff'
   }
-  // Device auto-login before showing form.
-  if (!route.query.oauth) {
-    const ok = await auth.ensureSession()
-    if (ok) {
-      router.replace(auth.homePath || '/')
-      return
-    }
-  }
-  const sid = String(route.query.sid || '')
-  if (sid) {
-    loading.value = true
-    try {
-      await finishWechatLogin({ session_id: sid })
-    } catch (e) {
-      wechatError.value = e?.response?.data?.msg || '微信登录失败'
-    } finally {
-      loading.value = false
-    }
+  // Trusted-device auto-login only. Never auto-start 公众号 OAuth.
+  const ok = await auth.ensureSession()
+  if (ok) {
+    router.replace(auth.homePath || '/')
   }
 })
 

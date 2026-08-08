@@ -23,8 +23,10 @@ from app.core.response import error_response, success_response
 from app.core.security import create_access_token
 from app.schemas.tenant import normalize_phone
 from app.services import staff_bind_token_service as bind_tokens
+from app.services import staff_mp_bind_session_service as mp_bind
 from app.services.merchant_account_service import MerchantAccountService
 from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
+from app.services.staff_miniprogram_provider import staff_miniprogram_auth_enabled
 from app.services.staff_trusted_device_service import StaffTrustedDeviceService
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.tenant_service import TenantService
@@ -236,12 +238,107 @@ async def set_backup_login(
     )
 
 
+@router.post("/merchant-accounts/{account_id}/miniprogram-bind-session")
+async def create_miniprogram_bind_session(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner: generate WeChat mini-program code for staff bind (primary)."""
+    if not staff_miniprogram_auth_enabled():
+        return error_response(code=403, msg="员工小程序绑定未启用")
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    svc = MerchantAccountService(db)
+    account = await svc.get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    if account.status != "active":
+        return error_response(code=400, msg="请先启用员工再生成绑定码")
+    if account.role not in ("waiter", "kitchen"):
+        return error_response(code=400, msg="该账号不支持微信绑定")
+
+    bound = await StaffWechatAuthService(db).is_wechat_bound(
+        tenant_id=principal.tenant_id, account_id=int(account.id)
+    )
+    if bound:
+        return error_response(code=400, msg="该员工已绑定微信，请先解除绑定")
+
+    try:
+        session = await mp_bind.create_mp_bind_session(
+            tenant_id=principal.tenant_id,
+            account_id=int(account.id),
+            created_by_owner=principal.tenant_id,
+        )
+    except StaffAuthStoreUnavailable as exc:
+        return error_response(code=503, msg=exc.msg)
+
+    from app.services.staff_wxacode_service import generate_staff_bind_wxacode
+
+    try:
+        image_bytes = await generate_staff_bind_wxacode(session["scene"])
+    except Exception as exc:
+        from app.core.logger import logger
+
+        logger.warning(
+            "staff_mp_bind_wxacode_failed account_id=%s tenant_id=%s err=%s",
+            account.id,
+            principal.tenant_id,
+            type(exc).__name__,
+        )
+        return error_response(code=502, msg="员工绑定码生成失败，请稍后重试")
+
+    import base64
+
+    qrcode_data_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
+    return success_response(
+        data={
+            "session_id": session["session_id"],
+            "expires_at": session["expires_at"],
+            "expires_in": session["expires_in"],
+            "qrcode_data_url": qrcode_data_url,
+            "staff_name": account.name,
+            "role": account.role,
+            "role_label": "服务员" if account.role == "waiter" else "后厨",
+        }
+    )
+
+
+@router.get("/merchant-accounts/{account_id}/miniprogram-bind-status")
+async def miniprogram_bind_status(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    if not staff_miniprogram_auth_enabled():
+        return error_response(code=403, msg="员工小程序绑定未启用")
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    status = await mp_bind.get_mp_bind_status_for_account(int(account_id))
+    if status != "bound":
+        if await StaffWechatAuthService(db).is_wechat_bound(
+            tenant_id=principal.tenant_id, account_id=int(account_id)
+        ):
+            status = "bound"
+    return success_response(data={"status": status})
+
+
 @router.post("/merchant-accounts/{account_id}/wechat-bind-token")
 async def create_wechat_bind_token(
     account_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    """Legacy H5 URL bind token — disabled when OA OAuth is off (default)."""
+    from app.services.staff_miniprogram_provider import staff_official_account_oauth_enabled
+
+    if not staff_official_account_oauth_enabled():
+        return error_response(code=403, msg="公众号员工绑定已停用，请使用小程序绑定码")
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
@@ -290,8 +387,10 @@ async def wechat_bind_status(
     account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
     if not account:
         return error_response(code=404, msg="员工不存在")
-    status = await bind_tokens.get_bind_status_for_account(int(account_id))
-    # If already bound in DB, surface bound even without redis marker.
+    # Prefer mini-program bind status; fall back to legacy redis marker.
+    status = await mp_bind.get_mp_bind_status_for_account(int(account_id))
+    if status == "expired":
+        status = await bind_tokens.get_bind_status_for_account(int(account_id))
     if status != "bound":
         if await StaffWechatAuthService(db).is_wechat_bound(
             tenant_id=principal.tenant_id, account_id=int(account_id)

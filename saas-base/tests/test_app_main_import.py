@@ -20,6 +20,8 @@ class AppMainImportTest(unittest.TestCase):
             if path:
                 paths.add(path)
         self.assertIn("/api/v1/staff/wechat/bind/confirm", paths)
+        self.assertIn("/api/v1/staff/miniprogram/bind/confirm", paths)
+        self.assertIn("/api/v1/login/staff/handoff", paths)
 
 
 if __name__ == "__main__":
