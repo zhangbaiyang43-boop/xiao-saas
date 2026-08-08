@@ -118,7 +118,11 @@ async def create_customer_queue_ticket(
         return success_response(data=data, msg="取号成功")
     except Exception as exc:
         logger.exception("customer queue ticket create failed")
-        return error_response(code=500, msg=str(exc) or "取号失败，请重试")
+        msg = str(exc) or "取号失败，请重试"
+        # 截断过长的 SQL/英文堆栈，避免小程序 toast 只看到半截英文
+        if len(msg) > 60:
+            msg = msg[:57] + "…"
+        return error_response(code=500, msg=msg)
 
 
 @router.get("/tickets")

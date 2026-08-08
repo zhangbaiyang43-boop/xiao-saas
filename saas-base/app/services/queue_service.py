@@ -343,13 +343,28 @@ class QueueService:
                 ahead_count = await self.count_ahead(ticket)
                 await self.db.commit()
                 await self.db.refresh(ticket)
-                await print_queue_ticket(self.db, ticket, ahead_count)
-                return ticket, ahead_count
-            except Exception:
+            except Exception as exc:
                 await self.db.rollback()
-                logger.warning("queue ticket create retry after duplicate or flush error")
+                err = str(exc).lower()
+                # 仅序号撞车时重试；缺列/其它错误重试无意义，直接抛出可读原因
+                if "duplicate" in err or "unique" in err or "1062" in err:
+                    logger.warning("queue ticket create retry after duplicate: %s", exc)
+                    continue
+                logger.exception("queue ticket create failed")
+                if "unknown column" in err or "no such column" in err:
+                    raise RuntimeError(
+                        "排队表未升级（缺少 openid 字段），请在服务器执行 alembic upgrade head 并重启服务"
+                    ) from exc
+                raise RuntimeError(f"取号失败：{exc}") from exc
 
-        raise RuntimeError("queue ticket create failed, please retry")
+            # 打印失败不能把已经成功的取号当成失败（否则会重试建号并最终报 create failed）
+            try:
+                await print_queue_ticket(self.db, ticket, ahead_count)
+            except Exception:
+                logger.exception("queue ticket print failed after create ticket_id=%s", ticket.id)
+            return ticket, ahead_count
+
+        raise RuntimeError("取号失败，请重试")
 
     async def list_tickets(self, tenant_id: str, status: str | None = None) -> list[QueueTicket]:
         query = select(QueueTicket).options(defer(QueueTicket.query_token)).where(QueueTicket.tenant_id == tenant_id)

@@ -351,13 +351,17 @@ async def _coupon_expiry_reminder_loop():
 @app.on_event("startup")
 async def startup():
     import asyncio
+    # 排队票 openid/customer_id 等补列：生产常关 AUTO_CREATE_TABLES，但仍需幂等补齐，
+    # 否则顾客自助取号 INSERT 会因 Unknown column 连续失败。
+    async with async_engine.begin() as conn:
+        await ensure_queue_ticket_schema(conn)
+
     if settings.AUTO_CREATE_TABLES:
         async with async_engine.begin() as conn:
             await ensure_bigint_ids(conn)
             await ensure_coupon_template_description(conn)
             await ensure_distribution_schema(conn)
             await ensure_tenant_schema(conn)
-            await ensure_queue_ticket_schema(conn)
             await conn.run_sync(Base.metadata.create_all)
 
     # 启动超时订单后台清理任务
