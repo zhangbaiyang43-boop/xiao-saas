@@ -68,6 +68,7 @@
           {{ wechatError }}
         </div>
         <button
+          type="button"
           class="submit-btn tap-shrink"
           :disabled="loading"
           @click="handleWechatLogin"
@@ -94,19 +95,21 @@
         </div>
 
         <div class="divider"><span>或</span></div>
-        <div class="backup-title">备用账号登录</div>
-        <div style="margin-bottom:12px">
-          <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="门店手机号" maxlength="11" />
-        </div>
-        <div style="margin-bottom:12px">
-          <input v-model="staffForm.username" class="native-input" placeholder="员工账号" autocomplete="username" />
-        </div>
-        <div style="margin-bottom:12px">
-          <input v-model="staffForm.password" class="native-input" type="password" placeholder="密码" autocomplete="current-password" />
-        </div>
-        <button class="submit-btn tap-shrink" :disabled="loading" @click="handleStaffLogin" style="margin-top:8px;background:#334155">
-          {{ loading ? '登录中...' : '登录' }}
-        </button>
+        <form class="backup-form" @submit.prevent="handleStaffLogin">
+          <div class="backup-title">备用账号登录</div>
+          <div style="margin-bottom:12px">
+            <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="门店手机号" maxlength="11" autocomplete="tel" />
+          </div>
+          <div style="margin-bottom:12px">
+            <input v-model="staffForm.username" class="native-input" placeholder="员工账号" autocomplete="username" />
+          </div>
+          <div style="margin-bottom:12px">
+            <input v-model="staffForm.password" class="native-input" type="password" placeholder="密码" autocomplete="current-password" />
+          </div>
+          <button type="submit" class="submit-btn tap-shrink" :disabled="loading" style="margin-top:8px;background:#334155">
+            {{ loading ? '登录中...' : '登录' }}
+          </button>
+        </form>
       </div>
 
       <div style="height:max(24px, env(safe-area-inset-bottom))" />
@@ -249,23 +252,41 @@ const handleLogin = async () => {
 }
 
 const handleStaffLogin = async () => {
-  if (!isPhone(staffForm.value.shop_phone)) {
+  // Password backup login is user-initiated only. Never auto-call /login/staff.
+  const shop_phone = String(staffForm.value.shop_phone || '').trim()
+  const username = String(staffForm.value.username || '').trim()
+  const password = String(staffForm.value.password || '')
+
+  if (!shop_phone) {
+    message.error('请输入门店手机号')
+    return
+  }
+  if (!isPhone(shop_phone)) {
     message.error('请输入正确的门店手机号')
     return
   }
-  if (!staffForm.value.username || !staffForm.value.password) {
-    message.error('请输入账号和密码')
+  if (!username) {
+    message.error('请输入员工账号')
     return
   }
+  if (!password) {
+    message.error('请输入密码')
+    return
+  }
+
   loading.value = true
   try {
-    const res = await staffLogin(staffForm.value)
+    const res = await staffLogin({ shop_phone, username, password })
     if (res?.code === 200 && res?.data?.token) {
       persistAndEnter(res.data, '登录成功')
       return
     }
     message.error(res?.msg || '登录失败')
   } catch (e) {
+    if (e?.code === 'STAFF_LOGIN_INCOMPLETE') {
+      message.error('请输入员工账号和密码')
+      return
+    }
     message.error(e?.response?.data?.msg || '登录失败')
   } finally {
     loading.value = false
