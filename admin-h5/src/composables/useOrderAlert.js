@@ -28,14 +28,30 @@ function _beep(ctx, freq, startOffset) {
   osc.stop(ctx.currentTime + startOffset + 0.27)
 }
 
+/** True when preference is on and AudioContext can play (not suspended). */
+function isSoundReady() {
+  return Boolean(alertEnabled.value && audioCtx && audioCtx.state !== 'suspended' && !audioNeedsUnlock.value)
+}
+
 function playNewOrderBeep() {
-  if (!alertEnabled.value || !audioCtx) return
+  if (!alertEnabled.value || !audioCtx) return false
   try {
-    if (audioCtx.state === 'suspended') audioCtx.resume()
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume()
+      if (audioCtx.state === 'suspended') {
+        audioNeedsUnlock.value = true
+        return false
+      }
+    }
     _beep(audioCtx, 880, 0)
     _beep(audioCtx, 880, 0.3)
     _beep(audioCtx, 1100, 0.6)
-  } catch {}
+    audioNeedsUnlock.value = false
+    return true
+  } catch {
+    audioNeedsUnlock.value = true
+    return false
+  }
 }
 
 function enableAlert() {
@@ -98,5 +114,7 @@ export function useOrderAlert() {
     unlockAudio,
     ensureAlertProbed,
     noteNewPendingCount,
+    playNewOrderBeep,
+    isSoundReady,
   }
 }

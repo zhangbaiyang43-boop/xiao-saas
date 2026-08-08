@@ -6,10 +6,19 @@
         <div class="wb-sub">{{ displayName || '厨房' }} · 做什么菜</div>
       </div>
       <div class="wb-actions">
-        <a-button size="small" @click="load">刷新</a-button>
+        <a-button size="small" @click="syncNow">刷新</a-button>
         <a-button size="small" @click="logout">退出</a-button>
       </div>
     </div>
+
+    <WorkbenchSyncBar
+      variant="dark"
+      :network-online="networkOnline"
+      :sync-failed="syncFailed"
+      :sound-ready="soundReady"
+      :last-sync-label="lastSyncLabel"
+      @enable-sound="enableSound"
+    />
 
     <div class="filters">
       <button
@@ -22,12 +31,18 @@
       >{{ f.label }} {{ counts[f.val] || 0 }}</button>
     </div>
 
-    <div v-if="loading" class="wb-empty">加载中…</div>
+    <div v-if="initialLoading" class="wb-empty">加载中…</div>
     <div v-else-if="!visible.length" class="wb-empty">暂无订单</div>
 
-    <div v-for="order in visible" :key="order.id" class="wb-card">
+    <div
+      v-for="order in visible"
+      :key="order.id"
+      class="wb-card"
+      :class="{ 'is-new': isHighlighted(order.id) }"
+    >
       <div class="wb-card-top">
         <div>
+          <span v-if="isHighlighted(order.id)" class="new-badge">新</span>
           <strong>{{ order.table_no || '未分桌' }}</strong>
           <span v-if="order.pickup_no"> · {{ order.pickup_no }}号桌牌</span>
         </div>
@@ -66,10 +81,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { getWorkbenchOrders, reprintOrder, updateOrderStatus } from '../api'
+import { reprintOrder, updateOrderStatus } from '../api'
+import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
+import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
@@ -77,13 +94,21 @@ const auth = useAuthStore()
 const can = (p) => auth.can(p)
 const displayName = computed(() => auth.displayName)
 
-async function logout() {
-  await auth.logoutCurrentDevice()
-  router.replace('/login?mode=staff')
-}
+const {
+  orders,
+  initialLoading,
+  syncFailed,
+  networkOnline,
+  lastSyncLabel,
+  soundReady,
+  enableSound,
+  isHighlighted,
+  syncNow,
+} = useWorkbenchSync({
+  dedupeKey: 'wb:kitchen',
+  filterStatuses: ['pending', 'preparing', 'done'],
+})
 
-const orders = ref([])
-const loading = ref(false)
 const busyId = ref('')
 const reprintId = ref('')
 const statusFilter = ref('pending')
@@ -101,22 +126,14 @@ const counts = computed(() => ({
 
 const visible = computed(() => orders.value.filter((o) => o.status === statusFilter.value))
 
+async function logout() {
+  await auth.logoutCurrentDevice()
+  router.replace('/login?mode=staff')
+}
+
 function waitMinutes(iso) {
   if (!iso) return 0
   return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000))
-}
-
-async function load() {
-  loading.value = true
-  try {
-    const res = await getWorkbenchOrders({ meta: { dedupe: true, dedupeKey: 'wb:kitchen' } })
-    const raw = res?.data?.data || res?.data || []
-    orders.value = Array.isArray(raw) ? raw.filter((o) => ['pending', 'preparing', 'done'].includes(o.status)) : []
-  } catch {
-    message.error('加载失败')
-  } finally {
-    loading.value = false
-  }
 }
 
 async function setStatus(order, status) {
@@ -124,8 +141,8 @@ async function setStatus(order, status) {
   try {
     const res = await updateOrderStatus(order.id, status)
     if (res?.code === 200) {
-      order.status = status
       message.success(status === 'preparing' ? '已开始制作' : '已完成')
+      await syncNow()
     } else message.error(res?.msg || '操作失败')
   } catch {
     message.error('操作失败')
@@ -138,16 +155,16 @@ async function reprint(order) {
   reprintId.value = order.id
   try {
     const res = await reprintOrder(order.id, 'kitchen')
-    if (res?.code === 200) message.success(res.msg || '已提交补打')
-    else message.error(res?.msg || '补打失败')
+    if (res?.code === 200) {
+      message.success(res.msg || '已提交补打')
+      await syncNow()
+    } else message.error(res?.msg || '补打失败')
   } catch {
     message.error('补打失败')
   } finally {
     reprintId.value = ''
   }
 }
-
-onMounted(load)
 </script>
 
 <style scoped>
@@ -159,7 +176,19 @@ onMounted(load)
 .filters { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }
 .chip { border: 1px solid #374151; background: #1f2937; color: #e5e7eb; border-radius: 999px; padding: 6px 12px; font-size: 13px; }
 .chip.active { background: #f59e0b; border-color: #f59e0b; color: #111; font-weight: 700; }
-.wb-card { background: #1f2937; border-radius: 14px; padding: 16px; margin-bottom: 10px; }
+.wb-card { background: #1f2937; border-radius: 14px; padding: 16px; margin-bottom: 10px; border: 1px solid transparent; }
+.wb-card.is-new { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, .25); }
+.new-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #111;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: middle;
+}
 .wb-card-top { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 16px; }
 .wait { color: #fbbf24; font-size: 13px; }
 .item-line { font-size: 20px; line-height: 1.5; margin-bottom: 4px; }

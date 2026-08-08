@@ -6,22 +6,36 @@
         <div class="wb-sub">{{ displayName || '前厅履约' }} · 下一件要处理什么</div>
       </div>
       <div class="wb-actions">
-        <a-button size="small" @click="load">刷新</a-button>
+        <a-button size="small" @click="syncNow">刷新</a-button>
         <a-button size="small" @click="logout">退出</a-button>
       </div>
     </div>
+
+    <WorkbenchSyncBar
+      :network-online="networkOnline"
+      :sync-failed="syncFailed"
+      :sound-ready="soundReady"
+      :last-sync-label="lastSyncLabel"
+      @enable-sound="enableSound"
+    />
 
     <div class="wb-stats">
       <div class="stat"><b>{{ pendingCount }}</b><span>待接单</span></div>
       <div class="stat"><b>{{ preparingCount }}</b><span>备餐中</span></div>
     </div>
 
-    <div v-if="loading" class="wb-empty">加载中…</div>
+    <div v-if="initialLoading" class="wb-empty">加载中…</div>
     <div v-else-if="!orders.length" class="wb-empty">暂无待处理订单</div>
 
-    <div v-for="order in orders" :key="order.id" class="wb-card">
+    <div
+      v-for="order in orders"
+      :key="order.id"
+      class="wb-card"
+      :class="{ 'is-new': isHighlighted(order.id) }"
+    >
       <div class="wb-card-top">
         <div>
+          <span v-if="isHighlighted(order.id)" class="new-badge">新</span>
           <strong>{{ order.table_no || '未分桌' }}</strong>
           <span v-if="order.pickup_no"> · {{ order.pickup_no }}号桌牌</span>
           <span class="muted"> · #{{ order.display_order_no }}</span>
@@ -56,10 +70,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { getWorkbenchOrders, updateOrderPickupNo, updateOrderStatus } from '../api'
+import { updateOrderPickupNo, updateOrderStatus } from '../api'
+import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
+import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
@@ -67,21 +83,34 @@ const auth = useAuthStore()
 const can = (p) => auth.can(p)
 const displayName = computed(() => auth.displayName)
 
-async function logout() {
-  await auth.logoutCurrentDevice()
-  router.replace('/login?mode=staff')
-}
+const {
+  orders,
+  initialLoading,
+  syncFailed,
+  networkOnline,
+  lastSyncLabel,
+  soundReady,
+  enableSound,
+  isHighlighted,
+  syncNow,
+  pendingCount,
+} = useWorkbenchSync({
+  dedupeKey: 'wb:waiter',
+  filterStatuses: ['pending', 'preparing'],
+})
 
-const orders = ref([])
-const loading = ref(false)
+const preparingCount = computed(() => orders.value.filter((o) => o.status === 'preparing').length)
+
 const busyId = ref('')
 const pickupOpen = ref(false)
 const pickupTarget = ref(null)
 const pickupNo = ref('')
 const pickupSaving = ref(false)
 
-const pendingCount = computed(() => orders.value.filter((o) => o.status === 'pending').length)
-const preparingCount = computed(() => orders.value.filter((o) => o.status === 'preparing').length)
+async function logout() {
+  await auth.logoutCurrentDevice()
+  router.replace('/login?mode=staff')
+}
 
 function statusText(s) {
   return { pending: '待接单', preparing: '备餐中', done: '已完成', settled: '已结账' }[s] || s
@@ -93,27 +122,13 @@ function waitMinutes(iso) {
   return Math.max(0, Math.floor(ms / 60000))
 }
 
-async function load() {
-  loading.value = true
-  try {
-    const res = await getWorkbenchOrders({ meta: { dedupe: true, dedupeKey: 'wb:waiter' } })
-    const raw = res?.data?.data || res?.data || []
-    // Waiter has no finance.settle — only show actionable fulfillment jobs.
-    orders.value = Array.isArray(raw) ? raw.filter((o) => ['pending', 'preparing'].includes(o.status)) : []
-  } catch {
-    message.error('加载失败')
-  } finally {
-    loading.value = false
-  }
-}
-
 async function accept(order) {
   busyId.value = order.id
   try {
     const res = await updateOrderStatus(order.id, 'preparing')
     if (res?.code === 200) {
-      order.status = 'preparing'
       message.success('已接单')
+      await syncNow()
     } else message.error(res?.msg || '接单失败')
   } catch {
     message.error('接单失败')
@@ -141,7 +156,7 @@ async function submitPickup() {
     if (res?.code === 200) {
       message.success('桌牌已更新')
       pickupOpen.value = false
-      await load()
+      await syncNow()
     } else message.error(res?.msg || '桌牌更新失败')
   } catch (e) {
     message.error(e?.response?.data?.msg || '桌牌更新失败')
@@ -149,8 +164,6 @@ async function submitPickup() {
     pickupSaving.value = false
   }
 }
-
-onMounted(load)
 </script>
 
 <style scoped>
@@ -163,7 +176,19 @@ onMounted(load)
 .stat { background: #fff; border-radius: 12px; padding: 12px; text-align: center; }
 .stat b { display: block; font-size: 22px; color: #111; }
 .stat span { font-size: 12px; color: #888; }
-.wb-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+.wb-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.04); border: 1px solid transparent; transition: border-color .2s, box-shadow .2s; }
+.wb-card.is-new { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, .18); }
+.new-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #111;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
 .wb-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .muted { color: #888; font-size: 12px; }
 .wait { margin: 6px 0; }
