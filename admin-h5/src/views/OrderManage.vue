@@ -148,7 +148,7 @@
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
-                <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
+                <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
                 <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
                 <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
                 <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
@@ -281,7 +281,7 @@
               <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status) }}</a-tag>
-              <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
+              <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
               <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
               <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
@@ -791,6 +791,7 @@ async function submitStaffOrder() {
       const dish = staffMenuItems.value.find(d => String(d.id) === String(dishId))
       return { dish_id: dishId, name: dish?.name || '', price: Number(dish?.price || 0), qty }
     })
+    const requestId = `owner-ao-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     const res = await createOrder({
       shop: getCurrentTenantId(),
       table: tableNo,
@@ -798,9 +799,10 @@ async function submitStaffOrder() {
       total: staffCartTotal.value,
       staff_note: staffNote.value.trim() || undefined,
       pickup_no: staffPickupNo.value.trim() || undefined,
+      request_id: requestId,
     })
     if (res.code === 200) {
-      message.success('已提交，同步到这一桌的账单里了')
+      message.success('加单成功，厨房已收到')
       staffOrderVisible.value = false
       staffPickupNo.value = ''
       await loadOrders()
@@ -838,6 +840,8 @@ async function loadOrders(pollMeta = {}) {
       discount_amount: o.discount_amount ? Number(o.discount_amount) : null,
       remark: o.remark || '',
       source: o.source || 'miniprogram',
+      createdByAccountId: o.created_by_account_id || null,
+      createdByRole: o.created_by_role || null,
       staffNote: o.staff_note || '',
       pickup_no: o.pickup_no || '',
       canAssignPickupNo: !!o.can_assign_pickup_no,
@@ -1008,6 +1012,14 @@ function tableStatusText(t) {
   if (t.isSettled) return '已结账'
   if (t.pendingPaymentOrders?.length) return '有订单待支付'
   return ''
+}
+
+function staffSourceLabel(order) {
+  const role = order?.createdByRole || order?.created_by_role
+  if (role === 'frontdesk') return '前台代加'
+  if (role === 'waiter') return '服务员代加'
+  if (role === 'owner') return '老板代加'
+  return '员工代加'
 }
 
 function statusLabel(s) {

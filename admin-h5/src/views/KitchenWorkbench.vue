@@ -2,8 +2,8 @@
   <div class="wb-page">
     <div class="wb-header">
       <div>
-        <div class="wb-title">后厨工作台</div>
-        <div class="wb-sub">{{ displayName || '厨房' }} · 做什么菜</div>
+        <div class="wb-title">待制作 {{ pendingCount }}</div>
+        <div class="wb-sub">{{ displayName || '厨房' }} · 接单、制作完成</div>
       </div>
       <div class="wb-actions">
         <a-button size="small" @click="syncNow">刷新</a-button>
@@ -141,6 +141,7 @@ const counts = computed(() => ({
   preparing: orders.value.filter((o) => o.status === 'preparing').length,
   done: orders.value.filter((o) => o.status === 'done').length,
 }))
+const pendingCount = computed(() => counts.value.pending)
 
 const printIssueCount = computed(() =>
   orders.value.filter((o) => o.print_issue === 'failed' || o.print_issue === 'unknown').length,

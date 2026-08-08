@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 
 const FRONTDESK = new Set([
   'order.view_fulfillment',
+  'order.assisted_add',
   'table.view',
   'pickup.view',
   'pickup.assign',
@@ -14,6 +15,7 @@ const FRONTDESK = new Set([
 const WAITER = new Set([
   'order.view_fulfillment',
   'order.serve',
+  'order.assisted_add',
   'table.view',
   'pickup.view',
 ])
@@ -36,10 +38,12 @@ assert.equal(can(['*'], 'finance.settle'), true)
 assert.equal(can(['*'], 'order.serve'), true)
 
 assert.equal(can([...FRONTDESK], 'pickup.assign'), true)
+assert.equal(can([...FRONTDESK], 'order.assisted_add'), true)
 assert.equal(can([...FRONTDESK], 'order.serve'), false)
 assert.equal(can([...FRONTDESK], 'order.accept'), false)
 
 assert.equal(can([...WAITER], 'order.serve'), true)
+assert.equal(can([...WAITER], 'order.assisted_add'), true)
 assert.equal(can([...WAITER], 'order.accept'), false)
 assert.equal(can([...WAITER], 'pickup.assign'), false)
 assert.equal(can([...WAITER], 'order.complete'), false)
@@ -47,6 +51,7 @@ assert.equal(can([...WAITER], 'order.complete'), false)
 assert.equal(can([...KITCHEN], 'order.accept'), true)
 assert.equal(can([...KITCHEN], 'order.complete'), true)
 assert.equal(can([...KITCHEN], 'order.serve'), false)
+assert.equal(can([...KITCHEN], 'order.assisted_add'), false)
 assert.equal(can([...KITCHEN], 'pickup.assign'), false)
 
 console.log('TEST-FE staffPermissions: passed')

@@ -2,10 +2,11 @@
   <div class="wb-page">
     <div class="wb-header">
       <div>
-        <div class="wb-title">前台工作台</div>
+        <div class="wb-title">待发牌 {{ awaitingCount }}</div>
         <div class="wb-sub">{{ displayName || '前台' }} · 发桌牌、换桌牌</div>
       </div>
       <div class="wb-actions">
+        <a-button size="small" @click="openAssisted()">代客加单</a-button>
         <a-button size="small" @click="syncNow">刷新</a-button>
         <a-button size="small" @click="logout">退出</a-button>
       </div>
@@ -48,6 +49,7 @@
         <div v-if="order.remark" class="remark">备注：{{ order.remark }}</div>
         <div class="actions">
           <a-button type="primary" size="small" @click="openPickup(order)">发桌牌</a-button>
+          <a-button size="small" @click="openAssisted(order)">代客加单</a-button>
         </div>
       </div>
 
@@ -71,6 +73,7 @@
         </div>
         <div class="actions">
           <a-button size="small" @click="openPickup(order)">换桌牌</a-button>
+          <a-button size="small" @click="openAssisted(order)">代客加单</a-button>
         </div>
       </div>
     </template>
@@ -85,6 +88,14 @@
       :submitting="pickupSaving"
       @select="handlePickupSelect"
     />
+
+    <AssistedOrderSheet
+      v-model:open="assistedOpen"
+      :shop-id="shopId"
+      :preset-table-no="assistedTable"
+      :preset-dining-session-id="assistedSessionId"
+      @success="onAssistedSuccess"
+    />
   </div>
 </template>
 
@@ -93,15 +104,31 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getPickupNoStatus, updateOrderPickupNo } from '../api'
+import AssistedOrderSheet from '../components/AssistedOrderSheet.vue'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
 import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { needsPickupIdsFromOrders, useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
+import { getSession } from '../utils/session'
 
 const router = useRouter()
 const auth = useAuthStore()
 const displayName = computed(() => auth.displayName)
+const shopId = computed(() => getSession().tenant_id || '')
+const assistedOpen = ref(false)
+const assistedTable = ref('')
+const assistedSessionId = ref('')
+
+function openAssisted(order) {
+  assistedTable.value = order?.table_no || ''
+  assistedSessionId.value = order?.dining_session_id || ''
+  assistedOpen.value = true
+}
+
+async function onAssistedSuccess() {
+  await syncNow()
+}
 
 const {
   orders,

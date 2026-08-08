@@ -94,7 +94,7 @@ class DiningSessionService:
         }
 
     async def get_or_create_open_session_for_staff(self, tenant_id: str, table_no: str) -> DiningSession:
-        """服务员在 admin-h5 代客加单时调用：只拿到（或建好）这一桌当前 OPEN 的会话，
+        """Owner 代客加单：只拿到（或建好）这一桌当前 OPEN 的会话，
         不像顾客扫码那样创建/绑定 participant——代点单不冒充某个具体顾客的身份，
         只挂在桌台会话下，跟顾客自己点的单一起累计进桌台总账。"""
         table_no = (table_no or "").strip()
@@ -105,6 +105,79 @@ class DiningSessionService:
         session.last_activity_at = now
         await self.db.flush()
         return session
+
+    async def get_open_session_for_staff(
+        self,
+        tenant_id: str,
+        table_no: str,
+        *,
+        dining_session_id: int | None = None,
+    ) -> DiningSession | None:
+        """Frontdesk/Waiter assisted add: require an existing OPEN session (never create)."""
+        table_no = (table_no or "").strip()
+        if not tenant_id or not table_no:
+            raise ValueError("缺少门店或桌号")
+        filters = [
+            DiningSession.tenant_id == tenant_id,
+            DiningSession.table_no == table_no,
+            DiningSession.status == "OPEN",
+        ]
+        if dining_session_id is not None:
+            filters.append(DiningSession.id == int(dining_session_id))
+        result = await self.db.execute(
+            select(DiningSession).where(*filters).with_for_update().limit(1)
+        )
+        session = result.scalar_one_or_none()
+        if session is None:
+            return None
+        session.last_activity_at = datetime.utcnow()
+        await self.db.flush()
+        return session
+
+    async def list_active_sessions_for_staff(self, tenant_id: str) -> list[dict]:
+        """OPEN dining sessions that still have non-cancelled/rejected orders."""
+        if not tenant_id:
+            return []
+        result = await self.db.execute(
+            select(
+                DiningSession.id,
+                DiningSession.table_no,
+                DiningSession.pickup_no,
+                DiningSession.started_at,
+                DiningSession.last_activity_at,
+                func.count(Order.id).label("order_count"),
+            )
+            .join(
+                Order,
+                (Order.dining_session_id == DiningSession.id)
+                & (Order.tenant_id == DiningSession.tenant_id)
+                & (Order.status.notin_(["cancelled", "rejected"])),
+            )
+            .where(
+                DiningSession.tenant_id == tenant_id,
+                DiningSession.status == "OPEN",
+            )
+            .group_by(
+                DiningSession.id,
+                DiningSession.table_no,
+                DiningSession.pickup_no,
+                DiningSession.started_at,
+                DiningSession.last_activity_at,
+            )
+            .order_by(DiningSession.last_activity_at.desc())
+        )
+        rows = result.all()
+        return [
+            {
+                "dining_session_id": str(row.id),
+                "table_no": row.table_no or "",
+                "pickup_no": row.pickup_no,
+                "order_count": int(row.order_count or 0),
+                "started_at": row.started_at.isoformat() if row.started_at else None,
+                "last_activity_at": row.last_activity_at.isoformat() if row.last_activity_at else None,
+            }
+            for row in rows
+        ]
 
     async def bind_participant_to_customer(
         self,

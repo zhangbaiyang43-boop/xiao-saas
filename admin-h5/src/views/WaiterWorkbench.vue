@@ -6,6 +6,7 @@
         <div class="wb-sub">{{ displayName || '服务员' }} · 确认上菜即完成</div>
       </div>
       <div class="wb-actions">
+        <a-button size="small" @click="openAssisted()">代客加单</a-button>
         <a-button size="small" @click="syncNow">刷新</a-button>
         <a-button size="small" @click="logout">退出</a-button>
       </div>
@@ -50,9 +51,18 @@
           :disabled="busyId === order.id"
           @click="confirmServed(order)"
         >确认已上菜</a-button>
+        <a-button size="small" block class="ao-entry" @click="openAssisted(order)">代客加单</a-button>
       </div>
       <div v-if="failId === order.id" class="fail">上菜确认失败，请重试</div>
     </div>
+
+    <AssistedOrderSheet
+      v-model:open="assistedOpen"
+      :shop-id="shopId"
+      :preset-table-no="assistedTable"
+      :preset-dining-session-id="assistedSessionId"
+      @success="onAssistedSuccess"
+    />
   </div>
 </template>
 
@@ -61,13 +71,29 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { serveOrder } from '../api'
+import AssistedOrderSheet from '../components/AssistedOrderSheet.vue'
 import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { waitingToServeIdsFromOrders, useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
+import { getSession } from '../utils/session'
 
 const router = useRouter()
 const auth = useAuthStore()
 const displayName = computed(() => auth.displayName)
+const shopId = computed(() => getSession().tenant_id || '')
+const assistedOpen = ref(false)
+const assistedTable = ref('')
+const assistedSessionId = ref('')
+
+function openAssisted(order) {
+  assistedTable.value = order?.table_no || ''
+  assistedSessionId.value = order?.dining_session_id || ''
+  assistedOpen.value = true
+}
+
+async function onAssistedSuccess() {
+  await syncNow()
+}
 
 const {
   orders,
@@ -144,7 +170,8 @@ async function confirmServed(order) {
 .items { font-size: 16px; line-height: 1.7; color: #222; margin-top: 8px; }
 .remark { margin-top: 6px; font-size: 13px; color: #b45309; }
 .remark.staff { color: #7c3aed; }
-.actions { margin-top: 14px; }
+.actions { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ao-entry { color: #666; }
 .fail { margin-top: 8px; font-size: 12px; color: #dc2626; }
 .wb-empty { text-align: center; color: #999; padding: 48px 0; }
 </style>

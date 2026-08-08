@@ -8,6 +8,7 @@ from app.core.permissions import (
     PERM_KITCHEN_PRINT_REPRINT,
     PERM_MEMBER_MANAGE,
     PERM_ORDER_ACCEPT,
+    PERM_ORDER_ASSISTED_ADD,
     PERM_ORDER_COMPLETE,
     PERM_ORDER_SERVE,
     PERM_ORDER_VIEW_FULFILLMENT,
@@ -58,6 +59,7 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
 
     def test_frontdesk_matrix(self):
         self.assertTrue(has_permission(ROLE_FRONTDESK, PERM_ORDER_VIEW_FULFILLMENT))
+        self.assertTrue(has_permission(ROLE_FRONTDESK, PERM_ORDER_ASSISTED_ADD))
         self.assertTrue(has_permission(ROLE_FRONTDESK, PERM_TABLE_VIEW))
         self.assertTrue(has_permission(ROLE_FRONTDESK, PERM_PICKUP_VIEW))
         self.assertTrue(has_permission(ROLE_FRONTDESK, PERM_PICKUP_ASSIGN))
@@ -72,6 +74,7 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
     def test_waiter_matrix(self):
         self.assertTrue(has_permission(ROLE_WAITER, PERM_ORDER_VIEW_FULFILLMENT))
         self.assertTrue(has_permission(ROLE_WAITER, PERM_ORDER_SERVE))
+        self.assertTrue(has_permission(ROLE_WAITER, PERM_ORDER_ASSISTED_ADD))
         self.assertTrue(has_permission(ROLE_WAITER, PERM_TABLE_VIEW))
         self.assertTrue(has_permission(ROLE_WAITER, PERM_PICKUP_VIEW))
         self.assertFalse(has_permission(ROLE_WAITER, PERM_ORDER_ACCEPT))
@@ -93,6 +96,7 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
         self.assertTrue(has_permission(ROLE_KITCHEN, PERM_ORDER_COMPLETE))
         self.assertTrue(has_permission(ROLE_KITCHEN, PERM_KITCHEN_PRINT_REPRINT))
         self.assertTrue(has_permission(ROLE_KITCHEN, PERM_PICKUP_VIEW))
+        self.assertFalse(has_permission(ROLE_KITCHEN, PERM_ORDER_ASSISTED_ADD))
         self.assertFalse(has_permission(ROLE_KITCHEN, PERM_PICKUP_ASSIGN))
         self.assertFalse(has_permission(ROLE_KITCHEN, PERM_PICKUP_CHANGE))
         self.assertFalse(has_permission(ROLE_KITCHEN, PERM_FINANCE_SETTLE))
@@ -132,6 +136,12 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
         self.assertTrue(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_WAITER))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_FRONTDESK))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_KITCHEN))
+        self.assertTrue(staff_route_allowed("POST", "/api/v1/orders", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("POST", "/api/v1/orders", ROLE_FRONTDESK))
+        self.assertFalse(staff_route_allowed("POST", "/api/v1/orders", ROLE_KITCHEN))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/menu/items", ROLE_WAITER))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/dining-sessions/active", ROLE_FRONTDESK))
+        self.assertFalse(staff_route_allowed("GET", "/api/v1/dining-sessions/active", ROLE_KITCHEN))
         self.assertTrue(staff_route_allowed("POST", "/api/v1/orders/123/reprint", ROLE_KITCHEN))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/reprint", ROLE_FRONTDESK))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/settle-table", ROLE_WAITER))

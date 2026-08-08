@@ -37,7 +37,10 @@ class Order(BaseModel):
     served_by_role = Column(String(32), nullable=True)  # waiter | owner
     completed_at = Column(DateTime, nullable=True)
     source = Column(String(16), nullable=False, default="miniprogram")   # miniprogram | h5 | staff
-    staff_note = Column(String(64), nullable=True)  # 服务员代客加单时的可选备注（如"前台-老王"），不关联账号，仅展示
+    # Phase R3 actor audit for staff-assisted create (role snapshot at create time).
+    created_by_account_id = Column(BigInteger, nullable=True)  # merchant_accounts.id; no FK
+    created_by_role = Column(String(32), nullable=True)  # owner | frontdesk | waiter
+    staff_note = Column(String(64), nullable=True)  # optional kitchen-facing note; NOT actor identity
     # 前台发给顾客的实体取餐牌号（如"07"）。跟 table_no 不是一回事——牌子是跟着顾客走的
     # 临时凭证，不代表固定桌位，不能塞进 table_no/DiningSession（那边靠 table_no 做
     # 会话查重，牌子号在一天内会被反复重复使用，会把不相关的顾客错误合并进同一桌账）。

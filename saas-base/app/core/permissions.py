@@ -21,6 +21,7 @@ PERM_ORDER_VIEW_FULFILLMENT = "order.view_fulfillment"
 PERM_ORDER_ACCEPT = "order.accept"  # pending → preparing
 PERM_ORDER_COMPLETE = "order.complete"  # preparing → done
 PERM_ORDER_SERVE = "order.serve"  # done + unserved → served_at set (Waiter)
+PERM_ORDER_ASSISTED_ADD = "order.assisted_add"  # staff add-on within active DiningSession
 PERM_ORDER_REJECT = "order.reject"
 
 PERM_TABLE_VIEW = "table.view"
@@ -54,6 +55,7 @@ PERM_WILDCARD = "*"
 FRONTDESK_PERMISSIONS = frozenset(
     {
         PERM_ORDER_VIEW_FULFILLMENT,
+        PERM_ORDER_ASSISTED_ADD,
         PERM_TABLE_VIEW,
         PERM_PICKUP_VIEW,
         PERM_PICKUP_ASSIGN,
@@ -65,6 +67,7 @@ WAITER_PERMISSIONS = frozenset(
     {
         PERM_ORDER_VIEW_FULFILLMENT,
         PERM_ORDER_SERVE,
+        PERM_ORDER_ASSISTED_ADD,
         PERM_TABLE_VIEW,
         PERM_PICKUP_VIEW,
     }

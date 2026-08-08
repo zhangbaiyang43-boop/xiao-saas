@@ -165,6 +165,12 @@ def serialize_order(
         "order_type_text": ORDER_TYPE_TEXT.get(getattr(order, "order_type", None), ""),
         "parent_order_id": str(order.parent_order_id) if getattr(order, "parent_order_id", None) else None,
         "source": getattr(order, "source", "miniprogram"),
+        "created_by_account_id": (
+            str(order.created_by_account_id)
+            if getattr(order, "created_by_account_id", None) is not None
+            else None
+        ),
+        "created_by_role": getattr(order, "created_by_role", None),
         "staff_note": getattr(order, "staff_note", None),
         "pickup_no": getattr(order, "pickup_no", None),
         "can_assign_pickup_no": can_assign_pickup_no(order, settings, dining_session),
@@ -324,11 +330,21 @@ async def _resolve_create_order_dining_context(
     parent_order_id = None
     session_for_pickup = None  # 解析出来的 DiningSession，用来读/写这一桌共享的取餐牌号
     if is_staff_order:
+        from app.core.permissions import parse_staff_role
+
         merchant_tenant_id = getattr(request.state, "tenant_id", None)
         if not merchant_tenant_id or merchant_tenant_id != tenant_id:
             return error_response(code=403, msg="无权为该门店下单"), customer_id, None, None, None, None, None
         if payment_mode not in ("postpay", "table_account"):
-            return error_response(code=400, msg="预付模式暂不支持代客加单"), customer_id, None, None, None, None, None
+            return (
+                error_response(code=400, msg="当前收款模式请由顾客扫码加单"),
+                customer_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
         if body.coupon_id:
             return error_response(code=400, msg="代客加单不支持使用优惠券"), customer_id, None, None, None, None, None
         table_no = (body.table or "").strip()
@@ -337,8 +353,31 @@ async def _resolve_create_order_dining_context(
 
         from app.services.dining_session_service import DiningSessionService
 
+        staff_role = parse_staff_role(getattr(request.state, "role", None))
+        session_id_raw = getattr(body, "dining_session_id", None)
+        session_id = int(session_id_raw) if session_id_raw else None
         try:
-            session = await DiningSessionService(db).get_or_create_open_session_for_staff(tenant_id, table_no)
+            if staff_role:
+                # Frontdesk/Waiter: never invent a new dining session.
+                session = await DiningSessionService(db).get_open_session_for_staff(
+                    tenant_id,
+                    table_no,
+                    dining_session_id=session_id,
+                )
+                if session is None:
+                    return (
+                        error_response(code=400, msg="当前桌台没有进行中的用餐订单"),
+                        customer_id,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+            else:
+                session = await DiningSessionService(db).get_or_create_open_session_for_staff(
+                    tenant_id, table_no
+                )
         except ValueError as exc:
             return error_response(code=400, msg=str(exc)), customer_id, None, None, None, None, None
 
@@ -357,6 +396,17 @@ async def _resolve_create_order_dining_context(
         parent_order = existing_order_result.scalar_one_or_none()
         order_type = "ADD_ON" if parent_order else "INITIAL"
         parent_order_id = parent_order.id if parent_order else None
+        # Staff roles must add onto an existing table bill (ADD_ON), not open a blank table.
+        if staff_role and parent_order is None:
+            return (
+                error_response(code=400, msg="当前桌台没有进行中的用餐订单"),
+                customer_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
     elif body.dining_session_id:
         from app.models.dining import DiningParticipant, DiningSession
         from app.services.dining_session_service import hash_participant_token
@@ -631,6 +681,8 @@ async def _persist_create_order_and_build_response(
     payment_mode: str,
     pay_later_mode: bool,
     is_staff_order: bool,
+    created_by_account_id: int | None,
+    created_by_role: str | None,
     applied_coupon_id: int | None,
     coupon_discount: Decimal,
     final_total: float,
@@ -701,6 +753,8 @@ async def _persist_create_order_and_build_response(
         coupon_id=applied_coupon_id,
         discount_amount=typing_cast(Any, float(coupon_discount)) if coupon_discount > 0 else None,
         source="staff" if is_staff_order else (body.source or "miniprogram"),
+        created_by_account_id=created_by_account_id if is_staff_order else None,
+        created_by_role=created_by_role if is_staff_order else None,
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
         pickup_no=resolved_pickup_no,
         client_request_id=request_id,
@@ -796,6 +850,19 @@ async def create_order(
         return early_response
 
     is_staff_order = getattr(request.state, "token_type", None) == "merchant"
+    created_by_account_id = None
+    created_by_role = None
+    if is_staff_order:
+        from app.core.permissions import ROLE_OWNER, parse_staff_role
+
+        staff_role = parse_staff_role(getattr(request.state, "role", None))
+        account_id = getattr(request.state, "account_id", None)
+        if staff_role and account_id is not None:
+            created_by_account_id = int(account_id)
+            created_by_role = staff_role
+        else:
+            created_by_account_id = None
+            created_by_role = ROLE_OWNER
 
     await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
@@ -831,6 +898,8 @@ async def create_order(
         payment_mode=payment_mode,
         pay_later_mode=pay_later_mode,
         is_staff_order=is_staff_order,
+        created_by_account_id=created_by_account_id,
+        created_by_role=created_by_role,
         applied_coupon_id=applied_coupon_id,
         coupon_discount=coupon_discount,
         final_total=final_total,

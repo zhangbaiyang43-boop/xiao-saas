@@ -12,4 +12,7 @@
 - 老板账号 = 现有 `Tenant` 短信登录，自动视为 `owner`
 - 员工账号 = `merchant_accounts` 表（店内唯一用户名 + 密码）
 - Owner 是超级身份（`permission="*"`），不是普通岗位
-- 前台：牌号绑定；后厨：制作完成；服务员：确认上菜（order.serve）
+- 前台：牌号绑定 + 代客加单（`order.assisted_add`）
+- 服务员：确认上菜（`order.serve`）+ 代客加单（`order.assisted_add`）
+- 后厨：制作完成；无代客加单
+- Prepay：员工代客加单明确不支持（须顾客扫码支付）

@@ -3,10 +3,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.core.database import get_db
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
+from app.models.tenant import Tenant
 from app.services.dining_session_service import DiningSessionService
 
 
@@ -30,6 +32,38 @@ class DiningCheckoutRequestIn(BaseModel):
     dining_session_id: str
     participant_token: Optional[str] = None
     requested: bool = True
+
+
+@router.get("/active")
+async def list_active_dining_sessions(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Staff assisted-add STEP1: currently OPEN dining tables for this tenant."""
+    if getattr(request.state, "token_type", None) != "merchant":
+        return error_response(code=401, msg="请先登录")
+    tenant_id = getattr(request.state, "tenant_id", None) or TenantContext.get_tenant_id()
+    if not tenant_id:
+        return error_response(code=400, msg="缺少门店")
+    TenantContext.set_tenant_id(tenant_id)
+
+    tenant_result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = tenant_result.scalar_one_or_none()
+    payment_mode = (getattr(tenant, "payment_mode", None) or "prepay") if tenant else "prepay"
+
+    sessions = await DiningSessionService(db).list_active_sessions_for_staff(tenant_id)
+    assisted_allowed = payment_mode in ("postpay", "table_account")
+    return success_response(
+        data={
+            "payment_mode": payment_mode,
+            "assisted_add_allowed": assisted_allowed,
+            "sessions": sessions,
+            "prepay_blocked_msg": None
+            if assisted_allowed
+            else "当前收款模式请由顾客扫码加单",
+        },
+        msg="ok",
+    )
 
 
 @router.post("/resolve")
