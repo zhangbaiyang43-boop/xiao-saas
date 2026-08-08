@@ -23,26 +23,19 @@ def table_exists(table_name: str) -> bool:
 
 
 def upgrade():
+    # DROP TABLE removes ordinary indexes automatically. Do not drop indexes
+    # one-by-one: production schema drift (missing index names) would abort
+    # the whole upgrade with MySQL 1091 before any table is removed.
     if table_exists("merchant_template_rule"):
-        op.drop_index("idx_merchant_template_rule_trigger_type", table_name="merchant_template_rule")
-        op.drop_index("idx_merchant_template_rule_status", table_name="merchant_template_rule")
-        op.drop_index("idx_merchant_template_rule_merchant_template", table_name="merchant_template_rule")
         op.drop_table("merchant_template_rule")
 
     if table_exists("merchant_template"):
-        op.drop_index("idx_merchant_template_status", table_name="merchant_template")
-        op.drop_index("idx_merchant_template_template", table_name="merchant_template")
-        op.drop_index("idx_merchant_template_tenant", table_name="merchant_template")
         op.drop_table("merchant_template")
 
     if table_exists("marketing_template_rule"):
-        op.drop_index("idx_marketing_template_rule_status", table_name="marketing_template_rule")
-        op.drop_index("idx_marketing_template_rule_template", table_name="marketing_template_rule")
         op.drop_table("marketing_template_rule")
 
     if table_exists("marketing_template"):
-        op.drop_index("idx_marketing_template_status", table_name="marketing_template")
-        op.drop_index("idx_marketing_template_code", table_name="marketing_template")
         op.drop_table("marketing_template")
 
 
