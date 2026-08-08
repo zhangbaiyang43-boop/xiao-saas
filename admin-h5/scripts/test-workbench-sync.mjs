@@ -17,6 +17,7 @@ const {
   needsPickupIdsFromOrders,
   pendingIdsFromOrders,
   sortOrdersFifo,
+  waitingToServeIdsFromOrders,
 } = await import(coreUrl)
 
 function read(rel) {
@@ -53,6 +54,17 @@ assert.equal(WORKBENCH_FULL_RECONCILE_INTERVAL_MS, 60000)
     { id: '1', can_assign_pickup_no: true, pickup_no: '' },
     { id: '2', can_assign_pickup_no: true, pickup_no: '8' },
     { id: '3', can_assign_pickup_no: false, pickup_no: '' },
+  ])
+  assert.ok(ids.has('1'))
+  assert.equal(ids.has('2'), false)
+  assert.equal(ids.has('3'), false)
+}
+
+{
+  const ids = waitingToServeIdsFromOrders([
+    { id: '1', status: 'done', served_at: null },
+    { id: '2', status: 'done', served_at: '2026-08-09T00:00:00Z' },
+    { id: '3', status: 'pending', served_at: null },
   ])
   assert.ok(ids.has('1'))
   assert.equal(ids.has('2'), false)
@@ -492,12 +504,15 @@ assert.ok(frontdesk.includes('useWorkbenchSync'), 'Frontdesk wired')
 assert.ok(waiter.includes('WorkbenchSyncBar'), 'Waiter status bar')
 assert.ok(kitchen.includes('WorkbenchSyncBar'), 'Kitchen status bar')
 assert.ok(frontdesk.includes('WorkbenchSyncBar'), 'Frontdesk status bar')
-assert.ok(waiter.includes("alertsEnabled: false"), 'Waiter R1: no pending alerts')
-assert.ok(!waiter.includes('接单') && !waiter.includes('发桌牌') && !waiter.includes('换桌牌'), 'Waiter actions removed')
+assert.ok(waiter.includes('waitingToServeIdsFromOrders'), 'Waiter R2: serving alerts')
+assert.ok(waiter.includes('确认已上菜'), 'Waiter serve CTA')
+assert.ok(waiter.includes('serveOrder'), 'Waiter serve API')
+assert.ok(!waiter.includes('接单') && !waiter.includes('发桌牌') && !waiter.includes('换桌牌'), 'Waiter non-serve actions removed')
 assert.ok(kitchen.includes('is-new') && kitchen.includes('新'), 'Kitchen highlight')
 assert.ok(frontdesk.includes('needsPickupIdsFromOrders'), 'Frontdesk alerts on needs-pickup')
 assert.ok(frontdesk.includes('发桌牌') && frontdesk.includes('换桌牌'), 'Frontdesk pickup actions')
 assert.ok(!frontdesk.includes('接单') && !frontdesk.includes('补打厨房单'), 'Frontdesk no kitchen actions')
+assert.ok(!frontdesk.includes('确认已上菜'), 'Frontdesk no serve CTA')
 assert.ok(routerSrc.includes("path: 'frontdesk'"), 'Frontdesk route')
 assert.ok(useSync.includes('visibilitychange'), 'visibility listener')
 assert.ok(useSync.includes("addEventListener('online'"), 'online listener')
@@ -515,6 +530,7 @@ assert.ok(!useSync.includes('EventSource'), 'no SSE')
 
 const apiSrc = read('src/api/index.js')
 assert.ok(apiSrc.includes('/v1/orders/workbench/changes'), 'changes API')
+assert.ok(apiSrc.includes('serveOrder') && apiSrc.includes('/serve'), 'serve API client')
 
 // --- Phase 4C delta helpers ---
 {

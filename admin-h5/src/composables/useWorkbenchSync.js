@@ -18,6 +18,7 @@ export {
   formatSyncAge,
   needsPickupIdsFromOrders,
   pendingIdsFromOrders,
+  waitingToServeIdsFromOrders,
 } from './workbenchSyncCore'
 
 function unwrapWorkbenchPayload(payload) {

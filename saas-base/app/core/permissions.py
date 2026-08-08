@@ -20,6 +20,7 @@ ALL_ROLES = (ROLE_OWNER, ROLE_FRONTDESK, ROLE_WAITER, ROLE_KITCHEN)
 PERM_ORDER_VIEW_FULFILLMENT = "order.view_fulfillment"
 PERM_ORDER_ACCEPT = "order.accept"  # pending → preparing
 PERM_ORDER_COMPLETE = "order.complete"  # preparing → done
+PERM_ORDER_SERVE = "order.serve"  # done + unserved → served_at set (Waiter)
 PERM_ORDER_REJECT = "order.reject"
 
 PERM_TABLE_VIEW = "table.view"
@@ -63,6 +64,7 @@ FRONTDESK_PERMISSIONS = frozenset(
 WAITER_PERMISSIONS = frozenset(
     {
         PERM_ORDER_VIEW_FULFILLMENT,
+        PERM_ORDER_SERVE,
         PERM_TABLE_VIEW,
         PERM_PICKUP_VIEW,
     }

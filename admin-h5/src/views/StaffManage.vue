@@ -48,19 +48,19 @@
             <a-radio value="frontdesk" class="role-radio">
               <div class="role-line">
                 <span class="role-name">前台</span>
-                <span class="role-desc">发桌牌、换桌牌、查看桌台</span>
+                <span class="role-desc">发桌牌、换桌牌</span>
               </div>
             </a-radio>
             <a-radio value="waiter" class="role-radio">
               <div class="role-line">
                 <span class="role-name">服务员</span>
-                <span class="role-desc">查看订单与桌牌</span>
+                <span class="role-desc">查看待上菜并确认上菜</span>
               </div>
             </a-radio>
             <a-radio value="kitchen" class="role-radio">
               <div class="role-line">
                 <span class="role-name">后厨</span>
-                <span class="role-desc">接单、制作完成、厨房补打</span>
+                <span class="role-desc">接单、制作完成</span>
               </div>
             </a-radio>
           </a-radio-group>

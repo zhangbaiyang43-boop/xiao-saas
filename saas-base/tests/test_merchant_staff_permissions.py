@@ -9,6 +9,7 @@ from app.core.permissions import (
     PERM_MEMBER_MANAGE,
     PERM_ORDER_ACCEPT,
     PERM_ORDER_COMPLETE,
+    PERM_ORDER_SERVE,
     PERM_ORDER_VIEW_FULFILLMENT,
     PERM_PICKUP_ASSIGN,
     PERM_PICKUP_CHANGE,
@@ -70,6 +71,7 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
 
     def test_waiter_matrix(self):
         self.assertTrue(has_permission(ROLE_WAITER, PERM_ORDER_VIEW_FULFILLMENT))
+        self.assertTrue(has_permission(ROLE_WAITER, PERM_ORDER_SERVE))
         self.assertTrue(has_permission(ROLE_WAITER, PERM_TABLE_VIEW))
         self.assertTrue(has_permission(ROLE_WAITER, PERM_PICKUP_VIEW))
         self.assertFalse(has_permission(ROLE_WAITER, PERM_ORDER_ACCEPT))
@@ -82,6 +84,9 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
         self.assertFalse(has_permission(ROLE_WAITER, PERM_SETTINGS_PAYMENT))
         self.assertFalse(has_permission(ROLE_WAITER, PERM_STAFF_MANAGE))
         self.assertFalse(has_permission(ROLE_WAITER, PERM_KITCHEN_PRINT_REPRINT))
+        self.assertFalse(has_permission(ROLE_FRONTDESK, PERM_ORDER_SERVE))
+        self.assertFalse(has_permission(ROLE_KITCHEN, PERM_ORDER_SERVE))
+        self.assertTrue(has_permission(ROLE_OWNER, PERM_ORDER_SERVE))
 
     def test_kitchen_matrix(self):
         self.assertTrue(has_permission(ROLE_KITCHEN, PERM_ORDER_ACCEPT))
@@ -124,6 +129,9 @@ class MerchantStaffPermissionsTest(unittest.TestCase):
         self.assertFalse(staff_route_allowed("PATCH", "/api/v1/orders/123/pickup-no", ROLE_WAITER))
         self.assertTrue(staff_route_allowed("PATCH", "/api/v1/orders/123/pickup-no", ROLE_FRONTDESK))
         self.assertFalse(staff_route_allowed("PATCH", "/api/v1/orders/123/pickup-no", ROLE_KITCHEN))
+        self.assertTrue(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_WAITER))
+        self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_FRONTDESK))
+        self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/serve", ROLE_KITCHEN))
         self.assertTrue(staff_route_allowed("POST", "/api/v1/orders/123/reprint", ROLE_KITCHEN))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/123/reprint", ROLE_FRONTDESK))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/settle-table", ROLE_WAITER))

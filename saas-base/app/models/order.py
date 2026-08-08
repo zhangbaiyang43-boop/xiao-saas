@@ -30,7 +30,11 @@ class Order(BaseModel):
     refund_amount = Column(Numeric(10, 2), nullable=True)
     refund_error = Column(Text, nullable=True)
     refunded_at = Column(DateTime, nullable=True)
+    # Waiter serving (Phase R2): independent of order.status done.
+    # Kitchen complete → status=done + served_at NULL → Waiter queue.
     served_at = Column(DateTime, nullable=True)
+    served_by_account_id = Column(BigInteger, nullable=True)  # merchant_accounts.id; no FK (project style)
+    served_by_role = Column(String(32), nullable=True)  # waiter | owner
     completed_at = Column(DateTime, nullable=True)
     source = Column(String(16), nullable=False, default="miniprogram")   # miniprogram | h5 | staff
     staff_note = Column(String(64), nullable=True)  # 服务员代客加单时的可选备注（如"前台-老王"），不关联账号，仅展示

@@ -179,6 +179,8 @@
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
+              <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
+              <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
               <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
             </div>
             <div v-if="reviewsMap[order.id]" class="review-row">
@@ -314,6 +316,8 @@
             <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
             <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
+            <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
+            <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
             <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
             <button
@@ -496,7 +500,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
 import { useOrderAlert } from '../composables/useOrderAlert'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
@@ -837,6 +841,7 @@ async function loadOrders(pollMeta = {}) {
       staffNote: o.staff_note || '',
       pickup_no: o.pickup_no || '',
       canAssignPickupNo: !!o.can_assign_pickup_no,
+      served_at: o.served_at || null,
       paymentStatus: o.payment_status || '',
       printStatus: o.print_status || null,
       createdAt: o.created_at || '',
@@ -1074,10 +1079,31 @@ async function finishOrder(order) {
   order.updating = true
   try {
     const res = await updateOrderStatus(order.id, 'done')
-    if (res.code === 200) order.status = 'done'
-    else message.error(res.msg || '操作失败，请刷新页面重试')
+    if (res.code === 200) {
+      order.status = 'done'
+      order.served_at = null
+    } else message.error(res.msg || '操作失败，请刷新页面重试')
   }
   catch { message.error('操作失败') } finally { order.updating = false }
+}
+
+function orderNeedsServe(order) {
+  return order?.status === 'done' && !order?.served_at
+}
+
+async function confirmServed(order) {
+  order.updating = true
+  try {
+    const res = await serveOrder(order.id)
+    if (res?.code === 200) {
+      order.served_at = res.data?.served_at || new Date().toISOString()
+      message.success('已确认上菜')
+    } else message.error(res?.msg || '操作失败，请刷新页面重试')
+  } catch {
+    message.error('操作失败')
+  } finally {
+    order.updating = false
+  }
 }
 
 async function reprintOrderTicket(order) {

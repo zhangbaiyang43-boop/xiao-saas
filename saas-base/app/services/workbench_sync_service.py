@@ -36,10 +36,12 @@ WORKBENCH_CURSOR_OVERLAP_SECONDS = 1
 _CURSOR_VERSION = 2
 _CURSOR_VERSION_V1 = 1
 
-# Match admin-h5 Waiter/Frontdesk/Kitchen filterStatuses (shared Full + Delta visibility).
-# Frontdesk inherits pre-R1 waiter pickup scope: pending + preparing.
+# Match admin-h5 workbench filterStatuses (shared Full + Delta visibility).
+# Frontdesk: pickup scope pending + preparing.
+# Waiter Phase R2: only WAITING_TO_SERVE (done + served_at IS NULL) — not a status set alone.
+# Kitchen / Owner: fulfillment statuses.
 _FRONTDESK_STATUSES = frozenset({"pending", "preparing"})
-_WAITER_STATUSES = frozenset({"pending", "preparing"})
+_WAITER_STATUSES = frozenset({"done"})
 _KITCHEN_STATUSES = frozenset({"pending", "preparing", "done"})
 _OWNER_STATUSES = frozenset({"pending", "preparing", "done"})
 
@@ -58,7 +60,16 @@ def workbench_visible_statuses_for_role(role: str | None) -> frozenset[str]:
     return frozenset()
 
 
+def is_waiting_to_serve(order: Any) -> bool:
+    """WAIT_TO_SERVE: kitchen done and not yet served by Waiter/Owner."""
+    status = getattr(order, "status", None)
+    return status == "done" and not getattr(order, "served_at", None)
+
+
 def is_order_visible_in_workbench(order: Any, role: str | None) -> bool:
+    value = (role or "").strip().lower()
+    if value == ROLE_WAITER:
+        return is_waiting_to_serve(order)
     status = getattr(order, "status", None)
     return status in workbench_visible_statuses_for_role(role)
 

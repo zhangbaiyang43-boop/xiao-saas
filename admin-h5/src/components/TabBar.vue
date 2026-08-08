@@ -59,6 +59,8 @@ async function fetchPending(pollMeta = {}) {
           pendingCount.value = raw.filter(
             (o) => (o.can_assign_pickup_no || o.canAssignPickupNo) && !o.pickup_no,
           ).length
+        } else if (auth.role === 'waiter') {
+          pendingCount.value = raw.filter((o) => o.status === 'done' && !o.served_at).length
         } else {
           pendingCount.value = raw.filter((o) => o.status === 'pending').length
         }

@@ -11,6 +11,31 @@ LIFECYCLE_SERVICE_SOURCE = (
 MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+# Status helpers moved out of menu.vue into composables (still consumer contract).
+CONSUMER_STATUS_SOURCE = (
+    ROOT.parent
+    / "member-mini-client"
+    / "src"
+    / "subpkg-order"
+    / "composables"
+    / "useTableBillView.js"
+).read_text(encoding="utf-8-sig")
+CONSUMER_LABEL_SOURCE = (
+    ROOT.parent
+    / "member-mini-client"
+    / "src"
+    / "subpkg-order"
+    / "composables"
+    / "useOrderFormatters.js"
+).read_text(encoding="utf-8-sig")
+CONSUMER_POLL_SOURCE = (
+    ROOT.parent
+    / "member-mini-client"
+    / "src"
+    / "subpkg-order"
+    / "composables"
+    / "useOrderStatusPoll.js"
+).read_text(encoding="utf-8-sig")
 ORDER_MANAGE_SOURCE = (
     ROOT.parent / "admin-h5" / "src" / "views" / "OrderManage.vue"
 ).read_text(encoding="utf-8-sig")
@@ -67,7 +92,8 @@ class OrderStateMachineContractsTest(unittest.TestCase):
     def test_status_update_records_terminal_timestamps_once(self):
         source = lifecycle_method_source("update_order_status")
         self.assertIn('body.status == "done"', source)
-        self.assertIn("served_at", source)
+        # Phase R2: kitchen done must NOT auto-write served_at (Waiter serve_order owns it).
+        self.assertNotIn("order.served_at = datetime.utcnow()", source)
         self.assertIn('body.status == "settled"', source)
         self.assertIn("completed_at", source)
 
@@ -89,10 +115,10 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn('o.status = "settled"', source)
 
     def test_consumer_and_merchant_status_text_cover_backend_states(self):
-        self.assertIn("pending: '", MENU_SOURCE)
-        self.assertIn("preparing: '", MENU_SOURCE)
-        self.assertIn("done: '", MENU_SOURCE)
-        self.assertIn("settled: '", MENU_SOURCE)
+        self.assertIn("pending:", CONSUMER_LABEL_SOURCE)
+        self.assertIn("preparing:", CONSUMER_LABEL_SOURCE)
+        self.assertIn("done:", CONSUMER_LABEL_SOURCE)
+        self.assertIn("settled:", CONSUMER_LABEL_SOURCE)
         self.assertIn("function statusLabel(s)", ORDER_MANAGE_SOURCE)
         self.assertIn("pending:", ORDER_MANAGE_SOURCE)
         self.assertIn("preparing:", ORDER_MANAGE_SOURCE)
@@ -100,16 +126,15 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn("settled:", ORDER_MANAGE_SOURCE)
 
     def test_consumer_status_rendering_uses_backend_status_without_fake_progression(self):
-        self.assertIn("if (['paid', 'pending'].includes(status)) return 'pending'", MENU_SOURCE)
-        self.assertIn("if (['accepted', 'preparing', 'cooking'].includes(status)) return 'preparing'", MENU_SOURCE)
-        self.assertIn("if (['done', 'completed'].includes(status)) return 'done'", MENU_SOURCE)
-        self.assertIn("if (status === 'settled') return 'settled'", MENU_SOURCE)
-        self.assertNotIn("return 'accepted'", MENU_SOURCE)
-        self.assertNotIn("return 'cooking'", MENU_SOURCE)
-        self.assertNotIn("return 'completed'", MENU_SOURCE)
-        self.assertIn("const order = ['pending', 'preparing', 'done', 'settled']", MENU_SOURCE)
-        self.assertIn("['settled', 'cancelled', 'rejected'].includes(newStatus)", MENU_SOURCE)
-        self.assertIn("!['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))", MENU_SOURCE)
+        self.assertIn("if (['paid', 'pending'].includes(status)) return 'pending'", CONSUMER_STATUS_SOURCE)
+        self.assertIn("if (['accepted', 'preparing', 'cooking'].includes(status)) return 'preparing'", CONSUMER_STATUS_SOURCE)
+        self.assertIn("if (['done', 'completed'].includes(status)) return 'done'", CONSUMER_STATUS_SOURCE)
+        self.assertIn("if (status === 'settled') return 'settled'", CONSUMER_STATUS_SOURCE)
+        self.assertNotIn("return 'accepted'", CONSUMER_STATUS_SOURCE)
+        self.assertNotIn("return 'cooking'", CONSUMER_STATUS_SOURCE)
+        self.assertNotIn("return 'completed'", CONSUMER_STATUS_SOURCE)
+        self.assertIn("['settled', 'cancelled', 'rejected'].includes(newStatus)", CONSUMER_POLL_SOURCE)
+        self.assertIn("!['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))", CONSUMER_POLL_SOURCE)
 
     def test_merchant_actions_follow_forward_sequence(self):
         self.assertIn("updateOrderStatus(order.id, 'preparing')", ORDER_MANAGE_SOURCE)

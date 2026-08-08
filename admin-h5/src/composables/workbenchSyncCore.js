@@ -27,6 +27,16 @@ export function needsPickupIdsFromOrders(orders) {
   return ids
 }
 
+/** Waiter alert set: done + not yet served. */
+export function waitingToServeIdsFromOrders(orders) {
+  const ids = new Set()
+  for (const o of orders || []) {
+    if (!o || o.id == null) continue
+    if (o.status === 'done' && !o.served_at) ids.add(String(o.id))
+  }
+  return ids
+}
+
 /** New pending IDs in `current` that are not in `known`. Uses string IDs only. */
 export function diffNewPendingIds(known, current) {
   const news = []

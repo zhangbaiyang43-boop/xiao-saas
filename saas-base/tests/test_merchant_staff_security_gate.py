@@ -535,11 +535,12 @@ class CrossTenantHttpIntegrationTest(unittest.IsolatedAsyncioTestCase):
                     tenant_id=TENANT_A,
                     table_no="A2",
                     total=99.5,
-                    status="pending",
+                    status="done",
                     payment_status="paid",
                     payment_mode="postpay",
                     phone="13800001111",
                     pickup_no="7",
+                    served_at=None,
                 )
             )
             await db.flush()
@@ -554,6 +555,7 @@ class CrossTenantHttpIntegrationTest(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
 
+        # Waiter R2 queue: done + unserved only
         token = create_access_token(TENANT_A, role="waiter", account_id=self.waiter_id)
         r = await self.client.get("/api/v1/orders/workbench", headers=self._auth(token))
         self.assertEqual(r.status_code, 200)
@@ -562,7 +564,7 @@ class CrossTenantHttpIntegrationTest(unittest.IsolatedAsyncioTestCase):
         rows = body.get("data") or []
         self.assertTrue(any(str(x.get("id")) == str(same_order) for x in rows))
         row = next(x for x in rows if str(x.get("id")) == str(same_order))
-        for bad in ("total", "phone", "payment_status", "payment_method", "customer_id"):
+        for bad in ("total", "phone", "payment_status", "payment_method", "customer_id", "served_by_account_id"):
             self.assertNotIn(bad, row)
         self.assertNotIn("price", (row.get("items") or [{}])[0])
 

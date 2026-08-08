@@ -465,8 +465,7 @@ class OrderLifecycleService(BaseService):
             await _restore_order_stock(order, self.db)
 
         order.status = body.status
-        if body.status == "done" and not getattr(order, "served_at", None):
-            order.served_at = datetime.utcnow()
+        # Phase R2: kitchen complete must NOT auto-serve. Waiter/Owner call serve_order.
         just_settled = body.status == "settled" and not getattr(order, "completed_at", None)
         if just_settled:
             order.completed_at = datetime.utcnow()
@@ -503,6 +502,63 @@ class OrderLifecycleService(BaseService):
                 "payment_time": getattr(order, "payment_time", None),
             },
             msg="状态已更新",
+        )
+
+    async def serve_order(
+        self,
+        order_id: int,
+        *,
+        account_id: int | None,
+        role: str | None,
+    ) -> ApiResponse:
+        """Mark kitchen-done order as served. Independent of payment/print/pickup.
+
+        Idempotent: repeat serve keeps first served_by_* audit.
+        """
+        tenant_id = self.require_tenant_id()
+        TenantContext.set_tenant_id(tenant_id)
+        result = await self.db.execute(
+            select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
+        )
+        order = result.scalar_one_or_none()
+        if not order:
+            return error_response(code=404, msg="order not found")
+
+        if (order.status or "") != "done":
+            return error_response(code=409, msg="仅制作完成的订单可确认上菜")
+
+        if getattr(order, "served_at", None):
+            return success_response(
+                data={
+                    "id": str(order.id),
+                    "status": order.status,
+                    "served_at": order.served_at.isoformat() if order.served_at else None,
+                    "idempotent": True,
+                },
+                msg="已上菜",
+            )
+
+        now = datetime.utcnow()
+        order.served_at = now
+        order.updated_at = now
+        role_value = (role or "").strip().lower()
+        if role_value == "owner" or account_id is None:
+            order.served_by_account_id = None
+            order.served_by_role = "owner"
+        else:
+            order.served_by_account_id = int(account_id)
+            order.served_by_role = role_value or "waiter"
+
+        await self.db.commit()
+        await self.db.refresh(order)
+        return success_response(
+            data={
+                "id": str(order.id),
+                "status": order.status,
+                "served_at": order.served_at.isoformat() if order.served_at else None,
+                "idempotent": False,
+            },
+            msg="已确认上菜",
         )
 
     async def settle_table(self, body: dict[str, Any], *, closed_by: str) -> ApiResponse:

@@ -161,6 +161,7 @@ export const uploadDishImage = (file) => {
 export const createOrder = (data) => request.post('/v1/orders', data)
 export const getOrders = (params, config = {}) => request.get('/v1/orders', { ...config, params })
 export const updateOrderStatus = (id, status) => request.patch(`/v1/orders/${id}/status`, { status })
+export const serveOrder = (id) => request.post(`/v1/orders/${id}/serve`)
 export const mockPayOrder = (id) => request.post(`/v1/orders/${id}/mock-pay`)
 export const createWxPayOrder = (id, data = {}) => request.post(`/v1/orders/${id}/pay`, data)
 export const updateMerchantNote = (id, note) => request.patch(`/v1/orders/${id}/note`, { note })

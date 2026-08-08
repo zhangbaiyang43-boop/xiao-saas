@@ -2,8 +2,8 @@
   <div class="wb-page">
     <div class="wb-header">
       <div>
-        <div class="wb-title">服务员工作台</div>
-        <div class="wb-sub">{{ displayName || '服务员' }} · 订单进度</div>
+        <div class="wb-title">待上菜 {{ waitingCount }}</div>
+        <div class="wb-sub">{{ displayName || '服务员' }} · 确认上菜即完成</div>
       </div>
       <div class="wb-actions">
         <a-button size="small" @click="syncNow">刷新</a-button>
@@ -19,41 +19,50 @@
       @enable-sound="enableSound"
     />
 
-    <div class="wb-stats">
-      <div class="stat"><b>{{ pendingCount }}</b><span>待制作</span></div>
-      <div class="stat"><b>{{ preparingCount }}</b><span>制作中</span></div>
-    </div>
-
     <div v-if="initialLoading" class="wb-empty">加载中…</div>
-    <div v-else-if="!orders.length" class="wb-empty">暂无桌台订单</div>
+    <div v-else-if="!queue.length" class="wb-empty">暂无待上菜</div>
 
     <div
-      v-for="order in orders"
+      v-for="order in queue"
       :key="order.id"
       class="wb-card"
+      :class="{ 'is-new': isHighlighted(order.id) }"
     >
       <div class="wb-card-top">
         <div>
+          <span v-if="isHighlighted(order.id)" class="new-badge">新</span>
           <strong>{{ order.table_no || '未分桌' }}</strong>
           <span v-if="order.pickup_no"> · {{ order.pickup_no }}号桌牌</span>
           <span class="muted"> · #{{ order.display_order_no }}</span>
         </div>
-        <a-tag>{{ statusText(order.status) }}</a-tag>
       </div>
-      <div class="muted wait">已等待 {{ waitMinutes(order.created_at) }} 分钟</div>
       <div class="items">
         <div v-for="(item, idx) in order.items" :key="idx">{{ item.name }} ×{{ item.qty }}</div>
       </div>
       <div v-if="order.remark" class="remark">备注：{{ order.remark }}</div>
+      <div v-if="order.staff_note" class="remark staff">厨房/代点：{{ order.staff_note }}</div>
+      <div class="actions">
+        <a-button
+          type="primary"
+          size="large"
+          block
+          :loading="busyId === order.id"
+          :disabled="busyId === order.id"
+          @click="confirmServed(order)"
+        >确认已上菜</a-button>
+      </div>
+      <div v-if="failId === order.id" class="fail">上菜确认失败，请重试</div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
+import { serveOrder } from '../api'
 import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
-import { useWorkbenchSync } from '../composables/useWorkbenchSync'
+import { waitingToServeIdsFromOrders, useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
@@ -68,29 +77,46 @@ const {
   lastSyncLabel,
   soundReady,
   enableSound,
+  isHighlighted,
   syncNow,
-  pendingCount,
 } = useWorkbenchSync({
   dedupeKey: 'wb:waiter',
-  filterStatuses: ['pending', 'preparing'],
-  alertsEnabled: false,
+  filterStatuses: ['done'],
+  alertIdsFromOrders: waitingToServeIdsFromOrders,
+  alertsEnabled: true,
 })
 
-const preparingCount = computed(() => orders.value.filter((o) => o.status === 'preparing').length)
+const queue = computed(() =>
+  orders.value.filter((o) => o.status === 'done' && !o.served_at),
+)
+const waitingCount = computed(() => queue.value.length)
+const busyId = ref('')
+const failId = ref('')
 
 async function logout() {
   await auth.logoutCurrentDevice()
   router.replace('/login?mode=staff')
 }
 
-function statusText(s) {
-  return { pending: '待制作', preparing: '制作中', done: '已完成', settled: '已结账' }[s] || s
-}
-
-function waitMinutes(iso) {
-  if (!iso) return 0
-  const ms = Date.now() - new Date(iso).getTime()
-  return Math.max(0, Math.floor(ms / 60000))
+async function confirmServed(order) {
+  if (!order?.id || busyId.value === order.id) return
+  busyId.value = order.id
+  failId.value = ''
+  try {
+    const res = await serveOrder(order.id)
+    if (res?.code === 200) {
+      message.success('已确认上菜')
+      await syncNow()
+    } else {
+      failId.value = order.id
+      message.error(res?.msg || '确认失败，请重试')
+    }
+  } catch {
+    failId.value = order.id
+    message.error('确认失败，请重试')
+  } finally {
+    busyId.value = ''
+  }
 }
 </script>
 
@@ -98,17 +124,27 @@ function waitMinutes(iso) {
 .wb-page { padding: 12px 12px 80px; background: #f5f5f5; min-height: 100%; }
 .wb-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
 .wb-actions { display: flex; gap: 8px; }
-.wb-title { font-size: 20px; font-weight: 700; color: #111; }
+.wb-title { font-size: 22px; font-weight: 800; color: #111; }
 .wb-sub { font-size: 12px; color: #888; margin-top: 4px; }
-.wb-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
-.stat { background: #fff; border-radius: 12px; padding: 12px; text-align: center; }
-.stat b { display: block; font-size: 22px; color: #111; }
-.stat span { font-size: 12px; color: #888; }
-.wb-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+.wb-card { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.04); border: 1px solid transparent; }
+.wb-card.is-new { border-color: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, .18); }
+.new-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #111;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
 .wb-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .muted { color: #888; font-size: 12px; }
-.wait { margin: 6px 0; }
-.items { font-size: 15px; line-height: 1.6; color: #222; }
+.items { font-size: 16px; line-height: 1.7; color: #222; margin-top: 8px; }
 .remark { margin-top: 6px; font-size: 13px; color: #b45309; }
-.wb-empty { text-align: center; color: #999; padding: 40px 0; }
+.remark.staff { color: #7c3aed; }
+.actions { margin-top: 14px; }
+.fail { margin-top: 8px; font-size: 12px; color: #dc2626; }
+.wb-empty { text-align: center; color: #999; padding: 48px 0; }
 </style>

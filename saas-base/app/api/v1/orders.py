@@ -168,6 +168,7 @@ def serialize_order(
         "staff_note": getattr(order, "staff_note", None),
         "pickup_no": getattr(order, "pickup_no", None),
         "can_assign_pickup_no": can_assign_pickup_no(order, settings, dining_session),
+        "served_at": order.served_at.isoformat() if getattr(order, "served_at", None) else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "items": [
             {
@@ -997,6 +998,35 @@ async def update_order_pickup_no(
     return await service.update_order_pickup_no(int(order_id), body.pickup_no)
 
 
+@router.post("/orders/{order_id}/serve")
+async def serve_order(
+    order_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Waiter/Owner: confirm dish served. Does not change order.status or print/payment."""
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_ORDER_SERVE
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_ORDER_SERVE):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(principal.tenant_id)
+    return await service.serve_order(
+        int(order_id),
+        account_id=principal.account_id,
+        role=principal.role,
+    )
+
+
 class OrderReprintBody(PydanticBase):
     print_type: str = "kitchen"
 
@@ -1115,6 +1145,7 @@ def serialize_fulfillment_order(
         "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
         "table_no": order.table_no or "",
         "pickup_no": getattr(order, "pickup_no", None) or "",
+        "served_at": order.served_at.isoformat() if getattr(order, "served_at", None) else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "remark": order.remark or "",
         "staff_note": getattr(order, "staff_note", None) or "",
