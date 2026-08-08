@@ -219,11 +219,7 @@ class OrderLifecycleService(BaseService):
             serialize_order,
         )
         from app.services.order_payment_service import OrderPaymentService
-        from app.services.order_print_service import (
-            MAX_PRINT_RETRY_ATTEMPTS,
-            _get_print_meta,
-            _print_paid_order_ticket,
-        )
+        from app.services.order_print_service import reconcile_print_orders
 
         tenant_id = self.require_tenant_id()
         TenantContext.set_tenant_id(tenant_id)
@@ -296,14 +292,11 @@ class OrderLifecycleService(BaseService):
         for order in orders:
             if order.status == "pending_payment":
                 recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order)) or recovered_any
-            print_meta = _get_print_meta(order)
-            if (
-                getattr(order, "payment_status", None) == "paid"
-                and print_meta.get("status") == "failed"
-                and int(print_meta.get("attempts") or 0) < MAX_PRINT_RETRY_ATTEMPTS
-            ):
-                await _print_paid_order_ticket(order, self.db, reason="merchant_list_recovery")
-                recovered_any = True
+        print_recovered = await reconcile_print_orders(
+            self.db, orders, trigger="merchant_list_recovery"
+        )
+        if print_recovered:
+            recovered_any = True
         if recovered_any:
             await self.db.commit()
             for order in orders:

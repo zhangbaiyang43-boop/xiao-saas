@@ -100,7 +100,10 @@ class PaymentModeP1ContractsTest(unittest.TestCase):
         self.assertIn('payment_mode in ("postpay", "table_account")', rule_source)
         self.assertIn('status in ("cancelled", "rejected")', rule_source)
         self.assertIn('allowed, reason = can_reprint_order(order, print_type=print_type)', route_source)
-        self.assertIn('reason in ("order_created_pay_later", "manual_reprint")', print_source)
+        self.assertIn('evaluate_print_eligibility', print_source)
+        eligibility_source = function_source(PRINT_SERVICE_SOURCE, "evaluate_print_eligibility")
+        self.assertIn('payment_mode == "prepay"', eligibility_source)
+        self.assertIn('payment_mode in ("postpay", "table_account")', rule_source)
 
 
 if __name__ == "__main__":

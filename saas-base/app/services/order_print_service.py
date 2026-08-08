@@ -13,6 +13,17 @@ from app.models.order import Order
 
 PRINT_META_MARKER = "\n__PRINT_META__="
 MAX_PRINT_RETRY_ATTEMPTS = 3
+PRINT_RETRY_COOLDOWN_SECONDS = 30
+PRINT_RECONCILE_GRACE_SECONDS = 15
+PRINT_RECONCILE_BATCH_LIMIT = 8
+
+_KUAIMAI_UNKNOWN_CODES = frozenset({
+    "KUAIMAI_TIMEOUT",
+    "KUAIMAI_UNKNOWN_ERROR",
+    "KUAIMAI_INVALID_RESPONSE",
+})
+_AUTO_RECONCILE_STATUSES = frozenset({"pending", "preparing", "done"})
+_FULFILLABLE_STATUSES = frozenset({"pending", "preparing", "done", "settled"})
 
 
 def can_reprint_order(order: Order, print_type: str = "kitchen") -> tuple[bool, str | None]:
@@ -29,6 +40,96 @@ def can_reprint_order(order: Order, print_type: str = "kitchen") -> tuple[bool, 
         if payment_mode in ("postpay", "table_account"):
             return True, None
     return False, "unsupported print type"
+
+
+def evaluate_print_eligibility(
+    order: Order,
+    *,
+    defer_kitchen_print: bool = False,
+    manual: bool = False,
+) -> dict:
+    """Decide whether an order may be printed (auto or manual)."""
+    status = getattr(order, "status", None)
+    payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
+    payment_status = getattr(order, "payment_status", None)
+    db_print_status = str(getattr(order, "print_status", "") or "").upper()
+    meta = _get_print_meta(order)
+
+    if status in ("cancelled", "rejected"):
+        return {"code": "NOT_PRINTABLE", "reason": "order cancelled or rejected"}
+
+    if not manual and (db_print_status == "SUCCESS" or meta.get("status") == "printed"):
+        return {"code": "ALREADY_SUCCESS", "reason": "already printed successfully"}
+
+    if defer_kitchen_print and not manual:
+        return {"code": "WAITING_PICKUP_NO", "reason": "waiting for pickup number before kitchen print"}
+
+    if payment_mode == "prepay" and payment_status != "paid":
+        return {"code": "NOT_YET_PAYABLE", "reason": "prepay order not paid"}
+
+    if status == "pending_payment":
+        return {"code": "NOT_YET_PAYABLE", "reason": "order still pending payment"}
+
+    # postpay / table_account unpaid OR paid → eligible in fulfillable statuses
+    if status in _FULFILLABLE_STATUSES:
+        return {"code": "ELIGIBLE", "reason": "eligible for print"}
+
+    return {"code": "NOT_PRINTABLE", "reason": f"status {status!r} is not printable"}
+
+
+def build_staff_print_summary(order: Order, *, defer_kitchen_print: bool = False) -> dict:
+    """Safe print fields for staff workbench DTOs — no raw meta / secrets / traces."""
+    meta = _get_print_meta(order)
+    db_status = str(getattr(order, "print_status", "") or "").upper()
+    meta_status = meta.get("status") if meta else None
+
+    print_status: str | None
+    if db_status in ("SUCCESS", "FAILED", "UNKNOWN", "PENDING"):
+        print_status = db_status
+    elif meta_status == "printed":
+        print_status = "SUCCESS"
+    elif meta_status == "failed":
+        print_status = "FAILED"
+    elif meta_status == "unknown":
+        print_status = "UNKNOWN"
+    elif meta_status in ("printing", "not_started"):
+        print_status = "PENDING"
+    else:
+        print_status = None
+
+    waiting = bool(
+        defer_kitchen_print
+        and print_status not in ("SUCCESS",)
+        and meta_status != "printed"
+    )
+
+    print_issue = None
+    if print_status == "FAILED" or meta_status == "failed":
+        print_issue = "failed"
+    elif print_status == "UNKNOWN" or meta_status == "unknown":
+        print_issue = "unknown"
+    elif waiting:
+        print_issue = "waiting_pickup"
+
+    if print_issue == "waiting_pickup":
+        label = "等待桌牌后打印"
+    elif print_status == "SUCCESS":
+        label = "已提交打印"
+    elif print_status == "FAILED":
+        label = "打印失败"
+    elif print_status == "UNKNOWN":
+        label = "打印状态未知"
+    else:
+        label = ""
+
+    can_reprint, _ = can_reprint_order(order, print_type="kitchen")
+    return {
+        "print_status": print_status,
+        "print_status_label": label,
+        "print_attempts": int(meta.get("attempts") or 0) if meta else 0,
+        "print_issue": print_issue,
+        "can_reprint": bool(can_reprint),
+    }
 
 
 def _split_merchant_note_and_print_meta(raw_note: str | None) -> tuple[str | None, dict]:
@@ -111,6 +212,47 @@ class PrintResultUnknownError(RuntimeError):
     明确说打印失败"是两码事，调用方必须分开处理（不能自动重试，见 print_order 的说明）。"""
 
 
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _eligible_at_for_reconcile(order: Order) -> datetime | None:
+    payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
+    if payment_mode == "prepay":
+        return _parse_dt(getattr(order, "payment_time", None)) or _parse_dt(getattr(order, "created_at", None))
+    return _parse_dt(getattr(order, "created_at", None))
+
+
+def _is_unknown_print_exception(exc: BaseException) -> bool:
+    if isinstance(exc, PrintResultUnknownError):
+        return True
+    code = str(getattr(exc, "code", None) or "").strip()
+    if code in _KUAIMAI_UNKNOWN_CODES:
+        return True
+    message = str(exc or "").strip()
+    if message in _KUAIMAI_UNKNOWN_CODES:
+        return True
+    return False
+
+
 async def _print_paid_order_ticket(
     order: Order,
     db: AsyncSession,
@@ -118,42 +260,36 @@ async def _print_paid_order_ticket(
     manual: bool = False,
     reason: str = "auto",
     operator: str | None = None,
+    operator_role: str | None = None,
 ) -> dict:
     """Print an order ticket and persist recoverable print state in existing order metadata."""
     if not order:
         return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint", "pickup_no_assigned") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
-    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
-        return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
 
     locked_result = await db.execute(select(Order).where(Order.id == order.id).with_for_update())
     locked_order = locked_result.scalar_one_or_none()
     if locked_order:
         order = locked_order
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint", "pickup_no_assigned") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
-    if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
-        return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
 
-    # 启用桌牌且要求分牌后出票：未分牌时暂缓（manual_reprint 仍允许补打）
-    if reason != "manual_reprint":
+    defer_kitchen_print = False
+    if not manual:
         from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
 
         pickup_settings = await load_pickup_settings(db, str(order.tenant_id))
-        if should_defer_kitchen_print(order, pickup_settings):
-            logger.warning(
-                "[PRINT_DEFERRED_WAITING_PICKUP_NO] order_id=%s reason=%s",
-                order.id,
-                reason,
-            )
-            return {"success": False, "skipped": True, "code": "WAITING_PICKUP_NO"}
+        defer_kitchen_print = should_defer_kitchen_print(order, pickup_settings)
 
-    meta = _get_print_meta(order)
-    db_print_status = str(getattr(order, "print_status", "") or "").upper()
-    if not manual and (db_print_status == "SUCCESS" or meta.get("status") == "printed"):
+    eligibility = evaluate_print_eligibility(
+        order,
+        defer_kitchen_print=defer_kitchen_print,
+        manual=manual,
+    )
+    code = eligibility.get("code")
+    if code == "ALREADY_SUCCESS":
+        meta = _get_print_meta(order)
         logger.warning(
             "[PRINT_SKIPPED_ALREADY_SUCCESS] order_id=%s print_status=%s status=%s attempts=%s provider_task_id=%s",
             order.id,
-            db_print_status or "",
+            str(getattr(order, "print_status", "") or ""),
             meta.get("status"),
             meta.get("attempts", 0),
             meta.get("provider_task_id"),
@@ -165,7 +301,19 @@ async def _print_paid_order_ticket(
             manual,
         )
         return {"success": True, "skipped": True, "status": "printed"}
+    if code == "WAITING_PICKUP_NO":
+        logger.warning(
+            "[PRINT_DEFERRED_WAITING_PICKUP_NO] order_id=%s reason=%s",
+            order.id,
+            reason,
+        )
+        return {"success": False, "skipped": True, "code": "WAITING_PICKUP_NO"}
+    if code == "NOT_YET_PAYABLE":
+        return {"success": False, "skipped": True, "code": "NOT_YET_PAYABLE"}
+    if code != "ELIGIBLE":
+        return {"success": False, "skipped": True, "code": code or "NOT_PRINTABLE"}
 
+    meta = _get_print_meta(order)
     attempts = int(meta.get("attempts") or 0)
     if not manual and attempts >= MAX_PRINT_RETRY_ATTEMPTS:
         logger.warning(
@@ -184,15 +332,19 @@ async def _print_paid_order_ticket(
             reason,
             manual,
         )
+    now_iso = datetime.now(timezone.utc).isoformat()
     meta.update({
         "status": "printing",
         "attempts": attempts + 1,
         "last_reason": reason,
+        "last_attempt_at": now_iso,
         "manual_reprint": bool(meta.get("manual_reprint")) or manual,
     })
-    if manual and operator:
-        meta["manual_reprint_by"] = operator
-        meta["manual_reprint_at"] = datetime.now(timezone.utc).isoformat()
+    if manual:
+        meta["manual_reprint_by"] = operator if operator else "owner"
+        meta["manual_reprint_at"] = now_iso
+        if operator_role:
+            meta["manual_reprint_role"] = operator_role
     _mark_order_print_state(order, "PENDING")
     _set_print_meta(order, meta)
     await db.flush()
@@ -280,7 +432,14 @@ async def _print_paid_order_ticket(
                 render_data,
             )
             if not result or result.get("success") is not True:
-                raise RuntimeError(result.get("code") or result.get("error") or "PRINT_PROVIDER_FAILED")
+                err = (
+                    (result.get("code") or result.get("error") or "PRINT_PROVIDER_FAILED")
+                    if result
+                    else "PRINT_PROVIDER_FAILED"
+                )
+                if str(err) in _KUAIMAI_UNKNOWN_CODES:
+                    raise PrintResultUnknownError(str(err))
+                raise RuntimeError(str(err))
             provider_task_id = result.get("provider_task_id")
         elif tenant_obj and tenant_obj.feieyun_sn and tenant_obj.feieyun_key:
             items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
@@ -318,7 +477,11 @@ async def _print_paid_order_ticket(
         # 打印成功）分开处理："失败"允许后续自动重试（merchant_list_recovery 那条路），
         # "未知"绝不能自动重试——如果这次其实已经打印成功了，自动重试会造成重复出票，
         # 必须交给能实际看到打印机的人来判断要不要手动补打。
-        is_unknown = isinstance(exc, PrintResultUnknownError)
+        is_unknown = _is_unknown_print_exception(exc)
+        if is_unknown and not isinstance(exc, PrintResultUnknownError):
+            # Normalize kuaimai unknown codes onto PrintResultUnknownError for callers/logs.
+            exc = PrintResultUnknownError(getattr(exc, "code", None) or str(exc))
+            is_unknown = True
         status_label = "unknown" if is_unknown else "failed"
         db_status = "UNKNOWN" if is_unknown else "FAILED"
         error_code = getattr(exc, "code", None) or str(exc) or type(exc).__name__
@@ -341,6 +504,78 @@ async def _print_paid_order_ticket(
             reason,
         )
         return {"success": False, "status": status_label, "attempts": meta.get("attempts"), "code": error_code}
+
+
+async def reconcile_print_orders(
+    db: AsyncSession,
+    orders,
+    *,
+    trigger: str = "reconcile",
+    pickup_settings: dict | None = None,
+) -> int:
+    """Best-effort print recovery for a bounded batch of orders. Returns print call count."""
+    from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
+
+    if not orders:
+        return 0
+
+    batch = list(orders)[:PRINT_RECONCILE_BATCH_LIMIT]
+    now = datetime.now(timezone.utc)
+    settings_by_tenant: dict[str, dict] = {}
+    attempted = 0
+
+    for order in batch:
+        if getattr(order, "status", None) not in _AUTO_RECONCILE_STATUSES:
+            continue
+
+        tenant_id = str(getattr(order, "tenant_id", "") or "")
+        if pickup_settings is not None:
+            settings = pickup_settings
+        else:
+            if tenant_id not in settings_by_tenant:
+                settings_by_tenant[tenant_id] = await load_pickup_settings(db, tenant_id)
+            settings = settings_by_tenant[tenant_id]
+
+        defer = should_defer_kitchen_print(order, settings)
+        eligibility = evaluate_print_eligibility(order, defer_kitchen_print=defer, manual=False)
+        if eligibility.get("code") in (
+            "ALREADY_SUCCESS",
+            "WAITING_PICKUP_NO",
+            "NOT_YET_PAYABLE",
+            "NOT_PRINTABLE",
+        ):
+            continue
+
+        meta = _get_print_meta(order)
+        db_print_status = str(getattr(order, "print_status", "") or "").upper()
+        meta_status = meta.get("status")
+
+        # Result-unknown must never auto-retry (risk of duplicate tickets).
+        if db_print_status == "UNKNOWN" or meta_status == "unknown":
+            continue
+
+        attempts = int(meta.get("attempts") or 0)
+        is_failed = db_print_status == "FAILED" or meta_status == "failed"
+
+        if is_failed:
+            if attempts >= MAX_PRINT_RETRY_ATTEMPTS:
+                continue
+            last_at = _parse_dt(meta.get("last_attempt_at")) or _parse_dt(meta.get("failed_at"))
+            if last_at and (now - last_at).total_seconds() < PRINT_RETRY_COOLDOWN_SECONDS:
+                continue
+            await _print_paid_order_ticket(order, db, reason=trigger)
+            attempted += 1
+            continue
+
+        # Never successfully printed: first attempt after grace window.
+        if attempts == 0 and not is_failed:
+            eligible_at = _eligible_at_for_reconcile(order)
+            if eligible_at and (now - eligible_at).total_seconds() < PRINT_RECONCILE_GRACE_SECONDS:
+                continue
+            await _print_paid_order_ticket(order, db, reason=trigger)
+            attempted += 1
+
+    return attempted
 
 
 # asyncio.create_task() 返回的 Task 如果没有任何地方存着强引用，理论上可能在下一次

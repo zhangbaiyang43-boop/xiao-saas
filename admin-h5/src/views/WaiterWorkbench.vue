@@ -39,6 +39,14 @@
           <strong>{{ order.table_no || '未分桌' }}</strong>
           <span v-if="order.pickup_no"> · {{ order.pickup_no }}号桌牌</span>
           <span class="muted"> · #{{ order.display_order_no }}</span>
+          <span
+            v-if="order.print_issue === 'failed'"
+            class="print-badge print-badge--failed"
+          >打印失败</span>
+          <span
+            v-else-if="order.print_issue === 'unknown'"
+            class="print-badge print-badge--unknown"
+          >打印状态未知</span>
         </div>
         <a-tag>{{ statusText(order.status) }}</a-tag>
       </div>
@@ -190,6 +198,17 @@ async function submitPickup() {
   vertical-align: middle;
 }
 .wb-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.print-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.print-badge--failed { background: #fef2f2; color: #dc2626; }
+.print-badge--unknown { background: #fffbeb; color: #b45309; }
 .muted { color: #888; font-size: 12px; }
 .wait { margin: 6px 0; }
 .items { font-size: 15px; line-height: 1.6; color: #222; }

@@ -20,6 +20,8 @@
       @enable-sound="enableSound"
     />
 
+    <div v-if="printIssueCount > 0" class="print-anomaly">打印异常 {{ printIssueCount }}</div>
+
     <div class="filters">
       <button
         v-for="f in filters"
@@ -45,6 +47,22 @@
           <span v-if="isHighlighted(order.id)" class="new-badge">新</span>
           <strong>{{ order.table_no || '未分桌' }}</strong>
           <span v-if="order.pickup_no"> · {{ order.pickup_no }}号桌牌</span>
+          <span
+            v-if="order.print_issue === 'failed'"
+            class="print-badge print-badge--failed"
+          >打印失败</span>
+          <span
+            v-else-if="order.print_issue === 'unknown'"
+            class="print-badge print-badge--unknown"
+          >打印状态未知</span>
+          <span
+            v-else-if="order.print_issue === 'waiting_pickup'"
+            class="print-badge print-badge--waiting"
+          >等待桌牌后打印</span>
+          <span
+            v-else-if="order.print_status === 'SUCCESS'"
+            class="print-ok"
+          >已提交打印</span>
         </div>
         <span class="wait">等待 {{ waitMinutes(order.created_at) }} 分钟</span>
       </div>
@@ -70,7 +88,7 @@
           @click="setStatus(order, 'done')"
         >完成</a-button>
         <a-button
-          v-if="can('kitchen.print_reprint')"
+          v-if="can('kitchen.print_reprint') && order.can_reprint"
           size="small"
           :loading="reprintId === order.id"
           @click="reprint(order)"
@@ -123,6 +141,10 @@ const counts = computed(() => ({
   preparing: orders.value.filter((o) => o.status === 'preparing').length,
   done: orders.value.filter((o) => o.status === 'done').length,
 }))
+
+const printIssueCount = computed(() =>
+  orders.value.filter((o) => o.print_issue === 'failed' || o.print_issue === 'unknown').length,
+)
 
 const visible = computed(() => orders.value.filter((o) => o.status === statusFilter.value))
 
@@ -189,8 +211,30 @@ async function reprint(order) {
   font-weight: 800;
   vertical-align: middle;
 }
+.print-anomaly {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #7f1d1d;
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 700;
+}
 .wb-card-top { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 16px; }
 .wait { color: #fbbf24; font-size: 13px; }
+.print-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.print-badge--failed { background: #7f1d1d; color: #fecaca; }
+.print-badge--unknown { background: #78350f; color: #fde68a; }
+.print-badge--waiting { background: #1e3a5f; color: #93c5fd; }
+.print-ok { margin-left: 8px; font-size: 11px; color: #9ca3af; font-weight: 500; }
 .item-line { font-size: 20px; line-height: 1.5; margin-bottom: 4px; }
 .remark { margin-top: 8px; color: #fca5a5; font-size: 15px; }
 .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }

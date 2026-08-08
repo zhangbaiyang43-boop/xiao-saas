@@ -29,7 +29,6 @@ from app.services.coupon_service import (
 from app.services.order_lifecycle_service import OrderLifecycleService
 from app.services.order_payment_service import OrderPaymentService
 from app.services.order_print_service import (
-    MAX_PRINT_RETRY_ATTEMPTS,
     _compose_merchant_note_with_print_meta,
     _get_print_meta,
     _print_paid_order_ticket,
@@ -37,7 +36,9 @@ from app.services.order_print_service import (
     _serialize_print_meta,
     _spawn_background_print_task,
     _split_merchant_note_and_print_meta,
+    build_staff_print_summary,
     can_reprint_order,
+    reconcile_print_orders,
 )
 from app.services.order_stock_service import _restore_order_stock
 
@@ -1049,8 +1050,14 @@ async def reprint_order_ticket(
     allowed, reason = can_reprint_order(order, print_type=print_type)
     if not allowed:
         return error_response(code=400, msg=reason or "order cannot reprint")
+    operator = str(principal.account_id) if principal.account_id else "owner"
     print_result = await _print_paid_order_ticket(
-        order, db, manual=True, reason="manual_reprint", operator=str(principal.tenant_id)
+        order,
+        db,
+        manual=True,
+        reason="manual_reprint",
+        operator=operator,
+        operator_role=principal.role,
     )
     await db.commit()
     await db.refresh(order)
@@ -1093,9 +1100,15 @@ async def get_my_order(
     )
 
 
-def serialize_fulfillment_order(order, order_items, *, can_assign_pickup: bool = False) -> dict:
+def serialize_fulfillment_order(
+    order,
+    order_items,
+    *,
+    can_assign_pickup: bool = False,
+    defer_kitchen_print: bool = False,
+) -> dict:
     """Minimal fulfillment DTO for waiter/kitchen — no money / customer PII."""
-    return {
+    data = {
         "id": str(order.id),
         "display_order_no": str(order.id)[-4:],
         "status": order.status,
@@ -1117,6 +1130,8 @@ def serialize_fulfillment_order(order, order_items, *, can_assign_pickup: bool =
             for i in order_items
         ],
     }
+    data.update(build_staff_print_summary(order, defer_kitchen_print=defer_kitchen_print))
+    return data
 
 
 @router.get("/orders/workbench")
@@ -1129,7 +1144,11 @@ async def list_workbench_orders(
 
     from app.core.merchant_auth import get_request_principal
     from app.core.permissions import PERM_ORDER_VIEW_FULFILLMENT, PERM_PICKUP_ASSIGN
-    from app.services.pickup_no_service import can_assign_pickup_no, load_pickup_settings
+    from app.services.pickup_no_service import (
+        can_assign_pickup_no,
+        load_pickup_settings,
+        should_defer_kitchen_print,
+    )
     from fastapi.responses import JSONResponse
 
     principal = get_request_principal(request)
@@ -1160,7 +1179,20 @@ async def list_workbench_orders(
         .order_by(Order.created_at.asc())
     )
     result = await db.execute(query)
-    orders = result.scalars().all()
+    orders = list(result.scalars().all())
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+
+    recovered = await reconcile_print_orders(
+        db,
+        orders,
+        trigger="reconcile",
+        pickup_settings=pickup_settings,
+    )
+    if recovered:
+        await db.commit()
+        for order in orders:
+            await db.refresh(order)
+
     order_ids = [o.id for o in orders]
     items_by_order: dict[int, list] = {}
     if order_ids:
@@ -1168,7 +1200,6 @@ async def list_workbench_orders(
         for item in items_result.scalars().all():
             items_by_order.setdefault(item.order_id, []).append(item)
 
-    pickup_settings = await load_pickup_settings(db, tenant_id)
     sessions_by_id = {}
     session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
     if session_ids:
@@ -1189,6 +1220,7 @@ async def list_workbench_orders(
                 o,
                 items_by_order.get(o.id or 0, []),
                 can_assign_pickup=assignable,
+                defer_kitchen_print=should_defer_kitchen_print(o, pickup_settings),
             )
         )
     return success_response(data=rows)

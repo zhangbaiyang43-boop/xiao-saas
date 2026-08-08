@@ -1,9 +1,11 @@
 import asyncio
 import importlib.util
+import json
 import pathlib
 import sys
 import types
 import unittest
+from datetime import datetime, timedelta, timezone
 from typing import Generic, Optional, TypeVar
 
 from pydantic import BaseModel
@@ -57,6 +59,7 @@ class FakeOrder:
         self.total = 15
         self.status = "pending"
         self.payment_status = "paid"
+        self.payment_mode = "prepay"
         self.payment_method = "wxpay"
         self.payment_time = "2026-07-16T10:00:00+00:00"
         self.discount_amount = 0
@@ -64,12 +67,15 @@ class FakeOrder:
         self.merchant_note = None
         self.customer_id = 1
         self.coupon_id = None
-        self.created_at = None
+        self.created_at = datetime(2026, 7, 16, 9, 59, tzinfo=timezone.utc)
         self.dining_session_id = None
         self.participant_id = None
         self.order_type = None
         self.parent_order_id = None
         self.source = "miniprogram"
+        self.print_status = "PENDING"
+        self.printed_at = None
+        self.pickup_no = None
 
 
 class FakeOrderItem:
@@ -212,6 +218,16 @@ def restore_stubs():
             sys.modules[name] = original
 
 
+async def _fake_load_pickup_settings(db, tenant_id):
+    return {"enabled": False, "required_before_print": False}
+
+
+def _fake_should_defer_kitchen_print(order, settings):
+    if not settings.get("enabled") or not settings.get("required_before_print"):
+        return False
+    return not getattr(order, "pickup_no", None)
+
+
 def install_stubs():
     global _ORIGINAL_MODULES
     modules = {
@@ -237,6 +253,7 @@ def install_stubs():
         "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
         "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
         "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
+        "app.services.pickup_no_service": types.ModuleType("app.services.pickup_no_service"),
     }
     _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in modules}
     for name, module in modules.items():
@@ -293,6 +310,13 @@ def install_stubs():
     modules["app.services.kuaimai_service"].build_order_template_render_data = KuaimaiStub.build_order_template_render_data
     modules["app.services.kuaimai_service"].validate_order_template_render_data = KuaimaiStub.validate_order_template_render_data
     modules["app.services.kuaimai_service"].print_template_order = KuaimaiStub.print_template_order
+    modules["app.services.pickup_no_service"].load_pickup_settings = _fake_load_pickup_settings
+    modules["app.services.pickup_no_service"].should_defer_kitchen_print = _fake_should_defer_kitchen_print
+    modules["app.services.pickup_no_service"].can_assign_pickup_no = lambda *a, **k: False
+    modules["app.services.pickup_no_service"].parse_pickup_settings = lambda *a, **k: {
+        "enabled": False,
+        "required_before_print": False,
+    }
 
 
 def load_orders_module():
@@ -314,6 +338,21 @@ def load_orders_module():
     spec.loader.exec_module(module)
     module.select = fake_select
     return module
+
+
+def load_print_module_only():
+    install_stubs()
+    print_spec = importlib.util.spec_from_file_location(
+        "order_print_service_phase4b_under_test",
+        PRINT_SERVICE_PATH,
+    )
+    print_module = importlib.util.module_from_spec(print_spec)
+    assert print_spec.loader is not None
+    _ORIGINAL_MODULES["app.services.order_print_service"] = sys.modules.get("app.services.order_print_service")
+    sys.modules["app.services.order_print_service"] = print_module
+    print_spec.loader.exec_module(print_module)
+    print_module.select = fake_select
+    return print_module
 
 
 class PrintFailureRecoveryContractsTest(unittest.TestCase):
@@ -338,7 +377,7 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         self.assertEqual(data["print_error_code"], "KUAIMAI_CONNECTION_ERROR")
         self.assertFalse(data["print_manual_reprint"])
 
-    def test_timeout_failure_records_retryable_error(self):
+    def test_timeout_failure_records_unknown_not_failed(self):
         order = FakeOrder()
         db = FakeDB(order)
         KuaimaiStub.outcomes = [KuaimaiPrintError("timeout", "KUAIMAI_TIMEOUT")]
@@ -347,9 +386,11 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         data = self.module.serialize_order(order, db.items)
 
         self.assertFalse(result["success"])
-        self.assertEqual(data["print_status"], "failed")
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(data["print_status"], "unknown")
         self.assertEqual(data["print_error_code"], "KUAIMAI_TIMEOUT")
         self.assertEqual(data["print_attempts"], 1)
+        self.assertNotEqual(data["print_status"], "failed")
 
     def test_template_error_does_not_send_provider_request(self):
         order = FakeOrder()
@@ -463,18 +504,194 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
 
         sys.modules["app.services.feieyun_service"].print_order = fake_print_order
 
-        asyncio.run(self.module._print_paid_order_ticket(order, db, manual=True, reason="manual_reprint", operator="tenant_1"))
+        asyncio.run(
+            self.module._print_paid_order_ticket(
+                order,
+                db,
+                manual=True,
+                reason="manual_reprint",
+                operator="42",
+                operator_role="kitchen",
+            )
+        )
         data = self.module.serialize_order(order, db.items)
+        _, meta = self.module._split_merchant_note_and_print_meta(order.merchant_note)
 
-        self.assertEqual(data["print_manual_reprint_by"], "tenant_1")
+        self.assertEqual(data["print_manual_reprint_by"], "42")
         self.assertIsNotNone(data["print_manual_reprint_at"])
+        self.assertEqual(meta.get("manual_reprint_role"), "kitchen")
 
     def test_list_orders_contains_recovery_trigger(self):
         lifecycle_source = LIFECYCLE_SERVICE_PATH.read_text(encoding="utf-8-sig")
         orders_source = MODULE_PATH.read_text(encoding="utf-8-sig")
-        self.assertIn('print_meta.get("status") == "failed"', lifecycle_source)
-        self.assertIn('reason="merchant_list_recovery"', lifecycle_source)
+        self.assertIn("reconcile_print_orders", lifecycle_source)
+        self.assertIn('trigger="merchant_list_recovery"', lifecycle_source)
+        self.assertIn("reconcile_print_orders", orders_source)
         self.assertIn('@router.post("/orders/{order_id}/reprint")', orders_source)
+
+
+class PrintPhase4BContractsTest(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(restore_stubs)
+        KuaimaiStub.reset()
+        self.print_mod = load_print_module_only()
+
+    def test_evaluate_eligibility_helpers(self):
+        cancelled = FakeOrder()
+        cancelled.status = "cancelled"
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(cancelled)["code"],
+            "NOT_PRINTABLE",
+        )
+
+        success = FakeOrder()
+        success.print_status = "SUCCESS"
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(success)["code"],
+            "ALREADY_SUCCESS",
+        )
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(success, manual=True)["code"],
+            "ELIGIBLE",
+        )
+
+        waiting = FakeOrder()
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(waiting, defer_kitchen_print=True)["code"],
+            "WAITING_PICKUP_NO",
+        )
+
+        unpaid_prepay = FakeOrder()
+        unpaid_prepay.payment_status = "unpaid"
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(unpaid_prepay)["code"],
+            "NOT_YET_PAYABLE",
+        )
+
+        unpaid_postpay = FakeOrder()
+        unpaid_postpay.payment_mode = "postpay"
+        unpaid_postpay.payment_status = "unpaid"
+        self.assertEqual(
+            self.print_mod.evaluate_print_eligibility(unpaid_postpay)["code"],
+            "ELIGIBLE",
+        )
+
+    def test_note_merge_preserves_merchant_note_text(self):
+        order = FakeOrder()
+        order.merchant_note = "少辣加葱"
+        db = FakeDB(order)
+        KuaimaiStub.outcomes = [KuaimaiPrintError("offline", "KUAIMAI_CONNECTION_ERROR")]
+
+        asyncio.run(self.print_mod._print_paid_order_ticket(order, db, reason="payment_success"))
+        note, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
+
+        self.assertEqual(note, "少辣加葱")
+        self.assertEqual(meta.get("status"), "failed")
+        self.assertIn("last_attempt_at", meta)
+        self.assertTrue(order.merchant_note.startswith("少辣加葱"))
+
+    def test_reconcile_retries_failed_unpaid_postpay(self):
+        order = FakeOrder()
+        order.payment_mode = "postpay"
+        order.payment_status = "unpaid"
+        order.print_status = "FAILED"
+        order.merchant_note = (
+            "note"
+            + self.print_mod.PRINT_META_MARKER
+            + json.dumps(
+                {
+                    "status": "failed",
+                    "attempts": 1,
+                    "last_attempt_at": (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        db = FakeDB(order)
+        KuaimaiStub.outcomes = [{"success": True, "provider_task_id": "postpay_retry"}]
+
+        attempted = asyncio.run(
+            self.print_mod.reconcile_print_orders(db, [order], trigger="merchant_list_recovery")
+        )
+        self.assertEqual(attempted, 1)
+        self.assertEqual(KuaimaiStub.calls, 1)
+        self.assertEqual(order.print_status, "SUCCESS")
+
+    def test_reconcile_never_auto_retries_unknown(self):
+        order = FakeOrder()
+        order.print_status = "UNKNOWN"
+        order.merchant_note = (
+            "x"
+            + self.print_mod.PRINT_META_MARKER
+            + json.dumps(
+                {
+                    "status": "unknown",
+                    "attempts": 1,
+                    "last_attempt_at": (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        db = FakeDB(order)
+
+        attempted = asyncio.run(self.print_mod.reconcile_print_orders(db, [order], trigger="reconcile"))
+        self.assertEqual(attempted, 0)
+        self.assertEqual(KuaimaiStub.calls, 0)
+
+    def test_reconcile_grace_skips_never_attempted(self):
+        order = FakeOrder()
+        order.created_at = datetime.now(timezone.utc)
+        order.payment_time = datetime.now(timezone.utc).isoformat()
+        order.print_status = "PENDING"
+        db = FakeDB(order)
+
+        attempted = asyncio.run(self.print_mod.reconcile_print_orders(db, [order], trigger="reconcile"))
+        self.assertEqual(attempted, 0)
+        self.assertEqual(KuaimaiStub.calls, 0)
+
+    def test_reconcile_prints_never_attempted_after_grace(self):
+        order = FakeOrder()
+        past = datetime.now(timezone.utc) - timedelta(seconds=60)
+        order.created_at = past
+        order.payment_time = past.isoformat()
+        order.print_status = "PENDING"
+        db = FakeDB(order)
+        KuaimaiStub.outcomes = [{"success": True, "provider_task_id": "grace_print"}]
+
+        attempted = asyncio.run(self.print_mod.reconcile_print_orders(db, [order], trigger="reconcile"))
+        self.assertEqual(attempted, 1)
+        self.assertEqual(KuaimaiStub.calls, 1)
+        self.assertEqual(order.print_status, "SUCCESS")
+
+    def test_build_staff_print_summary_safe_fields_only(self):
+        order = FakeOrder()
+        order.print_status = "FAILED"
+        order.merchant_note = (
+            "secret note"
+            + self.print_mod.PRINT_META_MARKER
+            + json.dumps({"status": "failed", "attempts": 2, "last_error": "boom", "app_secret": "x"})
+        )
+        summary = self.print_mod.build_staff_print_summary(order)
+        self.assertEqual(summary["print_status"], "FAILED")
+        self.assertEqual(summary["print_status_label"], "打印失败")
+        self.assertEqual(summary["print_issue"], "failed")
+        self.assertEqual(summary["print_attempts"], 2)
+        self.assertTrue(summary["can_reprint"])
+        self.assertNotIn("last_error", summary)
+        self.assertNotIn("app_secret", summary)
+        self.assertNotIn("merchant_note", summary)
+
+        waiting = self.print_mod.build_staff_print_summary(order, defer_kitchen_print=True)
+        # failed takes precedence over waiting
+        self.assertEqual(waiting["print_issue"], "failed")
+
+        pending = FakeOrder()
+        pending.print_status = "PENDING"
+        wait_summary = self.print_mod.build_staff_print_summary(pending, defer_kitchen_print=True)
+        self.assertEqual(wait_summary["print_issue"], "waiting_pickup")
+        self.assertEqual(wait_summary["print_status_label"], "等待桌牌后打印")
 
 
 if __name__ == "__main__":
