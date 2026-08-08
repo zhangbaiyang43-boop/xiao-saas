@@ -14,18 +14,38 @@
     <div v-for="row in list" :key="row.id" class="card" @click="openEdit(row)">
       <div>
         <div class="name">{{ row.name }}</div>
-        <div class="meta">{{ roleLabel(row.role) }} · {{ row.username }} · {{ statusLabel(row.status) }}</div>
+        <div class="meta">
+          {{ roleLabel(row.role) }} · {{ statusLabel(row.status) }}
+        </div>
+        <div class="meta">
+          微信：{{ row.wechat_bound ? '已绑定' : '未绑定' }}
+          · 设备：{{ row.trusted_device_count || 0 }}台
+        </div>
       </div>
-      <span class="arrow">›</span>
+      <div class="right">
+        <a-button
+          v-if="!row.wechat_bound && row.status !== 'disabled'"
+          size="small"
+          type="primary"
+          @click.stop="openQr(row)"
+        >
+          生成绑定码
+        </a-button>
+        <span class="arrow">›</span>
+      </div>
     </div>
 
-    <a-modal v-model:open="modalOpen" :title="editing ? '编辑员工' : '添加员工'" @ok="save" :confirmLoading="saving">
+    <!-- 添加 / 编辑 -->
+    <a-modal
+      v-model:open="modalOpen"
+      :title="editing ? '员工详情' : '添加员工'"
+      @ok="save"
+      :confirmLoading="saving"
+      :okText="editing ? '保存' : '创建员工'"
+    >
       <a-form layout="vertical">
         <a-form-item label="员工姓名">
-          <a-input v-model:value="form.name" maxlength="32" />
-        </a-form-item>
-        <a-form-item v-if="!editing" label="登录账号">
-          <a-input v-model:value="form.username" maxlength="32" placeholder="字母数字下划线" />
+          <a-input v-model:value="form.name" maxlength="32" placeholder="张白杨" />
         </a-form-item>
         <a-form-item label="岗位">
           <a-radio-group v-model:value="form.role">
@@ -33,30 +53,95 @@
             <a-radio value="kitchen">后厨</a-radio>
           </a-radio-group>
         </a-form-item>
-        <a-form-item v-if="!editing" label="初始密码">
-          <a-input-password v-model:value="form.password" />
-        </a-form-item>
-        <a-form-item v-if="editing" label="状态">
-          <a-radio-group v-model:value="form.status">
-            <a-radio value="active">正常</a-radio>
-            <a-radio value="disabled">停用</a-radio>
-          </a-radio-group>
-        </a-form-item>
-        <a-form-item v-if="editing" label="重置密码（可选）">
-          <a-input-password v-model:value="form.password" placeholder="留空则不修改" />
-        </a-form-item>
+        <template v-if="editing">
+          <a-form-item label="状态">
+            <a-radio-group v-model:value="form.status">
+              <a-radio value="active">正常</a-radio>
+              <a-radio value="disabled">停用</a-radio>
+            </a-radio-group>
+          </a-form-item>
+          <div class="info-block">
+            <div>微信登录：{{ editing.wechat_bound ? '已绑定' : '未绑定' }}</div>
+            <div>可信设备：{{ editing.trusted_device_count || 0 }} 台</div>
+            <div class="actions">
+              <a-button
+                v-if="!editing.wechat_bound && form.status !== 'disabled'"
+                size="small"
+                type="primary"
+                @click="openQr(editing)"
+              >
+                生成微信绑定码
+              </a-button>
+              <a-button
+                v-if="editing.wechat_bound"
+                size="small"
+                danger
+                @click="doUnbind"
+              >
+                解除微信绑定
+              </a-button>
+              <a-button
+                v-if="(editing.trusted_device_count || 0) > 0"
+                size="small"
+                @click="doRevokeDevices"
+              >
+                退出所有设备
+              </a-button>
+            </div>
+          </div>
+          <a-collapse ghost>
+            <a-collapse-panel key="backup" header="备用账号登录">
+              <a-form-item label="登录账号">
+                <a-input v-model:value="backup.username" maxlength="32" placeholder="字母数字下划线" />
+              </a-form-item>
+              <a-form-item label="设置密码">
+                <a-input-password v-model:value="backup.password" placeholder="至少8位" />
+              </a-form-item>
+              <a-button size="small" type="primary" :loading="backupSaving" @click="saveBackup">保存备用登录</a-button>
+              <div v-if="editing.has_password" class="hint">已设置备用账号：{{ editing.username }}</div>
+            </a-collapse-panel>
+          </a-collapse>
+        </template>
       </a-form>
+    </a-modal>
+
+    <!-- 创建成功引导 -->
+    <a-modal v-model:open="createdOpen" title="员工已创建" :footer="null">
+      <div class="created">
+        <div class="name">{{ created?.name }}</div>
+        <div class="meta">{{ roleLabel(created?.role) }} · 微信未绑定</div>
+        <a-button type="primary" block style="margin-top:16px" @click="openQr(created); createdOpen=false">
+          生成微信绑定码
+        </a-button>
+      </div>
+    </a-modal>
+
+    <!-- 绑定二维码 -->
+    <a-modal v-model:open="qrOpen" title="微信绑定" :footer="null" @cancel="stopPoll">
+      <div class="qr-box">
+        <div class="name">{{ qrStaff?.name }} · {{ roleLabel(qrStaff?.role) }}</div>
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="绑定二维码" class="qr-img" />
+        <div class="hint">请让员工本人使用微信扫码</div>
+        <div class="ttl">{{ ttlText }}</div>
+        <div v-if="bindOk" class="ok">✓ 微信绑定成功</div>
+        <a-button style="margin-top:12px" block @click="regenQr" :loading="qrLoading">重新生成</a-button>
+      </div>
     </a-modal>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { message, Modal } from 'ant-design-vue'
+import QRCode from 'qrcode'
 import {
   createMerchantAccount,
+  createWechatBindToken,
   getMerchantAccounts,
-  resetMerchantAccountPassword,
+  getWechatBindStatus,
+  revokeStaffDevices,
+  setMerchantAccountBackupLogin,
+  unbindStaffWechat,
   updateMerchantAccount,
 } from '../api'
 
@@ -65,16 +150,32 @@ const loading = ref(false)
 const modalOpen = ref(false)
 const saving = ref(false)
 const editing = ref(null)
-const form = reactive({
-  name: '',
-  username: '',
-  role: 'waiter',
-  password: '',
-  status: 'active',
-})
+const createdOpen = ref(false)
+const created = ref(null)
+const form = reactive({ name: '', role: 'waiter', status: 'active' })
+const backup = reactive({ username: '', password: '' })
+const backupSaving = ref(false)
+
+const qrOpen = ref(false)
+const qrStaff = ref(null)
+const qrDataUrl = ref('')
+const qrLoading = ref(false)
+const bindOk = ref(false)
+const expiresAt = ref(0)
+const nowTick = ref(Date.now())
+let pollTimer = null
+let tickTimer = null
 
 const waiterCount = computed(() => list.value.filter((x) => x.role === 'waiter').length)
 const kitchenCount = computed(() => list.value.filter((x) => x.role === 'kitchen').length)
+const ttlText = computed(() => {
+  if (bindOk.value) return '已完成'
+  const left = Math.max(0, Math.floor((expiresAt.value - nowTick.value) / 1000))
+  if (!left) return '已失效'
+  const m = String(Math.floor(left / 60)).padStart(2, '0')
+  const s = String(left % 60).padStart(2, '0')
+  return `${m}:${s} 后失效`
+})
 
 function roleLabel(r) {
   return { waiter: '服务员', kitchen: '后厨' }[r] || r
@@ -97,7 +198,7 @@ async function load() {
 
 function openCreate() {
   editing.value = null
-  Object.assign(form, { name: '', username: '', role: 'waiter', password: '', status: 'active' })
+  Object.assign(form, { name: '', role: 'waiter', status: 'active' })
   modalOpen.value = true
 }
 
@@ -105,11 +206,10 @@ function openEdit(row) {
   editing.value = row
   Object.assign(form, {
     name: row.name,
-    username: row.username,
     role: row.role,
-    password: '',
     status: row.status || 'active',
   })
+  Object.assign(backup, { username: row.username || '', password: '' })
   modalOpen.value = true
 }
 
@@ -119,34 +219,28 @@ async function save() {
     if (!editing.value) {
       const res = await createMerchantAccount({
         name: form.name,
-        username: form.username,
-        password: form.password,
         role: form.role,
       })
       if (res?.code !== 200) {
         message.error(res?.msg || '创建失败')
         return
       }
-      message.success('已创建')
-    } else {
-      const res = await updateMerchantAccount(editing.value.id, {
-        name: form.name,
-        role: form.role,
-        status: form.status,
-      })
-      if (res?.code !== 200) {
-        message.error(res?.msg || '保存失败')
-        return
-      }
-      if (form.password) {
-        const rp = await resetMerchantAccountPassword(editing.value.id, { password: form.password })
-        if (rp?.code !== 200) {
-          message.error(rp?.msg || '密码重置失败')
-          return
-        }
-      }
-      message.success('已保存')
+      created.value = res.data
+      modalOpen.value = false
+      createdOpen.value = true
+      await load()
+      return
     }
+    const res = await updateMerchantAccount(editing.value.id, {
+      name: form.name,
+      role: form.role,
+      status: form.status,
+    })
+    if (res?.code !== 200) {
+      message.error(res?.msg || '保存失败')
+      return
+    }
+    message.success('已保存')
     modalOpen.value = false
     await load()
   } catch (e) {
@@ -156,7 +250,122 @@ async function save() {
   }
 }
 
+async function saveBackup() {
+  if (!editing.value) return
+  backupSaving.value = true
+  try {
+    const res = await setMerchantAccountBackupLogin(editing.value.id, {
+      username: backup.username,
+      password: backup.password,
+    })
+    if (res?.code !== 200) {
+      message.error(res?.msg || '设置失败')
+      return
+    }
+    message.success('备用登录已设置')
+    editing.value = res.data
+    await load()
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '设置失败')
+  } finally {
+    backupSaving.value = false
+  }
+}
+
+function stopPoll() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+  if (tickTimer) {
+    clearInterval(tickTimer)
+    tickTimer = null
+  }
+}
+
+async function openQr(row) {
+  if (!row?.id) return
+  qrStaff.value = row
+  qrOpen.value = true
+  bindOk.value = false
+  await regenQr()
+}
+
+async function regenQr() {
+  if (!qrStaff.value?.id) return
+  qrLoading.value = true
+  bindOk.value = false
+  stopPoll()
+  try {
+    const res = await createWechatBindToken(qrStaff.value.id)
+    if (res?.code !== 200) {
+      message.error(res?.msg || '生成失败')
+      return
+    }
+    const url = res.data.binding_url
+    expiresAt.value = Date.parse(res.data.expires_at) || Date.now() + (res.data.expires_in || 300) * 1000
+    qrDataUrl.value = await QRCode.toDataURL(url, { width: 220, margin: 1 })
+    tickTimer = setInterval(() => {
+      nowTick.value = Date.now()
+    }, 1000)
+    pollTimer = setInterval(async () => {
+      try {
+        const st = await getWechatBindStatus(qrStaff.value.id)
+        if (st?.data?.status === 'bound') {
+          bindOk.value = true
+          stopPoll()
+          message.success('微信绑定成功')
+          await load()
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 2500)
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '生成失败')
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+function doUnbind() {
+  Modal.confirm({
+    title: '解除微信绑定？',
+    content: '将解绑微信，并退出该员工所有可信设备。',
+    async onOk() {
+      const res = await unbindStaffWechat(editing.value.id)
+      if (res?.code !== 200) {
+        message.error(res?.msg || '操作失败')
+        return
+      }
+      message.success('已解除绑定')
+      await load()
+      const fresh = list.value.find((x) => x.id === editing.value.id)
+      if (fresh) editing.value = fresh
+    },
+  })
+}
+
+function doRevokeDevices() {
+  Modal.confirm({
+    title: '退出所有设备？',
+    content: '微信绑定保留，员工下次需重新微信认证。',
+    async onOk() {
+      const res = await revokeStaffDevices(editing.value.id)
+      if (res?.code !== 200) {
+        message.error(res?.msg || '操作失败')
+        return
+      }
+      message.success('已退出所有设备')
+      await load()
+      const fresh = list.value.find((x) => x.id === editing.value.id)
+      if (fresh) editing.value = fresh
+    },
+  })
+}
+
 onMounted(load)
+onBeforeUnmount(stopPoll)
 </script>
 
 <style scoped>
@@ -167,6 +376,15 @@ onMounted(load)
 .card { background: #fff; border-radius: 12px; padding: 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
 .name { font-size: 16px; font-weight: 600; }
 .meta { font-size: 12px; color: #888; margin-top: 4px; }
+.right { display: flex; align-items: center; gap: 8px; }
 .arrow { color: #ccc; font-size: 22px; }
 .empty { text-align: center; color: #999; padding: 40px 0; }
+.info-block { background: #f7f7f7; border-radius: 10px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.7; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.hint { font-size: 12px; color: #888; margin-top: 8px; }
+.qr-box { text-align: center; padding: 8px 0 4px; }
+.qr-img { width: 220px; height: 220px; margin: 12px auto; display: block; }
+.ttl { font-size: 14px; color: #666; margin-top: 4px; }
+.ok { color: #07c160; font-weight: 700; margin-top: 10px; }
+.created { text-align: center; padding: 8px 0; }
 </style>

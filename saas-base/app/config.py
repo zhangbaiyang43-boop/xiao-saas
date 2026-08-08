@@ -73,6 +73,24 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     # 微信 code2session mock 只能在非生产环境显式开启，生产环境配置缺失或微信异常必须失败。
     ALLOW_MOCK_WECHAT_SESSION: bool = False
+
+    # Staff WeChat (公众号网页 OAuth) — separate from miniapp WECHAT_APP_ID.
+    STAFF_WECHAT_LOGIN_ENABLED: bool = False
+    STAFF_WECHAT_APP_ID: str = ""
+    STAFF_WECHAT_APP_SECRET: str = ""
+    STAFF_WECHAT_OAUTH_REDIRECT_URI: str = ""
+    STAFF_WECHAT_BIND_TTL_SECONDS: int = 300
+    STAFF_TRUST_DEVICE_DAYS: int = 30
+    STAFF_ACCESS_TOKEN_MINUTES: int = 120
+    # Cookie mode (default): HttpOnly staff_device; JSON must NOT include device_credential.
+    # JS mode (false): response may include device_credential for localStorage — mutually exclusive.
+    STAFF_DEVICE_COOKIE_ENABLED: bool = True
+    STAFF_DEVICE_COOKIE_NAME: str = "staff_device"
+    STAFF_DEVICE_COOKIE_PATH: str = "/api"
+    # Non-prod only: allow mock openid exchange without real WeChat OAuth.
+    STAFF_WECHAT_ALLOW_MOCK: bool = False
+    # Non-prod only: allow process-local memory for bind/OAuth tokens when Redis is down.
+    STAFF_WECHAT_ALLOW_MEMORY_STORE: bool = False
     # 独立于 DEBUG 的开关：只有显式设为 true 才允许模拟充值/模拟支付这类会
     # 凭空产生真实余额的测试接口生效。不跟 DEBUG 绑定，因为 DEBUG 在这个项目
     # 的实际部署环境里被发现是 true，不能作为"是否在生产环境"的可靠判断依据。

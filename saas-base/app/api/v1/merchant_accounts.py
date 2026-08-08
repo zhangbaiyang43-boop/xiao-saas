@@ -1,7 +1,10 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.database import get_db
 from app.core.merchant_auth import (
     clear_staff_login_failures,
@@ -19,7 +22,11 @@ from app.core.rate_limiter import login_limit
 from app.core.response import error_response, success_response
 from app.core.security import create_access_token
 from app.schemas.tenant import normalize_phone
+from app.services import staff_bind_token_service as bind_tokens
 from app.services.merchant_account_service import MerchantAccountService
+from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
+from app.services.staff_trusted_device_service import StaffTrustedDeviceService
+from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.tenant_service import TenantService
 from slowapi.util import get_remote_address
 
@@ -34,9 +41,9 @@ class StaffLoginRequest(BaseModel):
 
 class StaffCreateRequest(BaseModel):
     name: str
-    username: str
-    password: str
     role: str  # waiter | kitchen
+    username: str | None = None
+    password: str | None = None
 
 
 class StaffUpdateRequest(BaseModel):
@@ -49,6 +56,11 @@ class StaffResetPasswordRequest(BaseModel):
     password: str
 
 
+class StaffBackupLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
 def _require_perm(request: Request, permission: str):
     principal = get_request_principal(request)
     if not principal:
@@ -56,6 +68,16 @@ def _require_perm(request: Request, permission: str):
     if not principal.can(permission):
         return None, error_response(code=403, msg="当前账号无此权限")
     return principal, None
+
+
+def _staff_access_token(tenant_id: str, role: str, account_id: int) -> str:
+    minutes = max(15, int(settings.STAFF_ACCESS_TOKEN_MINUTES or 120))
+    return create_access_token(
+        tenant_id,
+        expires_delta=timedelta(minutes=minutes),
+        role=role,
+        account_id=int(account_id),
+    )
 
 
 @router.get("/auth/me")
@@ -112,15 +134,10 @@ async def staff_login(request: Request, body: StaffLoginRequest, db: AsyncSessio
     )
     if err:
         await record_staff_login_failure(tenant.tenant_id, username, client_ip)
-        # Unified message — never reveal whether username exists.
         return error_response(code=400, msg="账号或密码错误")
 
     await clear_staff_login_failures(tenant.tenant_id, username, client_ip)
-    token = create_access_token(
-        tenant.tenant_id,
-        role=account.role,
-        account_id=int(account.id),
-    )
+    token = _staff_access_token(tenant.tenant_id, account.role, int(account.id))
     return success_response(
         data={
             "tenant_id": tenant.tenant_id,
@@ -133,6 +150,7 @@ async def staff_login(request: Request, body: StaffLoginRequest, db: AsyncSessio
             "username": account.username,
             "permissions": permission_list(account.role),
             "home_path": "/waiter" if account.role == "waiter" else "/kitchen",
+            "auth_method": "staff_password",
         },
         msg="登录成功",
     )
@@ -158,9 +176,9 @@ async def create_merchant_account(
     return await MerchantAccountService(db).create_account(
         tenant_id=principal.tenant_id,
         name=body.name,
+        role=body.role,
         username=body.username,
         password=body.password,
-        role=body.role,
     )
 
 
@@ -198,3 +216,121 @@ async def reset_merchant_account_password(
         account_id=int(account_id),
         password=body.password,
     )
+
+
+@router.post("/merchant-accounts/{account_id}/backup-login")
+async def set_backup_login(
+    account_id: str,
+    body: StaffBackupLoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    return await MerchantAccountService(db).set_backup_login(
+        tenant_id=principal.tenant_id,
+        account_id=int(account_id),
+        username=body.username,
+        password=body.password,
+    )
+
+
+@router.post("/merchant-accounts/{account_id}/wechat-bind-token")
+async def create_wechat_bind_token(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    svc = MerchantAccountService(db)
+    account = await svc.get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    if account.status != "active":
+        return error_response(code=400, msg="请先启用员工再生成绑定码")
+    if account.role not in ("waiter", "kitchen"):
+        return error_response(code=400, msg="该账号不支持微信绑定")
+
+    bound = await StaffWechatAuthService(db).is_wechat_bound(
+        tenant_id=principal.tenant_id, account_id=int(account.id)
+    )
+    if bound:
+        return error_response(code=400, msg="该员工已绑定微信，请先解除绑定")
+
+    try:
+        data = await bind_tokens.create_bind_token(
+            tenant_id=principal.tenant_id,
+            account_id=int(account.id),
+            created_by_owner=principal.tenant_id,
+        )
+    except StaffAuthStoreUnavailable as exc:
+        return error_response(code=503, msg=exc.msg)
+    return success_response(
+        data={
+            **data,
+            "staff_name": account.name,
+            "role": account.role,
+            "role_label": "服务员" if account.role == "waiter" else "后厨",
+        }
+    )
+
+
+@router.get("/merchant-accounts/{account_id}/wechat-bind-status")
+async def wechat_bind_status(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    status = await bind_tokens.get_bind_status_for_account(int(account_id))
+    # If already bound in DB, surface bound even without redis marker.
+    if status != "bound":
+        if await StaffWechatAuthService(db).is_wechat_bound(
+            tenant_id=principal.tenant_id, account_id=int(account_id)
+        ):
+            status = "bound"
+    return success_response(data={"status": status})
+
+
+@router.post("/merchant-accounts/{account_id}/wechat-unbind")
+async def wechat_unbind(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    data = await StaffWechatAuthService(db).unbind_wechat(
+        tenant_id=principal.tenant_id, account_id=int(account_id)
+    )
+    return success_response(data=data, msg="已解除微信绑定")
+
+
+@router.post("/merchant-accounts/{account_id}/devices/revoke-all")
+async def revoke_all_devices(
+    account_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    principal, err = _require_perm(request, PERM_STAFF_MANAGE)
+    if err:
+        return err
+    account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
+    if not account:
+        return error_response(code=404, msg="员工不存在")
+    count = await StaffTrustedDeviceService(db).revoke_all(
+        tenant_id=principal.tenant_id, account_id=int(account_id)
+    )
+    return success_response(data={"revoked": count}, msg="已退出所有设备")

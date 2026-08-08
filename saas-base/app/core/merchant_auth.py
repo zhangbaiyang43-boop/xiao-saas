@@ -196,6 +196,12 @@ _STAFF_ROUTE_RULES: list[tuple[str, re.Pattern[str], Optional[str] | tuple[str, 
     ("POST", re.compile(r"^/api/v1/merchant-accounts$"), "staff.manage"),
     ("PATCH", re.compile(r"^/api/v1/merchant-accounts/\d+$"), "staff.manage"),
     ("POST", re.compile(r"^/api/v1/merchant-accounts/\d+/reset-password$"), "staff.manage"),
+    ("POST", re.compile(r"^/api/v1/merchant-accounts/\d+/backup-login$"), "staff.manage"),
+    ("POST", re.compile(r"^/api/v1/merchant-accounts/\d+/wechat-bind-token$"), "staff.manage"),
+    ("GET", re.compile(r"^/api/v1/merchant-accounts/\d+/wechat-bind-status$"), "staff.manage"),
+    ("POST", re.compile(r"^/api/v1/merchant-accounts/\d+/wechat-unbind$"), "staff.manage"),
+    ("POST", re.compile(r"^/api/v1/merchant-accounts/\d+/devices/revoke-all$"), "staff.manage"),
+    ("POST", re.compile(r"^/api/v1/login/staff/logout-device$"), None),
 ]
 
 
@@ -263,7 +269,9 @@ def hash_staff_password(password: str) -> str:
     return get_password_hash(password)
 
 
-def check_staff_password(plain: str, hashed: str) -> bool:
+def check_staff_password(plain: str, hashed: str | None) -> bool:
+    if not hashed:
+        return False
     return verify_password(plain, hashed)
 
 

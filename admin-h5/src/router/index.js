@@ -35,11 +35,13 @@ const SuperAdmin = () => import('../views/SuperAdmin.vue')
 const WaiterWorkbench = () => import('../views/WaiterWorkbench.vue')
 const KitchenWorkbench = () => import('../views/KitchenWorkbench.vue')
 const StaffManage = () => import('../views/StaffManage.vue')
+const StaffBind = () => import('../views/StaffBind.vue')
 
 const ownerOnly = { requiresPermission: '*' }
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
+  { path: '/staff-bind', name: 'StaffBind', component: StaffBind },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
   { path: '/queue/display', name: 'QueueDisplay', component: QueueDisplay },
@@ -99,20 +101,26 @@ function homeForRole(role) {
 
 router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'
+  const isStaffBind = to.path === '/staff-bind'
   const isOrder = to.path === '/order'
   const isSuper = to.path === '/super'
   const isH5 = to.path.startsWith('/h5/')
   const isQueueDisplay = to.path === '/queue/display'
   const isQueueStatus = to.path === '/queue/status'
-  const validSession = hasValidSession()
+  const auth = useAuthStore()
 
-  if (isSuper && validSession) {
-    next('/')
+  if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus || isStaffBind) {
+    next()
     return
   }
 
-  if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus) {
-    next()
+  let validSession = hasValidSession()
+  if (!validSession && !isLogin) {
+    validSession = await auth.ensureSession()
+  }
+
+  if (isSuper && validSession) {
+    next('/')
     return
   }
 
@@ -123,13 +131,11 @@ router.beforeEach(async (to, from, next) => {
   }
 
   if (isLogin && validSession) {
-    const auth = useAuthStore()
     next(auth.homePath || homeForRole(auth.role))
     return
   }
 
   if (validSession) {
-    const auth = useAuthStore()
     if (!auth.loaded) {
       await auth.hydrateFromServer()
     }

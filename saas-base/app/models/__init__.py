@@ -24,6 +24,8 @@ from app.models.pickup_no_assignment import PickupNoAssignment
 from app.models.queue_ticket import QueueTicket
 from app.models.staff import Staff
 from app.models.merchant_account import MerchantAccount
+from app.models.merchant_account_wechat_binding import MerchantAccountWechatBinding
+from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice
 from app.models.perf_sample import PerfSample
 from .tenant import Tenant
 from .customer import Customer
@@ -63,6 +65,8 @@ __all__ = [
     'QueueTicket',
     'Staff',
     'MerchantAccount',
+    'MerchantAccountWechatBinding',
+    'MerchantAccountTrustedDevice',
     'PerfSample',
 ]
 

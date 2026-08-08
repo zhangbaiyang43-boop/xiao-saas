@@ -5,7 +5,10 @@
         <div class="wb-title">后厨工作台</div>
         <div class="wb-sub">{{ displayName || '厨房' }} · 做什么菜</div>
       </div>
-      <a-button size="small" @click="load">刷新</a-button>
+      <div class="wb-actions">
+        <a-button size="small" @click="load">刷新</a-button>
+        <a-button size="small" @click="logout">退出</a-button>
+      </div>
     </div>
 
     <div class="filters">
@@ -64,13 +67,20 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getWorkbenchOrders, reprintOrder, updateOrderStatus } from '../api'
 import { useAuthStore } from '../stores/auth'
 
+const router = useRouter()
 const auth = useAuthStore()
 const can = (p) => auth.can(p)
 const displayName = computed(() => auth.displayName)
+
+async function logout() {
+  await auth.logoutCurrentDevice()
+  router.replace('/login?mode=staff')
+}
 
 const orders = ref([])
 const loading = ref(false)
@@ -143,6 +153,7 @@ onMounted(load)
 <style scoped>
 .wb-page { padding: 12px 12px 80px; background: #111827; min-height: 100%; color: #f9fafb; }
 .wb-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
+.wb-actions { display: flex; gap: 8px; }
 .wb-title { font-size: 22px; font-weight: 800; }
 .wb-sub { font-size: 12px; color: #9ca3af; margin-top: 4px; }
 .filters { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }

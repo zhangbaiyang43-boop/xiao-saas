@@ -10,7 +10,8 @@
     "test:pickup-ui": "node scripts/test-pickup-no-ui.mjs",
     "test:order-list-sort": "node scripts/test-order-list-sort.mjs",
     "test:staff-permissions": "node scripts/test-staff-permissions.mjs",
-    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run build"
+    "test:staff-device-cookie": "node scripts/test-staff-device-cookie.mjs",
+    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

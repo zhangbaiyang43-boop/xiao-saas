@@ -4,7 +4,7 @@
       <div class="brand-top">
         <div class="brand-icon"><ShopOutlined style="font-size:28px;color:#fff" /></div>
         <h1>开心点单商家后台</h1>
-        <p>老板验证码登录 · 员工账号密码登录</p>
+        <p>老板验证码登录 · 员工微信快捷登录</p>
       </div>
 
       <a-alert
@@ -64,20 +64,48 @@
       </div>
 
       <div v-else style="padding:8px 20px 16px">
+        <div v-if="wechatError" class="hint-card" style="margin-bottom:12px;color:#b45309">
+          {{ wechatError }}
+        </div>
+        <button
+          class="submit-btn tap-shrink"
+          :disabled="loading"
+          @click="handleWechatLogin"
+          style="margin-bottom:14px;background:#07C160"
+        >
+          {{ loading ? '登录中...' : '微信快捷登录' }}
+        </button>
+        <div v-if="!inWechat" class="hint-card" style="margin-bottom:14px">
+          请在微信中打开以使用微信快捷登录
+        </div>
+
+        <div v-if="shopChoices.length" class="shop-choices">
+          <div class="hint-card" style="margin-bottom:8px">请选择工作门店</div>
+          <button
+            v-for="item in shopChoices"
+            :key="item.account_id"
+            type="button"
+            class="shop-choice"
+            @click="chooseShop(item)"
+          >
+            <strong>{{ item.shop_name }}</strong>
+            <span>{{ item.role_label }} · {{ item.staff_name }}</span>
+          </button>
+        </div>
+
+        <div class="divider"><span>或</span></div>
+        <div class="backup-title">备用账号登录</div>
         <div style="margin-bottom:12px">
           <input v-model="staffForm.shop_phone" class="native-input" type="tel" placeholder="门店手机号" maxlength="11" />
         </div>
         <div style="margin-bottom:12px">
-          <input v-model="staffForm.username" class="native-input" placeholder="员工登录账号" autocomplete="username" />
+          <input v-model="staffForm.username" class="native-input" placeholder="员工账号" autocomplete="username" />
         </div>
         <div style="margin-bottom:12px">
           <input v-model="staffForm.password" class="native-input" type="password" placeholder="密码" autocomplete="current-password" />
         </div>
-        <div class="hint-card">
-          <span>使用老板开通的员工账号。岗位不同，进入不同工作台。</span>
-        </div>
-        <button class="submit-btn tap-shrink" :disabled="loading" @click="handleStaffLogin" style="margin-top:16px">
-          {{ loading ? '登录中...' : '进入工作台' }}
+        <button class="submit-btn tap-shrink" :disabled="loading" @click="handleStaffLogin" style="margin-top:8px;background:#334155">
+          {{ loading ? '登录中...' : '登录' }}
         </button>
       </div>
 
@@ -87,17 +115,30 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ShopOutlined } from '@ant-design/icons-vue'
-import { login, sendLoginCode, staffLogin } from '../api'
+import {
+  getStaffWechatOauthStart,
+  getStaffWechatStatus,
+  login,
+  sendLoginCode,
+  staffLogin,
+  staffWechatLogin,
+} from '../api'
 import { useAuthStore } from '../stores/auth'
+import {
+  clearOauthAttempted,
+  isWechatBrowser,
+  markOauthAttempted,
+  wasOauthAttemptedRecently,
+} from '../utils/deviceAuth'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
-const mode = ref('owner')
+const mode = ref(route.query.mode === 'staff' ? 'staff' : 'owner')
 const loading = ref(false)
 const codeSending = ref(false)
 const codeCountdown = ref(0)
@@ -105,6 +146,10 @@ const loginForm = ref({ phone: '', code: '' })
 const staffForm = ref({ shop_phone: '', username: '', password: '' })
 const phoneError = ref('')
 const codeError = ref('')
+const wechatError = ref('')
+const inWechat = ref(isWechatBrowser())
+const shopChoices = ref([])
+const oauthSessionId = ref('')
 let countdownTimer = null
 
 const isPhone = (v) => /^1\d{10}$/.test(v || '')
@@ -227,6 +272,96 @@ const handleStaffLogin = async () => {
   }
 }
 
+const finishWechatLogin = async (payload) => {
+  const res = await staffWechatLogin(payload)
+  if (res?.code === 200 && res.data?.multiple_accounts) {
+    shopChoices.value = res.data.accounts || []
+    oauthSessionId.value = res.data.session_id || payload.session_id || ''
+    wechatError.value = '请选择工作门店'
+    return
+  }
+  if (res?.code === 200 && res?.data?.token) {
+    clearOauthAttempted()
+    persistAndEnter(res.data, '登录成功')
+    return
+  }
+  wechatError.value = res?.msg || '微信登录失败'
+}
+
+const chooseShop = async (item) => {
+  loading.value = true
+  try {
+    await finishWechatLogin({
+      session_id: oauthSessionId.value || String(route.query.sid || ''),
+      account_id: item.account_id,
+    })
+  } catch (e) {
+    wechatError.value = e?.response?.data?.msg || '微信登录失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+const handleWechatLogin = async () => {
+  wechatError.value = ''
+  if (!inWechat.value) {
+    wechatError.value = '请在微信中打开'
+    return
+  }
+  if (wasOauthAttemptedRecently()) {
+    wechatError.value = '微信登录失败，请使用下方备用账号登录，或稍后重试'
+    return
+  }
+  loading.value = true
+  try {
+    const status = await getStaffWechatStatus()
+    const cfg = status?.data || {}
+    if (!cfg.configured && !cfg.mock_allowed) {
+      wechatError.value = '微信员工登录尚未配置，请使用备用账号登录'
+      return
+    }
+    markOauthAttempted()
+    const start = await getStaffWechatOauthStart({ purpose: 'login' })
+    const url = start?.data?.authorize_url
+    if (!url) {
+      wechatError.value = start?.msg || '无法启动微信登录'
+      clearOauthAttempted()
+      return
+    }
+    window.location.href = url
+  } catch (e) {
+    clearOauthAttempted()
+    wechatError.value = e?.response?.data?.msg || '微信登录失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(async () => {
+  if (route.query.mode === 'staff' || route.query.oauth) {
+    mode.value = 'staff'
+  }
+  // Device auto-login before showing form.
+  if (!route.query.oauth) {
+    const ok = await auth.ensureSession()
+    if (ok) {
+      router.replace(auth.homePath || '/')
+      return
+    }
+  }
+  const sid = String(route.query.sid || '')
+  if (sid) {
+    loading.value = true
+    try {
+      await finishWechatLogin({ session_id: sid })
+    } catch (e) {
+      wechatError.value = e?.response?.data?.msg || '微信登录失败'
+    } finally {
+      loading.value = false
+    }
+  }
+})
+
 onBeforeUnmount(clearCountdown)
 </script>
 
@@ -322,4 +457,39 @@ onBeforeUnmount(clearCountdown)
   font-weight: 600;
 }
 .submit-btn:disabled { opacity: .6; }
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 8px 0 14px;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
+}
+.backup-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #334155;
+}
+.shop-choices { margin-bottom: 14px; }
+.shop-choice {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.shop-choice span { font-size: 12px; color: #64748b; }
 </style>

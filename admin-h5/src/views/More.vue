@@ -122,8 +122,12 @@ const router = useRouter()
 const auth = useAuthStore()
 const merchant = ref({ name: '' })
 
-function logout() {
-  auth.clearAuth()
+async function logout() {
+  if (auth.accountId) {
+    await auth.logoutCurrentDevice()
+  } else {
+    auth.clearAuth()
+  }
   router.push('/login')
 }
 

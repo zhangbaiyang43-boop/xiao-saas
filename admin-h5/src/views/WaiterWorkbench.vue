@@ -5,7 +5,10 @@
         <div class="wb-title">服务员工作台</div>
         <div class="wb-sub">{{ displayName || '前厅履约' }} · 下一件要处理什么</div>
       </div>
-      <a-button size="small" @click="load">刷新</a-button>
+      <div class="wb-actions">
+        <a-button size="small" @click="load">刷新</a-button>
+        <a-button size="small" @click="logout">退出</a-button>
+      </div>
     </div>
 
     <div class="wb-stats">
@@ -54,13 +57,20 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { getWorkbenchOrders, updateOrderPickupNo, updateOrderStatus } from '../api'
 import { useAuthStore } from '../stores/auth'
 
+const router = useRouter()
 const auth = useAuthStore()
 const can = (p) => auth.can(p)
 const displayName = computed(() => auth.displayName)
+
+async function logout() {
+  await auth.logoutCurrentDevice()
+  router.replace('/login?mode=staff')
+}
 
 const orders = ref([])
 const loading = ref(false)
@@ -146,6 +156,7 @@ onMounted(load)
 <style scoped>
 .wb-page { padding: 12px 12px 80px; background: #f5f5f5; min-height: 100%; }
 .wb-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.wb-actions { display: flex; gap: 8px; }
 .wb-title { font-size: 20px; font-weight: 700; color: #111; }
 .wb-sub { font-size: 12px; color: #888; margin-top: 4px; }
 .wb-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
