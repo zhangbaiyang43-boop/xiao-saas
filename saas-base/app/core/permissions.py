@@ -79,14 +79,27 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 
 
 def normalize_role(role: str | None) -> str:
-    value = (role or ROLE_OWNER).strip().lower()
-    if value not in ALL_ROLES:
-        return ROLE_OWNER
-    return value
+    """Map known roles; unknown/empty → owner only for explicit legacy owner paths.
+
+    Staff tokens must NOT call this for elevation. Use parse_staff_role() instead.
+    """
+    value = (role or "").strip().lower()
+    if value in ALL_ROLES:
+        return value
+    return ROLE_OWNER
+
+
+def parse_staff_role(role: str | None) -> str | None:
+    """Return waiter/kitchen or None. Never returns owner."""
+    value = (role or "").strip().lower()
+    if value in STAFF_ROLES:
+        return value
+    return None
 
 
 def permissions_for_role(role: str | None) -> frozenset[str]:
-    return ROLE_PERMISSIONS.get(normalize_role(role), frozenset())
+    value = (role or "").strip().lower()
+    return ROLE_PERMISSIONS.get(value, frozenset())
 
 
 def has_permission(role: str | None, permission: str) -> bool:

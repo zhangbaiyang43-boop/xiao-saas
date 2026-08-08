@@ -9,6 +9,7 @@ from app.core.merchant_auth import (
     check_staff_password,
     hash_staff_password,
     invalidate_account_auth_cache,
+    validate_staff_password,
 )
 from app.core.permissions import ROLE_KITCHEN, ROLE_WAITER, STAFF_ROLES
 from app.core.response import error_response, success_response
@@ -82,8 +83,9 @@ class MerchantAccountService:
             return error_response(code=400, msg="登录账号需为3-32位字母数字或下划线")
         if role not in STAFF_ROLES:
             return error_response(code=400, msg="岗位仅支持服务员或后厨")
-        if len(password) < 6 or len(password) > 64:
-            return error_response(code=400, msg="密码长度需为6-64位")
+        pw_err = validate_staff_password(password)
+        if pw_err:
+            return error_response(code=400, msg=pw_err)
 
         existing = await self.get_by_username(tenant_id, username)
         if existing:
@@ -143,9 +145,9 @@ class MerchantAccountService:
         account = await self.get_by_id(tenant_id, account_id)
         if not account:
             return error_response(code=404, msg="员工不存在")
-        password = password or ""
-        if len(password) < 6 or len(password) > 64:
-            return error_response(code=400, msg="密码长度需为6-64位")
+        pw_err = validate_staff_password(password)
+        if pw_err:
+            return error_response(code=400, msg=pw_err)
         account.password_hash = hash_staff_password(password)
         await self.db.commit()
         await invalidate_account_auth_cache(account.id)

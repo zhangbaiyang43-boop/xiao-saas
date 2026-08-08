@@ -3,7 +3,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.merchant_auth import get_request_principal
+from app.core.merchant_auth import (
+    clear_staff_login_failures,
+    get_request_principal,
+    record_staff_login_failure,
+    staff_login_allowed,
+)
 from app.core.permissions import (
     PERM_STAFF_MANAGE,
     PERM_STAFF_VIEW,
@@ -16,6 +21,7 @@ from app.core.security import create_access_token
 from app.schemas.tenant import normalize_phone
 from app.services.merchant_account_service import MerchantAccountService
 from app.services.tenant_service import TenantService
+from slowapi.util import get_remote_address
 
 router = APIRouter(prefix="/api/v1", tags=["商家员工"])
 
@@ -93,14 +99,23 @@ async def staff_login(request: Request, body: StaffLoginRequest, db: AsyncSessio
     if not tenant.status:
         return error_response(code=403, msg="商家账号已停用")
 
+    client_ip = get_remote_address(request) or "unknown"
+    username = (body.username or "").strip().lower()
+    allowed, throttle_msg = await staff_login_allowed(tenant.tenant_id, username, client_ip)
+    if not allowed:
+        return error_response(code=429, msg=throttle_msg or "尝试次数过多，请稍后再试")
+
     account, err = await MerchantAccountService(db).authenticate(
         tenant_id=tenant.tenant_id,
-        username=body.username,
+        username=username,
         password=body.password,
     )
     if err:
-        return error_response(code=400, msg=err)
+        await record_staff_login_failure(tenant.tenant_id, username, client_ip)
+        # Unified message — never reveal whether username exists.
+        return error_response(code=400, msg="账号或密码错误")
 
+    await clear_staff_login_failures(tenant.tenant_id, username, client_ip)
     token = create_access_token(
         tenant.tenant_id,
         role=account.role,

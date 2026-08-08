@@ -17,15 +17,18 @@ from app.core.cache_helper import get_cache, set_cache
 from app.core.permissions import (
     ORDER_STATUS_PERMISSIONS,
     ROLE_OWNER,
+    STAFF_ROLES,
     has_any_permission,
     has_permission,
-    normalize_role,
+    parse_staff_role,
     permission_list,
 )
 from app.core.response import RespVo
 from app.core.security import get_password_hash, verify_password
 
 ACCOUNT_STATUS_CACHE_TTL = 30
+STAFF_LOGIN_FAIL_TTL = 900
+STAFF_LOGIN_FAIL_MAX = 10
 
 
 class MerchantPrincipal:
@@ -39,14 +42,15 @@ class MerchantPrincipal:
         username: str | None = None,
     ):
         self.tenant_id = tenant_id
-        self.role = normalize_role(role)
+        self.role = role
         self.account_id = account_id
         self.name = name
         self.username = username
 
     @property
     def is_owner(self) -> bool:
-        return self.role == ROLE_OWNER
+        # Owner = Tenant subject (no merchant_accounts row), never a staff account.
+        return self.account_id is None and self.role == ROLE_OWNER
 
     def can(self, permission: str) -> bool:
         return has_permission(self.role, permission)
@@ -69,15 +73,84 @@ def permission_denied_response(msg: str = "当前账号无此权限") -> JSONRes
     )
 
 
+def auth_error_response(status: int, msg: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content=RespVo(code=status, msg=msg).to_response(),
+    )
+
+
+async def resolve_merchant_request_auth(payload: dict) -> tuple[dict | None, JSONResponse | None]:
+    """Resolve merchant auth from JWT payload.
+
+    Legacy owner (only):
+      type=merchant AND account_id is absent → role=owner
+
+    Staff:
+      account_id present → load merchant_accounts; role from DB only;
+      invalid/missing account/role/status → reject (never owner).
+    """
+    if payload.get("type") != "merchant":
+        return None, None
+
+    tenant_id = payload.get("tenant_id")
+    if not tenant_id:
+        return None, auth_error_response(401, "未登录或登录已过期")
+
+    account_id = payload.get("account_id")
+    if account_id is None:
+        return {
+            "tenant_id": tenant_id,
+            "role": ROLE_OWNER,
+            "account_id": None,
+            "account_name": None,
+            "account_username": None,
+        }, None
+
+    try:
+        account_id_int = int(account_id)
+    except (TypeError, ValueError):
+        return None, auth_error_response(401, "未登录或登录已过期")
+
+    auth_state = await load_account_auth_state(account_id_int, tenant_id)
+    if not auth_state or auth_state.get("missing"):
+        return None, auth_error_response(401, "未登录或登录已过期")
+    if auth_state.get("tenant_id") != tenant_id:
+        return None, auth_error_response(403, "当前账号无此权限")
+    if auth_state.get("status") != "active":
+        return None, auth_error_response(403, "账号已停用")
+
+    staff_role = parse_staff_role(auth_state.get("role"))
+    if not staff_role:
+        # Corrupt / illegal staff role must never elevate to owner.
+        return None, auth_error_response(403, "当前账号无此权限")
+
+    return {
+        "tenant_id": tenant_id,
+        "role": staff_role,
+        "account_id": account_id_int,
+        "account_name": auth_state.get("name"),
+        "account_username": auth_state.get("username"),
+    }, None
+
+
 def get_request_principal(request: Request) -> MerchantPrincipal | None:
     tenant_id = getattr(request.state, "tenant_id", None)
     token_type = getattr(request.state, "token_type", None)
     if not tenant_id or token_type != "merchant":
         return None
+    role = getattr(request.state, "role", None)
+    account_id = getattr(request.state, "account_id", None)
+    if account_id is None:
+        if role != ROLE_OWNER:
+            return None
+    else:
+        if role not in STAFF_ROLES:
+            return None
     return MerchantPrincipal(
         tenant_id=tenant_id,
-        role=getattr(request.state, "role", ROLE_OWNER) or ROLE_OWNER,
-        account_id=getattr(request.state, "account_id", None),
+        role=role,
+        account_id=account_id,
         name=getattr(request.state, "account_name", None),
         username=getattr(request.state, "account_username", None),
     )
@@ -107,7 +180,6 @@ def require_order_status_permission(target_status: str, role: str) -> bool:
 
 
 # Staff default-deny: only these routes may be hit by non-owner merchant tokens.
-# Permission is checked here (and again in handlers for body-dependent actions).
 _STAFF_ROUTE_RULES: list[tuple[str, re.Pattern[str], Optional[str] | tuple[str, ...]]] = [
     ("GET", re.compile(r"^/api/v1/auth/me$"), None),
     ("POST", re.compile(r"^/api/v1/tenant/logout$"), None),
@@ -128,9 +200,10 @@ _STAFF_ROUTE_RULES: list[tuple[str, re.Pattern[str], Optional[str] | tuple[str, 
 
 
 def staff_route_allowed(method: str, path: str, role: str) -> bool:
-    role = normalize_role(role)
     if role == ROLE_OWNER:
         return True
+    if role not in STAFF_ROLES:
+        return False
     m = (method or "GET").upper()
     for rule_method, pattern, perm in _STAFF_ROUTE_RULES:
         if rule_method != m:
@@ -153,6 +226,8 @@ async def load_account_auth_state(account_id: int, tenant_id: str) -> dict | Non
     cache_key = f"merchant_account_auth:{account_id}"
     cached = await get_cache(cache_key)
     if cached is not None:
+        if cached.get("missing"):
+            return None
         if cached.get("tenant_id") != tenant_id:
             return None
         return cached
@@ -190,3 +265,44 @@ def hash_staff_password(password: str) -> str:
 
 def check_staff_password(plain: str, hashed: str) -> bool:
     return verify_password(plain, hashed)
+
+
+def validate_staff_password(password: str | None) -> str | None:
+    """Return error message or None if ok. Min length 8; reject whitespace-only."""
+    raw = "" if password is None else str(password)
+    if not raw or not raw.strip() or raw.isspace():
+        return "密码不能为空或纯空格"
+    if len(raw) < 8 or len(raw) > 64:
+        return "密码长度需为8-64位"
+    return None
+
+
+def _staff_fail_key(tenant_id: str, username: str, ip: str) -> str:
+    return f"staff_login_fail:{tenant_id}:{username.strip().lower()}:{ip or 'unknown'}"
+
+
+async def staff_login_allowed(tenant_id: str, username: str, ip: str) -> tuple[bool, str | None]:
+    fails = await get_cache(_staff_fail_key(tenant_id, username, ip))
+    try:
+        count = int(fails or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count >= STAFF_LOGIN_FAIL_MAX:
+        return False, "尝试次数过多，请稍后再试"
+    return True, None
+
+
+async def record_staff_login_failure(tenant_id: str, username: str, ip: str) -> None:
+    key = _staff_fail_key(tenant_id, username, ip)
+    fails = await get_cache(key)
+    try:
+        count = int(fails or 0) + 1
+    except (TypeError, ValueError):
+        count = 1
+    await set_cache(key, count, ttl=STAFF_LOGIN_FAIL_TTL)
+
+
+async def clear_staff_login_failures(tenant_id: str, username: str, ip: str) -> None:
+    from app.core.cache_helper import delete_cache
+
+    await delete_cache(_staff_fail_key(tenant_id, username, ip))

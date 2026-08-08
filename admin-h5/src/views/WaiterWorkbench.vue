@@ -11,7 +11,6 @@
     <div class="wb-stats">
       <div class="stat"><b>{{ pendingCount }}</b><span>待接单</span></div>
       <div class="stat"><b>{{ preparingCount }}</b><span>备餐中</span></div>
-      <div class="stat"><b>{{ doneCount }}</b><span>待上菜/待结账</span></div>
     </div>
 
     <div v-if="loading" class="wb-empty">加载中…</div>
@@ -73,7 +72,6 @@ const pickupSaving = ref(false)
 
 const pendingCount = computed(() => orders.value.filter((o) => o.status === 'pending').length)
 const preparingCount = computed(() => orders.value.filter((o) => o.status === 'preparing').length)
-const doneCount = computed(() => orders.value.filter((o) => o.status === 'done').length)
 
 function statusText(s) {
   return { pending: '待接单', preparing: '备餐中', done: '已完成', settled: '已结账' }[s] || s
@@ -90,7 +88,8 @@ async function load() {
   try {
     const res = await getWorkbenchOrders({ meta: { dedupe: true, dedupeKey: 'wb:waiter' } })
     const raw = res?.data?.data || res?.data || []
-    orders.value = Array.isArray(raw) ? raw.filter((o) => ['pending', 'preparing', 'done'].includes(o.status)) : []
+    // Waiter has no finance.settle — only show actionable fulfillment jobs.
+    orders.value = Array.isArray(raw) ? raw.filter((o) => ['pending', 'preparing'].includes(o.status)) : []
   } catch {
     message.error('加载失败')
   } finally {
@@ -149,7 +148,7 @@ onMounted(load)
 .wb-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
 .wb-title { font-size: 20px; font-weight: 700; color: #111; }
 .wb-sub { font-size: 12px; color: #888; margin-top: 4px; }
-.wb-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.wb-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
 .stat { background: #fff; border-radius: 12px; padding: 12px; text-align: center; }
 .stat b { display: block; font-size: 22px; color: #111; }
 .stat span { font-size: 12px; color: #888; }

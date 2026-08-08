@@ -2,8 +2,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from app.core.merchant_auth import load_account_auth_state, staff_route_allowed
-from app.core.permissions import ROLE_OWNER, normalize_role
+from app.core.merchant_auth import resolve_merchant_request_auth, staff_route_allowed
+from app.core.permissions import ROLE_OWNER
 from app.core.response import RespVo
 from app.core.security import verify_token
 
@@ -118,34 +118,33 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.customer_id = payload.get("customer_id")
         request.state.openid = payload.get("openid")
         request.state.token_type = payload.get("type")
-        # Legacy merchant tokens (pre-staff) have no role/account_id → treat as owner.
-        request.state.role = normalize_role(payload.get("role") or ROLE_OWNER)
-        request.state.account_id = payload.get("account_id")
+        request.state.role = None
+        request.state.account_id = None
         request.state.account_name = None
         request.state.account_username = None
 
-        # Staff merchant tokens: always refresh role/status from DB and default-deny.
-        # Applies even on OPTIONAL_AUTH paths so staff cannot probe owner APIs via optional routes.
-        if payload.get("type") == "merchant" and request.state.account_id is not None:
-            auth_state = await load_account_auth_state(int(request.state.account_id), request.state.tenant_id)
-            if not auth_state or auth_state.get("missing"):
+        if payload.get("type") == "merchant":
+            auth_state, err = await resolve_merchant_request_auth(payload)
+            if err is not None:
+                return err
+            if auth_state is None:
                 return JSONResponse(
                     status_code=401,
                     content=RespVo(code=401, msg="未登录或登录已过期").to_response(),
                 )
-            if auth_state.get("status") != "active":
-                return JSONResponse(
-                    status_code=403,
-                    content=RespVo(code=403, msg="账号已停用").to_response(),
-                )
-            request.state.role = normalize_role(auth_state.get("role"))
-            request.state.account_name = auth_state.get("name")
-            request.state.account_username = auth_state.get("username")
-            if not staff_route_allowed(request.method, request.url.path, request.state.role):
-                return JSONResponse(
-                    status_code=403,
-                    content=RespVo(code=403, msg="当前账号无此权限").to_response(),
-                )
+            request.state.tenant_id = auth_state["tenant_id"]
+            request.state.role = auth_state["role"]
+            request.state.account_id = auth_state["account_id"]
+            request.state.account_name = auth_state["account_name"]
+            request.state.account_username = auth_state["account_username"]
+
+            # Staff default-deny (owner keeps full access). Applies on optional paths too.
+            if request.state.role != ROLE_OWNER:
+                if not staff_route_allowed(request.method, request.url.path, request.state.role):
+                    return JSONResponse(
+                        status_code=403,
+                        content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+                    )
 
         if is_optional:
             return await call_next(request)
@@ -170,4 +169,3 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
 
         return await call_next(request)
-
