@@ -91,11 +91,3 @@ def staff_official_account_oauth_enabled() -> bool:
 
 def staff_miniprogram_auth_enabled() -> bool:
     return bool(settings.STAFF_MINIPROGRAM_AUTH_ENABLED)
-
-
-# TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除
-STAFF_MP_TEST_SCAN_PREFIX = "KXD_STAFF_BIND_V1:"
-
-
-def build_staff_mp_test_scan_payload(scene: str) -> str:
-    return f"{STAFF_MP_TEST_SCAN_PREFIX}{(scene or '').strip()}"

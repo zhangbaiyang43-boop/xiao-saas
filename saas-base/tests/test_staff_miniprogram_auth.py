@@ -17,11 +17,7 @@ from app.models.merchant_account_wechat_binding import MerchantAccountWechatBind
 from app.models.tenant import Tenant
 from app.services import staff_handoff_service as handoff_svc
 from app.services import staff_mp_bind_session_service as mp_bind
-from app.services.staff_miniprogram_provider import (
-    MockMiniProgramIdentityProvider,
-    STAFF_MP_TEST_SCAN_PREFIX,
-    build_staff_mp_test_scan_payload,
-)
+from app.services.staff_miniprogram_provider import MockMiniProgramIdentityProvider
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.staff_wechat_provider import WechatIdentity as WId
 from app.utils.id_generator import generate_snowflake_id
@@ -250,16 +246,6 @@ class StaffMiniprogramAuthTest(unittest.IsolatedAsyncioTestCase):
                 identity=WId(app_id=APP_ID, openid="x"),
             )
             self.assertFalse(result["ok"])
-
-
-class StaffMpTestScanPayloadTest(unittest.TestCase):
-    """TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除。"""
-
-    def test_payload_format_reuses_scene(self):
-        scene = "0123456789abcdef0123456789abcdef"
-        payload = build_staff_mp_test_scan_payload(scene)
-        self.assertTrue(payload.startswith(STAFF_MP_TEST_SCAN_PREFIX))
-        self.assertEqual(payload[len(STAFF_MP_TEST_SCAN_PREFIX) :], scene)
 
 
 class AppImportMiniprogramRoutesTest(unittest.TestCase):

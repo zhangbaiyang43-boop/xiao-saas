@@ -22,7 +22,24 @@
 
 <script>
 import { confirmStaffMpBind, getStaffMiniprogramStatus, previewStaffMpBind } from '@/api/staff'
-import { normalizeStaffBindScene } from '@/utils/staffBindTestScanner'
+
+const STAFF_MP_SCENE_HEX_RE = /^[0-9a-fA-F]{32}$/
+
+/** Official wxacode `options.scene` only (TEMP ordinary QR transport removed). */
+function normalizeStaffBindScene(options = {}) {
+  let raw = options.scene ?? options.t ?? ''
+  if (raw === undefined || raw === null) return ''
+  raw = String(raw).trim()
+  if (!raw) return ''
+  try {
+    raw = decodeURIComponent(raw)
+  } catch {
+    /* keep raw */
+  }
+  raw = String(raw).trim()
+  if (!STAFF_MP_SCENE_HEX_RE.test(raw)) return ''
+  return raw.toLowerCase()
+}
 
 const wxLogin = () =>
   new Promise((resolve, reject) => {
@@ -48,7 +65,6 @@ export default {
     }
   },
   onLoad(options) {
-    // Official wxacode options.scene and TEMP test navigateTo ?scene= share this path.
     this.scene = normalizeStaffBindScene(options || {})
     this.loadPreview()
   },
