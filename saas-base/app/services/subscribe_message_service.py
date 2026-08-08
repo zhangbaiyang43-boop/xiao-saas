@@ -60,7 +60,8 @@ def _format_pay_time(payment_time: Any) -> str:
 
 
 def resolve_pickup_no(order: Any) -> str:
-    return _clip(getattr(order, "pickup_no", None) or getattr(order, "table_no", None) or "", 32) or "—"
+    # 禁止把固定桌号 table_no 冒充实体桌牌号；无牌时用短横线占位
+    return _clip(getattr(order, "pickup_no", None) or "", 32) or "—"
 
 
 def build_order_success_data(

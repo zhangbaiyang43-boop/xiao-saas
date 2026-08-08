@@ -28,6 +28,10 @@
             <text class="order-core-icon iconfont icon-zuowei"></text>
             <text class="order-core-value">{{ tableNo || orderModeText.unknownTable }}</text>
           </view>
+          <view v-if="currentTableOrder.pickupNo" class="order-core-item">
+            <text class="order-core-icon iconfont icon-form"></text>
+            <text class="order-core-value">桌牌 {{ currentTableOrder.pickupNo }}</text>
+          </view>
           <view class="order-core-item">
             <text class="order-core-icon order-core-icon--amount iconfont icon-pay"></text>
             <text class="order-core-value order-core-value--amount">{{ '¥' + formatPrice(currentTableOrder.total || 0) }}</text>
@@ -109,9 +113,12 @@
       </scroll-view>
 
       <view v-else class="table-status-empty">
-        <text class="table-status-empty-icon iconfont icon-list"></text>
-        <text class="table-status-empty-title">暂无本桌订单</text>
-        <text class="table-status-empty-desc">选好菜品，点击下单即可开始</text>
+        <state-empty
+          padded
+          icon="🧾"
+          title="暂无本桌订单"
+          desc="选好菜品，点击下单即可开始"
+        />
       </view>
 
       <view class="orders-actions">
@@ -128,8 +135,11 @@
 // 模板，非分账模式下的订单状态 + 历史订单视图）。纯展示组件，不带任何业务逻
 // 辑——关闭、展开/收起历史订单都只 emit 出去，真正的状态还是父组件的
 // showOrders/showAllOrders，一行逻辑都没有改。
+import StateEmpty from '@/components/state-empty/state-empty.vue'
+
 export default {
   name: 'OrderHistorySheet',
+  components: { StateEmpty },
   props: {
     currentTableOrder: { type: Object, default: null },
     historyTableOrders: { type: Array, default: () => [] },
@@ -181,7 +191,7 @@ export default {
 }
 
 .table-status-card--canceled {
-  --order-status-main: #ef4444;
+  --order-status-main: var(--danger);
   --order-status-soft: #fee2e2;
   --order-status-bg: #fff1f2;
   --order-status-border: #fecdd3;
@@ -195,7 +205,7 @@ export default {
 }
 
 .table-status-card--accepted {
-  --order-status-main: #f59e0b;
+  --order-status-main: var(--warning);
   --order-status-soft: #fef3c7;
   --order-status-bg: #fffbeb;
   --order-status-border: #fde68a;
@@ -229,7 +239,7 @@ export default {
   display: inline-flex;
   align-items: center;
   gap: 8rpx;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 24rpx;
   font-weight: 900;
   white-space: nowrap;
@@ -378,7 +388,7 @@ export default {
   margin-top: 20rpx;
   padding: 24rpx;
   border-radius: var(--radius-card);
-  background: #fff;
+  background: var(--bg-card);
   border: 2rpx solid #f1f5f9;
 }
 
@@ -487,7 +497,7 @@ export default {
 .order-progress-step.done .order-progress-dot,
 .order-progress-step.active .order-progress-dot {
   background: var(--brand);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .order-progress-step.active .order-progress-dot {
@@ -680,7 +690,7 @@ export default {
 .orders-actions {
   flex-shrink: 0;
   padding: 8rpx 32rpx 0;
-  background: #fff;
+  background: var(--bg-card);
 }
 
 
@@ -693,7 +703,7 @@ export default {
   justify-content: center;
   text { font-size: 30rpx; font-weight: 900; }
   background: var(--brand);
-  text { color: #fff; }
+  text { color: var(--text-inverse); }
 }
 
 .orders-secondary-btn--canceled {

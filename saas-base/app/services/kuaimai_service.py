@@ -182,11 +182,14 @@ def build_order_template_render_data(
     items = [_build_print_item_row(item) for item in order_items]
     items = [item for item in items if item["goods_name"] and item["quantity"] > 0]
 
+    pickup_no = _safe_text(getattr(order, "pickup_no", ""))
     order_data = {
         "shop_name": _safe_text(shop_name),
         "order_no": order_no,
         "order_no_short": order_no[-4:] if order_no else "",
         "table_no": _safe_text(getattr(order, "table_no", "")),
+        # 实体桌牌号：与固定桌号 table_no 分离，禁止互相覆盖
+        "pickup_no": pickup_no,
         "order_time": _order_time_text(order),
         "pay_type": pay_type_text,
         "pay_type_text": pay_type_text,

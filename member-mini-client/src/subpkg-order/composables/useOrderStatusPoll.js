@@ -1,5 +1,6 @@
 import { watch } from 'vue'
 import { getOrderStatus } from '@/api/order'
+import { toastText, modalText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的"订单状态轮询"——顾客下单/支付成功后，每 15 秒问一次
 // 后端这单到没到"制作中/已完成"，以及本桌人数轮询（每 25 秒问一次本桌订单，
@@ -31,9 +32,12 @@ export function useOrderStatusPoll({
           const newStatus = body.data?.status || 'pending'
           orderStatus.value = newStatus
           const rec = myOrders.value.find(o => o.id === id)
-          if (rec && rec.status !== newStatus) {
-            rec.status = newStatus
-            saveMyOrders()
+          if (rec) {
+            let dirty = false
+            if (rec.status !== newStatus) { rec.status = newStatus; dirty = true }
+            const nextPickup = body.data?.pickup_no || ''
+            if (nextPickup && rec.pickupNo !== nextPickup) { rec.pickupNo = nextPickup; dirty = true }
+            if (dirty) saveMyOrders()
           }
           if (['settled', 'cancelled', 'rejected'].includes(newStatus)) stopStatusPoll()
         }
@@ -63,9 +67,12 @@ export function useOrderStatusPoll({
         if (body.code === 200) {
           const newStatus = body.data?.status || order.status
           const rec = myOrders.value.find(o => o.id === order.id)
-          if (rec && rec.status !== newStatus) {
-            rec.status = newStatus
-            saveMyOrders()
+          if (rec) {
+            let dirty = false
+            if (rec.status !== newStatus) { rec.status = newStatus; dirty = true }
+            const nextPickup = body.data?.pickup_no || ''
+            if (nextPickup && rec.pickupNo !== nextPickup) { rec.pickupNo = nextPickup; dirty = true }
+            if (dirty) saveMyOrders()
           }
         }
       }).catch(() => {})
@@ -75,13 +82,17 @@ export function useOrderStatusPoll({
   watch(orderStatus, (newVal, oldVal) => {
     if (newVal === 'preparing' && oldVal === 'pending') {
       uni.vibrateShort({ type: 'heavy' })
-      uni.showToast({ title: '商家已接单，正在备餐', icon: 'none', duration: 2500 })
+      uni.showToast({ title: toastText.merchantAccepted, icon: 'none', duration: 2500 })
     } else if (newVal === 'done') {
       uni.vibrateShort({ type: 'heavy' })
     } else if (newVal === 'rejected') {
       stopStatusPoll()
       uni.vibrateShort({ type: 'heavy' })
-      uni.showModal({ title: '订单已被拒绝', content: '商家暂时无法处理此订单，请联系服务员', showCancel: false })
+      uni.showModal({
+        title: modalText.orderRejectedTitle,
+        content: modalText.orderRejectedContent,
+        showCancel: false,
+      })
     }
   })
 

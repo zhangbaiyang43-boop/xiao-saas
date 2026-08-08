@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { getCurrentDiningOrders } from '@/api/order'
 import { bindDiningParticipant } from '@/api/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
-import { orderModeText } from '../utils/orderText.js'
+import { orderModeText, toastText, modalText } from '../utils/orderText.js'
 import { reportError } from '@/utils/monitor'
 
 // 从 menu.vue 拆出来的"拼桌身份"这条链路——建立/校验本桌身份、绑定当前参与者、
@@ -79,6 +79,7 @@ export function useDiningSession({
       participantNo: order.participant_no ?? null,
       isStaff: order.source === 'staff',
       staffNote: order.staff_note || '',
+      pickupNo: order.pickup_no || '',
       createdAt: timeStr,
       createdTs: Number.isNaN(created.getTime()) ? Date.now() : created.getTime(),
       table: order.table_no || tableNo.value,
@@ -130,7 +131,7 @@ export function useDiningSession({
       const newParticipantCount = Number(res.data?.participant_count || 0)
       if (newParticipantCount > 0) {
         if (hasSyncedParticipantCount.value && newParticipantCount > knownParticipantCount.value) {
-          uni.showToast({ title: '有新伙伴扫码加入了本桌', icon: 'none', duration: 2500 })
+          uni.showToast({ title: toastText.newParticipant, icon: 'none', duration: 2500 })
         }
         knownParticipantCount.value = newParticipantCount
         hasSyncedParticipantCount.value = true
@@ -146,10 +147,10 @@ export function useDiningSession({
 
   const showTableHint = () => {
     uni.showModal({
-      title: '桌号提示',
-      content: '当前桌号：' + (tableNo.value || orderModeText.unknownTable) + '\\n请确认桌号后继续点餐',
+      title: modalText.tableHintTitle,
+      content: modalText.tableHintContent(tableNo.value || orderModeText.unknownTable),
       showCancel: false,
-      confirmText: '知道了'
+      confirmText: modalText.tableHintConfirm,
     })
   }
 

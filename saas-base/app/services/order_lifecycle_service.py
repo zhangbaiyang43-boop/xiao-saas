@@ -28,44 +28,37 @@ def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> b
 
 class OrderLifecycleService(BaseService):
     async def update_order_pickup_no(self, order_id: int, pickup_no_raw: str) -> ApiResponse:
+        from app.services.pickup_no_service import PickupNoService
+
         tenant_id = self.require_tenant_id()
-        result = await self.db.execute(
-            select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+        service = PickupNoService(self.db)
+        result = await service.assign_for_order(
+            tenant_id=tenant_id,
+            order_id=int(order_id),
+            pickup_no_raw=pickup_no_raw,
         )
-        order = result.scalar_one_or_none()
-        if not order:
-            return error_response(code=404, msg="order not found")
+        # 分牌成功后、在事务外触发厨房票（防重复打印由 print_service 幂等保证）
+        if getattr(result, "code", None) == 200 and (result.data or {}).get("should_print_after"):
+            try:
+                from app.services.order_print_service import _print_paid_order_ticket
 
-        pickup_no = pickup_no_raw.strip()[:16] or None
-        affected_ids = [order.id]
-
-        if order.dining_session_id:
-            from app.models.dining import DiningSession
-
-            session = await self.db.get(DiningSession, order.dining_session_id)
-            if session:
-                session.pickup_no = pickup_no
-                siblings_result = await self.db.execute(
-                    select(Order).where(
-                        Order.tenant_id == tenant_id,
-                        Order.dining_session_id == session.id,
-                        Order.status.notin_(["cancelled", "rejected"]),
+                order_ids = (result.data or {}).get("order_ids") or []
+                for oid in order_ids:
+                    order_result = await self.db.execute(
+                        select(Order).where(Order.id == int(oid), Order.tenant_id == tenant_id)
                     )
+                    order = order_result.scalar_one_or_none()
+                    if not order:
+                        continue
+                    await _print_paid_order_ticket(order, self.db, reason="pickup_no_assigned")
+                await self.db.commit()
+            except Exception:
+                # 打印失败不回滚桌牌分配
+                import logging
+                logging.getLogger(__name__).exception(
+                    "pickup_no assigned but print failed order_id=%s", order_id
                 )
-                siblings = siblings_result.scalars().all()
-                for sibling in siblings:
-                    sibling.pickup_no = pickup_no
-                affected_ids = [o.id for o in siblings] or affected_ids
-            else:
-                order.pickup_no = pickup_no
-        else:
-            order.pickup_no = pickup_no
-
-        await self.db.commit()
-        return success_response(
-            data={"pickup_no": pickup_no, "order_ids": [str(i) for i in affected_ids]},
-            msg="取餐牌号已更新",
-        )
+        return result
 
     async def update_merchant_note(self, order_id: int, note: str) -> ApiResponse:
         from app.services.order_print_service import (
@@ -138,6 +131,15 @@ class OrderLifecycleService(BaseService):
             coupon = await self.db.get(_Coupon, order.coupon_id)
             if coupon and coupon.status == "LOCKED":
                 coupon.status = "UNUSED"
+        # 桌牌属 DiningSession：仅当会话内已无有效履约订单时释放租约
+        if order.dining_session_id:
+            from app.models.dining import DiningSession
+            from app.services.pickup_no_service import PickupNoService
+
+            session = await self.db.get(DiningSession, order.dining_session_id)
+            await PickupNoService(self.db).release_if_no_holding_orders(
+                str(order.tenant_id), session
+            )
         await self.db.commit()
         return success_response(data={"id": str(order.id), "status": "cancelled"}, msg="order cancelled")
 
@@ -193,6 +195,8 @@ class OrderLifecycleService(BaseService):
             "payment_status": order.payment_status,
             "merchant_note": order.merchant_note,
             "reward_coupon": reward_coupon,
+            "pickup_no": getattr(order, "pickup_no", None),
+            "table_no": getattr(order, "table_no", None),
         })
 
     async def list_orders(
@@ -318,21 +322,23 @@ class OrderLifecycleService(BaseService):
 
         session_ids = {o.dining_session_id for o in orders if getattr(o, "dining_session_id", None)}
         checkout_requested_by_session = {}
+        sessions_by_id = {}
         if session_ids:
             from app.models.dining import DiningSession
 
             sessions_result = await self.db.execute(
-                select(DiningSession.id, DiningSession.checkout_requested_at).where(
-                    DiningSession.id.in_(session_ids)
-                )
+                select(DiningSession).where(DiningSession.id.in_(session_ids))
             )
-            for session_id, checkout_requested_at in sessions_result.all():
-                if checkout_requested_at:
-                    checkout_requested_by_session[session_id] = checkout_requested_at.isoformat()
+            for session in sessions_result.scalars().all():
+                sessions_by_id[session.id] = session
+                if session.checkout_requested_at:
+                    checkout_requested_by_session[session.id] = session.checkout_requested_at.isoformat()
 
         from app.services.dining_session_service import DiningSessionService
+        from app.services.pickup_no_service import load_pickup_settings
 
         participant_ordinals = await DiningSessionService.get_participant_ordinals(self.db, tenant_id, list(session_ids))
+        pickup_settings = await load_pickup_settings(self.db, tenant_id)
 
         rows = [
             serialize_order(
@@ -340,6 +346,8 @@ class OrderLifecycleService(BaseService):
                 items_by_order.get(o.id or 0, []),
                 checkout_requested_at=checkout_requested_by_session.get(getattr(o, "dining_session_id", None)),
                 participant_no=participant_ordinals.get(getattr(o, "participant_id", None)),
+                pickup_settings=pickup_settings,
+                dining_session=sessions_by_id.get(getattr(o, "dining_session_id", None)),
             )
             for o in orders
         ]
@@ -475,6 +483,12 @@ class OrderLifecycleService(BaseService):
             await _mark_order_coupon_used_if_locked(order, self.db)
             if marked_offline_paid:
                 await payment_svc._apply_paid_order_member_assets_once(order)
+        if body.status in ("rejected", "cancelled") and order.dining_session_id:
+            from app.models.dining import DiningSession
+            from app.services.pickup_no_service import PickupNoService
+
+            session = await self.db.get(DiningSession, order.dining_session_id)
+            await PickupNoService(self.db).release_if_no_holding_orders(tenant_id, session)
         await self.db.commit()
         await self.db.refresh(order)
         if just_settled:
@@ -563,6 +577,11 @@ class OrderLifecycleService(BaseService):
         active_session.closed_at = datetime.utcnow()
         active_session.closed_by = closed_by
         active_session.active_key = None
+        # 释放当前桌牌租约；历史 Order.pickup_no 保留作快照
+        from app.services.pickup_no_service import PickupNoService
+        await PickupNoService(self.db).release_session_assignment(
+            tenant_id, active_session, clear_session_field=True
+        )
 
         total = 0.0
         settled_count = 0

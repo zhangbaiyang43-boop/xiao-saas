@@ -50,9 +50,9 @@ class SubscribeMessageServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(data["thing5"]["value"], "请到前台取餐")
         self.assertEqual(data["thing4"]["value"], "宫保鸡丁等")
 
-    def test_resolve_pickup_no_falls_back_to_table(self):
+    def test_resolve_pickup_no_does_not_fall_back_to_table(self):
         order = SimpleNamespace(pickup_no=None, table_no="A01")
-        self.assertEqual(resolve_pickup_no(order), "A01")
+        self.assertEqual(resolve_pickup_no(order), "—")
 
     async def test_send_order_success_skips_without_openid(self):
         order = SimpleNamespace(id=1, customer_id=None, total=10, pickup_no="1", payment_time=None, tenant_id="t1")

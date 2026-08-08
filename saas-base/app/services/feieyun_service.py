@@ -68,7 +68,7 @@ def build_order_ticket(order, order_items) -> str:
     lines.append("<CB>新订单</CB>")   # 居中加粗标题
     pickup_no = getattr(order, "pickup_no", None)
     if pickup_no:
-        lines.append(f"<CB>取餐号：{pickup_no}</CB>")
+        lines.append(f"<CB>桌牌号：{pickup_no}</CB>")
     lines.append(f"桌号：{getattr(order, 'table_no', '') or '—'}")
     lines.append(f"单号：{str(order.id)[-8:]}")
     lines.append(f"来源：{'H5点餐' if getattr(order, 'source', '') == 'h5' else '小程序'}")

@@ -49,6 +49,22 @@
           <a-button type="primary" html-type="submit" block size="large" :loading="savingStore">保存门店资料</a-button>
         </a-form>
       </section>
+      <section class="panel-card animate-in" style="animation-delay:.06s">
+        <a-form :model="pickupForm" layout="vertical" @finish="savePickupSettings">
+          <a-form-item label="启用数字桌牌">
+            <a-switch v-model:checked="pickupForm.pickup_no_enabled" />
+            <div class="logo-upload-hint">开启后：顾客可见桌牌号；可要求分牌后再打厨房票</div>
+          </a-form-item>
+          <a-form-item label="桌牌数量（1-999）">
+            <a-input-number v-model:value="pickupForm.pickup_no_count" :min="1" :max="999" style="width:100%" />
+          </a-form-item>
+          <a-form-item label="打印前必须分牌">
+            <a-switch v-model:checked="pickupForm.pickup_no_required_before_print" :disabled="!pickupForm.pickup_no_enabled" />
+            <div class="logo-upload-hint">仅在启用桌牌时生效；未分牌时暂缓厨房票</div>
+          </a-form-item>
+          <a-button type="primary" html-type="submit" block size="large" :loading="savingPickup">保存桌牌设置</a-button>
+        </a-form>
+      </section>
       <section class="plain-card animate-in" style="animation-delay:.08s">
         <strong>商家 ID</strong>
         <span class="tenant-id tap-shrink" @click="copyTenantId">{{ tenantId ? tenantId.slice(0, 4) + '****' + tenantId.slice(-4) : '-' }}</span>
@@ -62,13 +78,19 @@ import { computed, onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { ShopOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../../components/PageHeader.vue'
-import { getTenantProfile, updateTenantProfile, uploadShopLogo } from '../../api'
+import { getTenantProfile, updateTenantProfile, updateTenantSettings, uploadShopLogo } from '../../api'
 
 const merchant = ref({})
 const savingStore = ref(false)
+const savingPickup = ref(false)
 const logoUploading = ref(false)
 const logoInputRef = ref(null)
 const storeForm = ref({ name: '', address: '', phone: '', logo_url: '' })
+const pickupForm = ref({
+  pickup_no_enabled: false,
+  pickup_no_count: 30,
+  pickup_no_required_before_print: true,
+})
 const tenantId = computed(() => merchant.value.tenant_id || merchant.value.id || '')
 
 async function loadProfile() {
@@ -81,6 +103,11 @@ async function loadProfile() {
         address: res.data.address || '',
         phone: res.data.phone || '',
         logo_url: res.data.logo_url || '',
+      }
+      pickupForm.value = {
+        pickup_no_enabled: !!res.data.pickup_no_enabled,
+        pickup_no_count: Number(res.data.pickup_no_count || 30),
+        pickup_no_required_before_print: res.data.pickup_no_required_before_print !== false,
       }
     }
   } catch {
@@ -136,6 +163,38 @@ async function saveStoreProfile() {
     message.error('保存失败，请检查后端接口')
   } finally {
     savingStore.value = false
+  }
+}
+
+async function savePickupSettings() {
+  const count = Number(pickupForm.value.pickup_no_count || 30)
+  if (!Number.isFinite(count) || count < 1 || count > 999) {
+    message.error('桌牌数量须在 1-999 之间')
+    return
+  }
+  savingPickup.value = true
+  try {
+    // 桌牌配置在 business_info，必须走 /tenant/settings；
+    // /tenant/profile 只接受店名/电话等基础字段，会静默丢掉 pickup_no_*。
+    const res = await updateTenantSettings({
+      pickup_no_enabled: !!pickupForm.value.pickup_no_enabled,
+      pickup_no_count: count,
+      pickup_no_required_before_print: !!pickupForm.value.pickup_no_required_before_print,
+    })
+    if (res.code === 200) {
+      pickupForm.value = {
+        pickup_no_enabled: !!res.data?.pickup_no_enabled,
+        pickup_no_count: Number(res.data?.pickup_no_count || count),
+        pickup_no_required_before_print: res.data?.pickup_no_required_before_print !== false,
+      }
+      message.success('桌牌设置已保存')
+      return
+    }
+    message.error(res.msg || '保存失败')
+  } catch {
+    message.error('保存失败，请检查后端接口')
+  } finally {
+    savingPickup.value = false
   }
 }
 

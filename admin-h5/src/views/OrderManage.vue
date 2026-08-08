@@ -27,6 +27,18 @@
       <span class="live-dot" />提醒还没生效，点这里立即解锁
     </div>
 
+    <div
+      v-if="pendingPickupCount > 0"
+      class="pickup-todo-banner tap-shrink"
+      @click="focusFirstPendingPickup"
+    >
+      <span class="pickup-todo-dot" />
+      <div>
+        <div class="pickup-todo-title">{{ pendingPickupCount }}笔订单待发桌牌</div>
+        <div class="pickup-todo-sub">顾客已付款</div>
+      </div>
+    </div>
+
     <!-- 统计数字 -->
     <div class="section-block animate-in">
       <a-card :bordered="false" :body-style="{ padding: '12px 0' }">
@@ -88,7 +100,7 @@
           </div>
           <div class="table-tile-state">{{ tableStatusText(table) || '已结账' }}</div>
           <div class="table-tile-total">¥{{ table.total.toFixed(2) }}</div>
-          <div class="table-tile-count">{{ table.orders.length }} 单<template v-if="table.pickupNo"> · {{ table.pickupNo }}号牌</template></div>
+          <div class="table-tile-count">{{ table.orders.length }} 单<template v-if="table.pickupNo"> · {{ table.pickupNo }}号桌牌</template></div>
         </div>
       </div>
 
@@ -109,20 +121,36 @@
             <span class="table-total">¥{{ selectedTable.total.toFixed(2) }}</span>
           </div>
 
-          <!-- 取餐牌号：管的是这一桌这一次吃饭，不是某一单菜，一桌登记一次，后面的加单自动共享 -->
-          <div style="padding:8px 16px;border-bottom:1px solid var(--border)">
-            <PickupNoPicker :model-value="selectedTable.pickupNo" @pick="(n) => sendTablePickupNo(selectedTable, n)" />
+          <!-- 桌牌：一桌一次，加单共享；拿实体牌后再点号 -->
+          <div
+            v-if="selectedTable.pickupNo || selectedTablePickupOrder"
+            style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px"
+          >
+            <div v-if="selectedTable.pickupNo" class="pickup-bound-row">
+              <span class="pickup-bound-tag">{{ selectedTable.pickupNo }}号桌牌</span>
+              <button
+                v-if="selectedTablePickupOrder && orderCanReplacePickup(selectedTablePickupOrder)"
+                type="button"
+                class="pickup-replace-link"
+                @click="openPickupSheet(selectedTablePickupOrder)"
+              >更换</button>
+            </div>
+            <div v-else-if="selectedTablePickupOrder && orderNeedsPickup(selectedTablePickupOrder)" class="pickup-pending-row">
+              <span class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
+              <a-button type="primary" size="small" @click="openPickupSheet(selectedTablePickupOrder)">发桌牌</a-button>
+            </div>
           </div>
 
           <!-- 订单列表 -->
           <div v-for="order in selectedTable.orders" :key="order.id" class="order-row">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-              <div style="display:flex;align-items:center;gap:6px">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
-                <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
+                <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
+                <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
                 <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
                 <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
@@ -238,15 +266,22 @@
         <template v-else-if="statusFilter">今天没有{{ statusFilters.find(f => f.val === statusFilter)?.label }}的订单</template>
         <template v-else>今天的订单都还没到账，去"待支付"筛选看看</template>
       </div>
-      <div v-for="order in visibleOrders" :key="order.id" style="padding:8px 16px 0">
+      <div
+        v-for="order in visibleOrders"
+        :key="order.id"
+        :data-order-card="order.id"
+        :data-needs-pickup="orderNeedsPickup(order) ? '1' : '0'"
+        style="padding:8px 16px 0"
+      >
         <a-card :bordered="false" :body-style="{ padding: '12px 16px' }">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <div style="display:flex;align-items:center;gap:6px">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status) }}</a-tag>
               <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">服务员代点</a-tag>
-              <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号牌</a-tag>
+              <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
+              <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
               <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
               <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
@@ -270,14 +305,23 @@
             <EditOutlined style="font-size:16px;margin-top:1px;flex-shrink:0" /><span>代点备注：{{ order.staffNote }}</span>
           </div>
           <div class="order-action-row">
+            <a-button
+              v-if="orderNeedsPickup(order)"
+              type="primary"
+              class="order-action-btn"
+              @click="openPickupSheet(order)"
+            >发桌牌</a-button>
             <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
             <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
             <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
-          </div>
-          <div v-if="!['cancelled','rejected'].includes(order.status)" style="margin-top:8px">
-            <PickupNoPicker :model-value="order.pickup_no" @pick="(n) => sendPickupNo(order, n)" />
+            <button
+              v-if="orderCanReplacePickup(order)"
+              type="button"
+              class="pickup-replace-link"
+              @click="openPickupSheet(order)"
+            >更换</button>
           </div>
           <div v-if="reviewsMap[order.id]" class="review-row">
             <span class="review-stars-display">{{ '★'.repeat(reviewsMap[order.id].rating) }}{{ '☆'.repeat(5 - reviewsMap[order.id].rating) }}</span>
@@ -420,8 +464,9 @@
         </template>
       </div>
       <div style="position:absolute;left:0;right:0;bottom:0;background:var(--bg-card);border-top:1px solid var(--border);padding:10px 16px 16px">
-        <div style="margin-bottom:10px">
-          <PickupNoPicker :model-value="staffPickupNo" placeholder="可选：取餐牌号" @pick="(n) => staffPickupNo = n" />
+        <div v-if="pickupNoEnabled" class="pickup-bound-row" style="margin-bottom:10px">
+          <span v-if="staffPickupNo" class="pickup-bound-tag">{{ staffPickupNo }}号桌牌</span>
+          <a-button size="small" @click="openStaffPickupSheet">{{ staffPickupNo ? '更换' : '发桌牌（可选）' }}</a-button>
         </div>
         <a-input v-model:value="staffNote" placeholder="可选：备注是谁加的（如：前台-老王）" maxlength="64" style="margin-bottom:10px" />
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -433,17 +478,29 @@
         </a-button>
       </div>
     </a-drawer>
+
+    <PickupNoPicker
+      v-model:open="pickupSheetOpen"
+      :count="pickupCount"
+      :occupied="pickupOccupied"
+      :current="pickupSheetCurrent"
+      :dining-session-id="pickupSheetSessionId"
+      :loading="pickupSheetLoading"
+      :submitting="pickupSheetSubmitting"
+      @select="handlePickupSelect"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, updateOrderPickupNo, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, updateOrderStatus, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import pollingManager from '../utils/pollingManager'
 import { useOrderAlert } from '../composables/useOrderAlert'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
+import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 
 function decodeJwtPayload(token) {
   try {
@@ -492,6 +549,125 @@ const staffCart = ref({}) // dish_id -> qty
 const staffNote = ref('')
 const staffPickupNo = ref('')
 const staffSubmitting = ref(false)
+const pickupNoEnabled = ref(false)
+const pickupCount = ref(30)
+const pickupOccupied = ref([])
+const pickupSheetOpen = ref(false)
+const pickupSheetLoading = ref(false)
+const pickupSheetSubmitting = ref(false)
+const pickupTargetOrder = ref(null)
+const pickupStaffMode = ref(false)
+
+function orderNeedsPickup(order) {
+  return needsPickup(order)
+}
+function orderCanReplacePickup(order) {
+  return canReplacePickup(order)
+}
+
+const pendingPickupOrders = computed(() => orders.value.filter((o) => orderNeedsPickup(o)))
+const pendingPickupCount = computed(() => pendingPickupOrders.value.length)
+
+const selectedTablePickupOrder = computed(() => {
+  const table = selectedTable.value
+  if (!table?.orders?.length) return null
+  return (
+    table.orders.find((o) => orderNeedsPickup(o))
+    || table.orders.find((o) => orderCanReplacePickup(o))
+    || null
+  )
+})
+
+const pickupSheetCurrent = computed(() => {
+  if (pickupStaffMode.value) return staffPickupNo.value || ''
+  return pickupTargetOrder.value?.pickup_no || ''
+})
+const pickupSheetSessionId = computed(() => {
+  if (pickupStaffMode.value) return ''
+  return pickupTargetOrder.value?.diningSessionId || ''
+})
+
+async function refreshPickupStatus() {
+  pickupSheetLoading.value = true
+  try {
+    const res = await getPickupNoStatus({
+      meta: { fromPolling: true, dedupe: true, dedupeKey: 'pickup-nos:status' },
+    })
+    if (res?.code === 200 && res.data) {
+      pickupNoEnabled.value = !!res.data.enabled
+      pickupCount.value = Number(res.data.count || 30)
+      pickupOccupied.value = Array.isArray(res.data.occupied) ? res.data.occupied : []
+    }
+  } catch {
+    /* 弹层仍可按本地 count 展示；后端 UNIQUE 仍是最终边界 */
+  } finally {
+    pickupSheetLoading.value = false
+  }
+}
+
+async function openPickupSheet(order) {
+  if (!order) return
+  if (!orderNeedsPickup(order) && !orderCanReplacePickup(order)) return
+  pickupStaffMode.value = false
+  pickupTargetOrder.value = order
+  pickupSheetOpen.value = true
+  await refreshPickupStatus()
+}
+
+async function openStaffPickupSheet() {
+  pickupStaffMode.value = true
+  pickupTargetOrder.value = null
+  pickupSheetOpen.value = true
+  await refreshPickupStatus()
+}
+
+async function focusFirstPendingPickup() {
+  const first = pendingPickupOrders.value[0]
+  if (!first) return
+  view.value = 'list'
+  await nextTick()
+  const el = document.querySelector(`[data-order-card="${first.id}"]`)
+  el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+async function handlePickupSelect(n) {
+  if (pickupSheetSubmitting.value) return
+  const value = String(n || '').trim()
+  if (!value) return
+
+  if (pickupStaffMode.value) {
+    staffPickupNo.value = value
+    pickupSheetOpen.value = false
+    message.success(`已选择${value}号桌牌`)
+    return
+  }
+
+  const order = pickupTargetOrder.value
+  if (!order) return
+  if (value === String(order.pickup_no || '')) {
+    pickupSheetOpen.value = false
+    return
+  }
+
+  pickupSheetSubmitting.value = true
+  try {
+    const res = await updateOrderPickupNo(order.id, value)
+    if (res?.code === 200) {
+      applyPickupNoToOrders(res.data?.pickup_no || value, res.data?.order_ids)
+      pickupSheetOpen.value = false
+      message.success(`已绑定${value}号桌牌`)
+    } else if (res?.code === 409) {
+      message.warning(pickupConflictToast(value))
+      await refreshPickupStatus()
+    } else {
+      message.error(res?.msg || '绑定失败，请重试')
+    }
+  } catch {
+    message.error('网络异常，请重试')
+  } finally {
+    pickupSheetSubmitting.value = false
+  }
+}
 
 // 新开一桌：不能让店员手打桌号（容易跟顾客自己扫码用的桌号对不上，同一张桌子
 // 变成两个不同字符串、账就分裂了）。可选的桌号必须来自商家自己在"桌码管理"
@@ -534,6 +710,20 @@ async function loadPaymentMode() {
   try {
     const res = await getTenantProfile()
     paymentMode.value = res?.data?.payment_mode || 'prepay'
+    if (res?.data?.pickup_no_enabled != null) {
+      pickupNoEnabled.value = !!res.data.pickup_no_enabled
+    }
+    if (res?.data?.pickup_no_count != null) {
+      pickupCount.value = Number(res.data.pickup_no_count) || 30
+    }
+  } catch {}
+  try {
+    const status = await getPickupNoStatus()
+    if (status?.code === 200 && status.data) {
+      pickupNoEnabled.value = !!status.data.enabled
+      pickupCount.value = Number(status.data.count || 30)
+      pickupOccupied.value = Array.isArray(status.data.occupied) ? status.data.occupied : []
+    }
   } catch {}
 }
 
@@ -645,6 +835,8 @@ async function loadOrders(pollMeta = {}) {
       source: o.source || 'miniprogram',
       staffNote: o.staff_note || '',
       pickup_no: o.pickup_no || '',
+      canAssignPickupNo: !!o.can_assign_pickup_no,
+      paymentStatus: o.payment_status || '',
       printStatus: o.print_status || null,
       createdAt: o.created_at || '',
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
@@ -855,39 +1047,16 @@ async function acceptOrder(order) {
   catch { message.error('操作失败') } finally { order.updating = false }
 }
 
-// 牌子管的是这一桌这一次吃饭，不是某一单菜：登记接口会把这个号同步给同一个桌台会话下的
-// 所有订单，这里把返回的 order_ids 应用回本地列表，同一桌其它订单（包括加单）立刻跟着更新，
-// 不用等下一次轮询刷新才看到。
+// 牌子管的是这一桌这一次吃饭：接口会把号同步给同一桌台会话下所有订单，立刻回写本地列表。
 function applyPickupNoToOrders(pickupNo, orderIds) {
   const idSet = new Set((orderIds || []).map(String))
   for (const o of orders.value) {
     if (idSet.has(String(o.id))) {
       o.pickup_no = pickupNo || ''
+      // 已有号后后端 can_assign=false；本地立即关掉「待发」避免等下一轮轮询
+      o.canAssignPickupNo = !pickupNo
     }
   }
-}
-
-async function sendPickupNo(order, value) {
-  if (!value || value === order.pickup_no) return
-  try {
-    const res = await updateOrderPickupNo(order.id, value)
-    if (res.code === 200) {
-      applyPickupNoToOrders(res.data.pickup_no, res.data.order_ids)
-      message.success('取餐牌号已登记')
-    } else message.error(res.msg || '登记失败')
-  } catch { message.error('登记失败') }
-}
-
-async function sendTablePickupNo(table, value) {
-  const anyOrder = table?.orders?.[0]
-  if (!value || !anyOrder) return
-  try {
-    const res = await updateOrderPickupNo(anyOrder.id, value)
-    if (res.code === 200) {
-      applyPickupNoToOrders(res.data.pickup_no, res.data.order_ids)
-      message.success('取餐牌号已登记，这一桌后面加单会自动带上')
-    } else message.error(res.msg || '登记失败')
-  } catch { message.error('登记失败') }
 }
 
 async function rejectOrder(order) {
@@ -1296,6 +1465,74 @@ onBeforeUnmount(() => {
   padding: 9px 14px;
   cursor: pointer;
   user-select: none;
+}
+.pickup-todo-banner {
+  margin: 8px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  cursor: pointer;
+  user-select: none;
+}
+.pickup-todo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.pickup-todo-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c2410c;
+  line-height: 1.3;
+}
+.pickup-todo-sub {
+  font-size: 11px;
+  color: #b45309;
+  margin-top: 2px;
+}
+.pickup-pending-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c2410c;
+}
+.pickup-pending-row,
+.pickup-bound-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+.pickup-bound-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+  font-size: 13px;
+  font-weight: 700;
+}
+.pickup-replace-link {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 6px;
+  cursor: pointer;
 }
 .filter-chip {
   display: inline-block;

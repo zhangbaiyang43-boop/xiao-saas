@@ -82,6 +82,10 @@ DEFAULT_BUSINESS_INFO = {
     "service_scope": "",
     "longitude": "",
     "latitude": "",
+    # 实体桌牌：默认关闭，避免升级影响不需要桌牌的老商户
+    "pickup_no_enabled": False,
+    "pickup_no_count": 30,
+    "pickup_no_required_before_print": True,
 }
 
 DEFAULT_PLUGIN_SETTINGS = {

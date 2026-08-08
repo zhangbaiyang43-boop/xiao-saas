@@ -122,7 +122,7 @@ async def _print_paid_order_ticket(
     """Print an order ticket and persist recoverable print state in existing order metadata."""
     if not order:
         return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
+    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint", "pickup_no_assigned") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
     if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
         return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
 
@@ -130,9 +130,22 @@ async def _print_paid_order_ticket(
     locked_order = locked_result.scalar_one_or_none()
     if locked_order:
         order = locked_order
-    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
+    allow_unpaid_print = reason in ("order_created_pay_later", "manual_reprint", "pickup_no_assigned") and getattr(order, "payment_mode", "prepay") in ("postpay", "table_account")
     if not allow_unpaid_print and getattr(order, "payment_status", None) != "paid":
         return {"success": False, "skipped": True, "code": "ORDER_NOT_PAID"}
+
+    # 启用桌牌且要求分牌后出票：未分牌时暂缓（manual_reprint 仍允许补打）
+    if reason != "manual_reprint":
+        from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
+
+        pickup_settings = await load_pickup_settings(db, str(order.tenant_id))
+        if should_defer_kitchen_print(order, pickup_settings):
+            logger.warning(
+                "[PRINT_DEFERRED_WAITING_PICKUP_NO] order_id=%s reason=%s",
+                order.id,
+                reason,
+            )
+            return {"success": False, "skipped": True, "code": "WAITING_PICKUP_NO"}
 
     meta = _get_print_meta(order)
     db_print_status = str(getattr(order, "print_status", "") or "").upper()

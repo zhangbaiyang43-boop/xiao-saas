@@ -3,6 +3,7 @@ import { joinByEntranceCode } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { isDiningIdentityError } from '@/utils/dining'
 import { reportError } from '@/utils/monitor'
+import { confirmationText, toastText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的下单 + 支付 + 待支付恢复 + 结账授权这一整条链路。这是全部
 // 拆解里风险最高的一块——直接碰真金白银和订单记录，一旦哪个环节漏传状态，
@@ -187,7 +188,12 @@ export function useCheckout({
   const goCheckout = () => {
     if (ordering.value || paying.value || authorizing.value) return
     if (!canSubmitOrder.value) {
-      uni.showToast({ title: tableSessionClosed.value ? '本桌已结束，请重新扫码点餐' : (tableNo.value ? '当前不可下单' : '未识别桌号，请重新扫码'), icon: 'none' })
+      uni.showToast({
+        title: tableSessionClosed.value
+          ? toastText.tableSessionEnded
+          : (tableNo.value ? confirmationText.unavailable : confirmationText.tableMissing),
+        icon: 'none',
+      })
       return
     }
     clearStalePrepayOrderForPayLater()
@@ -210,7 +216,7 @@ export function useCheckout({
   const handleCheckoutAuth = async (event) => {
     if (authorizing.value || ordering.value || paying.value) return
     const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
-    if (!phoneCode) return uni.showToast({ title: '未完成授权，暂时无法继续支付', icon: 'none' })
+    if (!phoneCode) return uni.showToast({ title: toastText.authIncomplete, icon: 'none' })
     authorizing.value = true
     authActionStatus.value = 'authorizing'
     try {
@@ -226,7 +232,7 @@ export function useCheckout({
       }, { authRedirect: false })
       if (res.code !== 200) {
         authActionStatus.value = 'idle'
-        uni.showToast({ title: res?.msg || '加入会员失败，请重试', icon: 'none', duration: 1200 })
+        uni.showToast({ title: res?.msg || toastText.joinMemberFailed, icon: 'none', duration: 1200 })
         return
       }
       uni.removeStorageSync('invite_code')
@@ -242,7 +248,7 @@ export function useCheckout({
       }
     } catch (err) {
       authActionStatus.value = 'idle'
-      uni.showToast({ title: err.message || '授权未完成，请重试', icon: 'none' })
+      uni.showToast({ title: err.message || toastText.authIncomplete, icon: 'none' })
     } finally {
       authorizing.value = false
       if (!ordering.value && !paying.value && authActionStatus.value !== 'idle') authActionStatus.value = 'idle'
@@ -275,7 +281,9 @@ export function useCheckout({
   const performSubmitOrder = async (isRetry = false) => {
     try {
       const sessionReady = await ensureDiningSession()
-      if (!sessionReady || tableSessionClosed.value) throw new Error(tableSessionClosed.value ? '本桌已结束，请重新扫码点餐' : '本桌点餐会话不可用，请重新扫码')
+      if (!sessionReady || tableSessionClosed.value) {
+        throw new Error(tableSessionClosed.value ? toastText.tableSessionEnded : toastText.tableSessionUnavailable)
+      }
       // 必须在用户点击提交的手势链里调用，否则微信不会弹授权框。
       await requestOrderSubscribeMessages()
       const payload = {
@@ -299,7 +307,7 @@ export function useCheckout({
       successDiscount.value = Number(data.discount_amount ?? 0)
       payAmount.value = Number(data.pay_amount ?? data.total ?? finalPrice.value)
       paymentMode.value = normalizePaymentMode(data.payment_mode)
-      if (!pendingOrderId.value) throw new Error('订单创建失败，请重试')
+      if (!pendingOrderId.value) throw new Error(toastText.createOrderFailed)
       if (data.need_payment !== false) {
         savePendingPaymentOrder()
         return await confirmPay()
@@ -320,7 +328,7 @@ export function useCheckout({
       }
       const rawMsg = err?.message || ''
       if (rawMsg.includes('会话') || rawMsg.includes('重新扫码') || rawMsg.includes('本桌')) tableSessionClosed.value = true
-      const msg = rawMsg || '下单失败，请告知服务员'
+      const msg = rawMsg || toastText.submitOrderFailed
       uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
       return false
     }
@@ -351,6 +359,7 @@ export function useCheckout({
       diningSessionId: diningSessionId.value || '', tableSessionId: diningSessionId.value || '',
       items: successItems.value, total: successTotal.value, createdAt: timeStr,
       createdTs: now.getTime(), table: tableNo.value,
+      pickupNo: data.pickup_no || '',
     })
     saveMyOrders()
     syncDiningOrders().catch(() => {})
@@ -463,7 +472,7 @@ export function useCheckout({
       const msg = err?.errMsg || err?.message || '支付失败，请重试'
       paymentFailed.value = true
       if (String(msg).includes('cancel')) {
-        uni.showToast({ title: '已取消支付', icon: 'none' })
+        uni.showToast({ title: toastText.payCancelled, icon: 'none' })
       } else {
         uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
       }

@@ -367,6 +367,10 @@ class DiningSessionService:
                     session.status = "EXPIRED"
                     session.closed_at = now
                     session.active_key = None
+                    from app.services.pickup_no_service import PickupNoService
+                    await PickupNoService(self.db).release_session_assignment(
+                        tenant_id, session, clear_session_field=True
+                    )
                 else:
                     return session
             else:
@@ -517,6 +521,7 @@ class DiningSessionService:
             "order_type": order.order_type,
             "source": getattr(order, "source", "miniprogram"),
             "staff_note": getattr(order, "staff_note", None),
+            "pickup_no": getattr(order, "pickup_no", None),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "items": [
                 {

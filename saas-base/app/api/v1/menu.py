@@ -177,6 +177,8 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         "queue_reminder_template_id": settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID or "",  # 空字符串表示排队订阅消息未配置
         "order_success_template_id": settings.WECHAT_ORDER_SUCCESS_TEMPLATE_ID or "",  # 点餐成功通知
         "pickup_reminder_template_id": settings.WECHAT_PICKUP_REMINDER_TEMPLATE_ID or "",  # 取餐提醒
+        "pickup_no_enabled": bool(biz.get("pickup_no_enabled", False)),
+        "pickup_no_count": int(biz.get("pickup_no_count") or 30),
     })
 
 

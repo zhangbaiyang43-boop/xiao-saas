@@ -2,8 +2,13 @@
   <view class="order-page">
 
 
-    <!-- 门店头条（方案 B）：全宽压在分类/菜品两列之上。
-    点餐 tab 上滑过阈值后收起，改由迷你条承接；其它 tab 一直显示。 -->
+    <!--
+      点餐头剧本（方案1+B，已落地，禁止再改结构）：
+      1) ShopHeader 全宽：Logo + 店名 + 桌号芯片，压在分类/菜品两列之上；
+      2) CouponBar 永远在头部/迷你条之下、分类菜品之上（全宽，不进右侧 scroll）；
+      3) 点餐 tab 列表上滑过阈值后只收起大头、露出迷你条（店名+桌号）；
+      禁止把头部/券条塞回 DishList 右侧滚动区。
+    -->
     <ShopHeader
       v-show="activeTab !== 'order' || headerVisible"
       :shop-logo="shopLogo"
@@ -16,7 +21,7 @@
       @show-table-hint="showTableHint"
     />
 
-    <!-- 点餐 tab 收起后的迷你条：店名 + 桌号芯片。 -->
+    <!-- 点餐 tab 收起后的迷你条：店名 + 桌号芯片（只承接滚动收起，不替代全宽头剧本）。 -->
     <view
       v-if="activeTab === 'order'"
       class="mini-shop-bar"
@@ -122,6 +127,7 @@
         :banner-info="bannerInfo"
         :shop-name="shopName"
         :member-level-badge-src="memberLevelBadgeSrc"
+        :member-identity-card-style="memberIdentityCardStyle"
         :member-level-label="memberLevelLabel"
         :member-upgrade-text="memberUpgradeText"
         :member-progress-percent="memberProgressPercent"
@@ -267,6 +273,8 @@
       :reminder-requested="reminderRequested"
       :requesting-reminder="requestingReminder"
       :table-no="tableNo"
+      :pickup-no-enabled="pickupNoEnabled"
+      :pickup-no="successPickupNo"
       :order-mode-text="orderModeText"
       :success-order-no="successOrderNo"
       :success-order-item-count="successOrderItemCount"
@@ -372,7 +380,6 @@
       :can-go-next-spec="canGoNextSpec"
       :spec-primary-text="specPrimaryText"
       :dish-image="dishImage"
-      :dish-placeholder-style="dishPlaceholderStyle"
       :format-price="formatPrice"
       :is-spec-selected="isSpecSelected"
       @cancel="cancelSpec"
@@ -442,7 +449,7 @@ import { useDiningSession } from '../composables/useDiningSession.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
-import { orderModeText, confirmationText, successText, specText, authSheetText } from '../utils/orderText.js'
+import { orderModeText, confirmationText, successText, specText, authSheetText, toastText, modalText } from '../utils/orderText.js'
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -455,7 +462,7 @@ export default {
   components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, DishList, CartBar, CouponBar, WelcomeCouponSheet, ShopHeader, BottomNav, LoadingStates },
   setup() {
     const {
-      formatPrice, dishImage, dishPlaceholderStyle, hasSpecs, isSoldOut, dishCardDesc,
+      formatPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
       dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
       couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
@@ -506,12 +513,12 @@ export default {
         const res = await remindMeForCoupon(earnedCoupon.value.couponId)
         if (res?.code === 200) {
           reminderRequested.value = true
-          uni.showToast({ title: '好的，到期前会提醒你', icon: 'none' })
+          uni.showToast({ title: toastText.reminderOk, icon: 'none' })
         } else {
-          uni.showToast({ title: res?.msg || '设置失败，请重试', icon: 'none' })
+          uni.showToast({ title: res?.msg || toastText.reminderFailed, icon: 'none' })
         }
       } catch (e) {
-        uni.showToast({ title: '设置失败，请重试', icon: 'none' })
+        uni.showToast({ title: toastText.reminderFailed, icon: 'none' })
       } finally {
         requestingReminder.value = false
       }
@@ -550,7 +557,7 @@ export default {
     const tableSessionClosedNotice = ref('\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c')
     const {
       bannerInfo, isMember, memberLoading, memberAuthorizing, memberSinceText,
-      memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText,
+      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardStyle, memberProgressPercent, memberUpgradeText,
       usableMemberCoupons, goOrderFromMember, useMemberCoupon,
     } = useMemberCard({
       shopCreatedAt,
@@ -562,7 +569,7 @@ export default {
     const authStateVersion = ref(0)
     const activeTab = ref('order')
 
-    // 方案1：全宽 ShopHeader 在两列之上；列表 scrollTop 过阈值后收起并露出迷你条。
+    // 方案1+B（与模板注释同一剧本）：全宽头在两列之上；scrollTop 过阈值只切迷你条。
     const HEADER_COLLAPSE_SCROLL = 48
     const headerVisible = ref(true)
     const onDishScrollPosition = (scrollTop) => {
@@ -850,9 +857,9 @@ export default {
     const clearCart = () => {
       if (!totalCount.value) return
       uni.showModal({
-        title: '清空购物车',
-        content: `确定要清空已选的${totalCount.value}件商品吗？`,
-        confirmText: '清空',
+        title: modalText.clearCartTitle,
+        content: modalText.clearCartContent(totalCount.value),
+        confirmText: modalText.clearCartConfirm,
         confirmColor: '#ff3018',
         success: (res) => {
           if (res.confirm) {
@@ -901,7 +908,7 @@ export default {
 
     const switchOrderMode = (mode) => {
       if (mode === 'delivery') {
-        uni.showToast({ title: '\u5916\u5356\u914d\u9001\u6b63\u5728\u5b8c\u5584\uff0c\u5f53\u524d\u5148\u652f\u6301\u5802\u98df\u70b9\u9910', icon: 'none' })
+        uni.showToast({ title: toastText.deliveryUnavailable, icon: 'none' })
         return
       }
       orderMode.value = mode
@@ -943,6 +950,11 @@ export default {
 
     const orderSuccessTemplateId = ref('')
     const pickupReminderTemplateId = ref('')
+    const pickupNoEnabled = ref(false)
+    const successPickupNo = computed(() => {
+      const current = myOrders.value.find(o => String(o.id) === String(orderId.value))
+      return (current && current.pickupNo) || ''
+    })
 
     const {
       goCheckout, cancelCheckoutAuth, handleCheckoutAuth,
@@ -1015,6 +1027,7 @@ export default {
       couponReminderTemplateId.value = d.coupon_reminder_template_id || ''
       orderSuccessTemplateId.value = d.order_success_template_id || ''
       pickupReminderTemplateId.value = d.pickup_reminder_template_id || ''
+      pickupNoEnabled.value = !!d.pickup_no_enabled
       if (d.is_open === false) {
         storeClosed.value = true
         closedNotice.value = d.closed_notice || d.business_hours || ''
@@ -1051,7 +1064,10 @@ export default {
           // toast、重复请求距离接口的问题。
           if (d.entry_coupon?.is_new) {
             uni.showToast({
-              title: `已发放进店券 ¥${formatPrice(d.entry_coupon.amount)}，满${Number(d.entry_coupon.threshold || 0).toFixed(0)}元可用`,
+              title: toastText.entryCoupon(
+                formatPrice(d.entry_coupon.amount),
+                Number(d.entry_coupon.threshold || 0).toFixed(0),
+              ),
               icon: 'none',
               duration: 3000,
             })
@@ -1128,7 +1144,7 @@ export default {
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
       paying, payAmount, confirmPay,
-      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass,
+      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll,
       remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,
       orderRemarkExpanded, toggleOrderRemarkExpanded, orderRemarkSummary,
@@ -1154,14 +1170,14 @@ export default {
       successDiscount, wechatPayAmount, expectedOrderPoints, checkoutMemberSummaryText, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
-      memberLevelLabel, memberLevelBadgeSrc, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
+      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardStyle, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
       homeStatusDesc, homeOrderButtonText, homeCouponHint, canStartOrdering, featuredDish, featuredDishTag, canHomeAdd, homeLastOrderItems,
       handleHomeStartOrder, handleFeaturedAdd, handleHomeReorderItem, handleHomeReorderAll,
       loadMemberStatus, refreshCustomerAuthState, loadShopSettings,
       deliveryEnabled, entryCoupon, newCustomerCouponPreview, newCustomerHookText,
       showSpecSheet, specDish, specQty, selectedSpecs, specTotalPrice,
       isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
-      isFeatured, dishPlaceholderStyle,
+      isFeatured,
       lastOrderItems, reorderItem, reorderAll,
       handleActiveCategoryChange, ignoreScroll,
       headerVisible, onDishScrollPosition,
@@ -1260,7 +1276,7 @@ export default {
 .order-page {
   height: 100vh;
   overflow: hidden;
-  background: #f5f6fa;
+  background: var(--bg-page);
   display: flex;
   flex-direction: column;
 }
@@ -1302,8 +1318,8 @@ export default {
   margin-left: auto;
   padding: 4rpx 16rpx;
   border-radius: 8rpx;
-  background: #1a1a1a;
-  color: #fff;
+  background: var(--ink);
+  color: var(--text-inverse);
   font-size: 22rpx;
   font-weight: 600;
   line-height: 32rpx;

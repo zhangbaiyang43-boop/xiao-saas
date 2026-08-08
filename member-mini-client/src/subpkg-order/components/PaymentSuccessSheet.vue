@@ -35,10 +35,20 @@
           >{{ reminderRequested ? '已设置提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我别忘了用') }}</text>
         </view>
 
+        <view v-if="pickupNoEnabled" class="pickup-hero">
+          <text class="pickup-hero-label">{{ pickupNo ? '您的桌牌号' : '桌牌待领取' }}</text>
+          <text v-if="pickupNo" class="pickup-hero-no">{{ pickupNo }}</text>
+          <text class="pickup-hero-tip">{{ pickupNo ? '请将桌牌放在桌面，方便服务员送餐' : '请向工作人员领取桌牌' }}</text>
+        </view>
+
         <view class="success-summary">
           <view class="success-summary-row">
             <text class="success-summary-label">{{ successText.table }}</text>
             <text class="success-summary-value">{{ tableNo || orderModeText.unknownTable }}</text>
+          </view>
+          <view v-if="pickupNoEnabled && pickupNo" class="success-summary-row">
+            <text class="success-summary-label">桌牌号</text>
+            <text class="success-summary-value">{{ pickupNo }}</text>
           </view>
           <view class="success-summary-row">
             <text class="success-summary-label">{{ successText.orderNo }}</text>
@@ -88,6 +98,8 @@ export default {
     reminderRequested: { type: Boolean, default: false },
     requestingReminder: { type: Boolean, default: false },
     tableNo: { type: [String, Number], default: '' },
+    pickupNoEnabled: { type: Boolean, default: false },
+    pickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     successOrderNo: { type: String, default: '' },
     successOrderItemCount: { type: Number, default: 0 },
@@ -114,7 +126,7 @@ export default {
 .success-card {
   width: 100%;
   max-height: 88vh;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 40rpx;
   padding: 0 0 40rpx;
   box-sizing: border-box;
@@ -122,6 +134,36 @@ export default {
 }
 
 
+
+.pickup-hero {
+  margin: 8rpx 40rpx 24rpx;
+  padding: 28rpx 24rpx;
+  border-radius: 28rpx;
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  text-align: center;
+}
+.pickup-hero-label {
+  display: block;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #9a3412;
+}
+.pickup-hero-no {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 88rpx;
+  line-height: 1;
+  font-weight: 900;
+  color: #c2410c;
+  letter-spacing: 4rpx;
+}
+.pickup-hero-tip {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 22rpx;
+  color: #9a3412;
+  line-height: 1.4;
+}
 
 .success-check {
   width: 96rpx;
@@ -204,7 +246,7 @@ export default {
   background: #fbbf24;
 }
 .order-status-bar.pending .order-status-text { color: #92400e; }
-.order-status-bar.preparing .order-status-text { color: #fff; font-size: 30rpx; }
+.order-status-bar.preparing .order-status-text { color: var(--text-inverse); font-size: 30rpx; }
 .order-status-bar.done .order-status-text { color: #78350f; font-size: 30rpx; }
 
 @keyframes status-pulse {
@@ -231,7 +273,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  text { color: #fff; font-size: 34rpx; font-weight: 900; }
+  text { color: var(--text-inverse); font-size: 34rpx; font-weight: 900; }
 }
 
 
@@ -279,7 +321,7 @@ export default {
 .success-sheet {
   width: 100%;
   max-height: 88vh;
-  background: #f6f7f8;
+  background: var(--bg-subtle);
   border-radius: 32rpx 32rpx 0 0;
   padding: 18rpx 24rpx calc(20rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
@@ -456,7 +498,7 @@ export default {
 .ec-currency {
   font-size: 30rpx;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--text-inverse);
   margin-right: 2rpx;
 }
 
@@ -465,7 +507,7 @@ export default {
 .ec-amount {
   font-size: 68rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--text-inverse);
   line-height: 1;
   text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
 }
@@ -494,7 +536,7 @@ export default {
   display: block;
   font-size: 25rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-inverse);
   line-height: 1.5;
 }
 
@@ -518,7 +560,7 @@ export default {
   border-radius: 999rpx;
   font-size: 21rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-inverse);
   background: rgba(255, 255, 255, 0.12);
 }
 
@@ -594,7 +636,7 @@ export default {
 
 
 .success-sheet .success-btn-primary text {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 32rpx;
   font-weight: 900;
 }
@@ -604,7 +646,7 @@ export default {
 .success-sheet .success-btn-secondary {
   height: 94rpx;
   border-radius: var(--radius-card);
-  background: #fff;
+  background: var(--bg-card);
   border: 1rpx solid #dfe5e8;
 }
 

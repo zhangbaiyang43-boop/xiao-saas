@@ -164,6 +164,8 @@ async def upload_shop_logo(
         processed = await run_in_threadpool(process_image, content, IMAGE_LOGO_MAX_DIMENSION)
     except ValueError:
         return error_response(code=400, msg="图片内容无效或已损坏")
+    except RuntimeError as e:
+        return error_response(code=500, msg=str(e))
     try:
         url = upload_image(processed, "logo.webp", "image/webp", folder="logo_images")
         return success_response(data={"url": url}, msg="上传成功")

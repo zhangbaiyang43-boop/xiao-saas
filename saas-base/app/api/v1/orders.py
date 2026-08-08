@@ -127,8 +127,19 @@ class MockPayBody(PydanticBase):
     participant_token: Optional[str] = None
 
 
-def serialize_order(order, order_items, checkout_requested_at=None, participant_no=None):
+def serialize_order(
+    order,
+    order_items,
+    checkout_requested_at=None,
+    participant_no=None,
+    *,
+    pickup_settings=None,
+    dining_session=None,
+):
+    from app.services.pickup_no_service import can_assign_pickup_no, parse_pickup_settings
+
     print_meta = _serialize_print_meta(order)
+    settings = pickup_settings if pickup_settings is not None else parse_pickup_settings(None)
     return {
         "id": str(order.id),
         "table_no": order.table_no,
@@ -155,6 +166,7 @@ def serialize_order(order, order_items, checkout_requested_at=None, participant_
         "source": getattr(order, "source", "miniprogram"),
         "staff_note": getattr(order, "staff_note", None),
         "pickup_no": getattr(order, "pickup_no", None),
+        "can_assign_pickup_no": can_assign_pickup_no(order, settings, dining_session),
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "items": [
             {
@@ -627,9 +639,48 @@ async def _persist_create_order_and_build_response(
     # 号同步成这一桌接下来所有加单共享的值），没传就继承这一桌已经登记过的号，避免同一桌
     # 每加一单都要前台重新填一遍。
     explicit_pickup_no = (body.pickup_no or "").strip()[:16] or None
+    from app.services.pickup_no_service import PickupNoService, load_pickup_settings
+
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+    # prepay + 启用桌牌：创建时未支付不能新占号（仍可继承会话已有牌号）
+    if (
+        explicit_pickup_no
+        and pickup_settings.get("enabled")
+        and payment_mode == "prepay"
+        and not (session_for_pickup and session_for_pickup.pickup_no)
+    ):
+        return error_response(code=422, msg="该订单尚未支付，暂不能分配桌牌")
+
     if explicit_pickup_no and session_for_pickup is not None:
         session_for_pickup.pickup_no = explicit_pickup_no
     resolved_pickup_no = explicit_pickup_no or (session_for_pickup.pickup_no if session_for_pickup else None)
+    # 写入活跃租约；同号冲突时创建订单失败（由 UNIQUE 兜底）
+    if resolved_pickup_no and session_for_pickup is not None and explicit_pickup_no:
+        try:
+            await PickupNoService(db).ensure_session_assignment(
+                tenant_id=tenant_id,
+                session=session_for_pickup,
+                pickup_no=resolved_pickup_no,
+            )
+        except IntegrityError:
+            await db.rollback()
+            return error_response(code=409, msg=f"{resolved_pickup_no}号桌牌正在使用中，请选择其他号码")
+    elif resolved_pickup_no and session_for_pickup is not None:
+        # 继承已有会话牌号：确保租约存在（历史会话可能缺租约行）
+        try:
+            await PickupNoService(db).ensure_session_assignment(
+                tenant_id=tenant_id,
+                session=session_for_pickup,
+                pickup_no=resolved_pickup_no,
+            )
+        except IntegrityError:
+            # 继承场景下租约冲突极少见：会话已有号但租约被他桌占了——不阻断下单，只打日志
+            logger.warning(
+                "pickup assignment conflict on inherit tenant=%s session=%s pickup=%s",
+                tenant_id,
+                session_for_pickup.id,
+                resolved_pickup_no,
+            )
 
     order = Order(
         tenant_id=tenant_id,
@@ -690,7 +741,12 @@ async def _persist_create_order_and_build_response(
             _print_paid_order_ticket_background(int(order.id), str(order.tenant_id), reason="order_created_pay_later")
         )
 
-    order_data = serialize_order(order, order_items)
+    order_data = serialize_order(
+        order,
+        order_items,
+        pickup_settings=pickup_settings,
+        dining_session=session_for_pickup,
+    )
     return success_response(
         data={
             **order_data,
@@ -859,6 +915,30 @@ class MerchantNoteUpdate(PydanticBase):
 
 class OrderPickupNoUpdate(PydanticBase):
     pickup_no: str = ""
+
+
+@router.get("/pickup-nos/status")
+async def get_pickup_no_status(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """商家端号牌选择器：返回启用状态、数量与当前占用（仅本租户）。"""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    token_type = getattr(request.state, "token_type", None)
+    if not tenant_id or token_type != "merchant":
+        return error_response(code=401, msg="请先登录")
+    from app.services.pickup_no_service import PickupNoService, load_pickup_settings
+
+    settings = await load_pickup_settings(db, tenant_id)
+    occupied = await PickupNoService(db).list_occupied(tenant_id)
+    return success_response(
+        data={
+            "enabled": settings["enabled"],
+            "count": settings["count"],
+            "required_before_print": settings["required_before_print"],
+            "occupied": occupied,
+        }
+    )
 
 
 @router.patch("/orders/{order_id}/pickup-no")
