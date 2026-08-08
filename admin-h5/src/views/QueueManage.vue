@@ -80,10 +80,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
 import { callNextQueueTicket, createQueueTicket, getQueueStatus, getQueueTickets, seatQueueTicket, skipQueueTicket } from '../api'
+import pollingManager from '../utils/pollingManager'
 
 function decodeJwtPayload(token) {
   try {
@@ -160,20 +161,30 @@ function statusText(value) {
   return { waiting: '等待中', called: '已叫号', seated: '已入座', skipped: '已过号', cancelled: '已取消' }[value] || value
 }
 
-async function loadAll() {
-  loading.value = true
-  error.value = ''
+async function loadAll(meta = {}) {
+  const fromPolling = Boolean(meta?.fromPolling)
+  // 轮询时不打 loading，避免顶部刷新按钮与骨架屏闪烁
+  if (!fromPolling) loading.value = true
+  if (!fromPolling) error.value = ''
   try {
     const [statusRes, ticketsRes] = await Promise.all([
-      getQueueStatus({ tenant_id: tenantId }),
-      getQueueTickets({ tenant_id: tenantId }),
+      getQueueStatus(
+        { tenant_id: tenantId },
+        { meta: { fromPolling, dedupe: true, dedupeKey: `queue:manage:status:${tenantId}` } },
+      ),
+      getQueueTickets(
+        { tenant_id: tenantId },
+        { meta: { fromPolling, dedupe: true, dedupeKey: `queue:manage:tickets:${tenantId}` } },
+      ),
     ])
     status.value = unwrap(statusRes) || {}
     tickets.value = Array.isArray(unwrap(ticketsRes)) ? unwrap(ticketsRes) : []
+    if (fromPolling) error.value = ''
   } catch (err) {
-    error.value = err?.message || '排位数据加载失败'
+    // 轮询失败保留旧列表，不打断商家操作；手动刷新仍展示错误
+    if (!fromPolling) error.value = err?.message || '排位数据加载失败'
   } finally {
-    loading.value = false
+    if (!fromPolling) loading.value = false
   }
 }
 
@@ -238,7 +249,21 @@ async function skipTicket(ticket) {
   }
 }
 
-onMounted(loadAll)
+onMounted(() => {
+  loadAll()
+  // 小程序自助取号后，商家端需自动看到新票，不能只靠手动刷新
+  pollingManager.start('queue-manage:tickets', {
+    task: loadAll,
+    interval: 5000,
+    hiddenInterval: 30000,
+    idleInterval: 30000,
+    immediate: false,
+  })
+})
+
+onBeforeUnmount(() => {
+  pollingManager.stop('queue-manage:tickets')
+})
 </script>
 
 <style scoped>

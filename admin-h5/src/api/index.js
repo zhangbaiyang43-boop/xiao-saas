@@ -148,7 +148,7 @@ export const uninstallPlugin = (data) => request.post('/v1/plugins/uninstall', d
 export const updatePluginConfig = (pluginCode, data) => request.put(`/v1/plugins/${pluginCode}/config`, data)
 
 export const createQueueTicket = (data) => request.post('/queue/tickets', data)
-export const getQueueTickets = (params) => request.get('/queue/tickets', { params })
+export const getQueueTickets = (params, config = {}) => request.get('/queue/tickets', { ...config, params })
 export const callNextQueueTicket = (data) => request.post('/queue/call-next', data)
 export const seatQueueTicket = (id, params) => request.post(`/queue/tickets/${id}/seat`, null, { params })
 export const skipQueueTicket = (id, params) => request.post(`/queue/tickets/${id}/skip`, null, { params })
