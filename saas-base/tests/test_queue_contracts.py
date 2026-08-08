@@ -46,6 +46,22 @@ class QueueContractsTest(unittest.TestCase):
         self.assertIn("idx_queue_ticket_query_token", indexes)
         self.assertTrue(indexes["idx_queue_ticket_query_token"].unique)
 
+    def test_queue_ticket_model_has_openid_and_customer_id(self):
+        cols = QueueTicket.__table__.columns
+        self.assertIn("openid", cols)
+        self.assertTrue(cols["openid"].nullable)
+        self.assertIn("customer_id", cols)
+        self.assertTrue(cols["customer_id"].nullable)
+
+    def test_create_ticket_signature_accepts_openid(self):
+        source = inspect.getsource(QueueService.create_ticket)
+        self.assertIn("openid", source)
+        self.assertIn("customer_id", source)
+
+    def test_call_next_sends_queue_subscribe(self):
+        source = inspect.getsource(QueueService.call_next)
+        self.assertIn("send_queue_reminder_subscribe", source)
+
     def test_query_token_and_url_do_not_expose_tenant_or_sequence(self):
         token_a = generate_queue_query_token()
         token_b = generate_queue_query_token()

@@ -133,6 +133,12 @@
           }
         },
         {
+          "path": "pages/queue-take",
+          "style": {
+            "navigationBarTitleText": "排队取号"
+          }
+        },
+        {
           "path": "pages/perf-debug",
           "style": {
             "navigationBarTitleText": "性能自测"

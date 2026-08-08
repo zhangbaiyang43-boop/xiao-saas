@@ -1,9 +1,9 @@
-"""小程序订阅消息：点餐成功 / 取餐提醒。
+"""小程序订阅消息：点餐成功 / 取餐提醒 / 排队叫号提醒。
 
 字段名（character_string1 / amount2 …）必须与微信公众平台「我的模板」详情里的
 xxxN.DATA 一致；改模板关键词顺序后只改本文件的 data 组装，不要散落到业务钩子里。
 
-发送失败只记日志，绝不抛到支付/改状态主流程。
+发送失败只打日志，绝不抛到支付/改状态/叫号主流程。
 """
 from __future__ import annotations
 
@@ -112,13 +112,15 @@ async def _load_customer_openid(db: AsyncSession, order: Any) -> Optional[str]:
     return openid if is_real_wechat_openid(openid) else None
 
 
-async def _load_shop_name(db: AsyncSession, order: Any) -> str:
-    tenant_id = getattr(order, "tenant_id", None)
+async def _load_shop_name(db: AsyncSession, entity: Any) -> str:
+    tenant_id = getattr(entity, "tenant_id", None)
     if not tenant_id:
         return "门店"
     from app.models.tenant import Tenant
 
-    tenant = await db.get(Tenant, str(tenant_id))
+    # 业务表存的是 Tenant.tenant_id（字符串），不是雪花主键 id
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == str(tenant_id)).limit(1))
+    tenant = result.scalar_one_or_none()
     return _clip(getattr(tenant, "name", None) if tenant else None, 20) or "门店"
 
 
@@ -200,4 +202,52 @@ async def send_pickup_reminder_subscribe(db: AsyncSession, order: Any) -> bool:
         return await _send(openid, template_id, data, tag="pickup_reminder_subscribe", order_id=getattr(order, "id", None))
     except Exception:
         logger.exception(f"[pickup_reminder_subscribe] unexpected order_id={getattr(order, 'id', None)}")
+        return False
+
+
+def build_queue_reminder_data(
+    *,
+    queue_no: str,
+    status_text: str = "已叫号",
+    current_called: str | None = None,
+    shop_name: str = "门店",
+    tip: str = "请尽快到前台就坐",
+) -> dict:
+    # 关键词顺序：排队号 → 排队状态 → 当前叫号 → 商家名称 → 备注
+    called = _clip(current_called or queue_no, 32) or "—"
+    return {
+        "character_string1": {"value": _clip(queue_no, 32) or "—"},
+        "phrase2": {"value": _clip(status_text, 5) or "已叫号"},
+        "character_string3": {"value": called},
+        "thing4": {"value": _clip(shop_name, 20) or "门店"},
+        "thing5": {"value": _clip(tip, 20) or "请尽快到前台就坐"},
+    }
+
+
+async def send_queue_reminder_subscribe(db: AsyncSession, ticket: Any) -> bool:
+    """叫号后发「排队提醒」。票上无真实 openid 时跳过（店员后台取号通常无 openid）。"""
+    template_id = (settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID or "").strip()
+    if not template_id:
+        return False
+    try:
+        openid = getattr(ticket, "openid", None)
+        if not is_real_wechat_openid(openid):
+            return False
+        shop_name = await _load_shop_name(db, ticket)
+        data = build_queue_reminder_data(
+            queue_no=getattr(ticket, "queue_no", "") or "—",
+            status_text="已叫号",
+            current_called=getattr(ticket, "queue_no", None),
+            shop_name=shop_name,
+            tip="请尽快到前台就坐",
+        )
+        return await _send(
+            str(openid).strip(),
+            template_id,
+            data,
+            tag="queue_reminder_subscribe",
+            order_id=getattr(ticket, "id", None),
+        )
+    except Exception:
+        logger.exception(f"[queue_reminder_subscribe] unexpected ticket_id={getattr(ticket, 'id', None)}")
         return False

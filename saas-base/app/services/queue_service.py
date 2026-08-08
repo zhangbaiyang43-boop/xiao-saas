@@ -113,19 +113,24 @@ def serialize_queue_ticket(ticket: QueueTicket, ahead_count: Optional[int] = Non
         "tenant_id": ticket.tenant_id,
         "queue_no": ticket.queue_no,
         "queue_type": ticket.queue_type,
+        "queue_type_name": queue_type_name(ticket.queue_type),
         "party_size": ticket.party_size,
         "phone": phone or None,
         "phone_tail": phone[-4:] if len(phone) >= 4 else None,
         "note": ticket.note,
         "status": ticket.status,
+        "status_text": STATUS_TEXT.get(ticket.status, ticket.status),
         "wait_minutes": wait_minutes,
         "created_at": created_at,
         "called_at": called_at,
         "seated_at": seated_at,
         "skipped_at": skipped_at,
+        "has_openid": bool(getattr(ticket, "openid", None)),
     }
     if ahead_count is not None:
         data["ahead_count"] = ahead_count
+        data["waiting_text"] = f"前方等待{max(0, ahead_count)}桌"
+        data["estimated_wait_text"] = _estimated_wait_text(ahead_count, ticket.status)
     return data
 
 
@@ -294,9 +299,20 @@ class QueueService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_ticket(self, tenant_id: str, party_size: int, phone: str | None, note: str | None) -> tuple[QueueTicket, int]:
+    async def create_ticket(
+        self,
+        tenant_id: str,
+        party_size: int,
+        phone: str | None,
+        note: str | None,
+        *,
+        openid: str | None = None,
+        customer_id: int | None = None,
+    ) -> tuple[QueueTicket, int]:
         queue_type = get_queue_type(party_size)
         today = _today_local_date()
+        openid_value = (openid or "").strip() or None
+        customer_id_value = int(customer_id) if customer_id else None
 
         for _ in range(3):
             max_result = await self.db.execute(
@@ -316,6 +332,8 @@ class QueueService:
                 party_size=party_size,
                 phone=(phone or "").strip() or None,
                 note=(note or "").strip() or None,
+                openid=openid_value,
+                customer_id=customer_id_value,
                 status="waiting",
                 query_token=generate_queue_query_token(),
             )
@@ -393,6 +411,12 @@ class QueueService:
         ticket.called_at = now
         await self.db.commit()
         await self.db.refresh(ticket)
+        # 排队订阅消息：仅顾客自助取号（票上有真实 openid）才发；失败不影响叫号。
+        try:
+            from app.services.subscribe_message_service import send_queue_reminder_subscribe
+            await send_queue_reminder_subscribe(self.db, ticket)
+        except Exception:
+            logger.exception(f"queue reminder subscribe failed ticket_id={ticket.id}")
         return ticket
 
     async def mark_status(self, tenant_id: str, ticket_id: int, status: str) -> QueueTicket | None:

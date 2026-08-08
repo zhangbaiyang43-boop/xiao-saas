@@ -6,10 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
+from app.core.response import error_response, success_response
+from app.core.tenant_context import TenantContext
 from app.models.queue_ticket import QueueTicket
-from app.schemas.queue import QueueCallNext, QueueTicketCreate
+from app.schemas.queue import QueueCallNext, QueueCustomerTicketCreate, QueueTicketCreate
 from app.services.queue_service import QueueCallBlocked, QueueService, print_queue_test_ticket, serialize_queue_ticket
 from app.services.kuaimai_service import KuaimaiPrintError
+from app.services.subscribe_message_service import is_real_wechat_openid
 
 router = APIRouter(prefix="/api/queue", tags=["queue"])
 
@@ -74,6 +77,48 @@ async def create_queue_ticket(body: QueueTicketCreate, request: Request, db: Asy
         return ok(data)
     except Exception as exc:
         return fail(str(exc))
+
+
+@router.post("/customer-tickets")
+async def create_customer_queue_ticket(
+    body: QueueCustomerTicketCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """小程序顾客自助取号：必须已登录；openid 只从 token 取，禁止客户端伪造。"""
+    # 顾客 JWT 的 type 是 "member"（见 create_customer_access_token），不是 "customer"
+    token_type = getattr(request.state, "token_type", None)
+    customer_id = getattr(request.state, "customer_id", None)
+    openid = getattr(request.state, "openid", None)
+    token_tenant_id = getattr(request.state, "tenant_id", None)
+    if token_type not in ("member", "customer") or not customer_id:
+        return error_response(code=401, msg="请先登录")
+    if not is_real_wechat_openid(openid):
+        return error_response(code=401, msg="微信登录失效，请重新进入小程序")
+
+    shop = _tenant_id(body.shop or body.tenant_id or token_tenant_id)
+    if not shop:
+        return error_response(code=400, msg="缺少门店参数")
+    if token_tenant_id and str(token_tenant_id) != shop:
+        return error_response(code=403, msg="门店与登录身份不匹配，请重新进入")
+
+    TenantContext.set_tenant_id(shop)
+    service = QueueService(db)
+    try:
+        ticket, ahead_count = await service.create_ticket(
+            tenant_id=shop,
+            party_size=body.party_size,
+            phone=None,
+            note=body.note,
+            openid=str(openid).strip(),
+            customer_id=int(customer_id),
+        )
+        data = serialize_queue_ticket(ticket, ahead_count=ahead_count)
+        data["query_token"] = ticket.query_token
+        return success_response(data=data, msg="取号成功")
+    except Exception as exc:
+        logger.exception("customer queue ticket create failed")
+        return error_response(code=500, msg=str(exc) or "取号失败，请重试")
 
 
 @router.get("/tickets")

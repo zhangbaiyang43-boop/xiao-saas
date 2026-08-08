@@ -139,6 +139,12 @@ async def ensure_queue_ticket_schema(conn) -> None:
         if not await _mysql_column_exists(conn, "queue_tickets", "query_token"):
             logger.warning("Repairing queue_tickets: adding missing query_token column")
             await conn.execute(text("ALTER TABLE `queue_tickets` ADD COLUMN `query_token` VARCHAR(64) NULL"))
+        if not await _mysql_column_exists(conn, "queue_tickets", "openid"):
+            logger.warning("Repairing queue_tickets: adding missing openid column")
+            await conn.execute(text("ALTER TABLE `queue_tickets` ADD COLUMN `openid` VARCHAR(64) NULL"))
+        if not await _mysql_column_exists(conn, "queue_tickets", "customer_id"):
+            logger.warning("Repairing queue_tickets: adding missing customer_id column")
+            await conn.execute(text("ALTER TABLE `queue_tickets` ADD COLUMN `customer_id` BIGINT NULL"))
         return
 
     if dialect == "sqlite":
@@ -148,6 +154,12 @@ async def ensure_queue_ticket_schema(conn) -> None:
         if not await _sqlite_column_exists(conn, "queue_tickets", "query_token"):
             logger.warning("Repairing queue_tickets: adding missing query_token column")
             await conn.execute(text("ALTER TABLE queue_tickets ADD COLUMN query_token VARCHAR(64) NULL"))
+        if not await _sqlite_column_exists(conn, "queue_tickets", "openid"):
+            logger.warning("Repairing queue_tickets: adding missing openid column")
+            await conn.execute(text("ALTER TABLE queue_tickets ADD COLUMN openid VARCHAR(64) NULL"))
+        if not await _sqlite_column_exists(conn, "queue_tickets", "customer_id"):
+            logger.warning("Repairing queue_tickets: adding missing customer_id column")
+            await conn.execute(text("ALTER TABLE queue_tickets ADD COLUMN customer_id BIGINT NULL"))
 
 
 async def ensure_distribution_schema(conn) -> None:

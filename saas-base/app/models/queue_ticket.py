@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Date, DateTime, Index, Integer, String, Text, UniqueConstraint
 
 from app.models.base import BaseModel
 
@@ -26,6 +26,9 @@ class QueueTicket(BaseModel):
     party_size = Column(Integer, nullable=False)
     phone = Column(String(20), nullable=True)
     note = Column(Text, nullable=True)
+    # 顾客自助取号时写入，叫号订阅消息用；店员后台取号可为空
+    openid = Column(String(64), nullable=True)
+    customer_id = Column(BigInteger, nullable=True)
     status = Column(String(16), nullable=False, default="waiting")
     called_at = Column(DateTime, nullable=True)
     seated_at = Column(DateTime, nullable=True)

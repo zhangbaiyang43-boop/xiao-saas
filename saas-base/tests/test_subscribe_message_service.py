@@ -8,10 +8,12 @@ from unittest.mock import AsyncMock, patch
 from app.services.subscribe_message_service import (
     build_order_success_data,
     build_pickup_reminder_data,
+    build_queue_reminder_data,
     is_real_wechat_openid,
     resolve_pickup_no,
     send_order_success_subscribe,
     send_pickup_reminder_subscribe,
+    send_queue_reminder_subscribe,
 )
 
 
@@ -73,7 +75,8 @@ class SubscribeMessageServiceTests(unittest.IsolatedAsyncioTestCase):
         customer = SimpleNamespace(openid="oRealOpenId")
         tenant = SimpleNamespace(name="测试店")
         db = AsyncMock()
-        db.get = AsyncMock(side_effect=[customer, tenant])
+        db.get = AsyncMock(return_value=customer)
+        db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: tenant))
 
         wechat = AsyncMock()
         wechat.send_subscribe_message = AsyncMock(return_value=True)
@@ -101,6 +104,48 @@ class SubscribeMessageServiceTests(unittest.IsolatedAsyncioTestCase):
             settings.WECHAT_PICKUP_REMINDER_TEMPLATE_ID = "tmpl-pickup"
             sent = await send_pickup_reminder_subscribe(db, order)
         self.assertFalse(sent)
+
+    def test_build_queue_reminder_data_field_keys(self):
+        data = build_queue_reminder_data(
+            queue_no="B003",
+            status_text="已叫号",
+            current_called="B003",
+            shop_name="开心小馆",
+        )
+        self.assertEqual(
+            set(data.keys()),
+            {"character_string1", "phrase2", "character_string3", "thing4", "thing5"},
+        )
+        self.assertEqual(data["character_string1"]["value"], "B003")
+        self.assertEqual(data["phrase2"]["value"], "已叫号")
+        self.assertEqual(data["thing5"]["value"], "请尽快到前台就坐")
+
+    async def test_send_queue_reminder_skips_without_openid(self):
+        ticket = SimpleNamespace(id=3, queue_no="A001", openid=None, tenant_id="t1")
+        db = AsyncMock()
+        with patch("app.services.subscribe_message_service.settings") as settings:
+            settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID = "tmpl-queue"
+            sent = await send_queue_reminder_subscribe(db, ticket)
+        self.assertFalse(sent)
+
+    async def test_send_queue_reminder_calls_wechat(self):
+        ticket = SimpleNamespace(id=4, queue_no="B002", openid="oRealOpenId", tenant_id="t1")
+        tenant = SimpleNamespace(name="测试店")
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: tenant))
+        wechat = AsyncMock()
+        wechat.send_subscribe_message = AsyncMock(return_value=True)
+
+        with patch("app.services.subscribe_message_service.settings") as settings, patch(
+            "app.services.wechat_service.WechatService", return_value=wechat
+        ):
+            settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID = "tmpl-queue"
+            sent = await send_queue_reminder_subscribe(db, ticket)
+
+        self.assertTrue(sent)
+        kwargs = wechat.send_subscribe_message.await_args.kwargs
+        self.assertEqual(kwargs["template_id"], "tmpl-queue")
+        self.assertEqual(kwargs["data"]["character_string1"]["value"], "B002")
 
 
 if __name__ == "__main__":
