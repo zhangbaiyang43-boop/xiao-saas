@@ -15,16 +15,13 @@ from app.core.permissions import STAFF_ROLES
 from app.core.response import error_response, success_response
 from app.models.merchant_account import MerchantAccount
 from app.services.staff_trusted_device_service import StaffTrustedDeviceService
-from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.utils.id_generator import generate_snowflake_id
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,32}$")
 
 
 async def serialize_account(db: AsyncSession, account: MerchantAccount) -> dict:
-    wechat = StaffWechatAuthService(db)
     devices = StaffTrustedDeviceService(db)
-    bound = await wechat.is_wechat_bound(tenant_id=account.tenant_id, account_id=int(account.id))
     device_count = await devices.count_active(tenant_id=account.tenant_id, account_id=int(account.id))
     return {
         "id": str(account.id),
@@ -34,7 +31,6 @@ async def serialize_account(db: AsyncSession, account: MerchantAccount) -> dict:
         "has_password": bool(account.username and account.password_hash),
         "role": account.role,
         "status": account.status,
-        "wechat_bound": bound,
         "trusted_device_count": device_count,
         "created_at": account.created_at.isoformat() if account.created_at else None,
         "updated_at": account.updated_at.isoformat() if account.updated_at else None,

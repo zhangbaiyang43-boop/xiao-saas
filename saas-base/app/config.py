@@ -74,29 +74,13 @@ class Settings(BaseSettings):
     # 微信 code2session mock 只能在非生产环境显式开启，生产环境配置缺失或微信异常必须失败。
     ALLOW_MOCK_WECHAT_SESSION: bool = False
 
-    # Staff mini-program auth (primary). Uses WECHAT_APP_ID / WECHAT_APP_SECRET via code2session.
-    STAFF_MINIPROGRAM_AUTH_ENABLED: bool = False
-    STAFF_MP_BIND_TTL_SECONDS: int = 300
-    STAFF_HANDOFF_TTL_SECONDS: int = 60
-    STAFF_MP_BIND_PAGE: str = "subpkg-staff/pages/staff-bind"
-    STAFF_MP_WXACODE_ENV_VERSION: str = "release"
-    # Legacy 公众号网页 OAuth — disabled by default; kept for optional re-enable only.
-    STAFF_OFFICIAL_ACCOUNT_OAUTH_ENABLED: bool = False
-    STAFF_WECHAT_LOGIN_ENABLED: bool = False  # alias / legacy; prefer STAFF_OFFICIAL_ACCOUNT_OAUTH_ENABLED
-    STAFF_WECHAT_APP_ID: str = ""
-    STAFF_WECHAT_APP_SECRET: str = ""
-    STAFF_WECHAT_OAUTH_REDIRECT_URI: str = ""
-    STAFF_WECHAT_BIND_TTL_SECONDS: int = 300
+    # Staff Authentication — H5 password + trusted device (formal path).
     STAFF_TRUST_DEVICE_DAYS: int = 30
     STAFF_ACCESS_TOKEN_MINUTES: int = 120
     # Cookie mode (default): HttpOnly staff_device; JSON must NOT include device_credential.
     STAFF_DEVICE_COOKIE_ENABLED: bool = True
     STAFF_DEVICE_COOKIE_NAME: str = "staff_device"
     STAFF_DEVICE_COOKIE_PATH: str = "/api"
-    # Non-prod only: mock miniapp code2session / legacy OA mock.
-    STAFF_WECHAT_ALLOW_MOCK: bool = False
-    # Non-prod only: allow process-local memory for bind/handoff tokens when Redis is down.
-    STAFF_WECHAT_ALLOW_MEMORY_STORE: bool = False
     # 独立于 DEBUG 的开关：只有显式设为 true 才允许模拟充值/模拟支付这类会
     # 凭空产生真实余额的测试接口生效。不跟 DEBUG 绑定，因为 DEBUG 在这个项目
     # 的实际部署环境里被发现是 true，不能作为"是否在生产环境"的可靠判断依据。

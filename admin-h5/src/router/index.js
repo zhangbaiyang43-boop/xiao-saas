@@ -35,15 +35,11 @@ const SuperAdmin = () => import('../views/SuperAdmin.vue')
 const WaiterWorkbench = () => import('../views/WaiterWorkbench.vue')
 const KitchenWorkbench = () => import('../views/KitchenWorkbench.vue')
 const StaffManage = () => import('../views/StaffManage.vue')
-const StaffBind = () => import('../views/StaffBind.vue')
-const StaffHandoff = () => import('../views/StaffHandoff.vue')
 
 const ownerOnly = { requiresPermission: '*' }
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
-  { path: '/staff-bind', name: 'StaffBind', component: StaffBind },
-  { path: '/staff-handoff', name: 'StaffHandoff', component: StaffHandoff },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
   { path: '/queue/display', name: 'QueueDisplay', component: QueueDisplay },
@@ -103,8 +99,6 @@ function homeForRole(role) {
 
 router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'
-  const isStaffBind = to.path === '/staff-bind'
-  const isStaffHandoff = to.path === '/staff-handoff'
   const isOrder = to.path === '/order'
   const isSuper = to.path === '/super'
   const isH5 = to.path.startsWith('/h5/')
@@ -112,7 +106,7 @@ router.beforeEach(async (to, from, next) => {
   const isQueueStatus = to.path === '/queue/status'
   const auth = useAuthStore()
 
-  if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus || isStaffBind || isStaffHandoff) {
+  if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus) {
     next()
     return
   }

@@ -1,7 +1,7 @@
 /**
  * Guards: /login/staff must only be called with complete shop_phone+username+password.
  * Auto paths (device / init) must not reference staffLogin.
- * Phase 1: staff password login is the formal H5 entry (not「备用」/ mini-program).
+ * Formal H5 auth: Password + Trusted Device. Staff WeChat/OA/MP/Handoff exited.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,7 +22,6 @@ const login = read('src/views/Login.vue')
 const auth = read('src/stores/auth.js')
 const device = read('src/utils/deviceAuth.js')
 const router = read('src/router/index.js')
-const handoff = read('src/views/StaffHandoff.vue')
 const staffManage = read('src/views/StaffManage.vue')
 
 assert(api.includes("err.code = 'STAFF_LOGIN_INCOMPLETE'"), 'staffLogin must reject incomplete body')
@@ -31,8 +30,15 @@ assert(
   'staffLogin must send exact backend fields',
 )
 assert(api.includes('withCredentials: true'), 'staffLogin must send credentials for staff_device cookie')
-assert(api.includes("'/v1/login/staff/handoff'"), 'handoff login API exists (legacy retained)')
-assert(api.includes('createMiniprogramBindSession'), 'miniprogram bind session API retained')
+assert(api.includes("'/v1/login/staff/device'"), 'device restore API retained')
+assert(api.includes("'/v1/login/staff/logout-device'"), 'logout-device API retained')
+assert(!api.includes("'/v1/login/staff/handoff'"), 'handoff login API removed')
+assert(!api.includes("'/v1/login/staff/wechat'"), 'OA staff wechat login API removed')
+assert(!api.includes('createMiniprogramBindSession'), 'miniprogram bind session API removed')
+assert(!api.includes('createWechatBindToken'), 'OA wechat bind token API removed')
+assert(!api.includes('unbindStaffWechat'), 'wechat unbind API removed')
+assert(!api.includes("'/v1/staff/miniprogram/"), 'miniprogram staff API removed')
+assert(!api.includes("'/v1/staff/wechat/"), 'OA staff wechat API removed')
 
 assert(login.includes('staffLogin'), 'Login.vue must use staffLogin')
 assert(!auth.includes('staffLogin'), 'auth store must not call staffLogin')
@@ -60,10 +66,14 @@ assert(onMountedBlock.includes('ensureSession'), 'auto path uses ensureSession (
 assert(!onMountedBlock.includes('finishWechatLogin'), 'must not consume OA oauth sid')
 assert(!onMountedBlock.includes('oauth/start'), 'must not redirect to OA oauth')
 
-assert(router.includes("path: '/staff-handoff'"), 'staff-handoff route retained')
-assert(handoff.includes('staffHandoffLogin'), 'StaffHandoff retained')
+assert(!router.includes("path: '/staff-handoff'"), 'staff-handoff route removed')
+assert(!router.includes("path: '/staff-bind'"), 'staff-bind route removed')
+assert(!router.includes('StaffHandoff'), 'StaffHandoff import removed')
+assert(!router.includes('StaffBind'), 'StaffBind import removed')
+assert(!fs.existsSync(path.join(root, 'src/views/StaffHandoff.vue')), 'StaffHandoff.vue deleted')
+assert(!fs.existsSync(path.join(root, 'src/views/StaffBind.vue')), 'StaffBind.vue deleted')
 
-// Phase 1 StaffManage: password primary, WeChat bind UI exited
+// StaffManage: password primary, WeChat bind UI exited
 assert(staffManage.includes('createMerchantAccount'), 'StaffManage creates staff')
 assert(staffManage.includes('username'), 'create/edit includes username')
 assert(staffManage.includes('password'), 'create/edit includes password')
@@ -73,7 +83,6 @@ assert(!staffManage.includes('生成微信绑定码'), 'WeChat bind button remov
 assert(!staffManage.includes('正式小程序码'), 'formal wxacode UI removed from StaffManage')
 assert(!staffManage.includes('备用账号登录'), 'backup login copy removed from StaffManage')
 
-assert(api.includes("'/v1/staff/miniprogram/status'"), 'miniprogram status API retained')
 assert(read('src/api/request.js').includes("hostname === 'saas.zhangbaiyang.com'"), 'prod H5 uses same-origin /api')
 assert(read('src/api/request.js').includes("return '/api'"), 'prod H5 baseURL is /api')
 
