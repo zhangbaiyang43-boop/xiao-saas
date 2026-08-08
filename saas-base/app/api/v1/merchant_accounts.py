@@ -23,6 +23,8 @@ from app.services import staff_mp_bind_session_service as mp_bind
 from app.services.merchant_account_service import MerchantAccountService
 from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
 from app.services.staff_miniprogram_provider import staff_miniprogram_auth_enabled
+from app.services.staff_session_cookie import deliver_device_credential, read_device_credential
+from app.services.staff_session_service import StaffSessionService
 from app.services.staff_trusted_device_service import (
     StaffTrustedDeviceService,
     decode_device_credential,
@@ -134,13 +136,11 @@ async def staff_login(
 
     await clear_staff_login_failures(tenant.tenant_id, username, client_ip)
 
-    # Store-device trusted login: reuse existing Trusted Device stack (same as handoff).
+    # Store-device trusted login via neutral StaffSessionService (no WeChat dependency).
     # Wrong/disabled password paths never reach here — no device created on failure.
-    from app.api.v1.staff_wechat_auth import _deliver_device_credential, _read_device_credential
-
-    existing_cred = _read_device_credential(request, None)
+    existing_cred = read_device_credential(request, None)
     existing_id, existing_secret = decode_device_credential(existing_cred)
-    issued = await StaffWechatAuthService(db).issue_session_for_account(
+    issued = await StaffSessionService(db).issue_session_for_account(
         account,
         auth_method="staff_password",
         user_agent=request.headers.get("user-agent"),
@@ -151,7 +151,7 @@ async def staff_login(
     if not issued.get("ok"):
         return error_response(code=400, msg=issued.get("msg") or "登录失败", data={"code": issued.get("code")})
 
-    data = _deliver_device_credential(response, issued)
+    data = deliver_device_credential(response, issued)
     return success_response(data=data, msg="登录成功")
 
 

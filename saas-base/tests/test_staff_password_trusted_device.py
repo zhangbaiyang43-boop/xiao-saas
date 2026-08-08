@@ -27,7 +27,7 @@ from app.services.staff_trusted_device_service import (
     decode_device_credential,
     summarize_user_agent,
 )
-from app.services.staff_wechat_auth_service import StaffWechatAuthService
+from app.services.staff_session_service import StaffSessionService
 from app.utils.id_generator import generate_snowflake_id
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
@@ -121,8 +121,8 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(err)
         self.assertIsNotNone(account)
-        tenant = await StaffWechatAuthService(db)._get_tenant(TENANT_A)
-        return await StaffWechatAuthService(db).issue_session_for_account(
+        tenant = await StaffSessionService(db)._get_tenant(TENANT_A)
+        return await StaffSessionService(db).issue_session_for_account(
             account,
             auth_method="staff_password",
             user_agent="Mozilla/5.0 (iPhone)",
@@ -171,7 +171,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
             await MerchantAccountService(db).update_account(
                 tenant_id=TENANT_A, account_id=self.waiter_id, role="kitchen"
             )
-            refresh = await StaffWechatAuthService(db).refresh_device(
+            refresh = await StaffSessionService(db).refresh_device(
                 device_id=device_id, secret=secret
             )
             self.assertTrue(refresh["ok"])
@@ -187,7 +187,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
             await MerchantAccountService(db).update_account(
                 tenant_id=TENANT_A, account_id=self.waiter_id, status="disabled"
             )
-            refresh = await StaffWechatAuthService(db).refresh_device(
+            refresh = await StaffSessionService(db).refresh_device(
                 device_id=device_id, secret=secret
             )
             self.assertFalse(refresh["ok"])
@@ -200,7 +200,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
                 tenant_id=TENANT_A, account_id=self.waiter_id, password="NewPass1234"
             )
             self.assertEqual(res.code, 200)
-            refresh = await StaffWechatAuthService(db).refresh_device(
+            refresh = await StaffSessionService(db).refresh_device(
                 device_id=device_id, secret=secret
             )
             self.assertFalse(refresh["ok"])
@@ -216,7 +216,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
                 password="AnotherPass9",
             )
             self.assertEqual(res.code, 200)
-            refresh = await StaffWechatAuthService(db).refresh_device(
+            refresh = await StaffSessionService(db).refresh_device(
                 device_id=device_id, secret=secret
             )
             self.assertFalse(refresh["ok"])
@@ -234,7 +234,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(b["ok"])
             self.assertEqual(int(b["account_id"]), self.waiter_b_id)
             b_id, b_secret = decode_device_credential(b["device_credential"])
-            refresh_b = await StaffWechatAuthService(db).refresh_device(
+            refresh_b = await StaffSessionService(db).refresh_device(
                 device_id=b_id, secret=b_secret
             )
             self.assertTrue(refresh_b["ok"])
@@ -247,7 +247,7 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
             await StaffTrustedDeviceService(db).revoke_all(
                 tenant_id=TENANT_A, account_id=self.waiter_id
             )
-            refresh = await StaffWechatAuthService(db).refresh_device(
+            refresh = await StaffSessionService(db).refresh_device(
                 device_id=device_id, secret=secret
             )
             self.assertFalse(refresh["ok"])
@@ -268,11 +268,11 @@ class StaffPasswordTrustedDeviceTest(unittest.IsolatedAsyncioTestCase):
 
 class StaffPasswordLoginCookieModeTest(unittest.TestCase):
     def test_cookie_mode_strips_credential_from_public_payload(self):
-        from app.api.v1.staff_wechat_auth import _public_auth_payload
         from app.config import settings
+        from app.services.staff_session_cookie import public_auth_payload
 
         with patch.object(settings, "STAFF_DEVICE_COOKIE_ENABLED", True):
-            data = _public_auth_payload(
+            data = public_auth_payload(
                 {
                     "ok": True,
                     "token": "t",

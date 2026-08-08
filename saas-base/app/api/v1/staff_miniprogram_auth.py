@@ -19,6 +19,8 @@ from app.services.staff_miniprogram_provider import (
     staff_miniprogram_auth_enabled,
     staff_official_account_oauth_enabled,
 )
+from app.services.staff_session_cookie import cookie_name, deliver_device_credential
+from app.services.staff_session_service import StaffSessionService
 from app.services.staff_trusted_device_service import decode_device_credential
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 
@@ -56,48 +58,6 @@ class MpLoginSelectRequest(BaseModel):
 
 class StaffHandoffRequest(BaseModel):
     handoff_token: str
-
-
-def _cookie_name() -> str:
-    return settings.STAFF_DEVICE_COOKIE_NAME or "staff_device"
-
-
-def _cookie_path() -> str:
-    return settings.STAFF_DEVICE_COOKIE_PATH or "/api"
-
-
-def _cookie_secure() -> bool:
-    env = (settings.APP_ENV or "").strip().lower()
-    return env in ("production", "prod")
-
-
-def _set_device_cookie(response: Response, credential: str) -> None:
-    if not settings.STAFF_DEVICE_COOKIE_ENABLED or not credential:
-        return
-    max_age = max(1, int(settings.STAFF_TRUST_DEVICE_DAYS or 30)) * 86400
-    response.set_cookie(
-        key=_cookie_name(),
-        value=credential,
-        max_age=max_age,
-        httponly=True,
-        secure=_cookie_secure(),
-        samesite="lax",
-        path=_cookie_path(),
-    )
-
-
-def _public_auth_payload(result: dict) -> dict:
-    data = {k: v for k, v in result.items() if k not in ("ok", "account")}
-    if settings.STAFF_DEVICE_COOKIE_ENABLED:
-        data.pop("device_credential", None)
-    return data
-
-
-def _deliver_device_credential(response: Response, result: dict) -> dict:
-    cred = result.get("device_credential")
-    if settings.STAFF_DEVICE_COOKIE_ENABLED and cred:
-        _set_device_cookie(response, cred)
-    return _public_auth_payload(result)
 
 
 def _ua(request: Request) -> str | None:
@@ -348,8 +308,8 @@ async def staff_handoff_login(
     if not payload:
         return error_response(code=401, msg="登录已失效，请返回微信重新进入", data={"code": "handoff_invalid"})
 
-    svc = StaffWechatAuthService(db)
-    account = await svc._get_account(payload["tenant_id"], int(payload["account_id"]))
+    wechat = StaffWechatAuthService(db)
+    account = await wechat._get_account(payload["tenant_id"], int(payload["account_id"]))
     if not account or account.status != "active":
         return error_response(code=401, msg="账号已停用", data={"code": "account_disabled"})
     if account.tenant_id != payload["tenant_id"]:
@@ -357,11 +317,11 @@ async def staff_handoff_login(
 
     existing_id = existing_secret = None
     if settings.STAFF_DEVICE_COOKIE_ENABLED:
-        cookie = request.cookies.get(_cookie_name())
+        cookie = request.cookies.get(cookie_name())
         if cookie:
             existing_id, existing_secret = decode_device_credential(cookie.strip())
 
-    result = await svc.issue_session_for_account(
+    result = await StaffSessionService(db).issue_session_for_account(
         account,
         auth_method="staff_mp_handoff",
         user_agent=_ua(request),
@@ -371,4 +331,4 @@ async def staff_handoff_login(
     if not result.get("ok"):
         return error_response(code=401, msg=result.get("msg") or "登录失败", data={"code": result.get("code")})
 
-    return success_response(data=_deliver_device_credential(response, result), msg="登录成功")
+    return success_response(data=deliver_device_credential(response, result), msg="登录成功")

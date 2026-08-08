@@ -21,6 +21,7 @@ from app.services.staff_trusted_device_service import (
     StaffTrustedDeviceService,
     decode_device_credential,
 )
+from app.services.staff_session_service import StaffSessionService
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.staff_wechat_provider import MockWechatIdentityProvider, WechatIdentity
 from app.utils.id_generator import generate_snowflake_id
@@ -141,16 +142,16 @@ class StaffWechatAuthV2Test(unittest.IsolatedAsyncioTestCase):
 
             cred = result["device_credential"]
             device_id, secret_a = decode_device_credential(cred)
-            refresh = await svc.refresh_device(device_id=device_id, secret=secret_a)
+            refresh = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret_a)
             self.assertTrue(refresh["ok"])
             _, secret_b = decode_device_credential(refresh["device_credential"])
             self.assertNotEqual(secret_a, secret_b)
 
             # Old secret must fail after rotation.
-            again = await svc.refresh_device(device_id=device_id, secret=secret_a)
+            again = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret_a)
             self.assertFalse(again["ok"])
 
-            ok = await svc.refresh_device(device_id=device_id, secret=secret_b)
+            ok = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret_b)
             self.assertTrue(ok["ok"])
 
     async def test_already_bound_blocks_other_wechat(self):
@@ -203,7 +204,7 @@ class StaffWechatAuthV2Test(unittest.IsolatedAsyncioTestCase):
             await MerchantAccountService(db).update_account(
                 tenant_id=TENANT_A, account_id=self.waiter_id, status="disabled"
             )
-            refresh = await svc.refresh_device(device_id=device_id, secret=secret)
+            refresh = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret)
             self.assertFalse(refresh["ok"])
 
             login = await svc.login_with_identity(
@@ -230,7 +231,7 @@ class StaffWechatAuthV2Test(unittest.IsolatedAsyncioTestCase):
             # Rotation may have happened — use latest secret from first refresh after role change.
             # First refresh after role change:
             # Device was created; secret still valid unless revoke_all on disable only.
-            refresh = await svc.refresh_device(device_id=device_id, secret=secret)
+            refresh = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret)
             self.assertTrue(refresh["ok"])
             self.assertEqual(refresh["role"], "kitchen")
             self.assertNotIn("pickup.assign", refresh["permissions"])
@@ -249,7 +250,7 @@ class StaffWechatAuthV2Test(unittest.IsolatedAsyncioTestCase):
             )
             device_id, secret = decode_device_credential(bound["device_credential"])
             await svc.unbind_wechat(tenant_id=TENANT_A, account_id=self.waiter_id)
-            refresh = await svc.refresh_device(device_id=device_id, secret=secret)
+            refresh = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret)
             self.assertFalse(refresh["ok"])
 
     async def test_revoke_all_keeps_wechat_binding(self):
@@ -266,7 +267,7 @@ class StaffWechatAuthV2Test(unittest.IsolatedAsyncioTestCase):
             device_id, secret = decode_device_credential(bound["device_credential"])
             await devices.revoke_all(tenant_id=TENANT_A, account_id=self.waiter_id)
             self.assertTrue(await svc.is_wechat_bound(tenant_id=TENANT_A, account_id=self.waiter_id))
-            refresh = await svc.refresh_device(device_id=device_id, secret=secret)
+            refresh = await StaffSessionService(db).refresh_device(device_id=device_id, secret=secret)
             self.assertFalse(refresh["ok"])
             login = await svc.login_with_identity(
                 identity=WechatIdentity(app_id="mock_staff_app", openid="openid_rev")
@@ -410,7 +411,8 @@ class StaffDeviceTransportAndRedisGateTest(unittest.IsolatedAsyncioTestCase):
     async def test_cookie_mode_strips_device_credential_from_json(self):
         from unittest.mock import MagicMock, patch
 
-        from app.api.v1 import staff_wechat_auth as api
+        from app.config import settings
+        from app.services import staff_session_cookie as cookie
 
         result = {
             "ok": True,
@@ -420,10 +422,10 @@ class StaffDeviceTransportAndRedisGateTest(unittest.IsolatedAsyncioTestCase):
             "device_id": "dev",
         }
         response = MagicMock()
-        with patch.object(api.settings, "STAFF_DEVICE_COOKIE_ENABLED", True), patch.object(
-            api.settings, "APP_ENV", "production"
+        with patch.object(settings, "STAFF_DEVICE_COOKIE_ENABLED", True), patch.object(
+            settings, "APP_ENV", "production"
         ):
-            public = api._deliver_device_credential(response, result)
+            public = cookie.deliver_device_credential(response, result)
             self.assertNotIn("device_credential", public)
             self.assertEqual(public.get("token"), "jwt")
             response.set_cookie.assert_called()
@@ -435,7 +437,8 @@ class StaffDeviceTransportAndRedisGateTest(unittest.IsolatedAsyncioTestCase):
     async def test_js_mode_keeps_device_credential_in_json(self):
         from unittest.mock import MagicMock, patch
 
-        from app.api.v1 import staff_wechat_auth as api
+        from app.config import settings
+        from app.services import staff_session_cookie as cookie
 
         result = {
             "ok": True,
@@ -443,25 +446,27 @@ class StaffDeviceTransportAndRedisGateTest(unittest.IsolatedAsyncioTestCase):
             "device_credential": "dev.secret",
         }
         response = MagicMock()
-        with patch.object(api.settings, "STAFF_DEVICE_COOKIE_ENABLED", False):
-            public = api._deliver_device_credential(response, result)
+        with patch.object(settings, "STAFF_DEVICE_COOKIE_ENABLED", False):
+            public = cookie.deliver_device_credential(response, result)
             self.assertEqual(public.get("device_credential"), "dev.secret")
             response.set_cookie.assert_not_called()
 
     async def test_cookie_mode_ignores_body_credential(self):
         from unittest.mock import MagicMock, patch
 
-        from app.api.v1 import staff_wechat_auth as api
+        from app.config import settings
+        from app.services import staff_session_cookie as cookie
 
         request = MagicMock()
         request.cookies = {}
-        with patch.object(api.settings, "STAFF_DEVICE_COOKIE_ENABLED", True):
-            self.assertIsNone(api._read_device_credential(request, "leaked.secret"))
+        with patch.object(settings, "STAFF_DEVICE_COOKIE_ENABLED", True):
+            self.assertIsNone(cookie.read_device_credential(request, "leaked.secret"))
 
     async def test_cookie_mode_refresh_rotation_strips_json(self):
         from unittest.mock import MagicMock, patch
 
-        from app.api.v1 import staff_wechat_auth as api
+        from app.config import settings
+        from app.services import staff_session_cookie as cookie
 
         result = {
             "ok": True,
@@ -470,8 +475,8 @@ class StaffDeviceTransportAndRedisGateTest(unittest.IsolatedAsyncioTestCase):
             "device_credential": "id.newsecret",
         }
         response = MagicMock()
-        with patch.object(api.settings, "STAFF_DEVICE_COOKIE_ENABLED", True):
-            public = api._deliver_device_credential(response, result)
+        with patch.object(settings, "STAFF_DEVICE_COOKIE_ENABLED", True):
+            public = cookie.deliver_device_credential(response, result)
             self.assertNotIn("device_credential", public)
             response.set_cookie.assert_called_once()
 

@@ -13,6 +13,7 @@ from app.api.v1.dining_sessions import router as dining_session_router
 from app.api.v1.entrance_codes import router as entrance_code_router
 from app.api.v1.login import router as login_router
 from app.api.v1.merchant_accounts import router as merchant_accounts_router
+from app.api.v1.staff_auth import router as staff_auth_router
 from app.api.v1.staff_wechat_auth import router as staff_wechat_auth_router
 from app.api.v1.staff_miniprogram_auth import router as staff_miniprogram_auth_router
 from app.api.v1.member import router as member_router
@@ -79,6 +80,7 @@ app.add_middleware(
 
 app.include_router(login_router)
 app.include_router(merchant_accounts_router)
+app.include_router(staff_auth_router)
 app.include_router(staff_wechat_auth_router)
 app.include_router(staff_miniprogram_auth_router)
 app.include_router(member_router)

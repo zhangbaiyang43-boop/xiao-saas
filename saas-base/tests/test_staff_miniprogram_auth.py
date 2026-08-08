@@ -18,6 +18,7 @@ from app.models.tenant import Tenant
 from app.services import staff_handoff_service as handoff_svc
 from app.services import staff_mp_bind_session_service as mp_bind
 from app.services.staff_miniprogram_provider import MockMiniProgramIdentityProvider
+from app.services.staff_session_service import StaffSessionService
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.staff_wechat_provider import WechatIdentity as WId
 from app.utils.id_generator import generate_snowflake_id
@@ -138,7 +139,7 @@ class StaffMiniprogramAuthTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(int(payload["account_id"]), self.waiter_id)
             self.assertIsNone(await handoff_svc.consume_handoff(handoff["handoff_token"]))
 
-            issued = await svc.issue_session_for_account(
+            issued = await StaffSessionService(db).issue_session_for_account(
                 bound["account"], auth_method="staff_mp_handoff"
             )
             self.assertTrue(issued["ok"])
@@ -194,7 +195,9 @@ class StaffMiniprogramAuthTest(unittest.IsolatedAsyncioTestCase):
             acc.role = "kitchen"
             await db.commit()
             await db.refresh(acc)
-            issued = await svc.issue_session_for_account(acc, auth_method="staff_mp_handoff")
+            issued = await StaffSessionService(db).issue_session_for_account(
+                acc, auth_method="staff_mp_handoff"
+            )
             self.assertEqual(issued["role"], "kitchen")
             self.assertEqual(set(issued["permissions"]), set(permission_list("kitchen")))
 
