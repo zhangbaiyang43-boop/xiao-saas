@@ -16,6 +16,7 @@ export {
   WORKBENCH_SYNC_INTERVAL_MS,
   diffNewPendingIds,
   formatSyncAge,
+  needsPickupIdsFromOrders,
   pendingIdsFromOrders,
 } from './workbenchSyncCore'
 
@@ -36,11 +37,18 @@ function readWorkbenchCursor(headers) {
 
 /**
  * Fixed-terminal workbench sync: 5s delta + 60s full reconcile.
- * @param {{ dedupeKey: string, filterStatuses: string[] }} options
+ * @param {{
+ *   dedupeKey: string,
+ *   filterStatuses: string[],
+ *   alertIdsFromOrders?: (orders: any[]) => Set<string>,
+ *   alertsEnabled?: boolean,
+ * }} options
  */
 export function useWorkbenchSync(options) {
   const dedupeKey = options.dedupeKey
   const filterStatuses = options.filterStatuses || []
+  const alertIdsFromOrders = options.alertIdsFromOrders
+  const alertsEnabled = options.alertsEnabled !== false
   const {
     alertEnabled,
     audioNeedsUnlock,
@@ -176,6 +184,8 @@ export function useWorkbenchSync(options) {
       fetchFull,
       fetchChanges,
       filterOrders,
+      alertIdsFromOrders,
+      alertsEnabled,
       playSound: () => {
         playNewOrderBeep()
       },

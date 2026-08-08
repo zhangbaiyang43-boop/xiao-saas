@@ -63,8 +63,12 @@ class WorkbenchCursorContractTest(unittest.TestCase):
         self.assertTrue(wss.is_order_visible_in_workbench(pending, "waiter"))
         self.assertTrue(wss.is_order_visible_in_workbench(preparing, "waiter"))
         self.assertFalse(wss.is_order_visible_in_workbench(done, "waiter"))
+        self.assertTrue(wss.is_order_visible_in_workbench(pending, "frontdesk"))
+        self.assertTrue(wss.is_order_visible_in_workbench(preparing, "frontdesk"))
+        self.assertFalse(wss.is_order_visible_in_workbench(done, "frontdesk"))
         self.assertTrue(wss.is_order_visible_in_workbench(done, "kitchen"))
         self.assertFalse(wss.is_order_visible_in_workbench(cancelled, "kitchen"))
+        self.assertFalse(wss.is_order_visible_in_workbench(pending, "cashier"))
 
     def test_fg01_same_timestamp_initial_pagination(self):
         """FG-01: multiple rows same second paginate without skip/dup across pages."""

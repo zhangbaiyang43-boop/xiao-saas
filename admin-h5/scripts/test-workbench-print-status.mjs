@@ -14,6 +14,7 @@ function read(rel) {
 
 const kitchen = read('src/views/KitchenWorkbench.vue')
 const waiter = read('src/views/WaiterWorkbench.vue')
+const frontdesk = read('src/views/FrontdeskWorkbench.vue')
 
 assert.ok(kitchen.includes('打印异常'), 'KitchenWorkbench shows print anomaly count')
 assert.ok(kitchen.includes('打印失败'), 'KitchenWorkbench shows failed badge')
@@ -23,9 +24,10 @@ assert.ok(kitchen.includes('已提交打印'), 'KitchenWorkbench shows SUCCESS l
 assert.ok(kitchen.includes("order.can_reprint"), 'Kitchen reprint gated by can_reprint')
 assert.ok(kitchen.includes("reprintOrder"), 'Kitchen still has reprintOrder call')
 
-assert.ok(waiter.includes('打印失败'), 'WaiterWorkbench shows failed badge')
-assert.ok(waiter.includes('打印状态未知'), 'WaiterWorkbench shows unknown badge')
+// Phase R1: Waiter is read-only fulfillment — no print ops / no reprint.
 assert.ok(!waiter.includes('reprintOrder'), 'WaiterWorkbench must not call reprintOrder')
 assert.ok(!waiter.includes('补打'), 'WaiterWorkbench must not show reprint button')
+assert.ok(!frontdesk.includes('reprintOrder'), 'FrontdeskWorkbench must not call reprintOrder')
+assert.ok(!frontdesk.includes('补打'), 'FrontdeskWorkbench must not show reprint button')
 
 console.log('test-workbench-print-status: ok')

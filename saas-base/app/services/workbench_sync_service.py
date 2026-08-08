@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.permissions import ROLE_KITCHEN, ROLE_OWNER, ROLE_WAITER
+from app.core.permissions import ROLE_FRONTDESK, ROLE_KITCHEN, ROLE_OWNER, ROLE_WAITER
 from app.models.order import Order, OrderItem
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,9 @@ WORKBENCH_CURSOR_OVERLAP_SECONDS = 1
 _CURSOR_VERSION = 2
 _CURSOR_VERSION_V1 = 1
 
-# Match admin-h5 Waiter/Kitchen filterStatuses (shared Full + Delta visibility).
+# Match admin-h5 Waiter/Frontdesk/Kitchen filterStatuses (shared Full + Delta visibility).
+# Frontdesk inherits pre-R1 waiter pickup scope: pending + preparing.
+_FRONTDESK_STATUSES = frozenset({"pending", "preparing"})
 _WAITER_STATUSES = frozenset({"pending", "preparing"})
 _KITCHEN_STATUSES = frozenset({"pending", "preparing", "done"})
 _OWNER_STATUSES = frozenset({"pending", "preparing", "done"})
@@ -44,14 +46,16 @@ _OWNER_STATUSES = frozenset({"pending", "preparing", "done"})
 
 def workbench_visible_statuses_for_role(role: str | None) -> frozenset[str]:
     value = (role or "").strip().lower()
+    if value == ROLE_FRONTDESK:
+        return _FRONTDESK_STATUSES
     if value == ROLE_WAITER:
         return _WAITER_STATUSES
     if value == ROLE_KITCHEN:
         return _KITCHEN_STATUSES
     if value == ROLE_OWNER:
         return _OWNER_STATUSES
-    # Unknown staff role: fail closed to kitchen-like fulfillment feed.
-    return _KITCHEN_STATUSES
+    # Unknown role: default deny (empty visibility).
+    return frozenset()
 
 
 def is_order_visible_in_workbench(order: Any, role: str | None) -> bool:

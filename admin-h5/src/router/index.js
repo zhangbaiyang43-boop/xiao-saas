@@ -34,6 +34,7 @@ const More = () => import('../views/More.vue')
 const SuperAdmin = () => import('../views/SuperAdmin.vue')
 const WaiterWorkbench = () => import('../views/WaiterWorkbench.vue')
 const KitchenWorkbench = () => import('../views/KitchenWorkbench.vue')
+const FrontdeskWorkbench = () => import('../views/FrontdeskWorkbench.vue')
 const StaffManage = () => import('../views/StaffManage.vue')
 
 const ownerOnly = { requiresPermission: '*' }
@@ -50,8 +51,24 @@ const routes = [
     component: Layout,
     children: [
       { path: '', name: 'Dashboard', component: Dashboard, meta: ownerOnly },
-      { path: 'waiter', name: 'WaiterWorkbench', component: WaiterWorkbench, meta: { requiresPermission: 'order.view_fulfillment' } },
-      { path: 'kitchen', name: 'KitchenWorkbench', component: KitchenWorkbench, meta: { requiresPermission: 'kitchen.view' } },
+      {
+        path: 'frontdesk',
+        name: 'FrontdeskWorkbench',
+        component: FrontdeskWorkbench,
+        meta: { requiresPermission: 'order.view_fulfillment', staffRoles: ['frontdesk'] },
+      },
+      {
+        path: 'waiter',
+        name: 'WaiterWorkbench',
+        component: WaiterWorkbench,
+        meta: { requiresPermission: 'order.view_fulfillment', staffRoles: ['waiter'] },
+      },
+      {
+        path: 'kitchen',
+        name: 'KitchenWorkbench',
+        component: KitchenWorkbench,
+        meta: { requiresPermission: 'kitchen.view', staffRoles: ['kitchen'] },
+      },
       { path: 'staff', name: 'StaffManage', component: StaffManage, meta: { requiresPermission: 'staff.manage' } },
       { path: 'entrance-codes', name: 'EntranceCodeList', component: EntranceCodeList, meta: ownerOnly },
       { path: 'channel-entries', name: 'ChannelEntryList', component: ChannelEntryList, meta: ownerOnly },
@@ -92,6 +109,7 @@ const router = createRouter({
 })
 
 function homeForRole(role) {
+  if (role === 'frontdesk') return '/frontdesk'
   if (role === 'waiter') return '/waiter'
   if (role === 'kitchen') return '/kitchen'
   return '/'
@@ -142,6 +160,11 @@ router.beforeEach(async (to, from, next) => {
       return
     }
     if (required && required !== '*' && !auth.can(required)) {
+      next(homeForRole(auth.role))
+      return
+    }
+    const staffRoles = to.meta?.staffRoles
+    if (Array.isArray(staffRoles) && staffRoles.length && !auth.isOwner && !staffRoles.includes(auth.role)) {
       next(homeForRole(auth.role))
       return
     }

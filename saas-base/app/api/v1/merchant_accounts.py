@@ -13,6 +13,7 @@ from app.core.permissions import (
     PERM_STAFF_MANAGE,
     PERM_STAFF_VIEW,
     ROLE_OWNER,
+    staff_home_path,
 )
 from app.core.rate_limiter import login_limit
 from app.core.response import error_response, success_response
@@ -38,7 +39,7 @@ class StaffLoginRequest(BaseModel):
 
 class StaffCreateRequest(BaseModel):
     name: str
-    role: str  # waiter | kitchen
+    role: str  # frontdesk | waiter | kitchen
     username: str | None = None
     password: str | None = None
 
@@ -82,11 +83,7 @@ async def auth_me(request: Request, db: AsyncSession = Depends(get_db)):
         {
             "tenant_name": tenant.name,
             "phone": tenant.phone if principal.is_owner else None,
-            "home_path": {
-                ROLE_OWNER: "/",
-                "waiter": "/waiter",
-                "kitchen": "/kitchen",
-            }.get(principal.role, "/"),
+            "home_path": "/" if principal.role == ROLE_OWNER else staff_home_path(principal.role),
         }
     )
     if principal.is_owner:

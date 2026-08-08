@@ -54,12 +54,26 @@ async function fetchPending(pollMeta = {}) {
         meta: { fromPolling: Boolean(pollMeta.fromPolling), dedupe: true, dedupeKey: 'wb:pending-badge' },
       })
       const raw = res?.data?.data || res?.data || []
-      if (Array.isArray(raw)) pendingCount.value = raw.filter((o) => o.status === 'pending').length
+      if (Array.isArray(raw)) {
+        if (auth.role === 'frontdesk') {
+          pendingCount.value = raw.filter(
+            (o) => (o.can_assign_pickup_no || o.canAssignPickupNo) && !o.pickup_no,
+          ).length
+        } else {
+          pendingCount.value = raw.filter((o) => o.status === 'pending').length
+        }
+      }
     }
   } catch {}
 }
 
 const tabs = computed(() => {
+  if (auth.role === 'frontdesk') {
+    return [
+      { path: '/frontdesk', label: '前台', icon: OrderedListOutlined, badge: pendingCount.value },
+      { path: '/more', label: '我的', icon: UserOutlined, badge: 0 },
+    ]
+  }
   if (auth.role === 'waiter') {
     return [
       { path: '/waiter', label: '工作台', icon: OrderedListOutlined, badge: pendingCount.value },
@@ -81,6 +95,7 @@ const tabs = computed(() => {
 })
 
 function shouldPollPending() {
+  if (auth.role === 'frontdesk') return route.path !== '/frontdesk'
   if (auth.role === 'waiter') return route.path !== '/waiter'
   if (auth.role === 'kitchen') return route.path !== '/kitchen'
   return route.path !== '/' && !route.path.startsWith('/orders')

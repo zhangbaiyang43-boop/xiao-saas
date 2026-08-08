@@ -11,6 +11,7 @@ import { clearSession, getSession, hasValidSession, saveSession } from '../utils
 
 const ROLE_HOME = {
   owner: '/',
+  frontdesk: '/frontdesk',
   waiter: '/waiter',
   kitchen: '/kitchen',
 }

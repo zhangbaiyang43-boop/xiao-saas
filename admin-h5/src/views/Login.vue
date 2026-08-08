@@ -176,7 +176,15 @@ const handleSendCode = async () => {
 const persistAndEnter = (data, msg) => {
   auth.applySession(data)
   message.success(msg)
-  const home = data.home_path || (data.role === 'waiter' ? '/waiter' : data.role === 'kitchen' ? '/kitchen' : '/')
+  const home =
+    data.home_path ||
+    (data.role === 'frontdesk'
+      ? '/frontdesk'
+      : data.role === 'waiter'
+        ? '/waiter'
+        : data.role === 'kitchen'
+          ? '/kitchen'
+          : '/')
   setTimeout(() => router.replace(home), 350)
 }
 

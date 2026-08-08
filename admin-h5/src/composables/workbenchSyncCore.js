@@ -16,6 +16,17 @@ export function pendingIdsFromOrders(orders) {
   return ids
 }
 
+/** Frontdesk alert set: assignable and still missing pickup_no. */
+export function needsPickupIdsFromOrders(orders) {
+  const ids = new Set()
+  for (const o of orders || []) {
+    if (!o || o.id == null) continue
+    const can = o.can_assign_pickup_no ?? o.canAssignPickupNo
+    if (can && !o.pickup_no) ids.add(String(o.id))
+  }
+  return ids
+}
+
 /** New pending IDs in `current` that are not in `known`. Uses string IDs only. */
 export function diffNewPendingIds(known, current) {
   const news = []
@@ -75,6 +86,8 @@ export function formatSyncAge(at, now = Date.now()) {
  * @param {(cursor:string) => Promise<{items:any[],removed_ids:string[],next_cursor:string,has_more:boolean}>} [opts.fetchChanges]
  * @param {() => Promise<any[]>} [opts.fetchOrders] legacy alias for fetchFull
  * @param {(raw: any[]) => any[]} opts.filterOrders
+ * @param {(orders: any[]) => Set<string>} [opts.alertIdsFromOrders] defaults to pendingIdsFromOrders
+ * @param {boolean} [opts.alertsEnabled] default true; false disables sound + highlight diffs
  * @param {() => void} [opts.playSound]
  * @param {() => number} [opts.now]
  * @param {number} [opts.intervalMs]
@@ -89,6 +102,8 @@ export function createWorkbenchSyncCore(opts) {
   const fetchChanges = opts.fetchChanges || null
   const useDelta = typeof fetchChanges === 'function'
   const filterOrders = opts.filterOrders
+  const alertIdsFromOrders = opts.alertIdsFromOrders || pendingIdsFromOrders
+  const alertsEnabled = opts.alertsEnabled !== false
   const playSound = opts.playSound || (() => {})
   const now = opts.now || (() => Date.now())
   const intervalMs = opts.intervalMs ?? WORKBENCH_SYNC_INTERVAL_MS
@@ -190,13 +205,13 @@ export function createWorkbenchSyncCore(opts) {
   function commitOrders(list, { allowAlert }) {
     const filtered = filterOrders(Array.isArray(list) ? list : [])
     const sorted = sortOrdersFifo(filtered)
-    const currentPending = pendingIdsFromOrders(sorted)
+    const currentAlertIds = alertIdsFromOrders(sorted)
     let newIds = []
-    if (allowAlert && hasBaseline) {
-      newIds = diffNewPendingIds(knownPendingIds, currentPending)
+    if (allowAlert && alertsEnabled && hasBaseline) {
+      newIds = diffNewPendingIds(knownPendingIds, currentAlertIds)
     }
     orders = sorted
-    knownPendingIds = currentPending
+    knownPendingIds = currentAlertIds
     hasBaseline = true
     lastSuccessfulSyncAt = now()
     syncFailed = false

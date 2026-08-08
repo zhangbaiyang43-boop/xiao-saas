@@ -8,7 +8,9 @@
       <a-card :bordered="false">
         <div style="font-size:16px;font-weight:700">{{ auth.displayName || '员工' }}</div>
         <div style="font-size:12px;color:var(--text-3);margin-top:4px">
-          {{ auth.role === 'kitchen' ? '后厨' : '服务员' }} · {{ auth.username || '' }}
+          {{
+            auth.role === 'kitchen' ? '后厨' : auth.role === 'frontdesk' ? '前台' : '服务员'
+          }} · {{ auth.username || '' }}
         </div>
       </a-card>
     </div>

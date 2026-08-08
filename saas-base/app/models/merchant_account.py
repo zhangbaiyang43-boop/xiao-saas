@@ -19,5 +19,5 @@ class MerchantAccount(BaseModel):
     # Nullable when staff uses WeChat-primary auth without backup password.
     username = Column(String(64), nullable=True, index=True)
     password_hash = Column(String(128), nullable=True)
-    role = Column(String(32), nullable=False, default="waiter")  # waiter | kitchen (owner is Tenant)
+    role = Column(String(32), nullable=False, default="waiter")  # frontdesk | waiter | kitchen (owner is Tenant)
     status = Column(String(16), nullable=False, default="active")  # active | disabled

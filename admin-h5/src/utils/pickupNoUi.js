@@ -4,7 +4,8 @@
  */
 
 export function needsPickup(order) {
-  return !!order?.canAssignPickupNo && !order.pickup_no
+  const can = order?.canAssignPickupNo ?? order?.can_assign_pickup_no
+  return !!can && !order.pickup_no
 }
 
 /** 已有号时的次级「更换」：不猜支付模式，仅排除终态 */

@@ -34,6 +34,7 @@ class StaffSessionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         self.waiter_id = generate_snowflake_id()
         self.kitchen_id = generate_snowflake_id()
+        self.frontdesk_id = generate_snowflake_id()
         async with self.SessionLocal() as db:
             db.add_all(
                 [
@@ -63,6 +64,15 @@ class StaffSessionServiceTest(unittest.IsolatedAsyncioTestCase):
                         role="kitchen",
                         status="active",
                     ),
+                    MerchantAccount(
+                        id=self.frontdesk_id,
+                        tenant_id=TENANT,
+                        name="前台",
+                        username="front_s",
+                        password_hash=FAKE_HASH,
+                        role="frontdesk",
+                        status="active",
+                    ),
                 ]
             )
             await db.commit()
@@ -82,8 +92,10 @@ class StaffSessionServiceTest(unittest.IsolatedAsyncioTestCase):
             svc = StaffSessionService(db)
             waiter = await self._account(db, self.waiter_id)
             kitchen = await self._account(db, self.kitchen_id)
+            frontdesk = await self._account(db, self.frontdesk_id)
             w = await svc.issue_session_for_account(waiter, auth_method="staff_password")
             k = await svc.issue_session_for_account(kitchen, auth_method="staff_password")
+            f = await svc.issue_session_for_account(frontdesk, auth_method="staff_password")
             self.assertTrue(w["ok"])
             self.assertEqual(w["role"], "waiter")
             self.assertEqual(w["home_path"], "/waiter")
@@ -91,6 +103,10 @@ class StaffSessionServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(k["ok"])
             self.assertEqual(k["role"], "kitchen")
             self.assertEqual(k["home_path"], "/kitchen")
+            self.assertTrue(f["ok"])
+            self.assertEqual(f["role"], "frontdesk")
+            self.assertEqual(f["home_path"], "/frontdesk")
+            self.assertEqual(set(f["permissions"]), set(permission_list("frontdesk")))
             payload = verify_token(w["token"])
             self.assertEqual(int(payload["account_id"]), self.waiter_id)
             self.assertEqual(payload["role"], "waiter")
@@ -102,13 +118,13 @@ class StaffSessionServiceTest(unittest.IsolatedAsyncioTestCase):
             waiter = await self._account(db, self.waiter_id)
             issued = await svc.issue_session_for_account(waiter, auth_method="staff_password")
             device_id, secret = decode_device_credential(issued["device_credential"])
-            waiter.role = "kitchen"
+            waiter.role = "frontdesk"
             await db.commit()
             refresh = await svc.refresh_device(device_id=device_id, secret=secret)
             self.assertTrue(refresh["ok"])
-            self.assertEqual(refresh["role"], "kitchen")
-            self.assertEqual(refresh["home_path"], "/kitchen")
-            self.assertEqual(set(refresh["permissions"]), set(permission_list("kitchen")))
+            self.assertEqual(refresh["role"], "frontdesk")
+            self.assertEqual(refresh["home_path"], "/frontdesk")
+            self.assertEqual(set(refresh["permissions"]), set(permission_list("frontdesk")))
 
     async def test_disabled_refresh_blocked(self):
         async with self.SessionLocal() as db:

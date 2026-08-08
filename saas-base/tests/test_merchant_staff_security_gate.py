@@ -217,14 +217,19 @@ class PermissionMatrixFromCodeTest(unittest.TestCase):
         self.assertEqual(ROLE_PERMISSIONS[ROLE_OWNER], frozenset({"*"}))
         self.assertTrue(has_permission(ROLE_OWNER, "finance.settle"))
         self.assertTrue(has_permission(ROLE_OWNER, "staff.manage"))
-        self.assertTrue(has_permission(ROLE_WAITER, "order.accept"))
+        self.assertFalse(has_permission(ROLE_WAITER, "order.accept"))
+        self.assertFalse(has_permission(ROLE_WAITER, "pickup.assign"))
         self.assertFalse(has_permission(ROLE_WAITER, "order.complete"))
         self.assertFalse(has_permission(ROLE_WAITER, "finance.settle"))
+        self.assertTrue(has_permission("frontdesk", "pickup.assign"))
+        self.assertFalse(has_permission("frontdesk", "order.accept"))
         self.assertTrue(has_permission(ROLE_KITCHEN, "order.complete"))
         self.assertFalse(has_permission(ROLE_KITCHEN, "pickup.assign"))
         self.assertTrue(has_permission(ROLE_KITCHEN, "kitchen.print_reprint"))
         self.assertIsNone(parse_staff_role("owner"))
         self.assertEqual(parse_staff_role("waiter"), "waiter")
+        self.assertEqual(parse_staff_role("frontdesk"), "frontdesk")
+        self.assertIsNone(parse_staff_role("cashier"))
 
 
 class PasswordAndThrottleTest(unittest.IsolatedAsyncioTestCase):

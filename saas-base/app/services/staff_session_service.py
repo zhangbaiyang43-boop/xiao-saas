@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.permissions import STAFF_ROLES, parse_staff_role, permission_list
+from app.core.permissions import STAFF_ROLES, parse_staff_role, permission_list, staff_home_path
 from app.core.security import create_access_token
 from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice
@@ -49,7 +49,7 @@ def _session_payload(account: MerchantAccount, tenant: Tenant | None, *, auth_me
         "account_id": str(account.id),
         "username": account.username,
         "permissions": permission_list(role),
-        "home_path": "/waiter" if role == "waiter" else "/kitchen",
+        "home_path": staff_home_path(role),
         "auth_method": auth_method,
         "device_trusted": True,
     }

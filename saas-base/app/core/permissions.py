@@ -9,11 +9,12 @@ from __future__ import annotations
 from typing import Iterable
 
 ROLE_OWNER = "owner"
+ROLE_FRONTDESK = "frontdesk"
 ROLE_WAITER = "waiter"
 ROLE_KITCHEN = "kitchen"
 
-STAFF_ROLES = (ROLE_WAITER, ROLE_KITCHEN)
-ALL_ROLES = (ROLE_OWNER, ROLE_WAITER, ROLE_KITCHEN)
+STAFF_ROLES = (ROLE_FRONTDESK, ROLE_WAITER, ROLE_KITCHEN)
+ALL_ROLES = (ROLE_OWNER, ROLE_FRONTDESK, ROLE_WAITER, ROLE_KITCHEN)
 
 # Atomic permissions mapped to real merchant actions
 PERM_ORDER_VIEW_FULFILLMENT = "order.view_fulfillment"
@@ -49,14 +50,21 @@ PERM_STAFF_MANAGE = "staff.manage"
 
 PERM_WILDCARD = "*"
 
-WAITER_PERMISSIONS = frozenset(
+FRONTDESK_PERMISSIONS = frozenset(
     {
         PERM_ORDER_VIEW_FULFILLMENT,
-        PERM_ORDER_ACCEPT,
         PERM_TABLE_VIEW,
         PERM_PICKUP_VIEW,
         PERM_PICKUP_ASSIGN,
         PERM_PICKUP_CHANGE,
+    }
+)
+
+WAITER_PERMISSIONS = frozenset(
+    {
+        PERM_ORDER_VIEW_FULFILLMENT,
+        PERM_TABLE_VIEW,
+        PERM_PICKUP_VIEW,
     }
 )
 
@@ -73,8 +81,15 @@ KITCHEN_PERMISSIONS = frozenset(
 
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ROLE_OWNER: frozenset({PERM_WILDCARD}),
+    ROLE_FRONTDESK: FRONTDESK_PERMISSIONS,
     ROLE_WAITER: WAITER_PERMISSIONS,
     ROLE_KITCHEN: KITCHEN_PERMISSIONS,
+}
+
+_STAFF_HOME_PATHS = {
+    ROLE_FRONTDESK: "/frontdesk",
+    ROLE_WAITER: "/waiter",
+    ROLE_KITCHEN: "/kitchen",
 }
 
 
@@ -90,11 +105,19 @@ def normalize_role(role: str | None) -> str:
 
 
 def parse_staff_role(role: str | None) -> str | None:
-    """Return waiter/kitchen or None. Never returns owner."""
+    """Return frontdesk/waiter/kitchen or None. Never returns owner."""
     value = (role or "").strip().lower()
     if value in STAFF_ROLES:
         return value
     return None
+
+
+def staff_home_path(role: str | None) -> str:
+    """Canonical workbench path for a staff role. Unknown → '/'."""
+    value = parse_staff_role(role)
+    if not value:
+        return "/"
+    return _STAFF_HOME_PATHS.get(value, "/")
 
 
 def permissions_for_role(role: str | None) -> frozenset[str]:

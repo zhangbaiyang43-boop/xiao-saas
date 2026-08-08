@@ -3,7 +3,9 @@
     <div class="head">
       <div>
         <div class="title">员工管理</div>
-        <div class="sub">服务员 {{ waiterCount }}人 · 后厨 {{ kitchenCount }}人</div>
+        <div class="sub">
+          前台 {{ frontdeskCount }}人 · 服务员 {{ waiterCount }}人 · 后厨 {{ kitchenCount }}人
+        </div>
       </div>
       <a-button type="primary" @click="openCreate">添加员工</a-button>
     </div>
@@ -42,9 +44,25 @@
           <a-input v-model:value="form.name" maxlength="32" placeholder="请输入员工姓名" />
         </a-form-item>
         <a-form-item label="岗位" required>
-          <a-radio-group v-model:value="form.role">
-            <a-radio value="waiter">服务员</a-radio>
-            <a-radio value="kitchen">后厨</a-radio>
+          <a-radio-group v-model:value="form.role" class="role-group">
+            <a-radio value="frontdesk" class="role-radio">
+              <div class="role-line">
+                <span class="role-name">前台</span>
+                <span class="role-desc">发桌牌、换桌牌、查看桌台</span>
+              </div>
+            </a-radio>
+            <a-radio value="waiter" class="role-radio">
+              <div class="role-line">
+                <span class="role-name">服务员</span>
+                <span class="role-desc">查看订单与桌牌</span>
+              </div>
+            </a-radio>
+            <a-radio value="kitchen" class="role-radio">
+              <div class="role-line">
+                <span class="role-name">后厨</span>
+                <span class="role-desc">接单、制作完成、厨房补打</span>
+              </div>
+            </a-radio>
           </a-radio-group>
         </a-form-item>
 
@@ -118,11 +136,12 @@ const form = reactive({
 const loginForm = reactive({ username: '', password: '' })
 const loginSaving = ref(false)
 
+const frontdeskCount = computed(() => list.value.filter((x) => x.role === 'frontdesk').length)
 const waiterCount = computed(() => list.value.filter((x) => x.role === 'waiter').length)
 const kitchenCount = computed(() => list.value.filter((x) => x.role === 'kitchen').length)
 
 function roleLabel(r) {
-  return { waiter: '服务员', kitchen: '后厨' }[r] || r
+  return { frontdesk: '前台', waiter: '服务员', kitchen: '后厨' }[r] || r
 }
 function statusLabel(s) {
   return s === 'disabled' ? '已停用' : '正常'
@@ -281,4 +300,9 @@ onMounted(load)
 .info-block { background: #f7f7f7; border-radius: 10px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.7; }
 .hint { font-size: 12px; color: #888; margin-top: 8px; line-height: 1.5; }
 .created { text-align: center; padding: 8px 0; }
+.role-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.role-radio { margin-inline-end: 0 !important; align-items: flex-start; height: auto; }
+.role-line { display: flex; flex-direction: column; line-height: 1.35; padding-top: 1px; }
+.role-name { font-weight: 600; color: #111; }
+.role-desc { font-size: 12px; color: #888; margin-top: 2px; }
 </style>

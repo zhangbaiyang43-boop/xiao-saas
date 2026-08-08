@@ -1107,7 +1107,7 @@ def serialize_fulfillment_order(
     can_assign_pickup: bool = False,
     defer_kitchen_print: bool = False,
 ) -> dict:
-    """Minimal fulfillment DTO for waiter/kitchen — no money / customer PII."""
+    """Minimal fulfillment DTO for staff workbenches — no money / customer PII."""
     data = {
         "id": str(order.id),
         "display_order_no": str(order.id)[-4:],

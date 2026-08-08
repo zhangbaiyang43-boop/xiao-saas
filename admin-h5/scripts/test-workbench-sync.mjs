@@ -14,6 +14,7 @@ const {
   applyWorkbenchDelta,
   createWorkbenchSyncCore,
   diffNewPendingIds,
+  needsPickupIdsFromOrders,
   pendingIdsFromOrders,
   sortOrdersFifo,
 } = await import(coreUrl)
@@ -45,6 +46,17 @@ assert.equal(WORKBENCH_FULL_RECONCILE_INTERVAL_MS, 60000)
   const known = new Set(['A', 'B'])
   const current = new Set(['B', 'C'])
   assert.deepEqual(diffNewPendingIds(known, current), ['C'])
+}
+
+{
+  const ids = needsPickupIdsFromOrders([
+    { id: '1', can_assign_pickup_no: true, pickup_no: '' },
+    { id: '2', can_assign_pickup_no: true, pickup_no: '8' },
+    { id: '3', can_assign_pickup_no: false, pickup_no: '' },
+  ])
+  assert.ok(ids.has('1'))
+  assert.equal(ids.has('2'), false)
+  assert.equal(ids.has('3'), false)
 }
 
 // Fake timer helpers
@@ -468,16 +480,25 @@ assert.equal(round2.getSnapshot().lastNewIds.length, 0)
 // Static wiring checks
 const waiter = read('src/views/WaiterWorkbench.vue')
 const kitchen = read('src/views/KitchenWorkbench.vue')
+const frontdesk = read('src/views/FrontdeskWorkbench.vue')
 const useSync = read('src/composables/useWorkbenchSync.js')
 const alert = read('src/composables/useOrderAlert.js')
 const orderManage = read('src/views/OrderManage.vue')
+const routerSrc = read('src/router/index.js')
 
 assert.ok(waiter.includes('useWorkbenchSync'), 'Waiter wired')
 assert.ok(kitchen.includes('useWorkbenchSync'), 'Kitchen wired')
+assert.ok(frontdesk.includes('useWorkbenchSync'), 'Frontdesk wired')
 assert.ok(waiter.includes('WorkbenchSyncBar'), 'Waiter status bar')
 assert.ok(kitchen.includes('WorkbenchSyncBar'), 'Kitchen status bar')
-assert.ok(waiter.includes('is-new') && waiter.includes('新'), 'Waiter highlight')
+assert.ok(frontdesk.includes('WorkbenchSyncBar'), 'Frontdesk status bar')
+assert.ok(waiter.includes("alertsEnabled: false"), 'Waiter R1: no pending alerts')
+assert.ok(!waiter.includes('接单') && !waiter.includes('发桌牌') && !waiter.includes('换桌牌'), 'Waiter actions removed')
 assert.ok(kitchen.includes('is-new') && kitchen.includes('新'), 'Kitchen highlight')
+assert.ok(frontdesk.includes('needsPickupIdsFromOrders'), 'Frontdesk alerts on needs-pickup')
+assert.ok(frontdesk.includes('发桌牌') && frontdesk.includes('换桌牌'), 'Frontdesk pickup actions')
+assert.ok(!frontdesk.includes('接单') && !frontdesk.includes('补打厨房单'), 'Frontdesk no kitchen actions')
+assert.ok(routerSrc.includes("path: 'frontdesk'"), 'Frontdesk route')
 assert.ok(useSync.includes('visibilitychange'), 'visibility listener')
 assert.ok(useSync.includes("addEventListener('online'"), 'online listener')
 assert.ok(useSync.includes('playNewOrderBeep'), 'reuses alert beep')

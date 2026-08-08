@@ -88,7 +88,7 @@ class MerchantAccountService:
         if not name or len(name) > 64:
             return error_response(code=400, msg="请填写员工姓名")
         if role not in STAFF_ROLES:
-            return error_response(code=400, msg="岗位仅支持服务员或后厨")
+            return error_response(code=400, msg="岗位仅支持前台、服务员或后厨")
 
         password_hash = None
         if username or password:
@@ -138,7 +138,7 @@ class MerchantAccountService:
         if role is not None:
             role = role.strip().lower()
             if role not in STAFF_ROLES:
-                return error_response(code=400, msg="岗位仅支持服务员或后厨")
+                return error_response(code=400, msg="岗位仅支持前台、服务员或后厨")
             account.role = role
 
         disabling = False
