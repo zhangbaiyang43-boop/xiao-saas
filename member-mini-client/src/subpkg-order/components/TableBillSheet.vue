@@ -1,15 +1,15 @@
 <template>
-  <view class="mask" @click="$emit('close')">
+  <view class="mask" @click="emitCloseOrFinish">
     <view class="orders-sheet table-account-sheet" @click.stop>
       <view class="orders-sheet-head table-account-head">
-        <view class="table-account-back" @click="$emit('close')">
+        <view class="table-account-back" @click="emitCloseOrFinish">
           <text class="iconfont icon-back"></text>
         </view>
         <text class="orders-sheet-title">已点菜品</text>
-        <text class="orders-sheet-close iconfont icon-close" @click="$emit('close')"></text>
+        <text class="orders-sheet-close iconfont icon-close" @click="emitCloseOrFinish"></text>
       </view>
 
-      <scroll-view v-if="!loadError" class="table-account-list" scroll-y :scroll-into-view="tableAccountScrollInto" scroll-with-animation>
+      <scroll-view v-if="!loadError" class="table-account-list" scroll-y>
         <view id="table-account-status-anchor" class="table-account-status">
           <view class="table-account-status-icon" :class="'table-account-status-icon--' + tableStatusView.tone">
             <text class="iconfont" :class="tableStatusView.icon"></text>
@@ -56,7 +56,7 @@
                     @error="$emit('mark-image-failed', group.id + '_' + idx)"
                   />
                   <view v-else class="table-account-item-placeholder">
-                    <text>{{ orderItemName(item).slice(0, 1) }}</text>
+                    <image class="table-account-item-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
                   </view>
                 </view>
                 <view class="table-account-item-main">
@@ -71,24 +71,37 @@
           </view>
 
           <view v-else class="table-account-empty">
-            <text class="table-account-empty-title">本桌还没有已点菜品</text>
-            <text class="table-account-empty-desc">可以先去点菜，后续加菜会自动合并到本桌账单</text>
+            <state-empty
+              padded
+              icon="🍽️"
+              title="本桌还没有已点菜品"
+              desc="可以先去点菜，后续加菜会自动合并到本桌账单"
+            />
           </view>
         </view>
 
-        <view class="table-account-tip">
+        <view v-if="!isTableSettled" class="table-account-tip">
           <text>同桌后续加菜会自动合并，不需要每次付款。</text>
         </view>
       </scroll-view>
 
       <view v-else class="table-status-empty">
-        <text class="table-status-empty-icon iconfont icon-warnfill"></text>
-        <text class="table-status-empty-title">本桌订单加载失败</text>
-        <text class="table-status-empty-desc">请重新加载后再查看本桌账单</text>
-        <view class="table-account-retry" @click="$emit('retry-load')"><text>重新加载</text></view>
+        <state-error
+          padded
+          title="本桌订单加载失败"
+          desc="请重新加载后再查看本桌账单"
+          retry-text="重新加载"
+          @retry="$emit('retry-load')"
+        />
       </view>
 
-      <view class="table-account-actions">
+      <!-- SETTLED：只保留「完成」；ACTIVE：继续加菜 + 结账相关操作 -->
+      <view v-if="isTableSettled" class="table-account-actions">
+        <view class="table-account-action table-account-action--primary" @click="$emit('finish')">
+          <text>完成</text>
+        </view>
+      </view>
+      <view v-else class="table-account-actions">
         <view
           class="table-account-action table-account-action--secondary"
           :class="{ 'table-account-action--disabled': !canContinueOrder }"
@@ -103,13 +116,6 @@
           @click="$emit('checkout')"
         >
           <text>{{ tableCheckouting ? '呼叫中...' : (checkoutRequested ? '已呼叫服务员，等待确认' : '吃好了，去结账') }}</text>
-        </view>
-        <view
-          v-else-if="isTableSettled"
-          class="table-account-action table-account-action--primary table-account-action--ghost"
-          @click="$emit('scroll-to-top')"
-        >
-          <text>查看结账详情</text>
         </view>
         <view
           v-else-if="stillPreparing"
@@ -131,12 +137,13 @@
 <script>
 // 从 menu.vue 拆出来的桌台账单弹层（原来是 showOrders && isSharedBillMode 那一段
 // 模板，"已点菜品"分账/桌台账单视图）。纯展示组件，不带任何业务逻辑——所有需要
-// 改父组件状态的动作（关闭、重新加载、继续加菜、去结账、滚动到顶部、图片加载
-// 失败）都只 emit 出去，真正的处理函数还是原来 menu.vue 里那几个
-// （loadMenu/handleTableContinueOrder/handleTableCheckout/
-// scrollTableAccountToTop/markOrderItemImageFailed），一行都没有改。
+// 改父组件状态的动作都只 emit 出去。
+import StateEmpty from '@/components/state-empty/state-empty.vue'
+import StateError from '@/components/state-error/state-error.vue'
+
 export default {
   name: 'TableBillSheet',
+  components: { StateEmpty, StateError },
   props: {
     loadError: { type: Boolean, default: false },
     tableStatusView: { type: Object, required: true },
@@ -154,9 +161,6 @@ export default {
     postpayReadyToSettle: { type: Boolean, default: false },
     tableCheckouting: { type: Boolean, default: false },
     checkoutRequested: { type: Boolean, default: false },
-    tableAccountScrollInto: { type: String, default: '' },
-    // 纯查询/格式化函数直接从父组件原样传进来（不是在这里重写一份同名逻辑），
-    // 保证跟父组件其它地方用到的结果 100% 一致。
     formatPrice: { type: Function, required: true },
     orderItemImage: { type: Function, required: true },
     orderItemName: { type: Function, required: true },
@@ -164,7 +168,13 @@ export default {
     orderItemQty: { type: Function, required: true },
     orderItemAmount: { type: Function, required: true },
   },
-  emits: ['close', 'retry-load', 'continue-order', 'checkout', 'scroll-to-top', 'mark-image-failed'],
+  emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
+  methods: {
+    emitCloseOrFinish() {
+      if (this.isTableSettled) this.$emit('finish')
+      else this.$emit('close')
+    },
+  },
 }
 </script>
 
@@ -172,7 +182,7 @@ export default {
 @import '../styles/_shared.scss';
 
 .table-account-sheet {
-  background: #f6f7f8;
+  background: var(--bg-subtle);
   padding-bottom: 0;
 }
 
@@ -252,7 +262,7 @@ export default {
 }
 
 .table-account-status-icon--settled {
-  background: #f3f4f6;
+  background: var(--bg-muted);
   color: var(--text-3);
 }
 
@@ -295,7 +305,7 @@ export default {
   margin-top: 8rpx;
   padding: 26rpx 28rpx;
   border-radius: 24rpx;
-  background: #fff;
+  background: var(--bg-card);
   box-sizing: border-box;
 }
 
@@ -348,7 +358,7 @@ export default {
   margin-top: 18rpx;
   padding: 24rpx;
   border-radius: 24rpx;
-  background: #fff;
+  background: var(--bg-card);
   box-sizing: border-box;
 }
 
@@ -408,7 +418,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 20rpx;
   font-weight: 800;
 }
@@ -438,7 +448,7 @@ export default {
 
 .table-account-group-discount {
   flex-shrink: 0;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 24rpx;
   font-weight: 700;
 }
@@ -496,18 +506,15 @@ export default {
 
 
 .table-account-item-placeholder {
-  background: #f2f4f5;
+  background: #F5F3EE;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-
-
-.table-account-item-placeholder text {
-  color: var(--text-3);
-  font-size: 34rpx;
-  font-weight: 800;
+.table-account-item-placeholder-img {
+  width: 60%;
+  height: 60%;
 }
 
 
@@ -572,30 +579,8 @@ export default {
 
 
 .table-account-empty {
-  padding: 56rpx 20rpx;
-  text-align: center;
+  padding: 24rpx 0;
 }
-
-
-
-.table-account-empty-title {
-  display: block;
-  color: var(--text-1);
-  font-size: 32rpx;
-  font-weight: 900;
-}
-
-
-
-.table-account-empty-desc {
-  display: block;
-  margin-top: 10rpx;
-  color: var(--text-3);
-  font-size: 26rpx;
-  line-height: 1.5;
-}
-
-
 
 .table-account-tip {
   margin: 18rpx 0 0;
@@ -609,27 +594,6 @@ export default {
 
 
 
-.table-account-retry {
-  width: 220rpx;
-  height: 76rpx;
-  margin: 24rpx auto 0;
-  border-radius: 38rpx;
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-
-
-.table-account-retry text {
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 900;
-}
-
-
-
 .table-account-actions {
   position: absolute;
   left: 0;
@@ -639,7 +603,7 @@ export default {
   display: flex;
   gap: 18rpx;
   padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
-  background: #fff;
+  background: var(--bg-card);
   border-top: 1rpx solid #edf0f2;
   box-sizing: border-box;
 }
@@ -668,7 +632,7 @@ export default {
 .table-account-action--secondary {
   flex: 0 0 236rpx;
   border: 2rpx solid var(--brand);
-  background: #fff;
+  background: var(--bg-card);
   color: var(--brand);
 }
 
@@ -684,25 +648,13 @@ export default {
   flex: 1;
   min-width: 0;
   background: var(--brand);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 
 
 .table-account-action--primary text {
-  color: #fff;
-}
-
-
-
-.table-account-action--ghost {
-  background: #f1f4f3;
-}
-
-
-
-.table-account-action--ghost text {
-  color: var(--text-2);
+  color: var(--text-inverse);
 }
 
 
@@ -718,7 +670,7 @@ export default {
 .table-account-action--info {
   height: auto;
   min-height: 92rpx;
-  background: #f6f7f8;
+  background: var(--bg-subtle);
   padding: 12rpx 20rpx;
 }
 

@@ -1,9 +1,8 @@
-import { computed, nextTick } from 'vue'
+import { computed } from 'vue'
 
 // 从 menu.vue 拆出来的"桌台账单/单笔订单进度"展示逻辑——本桌当前订单是哪一单、
 // 桌台账单（拼单/餐后付款）要不要显示结账按钮、订单进度条的文案图标——全都是
-// 只读派生计算，只在末尾 scrollTableAccountToTop 这一个函数里有个纯 UI 滚动的
-// 副作用（不涉及网络/存储）。逻辑跟原来在 menu.vue 里的一字未改，只是搬了个
+// 只读派生计算（不涉及网络/存储）。逻辑跟原来在 menu.vue 里的一字未改，只是搬了个
 // 位置。
 //
 // 特意没有拆进来的东西，留在 menu.vue 里：
@@ -16,7 +15,7 @@ import { computed, nextTick } from 'vue'
 export function useTableBillView({
   myOrders, orderId, orderStatus, paymentMode, diningSessionId,
   tableSessionTotal, tableSessionClosed, tableSessionStatus, checkoutRequestedAt,
-  tableCheckouting, tableSessionClosedAt, tableAccountScrollInto,
+  tableCheckouting, tableSessionClosedAt,
   normalizePaymentMode, orderItemQty, orderItemCount,
 }) {
   const normalizeOrderStatus = (status) => {
@@ -144,14 +143,6 @@ export function useTableBillView({
   const postpayReadyToSettle = computed(() =>
     isPostpayMode.value && tableItemCount.value > 0 && !isTableSettled.value && allOrdersDone.value
   )
-  // "查看结账详情"点击后要做的事：账单信息（结账时间/优惠/明细）本来就在这个 sheet
-  // 里，不需要再跳一个页面或弹一次窗——只是把视图滚回顶部，让这些信息进入视野。
-  // 之前这里错误地复用了"发起结账"的 handleTableCheckout，点了只会弹"请联系服务员"。
-  const scrollTableAccountToTop = async () => {
-    tableAccountScrollInto.value = ''
-    await nextTick()
-    tableAccountScrollInto.value = 'table-account-status-anchor'
-  }
   const formatClosedAtTime = (raw) => {
     if (!raw) return ''
     const d = new Date(raw)
@@ -167,7 +158,7 @@ export function useTableBillView({
       return {
         icon: 'icon-roundcheckfill',
         title: '本桌已结账',
-        desc: closedTimeText ? `结账时间 ${closedTimeText}` : '本次用餐账单已经结清',
+        desc: closedTimeText ? `本次用餐已完成 · 结账时间 ${closedTimeText}` : '本次用餐已完成',
         note: payNote,
         tone: 'settled',
       }
@@ -301,7 +292,6 @@ export function useTableBillView({
     checkoutRequested,
     canCheckout,
     postpayReadyToSettle,
-    scrollTableAccountToTop,
     tableStatusView,
     currentTableOrderStatus,
     tableOrderStatusTone,

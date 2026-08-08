@@ -20,7 +20,12 @@ export function useDiningSession({
   tableSessionClosed, tableSessionStatus, tableSessionTotal, tableSessionClosedNotice,
   checkoutRequestedAt, tableSessionClosedAt, myOrders,
   normalizePaymentMode, saveMyOrders,
+  // 可选：CLOSED / exit 时停掉桌台相关轮询（由 menu 注入 stopStatusPoll + stopTablePresencePoll）
+  stopDiningPolls,
 }) {
+  // 退出进行中：防止完成按钮连点、poll 回写 CLOSED UI、ensure 静默复活
+  const isExitingSession = ref(false)
+
   // 只更新本组件的响应式状态；实际的"怎么建立/校验本桌身份、往 storage 写哪些字段"
   // 全部收敛到 utils/dining.js 的 resolveDiningIdentity/persistDiningContext，跟扫码
   // 入口页（entry/index.vue）共用同一份实现，不再各自维护一份。
@@ -31,10 +36,60 @@ export function useDiningSession({
     persistDiningStorage(data)
   }
 
+  const clearDiningSessionStorage = () => {
+    uni.removeStorageSync('table_no')
+    uni.removeStorageSync('table_no_at')
+    uni.removeStorageSync('dining_session_id')
+    uni.removeStorageSync('dining_participant_id')
+    uni.removeStorageSync('dining_participant_token')
+    uni.removeStorageSync('dining_table_no')
+    // dining_client_id 是设备级匿名 id，跨会话复用，不属于"本次 DiningSession"，保留。
+  }
+
+  const stopPollsSafe = () => {
+    if (typeof stopDiningPolls === 'function') {
+      try { stopDiningPolls() } catch { /* ignore */ }
+    }
+  }
+
+  // CLOSED 后进入「可展示结账结果」态：
+  // - 清 storage，避免其它页把已结账桌当成仍在用餐
+  // - 清 participantToken，杜绝继续用旧身份打桌台 API
+  // - 保留 diningSessionId + tableNo，供 TableBillSheet 过滤/展示本桌结果
+  // - 立刻停 poll；不立刻跳页——用户点「完成」再 exitDiningSession
+  const markSessionClosed = (notice) => {
+    tableSessionClosed.value = true
+    tableSessionClosedNotice.value = notice
+      || '本桌用餐已结束，如需继续点餐，请重新扫码进入新一桌'
+    clearDiningSessionStorage()
+    diningParticipantToken.value = ''
+    stopPollsSafe()
+  }
+
+  // 彻底退出本次桌台会话（内存 + storage + 停 poll）。不负责导航；调用方 reLaunch。
+  // 返回 false 表示已在退出中（幂等）。
+  const exitDiningSession = () => {
+    if (isExitingSession.value) return false
+    isExitingSession.value = true
+    stopPollsSafe()
+    clearDiningSessionStorage()
+    diningSessionId.value = ''
+    diningParticipantToken.value = ''
+    tableNo.value = ''
+    tableSessionClosed.value = false
+    tableSessionStatus.value = ''
+    tableSessionTotal.value = 0
+    tableSessionClosedAt.value = ''
+    tableSessionClosedNotice.value = ''
+    checkoutRequestedAt.value = ''
+    return true
+  }
+
   const ensureDiningSession = async (force = false) => {
+    // CLOSED / 退出中：禁止用旧 tableNo 静默重建 DiningSession。重新开桌只能走扫码 entry。
+    if (tableSessionClosed.value || isExitingSession.value) return false
     const tenantId = shopId.value || uni.getStorageSync('tenant_id') || ''
     const table = tableNo.value || uni.getStorageSync('table_no') || ''
-    if (tableSessionClosed.value && !force) return false
     const identity = await resolveDiningIdentity({ tenantId, table, force })
     if (!identity.ok) return false
     persistDiningContext(identity.data)
@@ -96,6 +151,10 @@ export function useDiningSession({
   // 事——那跟"这一桌真的还没人点单"在界面上长得一模一样，顾客不会知道是身份出了问题。
   // 这两种情况都先强制重建一次身份再重试，isRetry 保证最多重试一次，不会死循环。
   const syncDiningOrders = async (isRetry = false) => {
+    if (isExitingSession.value) return false
+    // 已 CLOSED：不再拉旧会话，更不能 ensureDiningSession(true) 静默开新桌
+    if (tableSessionClosed.value) return false
+
     const query = diningOrderQuery()
     if (!query.tenant_id || !query.dining_session_id || !query.participant_token) {
       if (isRetry) return false
@@ -111,22 +170,18 @@ export function useDiningSession({
       const sessionStatus = String(res.data?.session_status || '').toUpperCase()
       tableSessionStatus.value = sessionStatus
       tableSessionTotal.value = Number(res.data?.table_total || res.data?.session_total || 0)
-      tableSessionClosed.value = res.data?.closed === true || ['CLOSED', 'EXPIRED'].includes(sessionStatus)
-      if (tableSessionClosed.value) {
-        tableSessionClosedNotice.value = '本桌用餐已结束，如需继续点餐，请重新扫码进入新一桌'
-        // Session closed: clear the local "which table" markers so the
-        // mine page won't keep showing this settled table as still dining.
-        uni.removeStorageSync('table_no')
-        uni.removeStorageSync('table_no_at')
-        uni.removeStorageSync('dining_session_id')
-        uni.removeStorageSync('dining_participant_id')
-        uni.removeStorageSync('dining_participant_token')
-        uni.removeStorageSync('dining_table_no')
-      }
       checkoutRequestedAt.value = res.data?.checkout_requested_at || ''
       tableSessionClosedAt.value = res.data?.closed_at || ''
       myOrders.value = (res.data?.orders || []).map(mapServerOrder)
       saveMyOrders()
+
+      const closed = res.data?.closed === true || ['CLOSED', 'EXPIRED'].includes(sessionStatus)
+      if (closed) {
+        markSessionClosed('本桌用餐已结束，如需继续点餐，请重新扫码进入新一桌')
+        return true
+      }
+
+      tableSessionClosed.value = false
 
       const newParticipantCount = Number(res.data?.participant_count || 0)
       if (newParticipantCount > 0) {
@@ -160,5 +215,8 @@ export function useDiningSession({
     bindCurrentDiningParticipant,
     syncDiningOrders,
     showTableHint,
+    markSessionClosed,
+    exitDiningSession,
+    isExitingSession,
   }
 }

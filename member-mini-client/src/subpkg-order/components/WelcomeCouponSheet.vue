@@ -19,7 +19,7 @@
       <view class="closed-icon-wrap"><text class="closed-icon iconfont" :class="tableSessionClosed ? 'icon-roundcheckfill' : 'icon-shopfill'"></text></view>
       <text class="closed-title">{{ tableSessionClosed ? '本桌用餐已结束' : shopName + ' 当前休息中' }}</text>
       <text class="closed-desc">{{ tableSessionClosed ? tableSessionClosedNotice : (closedNotice || '营业时间请参考门店公告') }}</text>
-      <view v-if="tableSessionClosed" class="closed-btn" @click="$emit('go-mine')"><text>好的，我知道了</text></view>
+      <view v-if="tableSessionClosed" class="closed-btn" @click="$emit('acknowledge-closed')"><text>好的，我知道了</text></view>
       <view v-else class="closed-btn" @click="$emit('keep-browsing')"><text>仍要浏览菜单</text></view>
     </view>
   </view>
@@ -30,9 +30,11 @@
 // 用餐结束遮罩（storeClosed || tableSessionClosed）。两个都很小、互不相关，顺手
 // 放进同一个文件。纯展示组件，不带任何业务逻辑——所有点击都只 emit 出去，真正
 // 的处理函数还是原来 menu.vue 里的
-// closeWelcomeCoupon/goOrderFromWelcomeCoupon/goMine，一行都没有改。原模板里
+// closeWelcomeCoupon/goOrderFromWelcomeCoupon/acknowledgeClosedSession，一行都没有改。原模板里
 // "仍要浏览菜单"按钮是直接 @click="storeClosed = false" 的状态赋值，这里改成
 // emit('keep-browsing')，父组件监听后照原样赋值。
+// tableSessionClosed 的「好的，我知道了」改为 emit('acknowledge-closed')：
+// 父组件负责 exitDiningSession + reLaunch，不再 navigateTo 我的（避免旧 menu 留栈）。
 export default {
   name: 'WelcomeCouponSheet',
   props: {
@@ -47,7 +49,7 @@ export default {
     // 纯格式化函数直接从父组件原样传进来（不是在这里重写一份同名逻辑）。
     formatPrice: { type: Function, required: true },
   },
-  emits: ['close', 'go-order', 'go-mine', 'keep-browsing'],
+  emits: ['close', 'go-order', 'acknowledge-closed', 'keep-browsing'],
 }
 </script>
 
@@ -68,7 +70,7 @@ export default {
 
 
 .closed-card {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   padding: 56rpx 40rpx 40rpx;
   text-align: center;
@@ -82,7 +84,7 @@ export default {
   height: 112rpx;
   margin: 0 auto 24rpx;
   border-radius: 50%;
-  background: #F3F4F6;
+  background: var(--bg-muted);
   color: #9aa1aa;
   display: flex;
   align-items: center;
@@ -123,7 +125,7 @@ export default {
   border-radius: 20rpx;
   text {
     font-size: 30rpx;
-    color: #fff;
+    color: var(--text-inverse);
     font-weight: 700;
   }
 }
@@ -194,7 +196,7 @@ export default {
 .wc-currency {
   font-size: 34rpx;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--text-inverse);
   margin-right: 4rpx;
 }
 
@@ -203,7 +205,7 @@ export default {
 .wc-amount {
   font-size: 88rpx;
   font-weight: 900;
-  color: #ffffff;
+  color: var(--text-inverse);
   line-height: 1;
   text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
 }
@@ -232,7 +234,7 @@ export default {
   display: block;
   font-size: 28rpx;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-inverse);
 }
 
 

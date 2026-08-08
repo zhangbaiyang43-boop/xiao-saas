@@ -291,14 +291,14 @@
       :welcome-coupon-data="welcomeCouponData"
       :welcome-coupon-cond-text="welcomeCouponCondText"
       :store-closed="storeClosed"
-      :table-session-closed="tableSessionClosed"
+      :table-session-closed="showUnexpectedClosedMask"
       :shop-name="shopName"
       :table-session-closed-notice="tableSessionClosedNotice"
       :closed-notice="closedNotice"
       :format-price="formatPrice"
       @close="closeWelcomeCoupon"
       @go-order="goOrderFromWelcomeCoupon"
-      @go-mine="goMine"
+      @acknowledge-closed="acknowledgeClosedSession"
       @keep-browsing="storeClosed = false"
     />
 
@@ -320,7 +320,6 @@
       :postpay-ready-to-settle="postpayReadyToSettle"
       :table-checkouting="tableCheckouting"
       :checkout-requested="checkoutRequested"
-      :table-account-scroll-into="tableAccountScrollInto"
       :format-price="formatPrice"
       :order-item-image="orderItemImage"
       :order-item-name="orderItemName"
@@ -328,10 +327,10 @@
       :order-item-qty="orderItemQty"
       :order-item-amount="orderItemAmount"
       @close="showOrders = false"
+      @finish="finishSettledSession"
       @retry-load="loadMenu"
       @continue-order="handleTableContinueOrder"
       @checkout="handleTableCheckout"
-      @scroll-to-top="scrollTableAccountToTop"
       @mark-image-failed="markOrderItemImageFailed"
     />
     <OrderHistorySheet
@@ -549,8 +548,7 @@ export default {
     const tableSessionTotal = ref(0)
     const tableCheckouting = ref(false)
     const checkoutRequestedAt = ref('')
-    const tableSessionClosedAt = ref('')   // 真正的结账时间（区别于下单时间），给"查看结账详情"用
-    const tableAccountScrollInto = ref('')
+    const tableSessionClosedAt = ref('')   // 真正的结账时间（区别于下单时间），给结账结果页展示
     const { failed: orderItemImageFailed, markFailed: markOrderItemImageFailed } = useFailedImageMap()
     const storeClosed = ref(false)
     const tableSessionClosed = ref(false)
@@ -582,7 +580,10 @@ export default {
     })
     const shopDistance = ref('')
 
+    // BottomNav「我的」：正常浏览仍可 navigateTo（ACTIVE 时返回旧 menu 合法）。
+    // CLOSED 退出禁止用这条路径——必须走 finishSettledSession / acknowledgeClosedSession 的 reLaunch。
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
+    const SAFE_PAGE_AFTER_DINING_EXIT = '/pages/mine/mine'
 
     const availableCoupons = ref([])
     const {
@@ -633,7 +634,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId,
       tableTotal, tableItemCount, tableOrderGroups,
       isTableSettled, canContinueOrder, stillPreparing, checkoutRequested,
-      canCheckout, postpayReadyToSettle, scrollTableAccountToTop, tableStatusView,
+      canCheckout, postpayReadyToSettle, tableStatusView,
       currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
       tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle,
       tableOrderStatusHint, tableOrderTimeline, currentOrderItemCount, currentOrderItems,
@@ -641,7 +642,7 @@ export default {
     } = useTableBillView({
       myOrders, orderId, orderStatus, paymentMode, diningSessionId,
       tableSessionTotal, tableSessionClosed, tableSessionStatus, checkoutRequestedAt,
-      tableCheckouting, tableSessionClosedAt, tableAccountScrollInto,
+      tableCheckouting, tableSessionClosedAt,
       normalizePaymentMode, orderItemQty, orderItemCount,
     })
 
@@ -650,13 +651,17 @@ export default {
       stopStatusPoll: () => stopStatusPoll(),
     })
 
+    // 先占位，useDiningSession / useOrderStatusPoll 创建后再接到真实 stop*
+    let stopDiningPollsImpl = () => {}
     const {
       persistDiningContext, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders, showTableHint,
+      exitDiningSession, isExitingSession,
     } = useDiningSession({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
       tableSessionClosed, tableSessionStatus, tableSessionTotal, tableSessionClosedNotice,
       checkoutRequestedAt, tableSessionClosedAt, myOrders,
       normalizePaymentMode, saveMyOrders,
+      stopDiningPolls: () => stopDiningPollsImpl(),
     })
 
     const {
@@ -664,11 +669,41 @@ export default {
       orderStatusText, orderStatusClass,
     } = useSuccessSheetView({ successItems, orderNo, orderId, orderStatus })
 
+    const canPollDiningSession = () => (
+      !isExitingSession.value
+      && !tableSessionClosed.value
+      && Boolean(diningSessionId.value || uni.getStorageSync('dining_session_id'))
+    )
+
     const {
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, refreshAllOrderStatuses,
     } = useOrderStatusPoll({
       orderStatus, diningParticipantToken, myOrders, saveMyOrders, syncDiningOrders, normalizeOrderStatus,
+      canPollDiningSession,
     })
+    stopDiningPollsImpl = () => {
+      stopStatusPoll()
+      stopTablePresencePoll()
+    }
+
+    // 看完结账结果 / 异常 CLOSED 遮罩确认后：清会话 + 清空页面栈，避免 mine→back→旧 A12。
+    const leaveClosedDiningSession = () => {
+      if (!exitDiningSession()) return
+      showOrders.value = false
+      uni.reLaunch({ url: SAFE_PAGE_AFTER_DINING_EXIT })
+    }
+    const finishSettledSession = () => leaveClosedDiningSession()
+    const acknowledgeClosedSession = () => leaveClosedDiningSession()
+
+    // 正在看 TableBillSheet 结账结果时，不要再叠一层「本桌用餐已结束」遮罩。
+    const showUnexpectedClosedMask = computed(() => (
+      tableSessionClosed.value && !(showOrders.value && isSharedBillMode.value && isTableSettled.value)
+    ))
+
+    const startTablePresencePollIfActive = () => {
+      if (!canPollDiningSession()) return
+      startTablePresencePoll()
+    }
 
     const finishOrdering = () => {
       showSuccess.value = false
@@ -1145,7 +1180,8 @@ export default {
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
       paying, payAmount, confirmPay,
       orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
-      startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll,
+      startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, startTablePresencePollIfActive,
+      finishSettledSession, acknowledgeClosedSession, showUnexpectedClosedMask, exitDiningSession, isExitingSession,
       remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,
       orderRemarkExpanded, toggleOrderRemarkExpanded, orderRemarkSummary,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
@@ -1162,7 +1198,6 @@ export default {
       goCheckout, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
-      tableAccountScrollInto, scrollTableAccountToTop,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
@@ -1236,7 +1271,7 @@ export default {
         // \u4f46\u53ef\u4fe1\u65f6\u5c31\u7701\u6389\u4e00\u6b21\u53c2\u6570\u5b8c\u5168\u76f8\u540c\u7684\u91cd\u590d\u7f51\u7edc\u5f80\u8fd4\u3002
         await this.ensureDiningSession(false)
         await this.syncDiningOrders()
-        this.startTablePresencePoll()
+        this.startTablePresencePollIfActive()
         await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
         if (options.openOrders === '1') this.showOrders = true
       })()
@@ -1258,7 +1293,8 @@ export default {
     if (this.orderId && !['settled', 'cancelled', 'rejected'].includes(this.orderStatus)) {
       this.startStatusPoll(this.orderId)
     }
-    this.startTablePresencePoll()
+    // CLOSED / 退出中 / 无 active session：禁止重启旧桌轮询（死循环根因之一）
+    this.startTablePresencePollIfActive()
   },
   onHide: function () {
     this.stopStatusPoll()

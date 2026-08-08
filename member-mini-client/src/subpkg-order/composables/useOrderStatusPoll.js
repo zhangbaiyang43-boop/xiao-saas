@@ -16,6 +16,8 @@ import { toastText, modalText } from '../utils/orderText.js'
 export function useOrderStatusPoll({
   orderStatus, diningParticipantToken, myOrders,
   saveMyOrders, syncDiningOrders, normalizeOrderStatus,
+  // 可选：CLOSED / 退出中 / 无 active session 时不要启动桌台轮询
+  canPollDiningSession,
 }) {
   let statusPollTimer = null
   let tablePresencePollTimer = null
@@ -54,7 +56,12 @@ export function useOrderStatusPoll({
   // 会停掉，不在后台空耗电量和流量。
   function startTablePresencePoll() {
     stopTablePresencePoll()
+    if (typeof canPollDiningSession === 'function' && !canPollDiningSession()) return
     tablePresencePollTimer = setInterval(() => {
+      if (typeof canPollDiningSession === 'function' && !canPollDiningSession()) {
+        stopTablePresencePoll()
+        return
+      }
       syncDiningOrders().catch(() => {})
     }, 25000)
   }
