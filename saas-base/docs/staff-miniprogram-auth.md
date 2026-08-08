@@ -24,28 +24,16 @@
 
 - `STAFF_MINIPROGRAM_AUTH_ENABLED=true`（主）
 - `STAFF_OFFICIAL_ACCOUNT_OAUTH_ENABLED=false`（旧公众号 OAuth，代码保留，默认关闭）
-- `STAFF_MINIPROGRAM_TEST_SCAN_ENABLED=false`（TEMP：开发版普通测试码 transport，默认关）
 
 ## 复用
 
 - `WechatService.code2session` / `get_access_token` / `get_wxacode_unlimit`
 - 表：`merchant_account_wechat_bindings`、`merchant_account_trusted_devices`（migration `20260808_0004`，无新 migration）
 
-## TEMP Staff Bind Test Scanner
+## TEMP_STAFF_SCAN_TEST
 
-【测试入口只绕过“小程序如何获得 scene”，绝不能绕过员工真实微信身份认证。】
+临时：开发版内「我的 → 扫一扫」扫普通码 `KXD_STAFF_BIND_V1:<scene>`，与正式小程序码共用同一 scene。
 
-【扫一扫测试和正式小程序码必须共用同一个 bind scene、同一个 preview、同一个 wx.login、同一个 code2session、同一个 handoff。】
-
-【release 小程序永远不展示测试扫一扫，即使服务器配置错误。】
-
-正式上线后删除（SEARCH `TEMP_STAFF_BIND_TEST_SCAN`）：
-
-1. 服务与设置「扫一扫测试」入口（`mine.vue`）
-2. `utils/staffBindTestScanner.js` 及 `__tests__/staffBindTestScanner.test.js`
-3. StaffManage 开发版测试二维码 UI
-4. API `test_scan_payload` / `test_scan_enabled`
-5. `STAFF_MINIPROGRAM_TEST_SCAN_ENABLED` 配置
-6. 相关 TEMP 测试断言
+正式上线后 SEARCH `TEMP_STAFF_SCAN_TEST` 删除入口 / helper / 测试二维码 / `test_scan_payload`。
 
 **不要删除**：`staff-bind`、`wx.login`、`code2session`、handoff、trusted device。

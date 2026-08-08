@@ -129,12 +129,13 @@
         <div class="section-label">正式绑定</div>
         <img v-if="qrDataUrl" :src="qrDataUrl" alt="微信小程序码" class="qr-img" />
         <div class="hint">请让员工本人使用微信扫一扫</div>
-        <!-- TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification. -->
+        <!-- TEMP_STAFF_SCAN_TEST -->
+        <!-- 正式小程序上线后删除 -->
         <template v-if="testScanDataUrl">
           <div class="divider-line" />
-          <div class="section-label">开发版测试</div>
-          <img :src="testScanDataUrl" alt="开发版测试二维码" class="qr-img" />
-          <div class="hint">请在开发版小程序：服务与设置 → 扫一扫测试</div>
+          <div class="section-label">测试二维码</div>
+          <img :src="testScanDataUrl" alt="测试二维码" class="qr-img" />
+          <div class="hint">开发版小程序：我的 → 扫一扫</div>
         </template>
         <div class="ttl">{{ ttlText }}</div>
         <div v-if="bindOk" class="ok">✓ 微信绑定成功</div>
@@ -175,7 +176,7 @@ const backupSaving = ref(false)
 const qrOpen = ref(false)
 const qrStaff = ref(null)
 const qrDataUrl = ref('')
-// TEMP_STAFF_BIND_TEST_SCAN
+// TEMP_STAFF_SCAN_TEST
 const testScanDataUrl = ref('')
 const qrLoading = ref(false)
 const bindOk = ref(false)
@@ -336,7 +337,7 @@ async function regenQr() {
       message.error('员工绑定码生成失败，请稍后重试')
       return
     }
-    // TEMP_STAFF_BIND_TEST_SCAN — local QR only; never send payload to third-party QR APIs.
+    // TEMP_STAFF_SCAN_TEST — local QR only; never send payload to third-party QR APIs.
     const testPayload = res.data.test_scan_payload || ''
     if (testPayload) {
       testScanDataUrl.value = await QRCode.toDataURL(testPayload, { width: 220, margin: 1 })

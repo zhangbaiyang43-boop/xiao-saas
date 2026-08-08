@@ -29,7 +29,6 @@ from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
 from app.services.staff_miniprogram_provider import (
     build_staff_mp_test_scan_payload,
     staff_miniprogram_auth_enabled,
-    staff_miniprogram_test_scan_enabled,
 )
 from app.services.staff_trusted_device_service import StaffTrustedDeviceService
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
@@ -305,10 +304,8 @@ async def create_miniprogram_bind_session(
         "role": account.role,
         "role_label": "服务员" if account.role == "waiter" else "后厨",
     }
-    # TEMP_STAFF_BIND_TEST_SCAN — same scene as wxacode; omit when flag off.
-    # Remove after MiniProgram production release verification.
-    if staff_miniprogram_test_scan_enabled():
-        data["test_scan_payload"] = build_staff_mp_test_scan_payload(session["scene"])
+    # TEMP_STAFF_SCAN_TEST — same scene as wxacode; 正式小程序上线后删除
+    data["test_scan_payload"] = build_staff_mp_test_scan_payload(session["scene"])
     return success_response(data=data)
 
 

@@ -93,13 +93,8 @@ def staff_miniprogram_auth_enabled() -> bool:
     return bool(settings.STAFF_MINIPROGRAM_AUTH_ENABLED)
 
 
-# TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification.
+# TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除
 STAFF_MP_TEST_SCAN_PREFIX = "KXD_STAFF_BIND_V1:"
-
-
-def staff_miniprogram_test_scan_enabled() -> bool:
-    """Plain QR test transport only. Does not enable/disable formal MiniProgram Auth."""
-    return bool(getattr(settings, "STAFF_MINIPROGRAM_TEST_SCAN_ENABLED", False))
 
 
 def build_staff_mp_test_scan_payload(scene: str) -> str:

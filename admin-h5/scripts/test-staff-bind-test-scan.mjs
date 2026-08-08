@@ -1,5 +1,5 @@
 /**
- * TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification.
+ * TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -12,12 +12,11 @@ const assert = (cond, msg) => {
 }
 
 const staffManage = read('src/views/StaffManage.vue')
-assert(staffManage.includes('TEMP_STAFF_BIND_TEST_SCAN'), 'TEMP marker')
-assert(staffManage.includes('test_scan_payload'), 'only show test QR when API returns payload')
-assert(staffManage.includes('testScanDataUrl'), 'test QR state')
+assert(staffManage.includes('TEMP_STAFF_SCAN_TEST'), 'TEMP marker')
+assert(staffManage.includes('test_scan_payload'), 'test QR from same-session payload')
+assert(staffManage.includes('测试二维码'), 'test QR label')
+assert(staffManage.includes('我的 → 扫一扫'), 'points to miniapp scan entry')
 assert(staffManage.includes('QRCode.toDataURL'), 'local QR generation')
 assert(staffManage.includes('qrcode_data_url'), 'formal wxacode still primary')
-assert(staffManage.includes('开发版测试'), 'dev test label')
-assert(staffManage.includes('扫一扫测试'), 'points to miniapp test entry')
 
 console.log('TEST-FE staffBindTestScan: passed')

@@ -17,12 +17,10 @@ from app.models.merchant_account_wechat_binding import MerchantAccountWechatBind
 from app.models.tenant import Tenant
 from app.services import staff_handoff_service as handoff_svc
 from app.services import staff_mp_bind_session_service as mp_bind
-from app.config import settings
 from app.services.staff_miniprogram_provider import (
     MockMiniProgramIdentityProvider,
     STAFF_MP_TEST_SCAN_PREFIX,
     build_staff_mp_test_scan_payload,
-    staff_miniprogram_test_scan_enabled,
 )
 from app.services.staff_wechat_auth_service import StaffWechatAuthService
 from app.services.staff_wechat_provider import WechatIdentity as WId
@@ -255,18 +253,13 @@ class StaffMiniprogramAuthTest(unittest.IsolatedAsyncioTestCase):
 
 
 class StaffMpTestScanPayloadTest(unittest.TestCase):
-    """TEMP_STAFF_BIND_TEST_SCAN — Remove after MiniProgram production release verification."""
+    """TEMP_STAFF_SCAN_TEST — 正式小程序上线后删除。"""
 
     def test_payload_format_reuses_scene(self):
         scene = "0123456789abcdef0123456789abcdef"
         payload = build_staff_mp_test_scan_payload(scene)
         self.assertTrue(payload.startswith(STAFF_MP_TEST_SCAN_PREFIX))
         self.assertEqual(payload[len(STAFF_MP_TEST_SCAN_PREFIX) :], scene)
-
-    def test_flag_default_false(self):
-        self.assertFalse(bool(getattr(settings, "STAFF_MINIPROGRAM_TEST_SCAN_ENABLED", False)))
-        # Helper tracks settings; default config is false.
-        self.assertFalse(staff_miniprogram_test_scan_enabled())
 
 
 class AppImportMiniprogramRoutesTest(unittest.TestCase):

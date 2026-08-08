@@ -17,7 +17,6 @@ from app.services.staff_bind_token_service import StaffAuthStoreUnavailable
 from app.services.staff_miniprogram_provider import (
     get_staff_miniprogram_provider,
     staff_miniprogram_auth_enabled,
-    staff_miniprogram_test_scan_enabled,
     staff_official_account_oauth_enabled,
 )
 from app.services.staff_trusted_device_service import decode_device_credential
@@ -33,8 +32,6 @@ async def mp_auth_status():
         data={
             "enabled": staff_miniprogram_auth_enabled(),
             "official_account_oauth_enabled": staff_official_account_oauth_enabled(),
-            # TEMP_STAFF_BIND_TEST_SCAN
-            "test_scan_enabled": staff_miniprogram_test_scan_enabled(),
         }
     )
 
