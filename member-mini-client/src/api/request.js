@@ -108,9 +108,14 @@ const request = (options) => {
         }
 
         if (body.code === 401 || statusCode === 401 || body.code === 403 || statusCode === 403) {
-          const error = new Error(toFriendlyMessage('', statusCode))
+          // authRedirect:false（如员工 bind preview）用服务端业务文案，避免误显示「登录已过期」。
+          const message = authRedirect
+            ? toFriendlyMessage('', statusCode)
+            : (body.msg || body.message || body.detail || toFriendlyMessage('', statusCode))
+          const error = new Error(message)
           error.statusCode = statusCode || body.code
           error.code = body.code || statusCode
+          error.bizCode = body?.data?.code
           // 401/403 大多是"登录态过期"这种预期内的正常事件，不是代码 bug，
           // 单独用 auth_error 这个 scene 报，方便以后在后台把它跟真正的接口
           // 故障分开看，不要混在一起互相掩盖。
@@ -123,6 +128,7 @@ const request = (options) => {
         const error = new Error(toFriendlyMessage(body.msg || body.message || body.detail, statusCode))
         error.statusCode = statusCode
         error.code = body.code
+        error.bizCode = body?.data?.code
         reportError('api.error', error, { url: options.url, statusCode, code: body.code })
         reject(error)
       },

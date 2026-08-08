@@ -273,5 +273,69 @@ class AppImportMiniprogramRoutesTest(unittest.TestCase):
         self.assertIn("/api/v1/staff/miniprogram/status", paths)
 
 
+class StaffMpAuthMiddlewareWhitelistTest(unittest.TestCase):
+    """First-time bind/login must be anonymous; other /api/v1/staff/* stay protected."""
+
+    PUBLIC_PATHS = (
+        "/api/v1/staff/miniprogram/status",
+        "/api/v1/staff/miniprogram/bind/preview",
+        "/api/v1/staff/miniprogram/bind/confirm",
+        "/api/v1/staff/miniprogram/login",
+        "/api/v1/staff/miniprogram/login/select",
+        "/api/v1/login/staff/handoff",
+    )
+
+    def test_exact_whitelist_entries(self):
+        from app.middleware.auth_middleware import WHITELIST
+
+        for path in self.PUBLIC_PATHS:
+            self.assertIn(path, WHITELIST)
+        # Must not open all staff APIs
+        self.assertNotIn("/api/v1/staff", WHITELIST)
+        self.assertNotIn("/api/v1/orders/workbench", WHITELIST)
+
+    def test_anonymous_bind_preview_passes_middleware(self):
+        import json
+
+        from starlette.requests import Request
+
+        from app.middleware.auth_middleware import AuthMiddleware
+
+        middleware = AuthMiddleware(app=None)
+        called = {"ok": False}
+
+        async def call_next(request):
+            called["ok"] = True
+            return json.dumps({"ok": True})
+
+        def make_req(path):
+            return Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "path": path,
+                    "headers": [],
+                    "query_string": b"",
+                    "server": ("testserver", 80),
+                    "scheme": "http",
+                    "client": ("testclient", 50000),
+                }
+            )
+
+        for path in self.PUBLIC_PATHS:
+            called["ok"] = False
+            result = asyncio.run(middleware.dispatch(make_req(path), call_next))
+            self.assertTrue(called["ok"], path)
+            self.assertEqual(result, json.dumps({"ok": True}))
+
+        # Non-optional merchant path still 401 without JWT (orders/* is optional-auth).
+        called["ok"] = False
+        blocked = asyncio.run(middleware.dispatch(make_req("/api/v1/merchant-accounts"), call_next))
+        self.assertFalse(called["ok"])
+        self.assertEqual(blocked.status_code, 401)
+        body = json.loads(blocked.body.decode("utf-8"))
+        self.assertEqual(body["code"], 401)
+
+
 if __name__ == "__main__":
     unittest.main()

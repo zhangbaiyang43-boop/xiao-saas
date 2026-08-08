@@ -50,6 +50,14 @@ WHITELIST = {
     "/api/v1/staff/wechat/oauth/callback",
     "/api/v1/staff/wechat/bind/preview",
     "/api/v1/staff/wechat/bind/confirm",
+    # Staff mini-program first-time identity: scene / wx.login code / handoff token
+    # authenticate themselves — must NOT require merchant/staff/customer JWT.
+    "/api/v1/staff/miniprogram/status",
+    "/api/v1/staff/miniprogram/bind/preview",
+    "/api/v1/staff/miniprogram/bind/confirm",
+    "/api/v1/staff/miniprogram/login",
+    "/api/v1/staff/miniprogram/login/select",
+    "/api/v1/login/staff/handoff",
     "/api/v1/register",
     "/api/v1/wework/callback",
     "/api/v1/member/login-or-create",

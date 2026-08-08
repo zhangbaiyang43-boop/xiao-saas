@@ -13,9 +13,11 @@ const assert = (cond, msg) => {
 
 const staffManage = read('src/views/StaffManage.vue')
 assert(staffManage.includes('TEMP_STAFF_SCAN_TEST'), 'TEMP marker')
+assert(staffManage.includes('正式小程序码'), 'formal code label')
+assert(staffManage.includes('开发版测试二维码'), 'test code label distinct')
 assert(staffManage.includes('test_scan_payload'), 'test QR from same-session payload')
-assert(staffManage.includes('测试二维码'), 'test QR label')
 assert(staffManage.includes('我的 → 扫一扫'), 'points to miniapp scan entry')
+assert(staffManage.includes('不要扫上方正式小程序码'), 'warn not to scan formal code')
 assert(staffManage.includes('QRCode.toDataURL'), 'local QR generation')
 assert(staffManage.includes('qrcode_data_url'), 'formal wxacode still primary')
 

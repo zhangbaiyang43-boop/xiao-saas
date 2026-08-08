@@ -126,17 +126,19 @@
     <a-modal v-model:open="qrOpen" title="微信绑定" :footer="null" @cancel="stopPoll">
       <div class="qr-box">
         <div class="name">{{ qrStaff?.name }} · {{ roleLabel(qrStaff?.role) }}</div>
-        <div class="section-label">正式绑定</div>
-        <img v-if="qrDataUrl" :src="qrDataUrl" alt="微信小程序码" class="qr-img" />
-        <div class="hint">请让员工本人使用微信扫一扫</div>
+        <div class="section-label">正式小程序码</div>
+        <img v-if="qrDataUrl" :src="qrDataUrl" alt="正式小程序码" class="qr-img" />
+        <div class="hint">正式环境：微信外部扫一扫打开小程序</div>
         <!-- TEMP_STAFF_SCAN_TEST -->
         <!-- 正式小程序上线后删除 -->
         <template v-if="testScanDataUrl">
           <div class="divider-line" />
-          <div class="section-label">测试二维码</div>
-          <img :src="testScanDataUrl" alt="测试二维码" class="qr-img" />
-          <div class="hint">开发版小程序：我的 → 扫一扫</div>
+          <div class="section-label">开发版测试二维码</div>
+          <img :src="testScanDataUrl" alt="开发版测试二维码" class="qr-img test-qr" />
+          <div class="hint">开发版小程序请使用：我的 → 扫一扫</div>
+          <div class="hint warn">请扫下方普通码，不要扫上方正式小程序码</div>
         </template>
+        <div v-else class="hint warn">未生成开发版测试二维码，请重新生成绑定码</div>
         <div class="ttl">{{ ttlText }}</div>
         <div v-if="bindOk" class="ok">✓ 微信绑定成功</div>
         <a-button style="margin-top:12px" block @click="regenQr" :loading="qrLoading">重新生成</a-button>
@@ -421,8 +423,10 @@ onBeforeUnmount(stopPoll)
 .hint { font-size: 12px; color: #888; margin-top: 8px; }
 .qr-box { text-align: center; padding: 8px 0 4px; }
 .qr-img { width: 220px; height: 220px; margin: 12px auto; display: block; }
+.qr-img.test-qr { border: 2px dashed #07c160; border-radius: 8px; padding: 4px; box-sizing: border-box; }
 .section-label { font-size: 13px; font-weight: 600; color: #334155; margin-top: 4px; }
 .divider-line { height: 1px; background: #e2e8f0; margin: 16px 0 12px; }
+.hint.warn { color: #b45309; font-weight: 600; }
 .ttl { font-size: 14px; color: #666; margin-top: 4px; }
 .ok { color: #07c160; font-weight: 700; margin-top: 10px; }
 .created { text-align: center; padding: 8px 0; }

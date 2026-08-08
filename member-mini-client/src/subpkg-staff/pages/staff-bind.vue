@@ -75,7 +75,12 @@ export default {
           role_label: res.data?.role_label || '',
         }
       } catch (e) {
-        this.error = e?.message || '绑定码已失效'
+        // bind scene 失效/无效 ≠ 顾客登录过期
+        if (e?.bizCode === 'bind_expired' || /绑定码/.test(String(e?.message || ''))) {
+          this.error = e?.message || '员工绑定码已过期，请让老板重新生成'
+        } else {
+          this.error = e?.message || '绑定码已失效'
+        }
       } finally {
         this.loading = false
       }
