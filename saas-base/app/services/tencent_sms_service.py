@@ -70,6 +70,15 @@ def generate_login_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def mask_phone(phone: str) -> str:
+    value = str(phone or "")
+    if len(value) == 11:
+        return f"{value[:3]}****{value[-4:]}"
+    if len(value) > 3:
+        return f"{value[:3]}****"
+    return "****"
+
+
 def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -187,7 +196,14 @@ class TencentSmsService:
         if code_value == "Ok":
             return True, "验证码已发送"
 
-        logger.error(f"Tencent SMS rejected login code: {result}")
+        response_payload = result.get("Response") or {}
+        request_id = response_payload.get("RequestId") or ""
+        logger.error(
+            "Tencent SMS rejected: provider=tencent code=%s request_id=%s phone=%s",
+            code_value,
+            request_id,
+            mask_phone(phone),
+        )
         return False, first_status.get("Message") or "验证码发送失败，请稍后再试"
 
     def _build_headers(self, body: str, timestamp: int) -> dict[str, str]:

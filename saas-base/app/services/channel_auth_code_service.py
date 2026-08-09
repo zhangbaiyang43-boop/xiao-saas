@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from collections import defaultdict
@@ -10,11 +11,15 @@ from typing import Any
 from app.config import settings
 from app.core.cache_helper import delete_cache, get_cache, set_cache
 from app.services.channel_partner_service import normalize_mobile
+from app.services.tencent_sms_service import TencentSmsService
 
-REAL_SMS_LOGIN_BLOCKED_REASON = "REAL SMS LOGIN BLOCKED"
+SMS_CONFIG_UNAVAILABLE_MSG = "短信服务暂不可用，请联系平台管理员"
+SMS_PROVIDER_FAILURE_MSG = "验证码发送失败，请稍后再试"
+INVALID_MOBILE_MSG = "请输入正确的手机号"
 
 _memory_cache: dict[str, tuple[float, Any]] = {}
 _code_locks = defaultdict(asyncio.Lock)
+_send_locks = defaultdict(asyncio.Lock)
 
 
 def _now() -> float:
@@ -67,6 +72,10 @@ def generate_login_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
+def is_valid_mainland_mobile(mobile_normalized: str) -> bool:
+    return bool(re.fullmatch(r"1\d{10}", mobile_normalized or ""))
+
+
 class ChannelAuthCodeService:
     def __init__(self) -> None:
         self.ttl = settings.SMS_CODE_TTL_SECONDS
@@ -91,20 +100,34 @@ class ChannelAuthCodeService:
         mobile_normalized = normalize_mobile(mobile)
         if not mobile_normalized:
             return False, "mobile required", {}
-        cooldown = await _cache_get(self._cooldown_key(mobile_normalized))
-        if cooldown:
-            return False, "验证码发送过于频繁，请稍后再试", {"retry_after": self.interval}
-        sent_count = int(await _cache_get(self._daily_key(mobile_normalized)) or 0)
-        if sent_count >= self.daily_limit:
-            return False, "今日验证码发送次数已达上限，请明天再试", {}
-        if not self._fake_provider_enabled():
-            return False, REAL_SMS_LOGIN_BLOCKED_REASON, {}
+        if not is_valid_mainland_mobile(mobile_normalized):
+            return False, INVALID_MOBILE_MSG, {}
 
-        code = generate_login_code()
-        await self.store_login_code(mobile_normalized, code)
-        await _cache_set(self._cooldown_key(mobile_normalized), True, self.interval)
-        await _cache_set(self._daily_key(mobile_normalized), sent_count + 1, 86400)
-        return True, "验证码已发送", {"expires_in": self.ttl, "retry_after": self.interval, "debug_code": code}
+        async with _send_locks[mobile_normalized]:
+            cooldown = await _cache_get(self._cooldown_key(mobile_normalized))
+            if cooldown:
+                return False, "验证码发送过于频繁，请稍后再试", {"retry_after": self.interval}
+            sent_count = int(await _cache_get(self._daily_key(mobile_normalized)) or 0)
+            if sent_count >= self.daily_limit:
+                return False, "今日验证码发送次数已达上限，请明天再试", {}
+
+            code = generate_login_code()
+            if not self._fake_provider_enabled():
+                sms = TencentSmsService()
+                if not sms.is_configured():
+                    return False, SMS_CONFIG_UNAVAILABLE_MSG, {}
+                ok, _provider_message = await sms.send_login_code(mobile_normalized, code)
+                if not ok:
+                    return False, SMS_PROVIDER_FAILURE_MSG, {}
+                await self.store_login_code(mobile_normalized, code)
+                await _cache_set(self._cooldown_key(mobile_normalized), True, self.interval)
+                await _cache_set(self._daily_key(mobile_normalized), sent_count + 1, 86400)
+                return True, "验证码已发送", {"expires_in": self.ttl, "retry_after": self.interval}
+
+            await self.store_login_code(mobile_normalized, code)
+            await _cache_set(self._cooldown_key(mobile_normalized), True, self.interval)
+            await _cache_set(self._daily_key(mobile_normalized), sent_count + 1, 86400)
+            return True, "验证码已发送", {"expires_in": self.ttl, "retry_after": self.interval, "debug_code": code}
 
     async def store_login_code(self, mobile_normalized: str, code: str) -> None:
         mobile_key = normalize_mobile(mobile_normalized)
