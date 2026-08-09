@@ -14,6 +14,7 @@ from app.models.channel_revenue import (
 )
 from app.models.tenant import Tenant
 from app.services.base_service import BaseService
+from app.utils.id_generator import generate_snowflake_id
 
 
 PARTNER_STATUS_ACTIVE = "ACTIVE"
@@ -64,6 +65,8 @@ def serialize_partner(partner: ChannelPartner) -> dict:
         "mobile_normalized": partner.mobile_normalized,
         "partner_type": partner.partner_type,
         "status": partner.status,
+        "created_at": partner.created_at.isoformat() if partner.created_at else None,
+        "updated_at": partner.updated_at.isoformat() if partner.updated_at else None,
     }
 
 
@@ -100,41 +103,60 @@ class ChannelPartnerService(BaseService):
     async def create_partner(
         self,
         *,
-        partner_code: str,
+        partner_code: str | None = None,
         name: str,
         mobile: str,
         partner_type: str,
         status: str = PARTNER_STATUS_ACTIVE,
     ) -> ChannelPartner:
         code = (partner_code or "").strip().upper()
+        code_is_manual = bool(code)
         partner_type = (partner_type or "OTHER").upper()
         status = (status or PARTNER_STATUS_ACTIVE).upper()
-        if not code:
-            raise ValueError("partner_code required")
         if partner_type not in PARTNER_TYPES:
             raise ValueError("partner_type unsupported")
         if status not in PARTNER_STATUSES:
             raise ValueError("partner status unsupported")
-        partner = ChannelPartner(
-            partner_code=code,
-            name=(name or "").strip(),
-            mobile=normalize_mobile(mobile),
-            mobile_normalized=normalize_mobile(mobile),
-            partner_type=partner_type,
-            status=status,
-        )
-        self.db.add(partner)
-        try:
-            await self.db.commit()
-        except IntegrityError as exc:
-            await self.db.rollback()
-            raise ValueError("partner_code or mobile already exists") from exc
-        await self.db.refresh(partner)
-        return partner
+        mobile_normalized = normalize_mobile(mobile)
+        if not mobile_normalized:
+            raise ValueError("mobile required")
+
+        for attempt in range(10):
+            next_code = code or await self._generate_partner_code()
+            partner = ChannelPartner(
+                partner_code=next_code,
+                name=(name or "").strip(),
+                mobile=mobile_normalized,
+                mobile_normalized=mobile_normalized,
+                partner_type=partner_type,
+                status=status,
+            )
+            self.db.add(partner)
+            try:
+                await self.db.commit()
+            except IntegrityError as exc:
+                await self.db.rollback()
+                if code_is_manual or attempt == 9:
+                    raise ValueError("partner_code or mobile already exists") from exc
+                continue
+            await self.db.refresh(partner)
+            return partner
+
+        raise ValueError("partner_code or mobile already exists")
 
     async def list_partners(self) -> list[ChannelPartner]:
         result = await self.db.execute(select(ChannelPartner).order_by(ChannelPartner.created_at.desc()))
         return list(result.scalars().all())
+
+    async def _generate_partner_code(self) -> str:
+        prefix = f"CH{datetime.utcnow().strftime('%Y%m%d')}"
+        for _ in range(20):
+            suffix = int(generate_snowflake_id()) % 10000
+            code = f"{prefix}{suffix:04d}"
+            existing = await self.db.execute(select(ChannelPartner.id).where(ChannelPartner.partner_code == code))
+            if existing.scalar_one_or_none() is None:
+                return code
+        raise ValueError("partner_code generation failed")
 
     async def get_partner(self, partner_id: int) -> ChannelPartner | None:
         result = await self.db.execute(select(ChannelPartner).where(ChannelPartner.id == partner_id))

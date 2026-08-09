@@ -30,7 +30,7 @@ router = APIRouter(
 
 
 class ChannelPartnerCreateRequest(BaseModel):
-    partner_code: str = Field(..., min_length=1, max_length=64)
+    partner_code: str | None = Field(None, min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=128)
     mobile: str = Field(..., min_length=1, max_length=32)
     partner_type: str = "OTHER"

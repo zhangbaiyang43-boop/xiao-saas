@@ -25,6 +25,12 @@
         <button class="logout-btn tap-shrink" @click="logout">退出</button>
       </div>
 
+      <div class="console-tabs animate-in">
+        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'merchants' }" @click="activeTab = 'merchants'">商家管理</button>
+        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'channel' }" @click="activeTab = 'channel'">渠道管理</button>
+      </div>
+
+      <div v-if="activeTab === 'merchants'">
       <div class="stat-row animate-in">
         <div class="stat-card"><div class="stat-num">{{ stats.total_merchants }}</div><div class="stat-label">商家总数</div></div>
         <div class="stat-card"><div class="stat-num green">{{ stats.active_merchants }}</div><div class="stat-label">活跃商家</div></div>
@@ -111,6 +117,9 @@
           </div>
         </div>
       </div>
+      </div>
+
+      <ChannelPartnerPanel v-else :super-token="superToken" />
     </div>
 
     <div v-if="payConfigTarget" class="modal-mask" @click.self="closePayConfig">
@@ -194,6 +203,7 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import axios from 'axios'
+import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 
 const BASE = '/api/super'
 
@@ -205,6 +215,7 @@ const needTotp = ref(false)
 const totpCode = ref('')
 const totpEnabled = ref(false)
 let superToken = ''
+const activeTab = ref('merchants')
 
 const stats = reactive({ total_merchants: 0, active_merchants: 0, today_orders: 0, today_revenue: 0 })
 const merchants = ref([])
@@ -566,6 +577,9 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 52px 16px 12px; background: var(--hero-dark); color: #fff; }
 .top-title { font-size: 18px; font-weight: 900; }
 .logout-btn { border: 1px solid rgba(255,255,255,.25); border-radius: 8px; background: rgba(255,255,255,.08); color: #fff; cursor: pointer; padding: 5px 12px; font-size: 13px; }
+.console-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 16px 0; background: var(--hero-dark); }
+.tab-btn { height: 40px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px 8px 0 0; background: rgba(255,255,255,.08); color: rgba(255,255,255,.72); font-weight: 800; cursor: pointer; }
+.tab-btn.active { background: var(--bg-page); border-color: var(--bg-page); color: var(--text-1); }
 .refresh-btn, .pay-cfg-btn, .cancel-btn, .fold-btn { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-2); cursor: pointer; }
 .refresh-btn { padding: 5px 12px; font-size: 13px; }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); padding: 12px 16px; gap: 8px; }
