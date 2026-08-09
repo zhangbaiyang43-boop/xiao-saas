@@ -1234,6 +1234,68 @@ def serialize_fulfillment_order(
     return data
 
 
+def serialize_recent_served_order(order, order_items) -> dict:
+    """Minimal waiter recent-served DTO — no money, payment, member, or customer data."""
+    return {
+        "order_id": str(order.id),
+        "table_no": order.table_no or "",
+        "pickup_no": getattr(order, "pickup_no", None) or "",
+        "served_at": order.served_at.isoformat() if getattr(order, "served_at", None) else None,
+        "served_by_role": getattr(order, "served_by_role", None) or "",
+        "items": [
+            {
+                "name": i.name,
+                "qty": i.qty,
+            }
+            for i in order_items
+        ],
+    }
+
+
+@router.get("/orders/workbench/recent-served-by-me")
+async def list_recent_served_by_me(
+    request: Request,
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Waiter: pure-read recent orders served by the current staff account only."""
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_ORDER_SERVE
+    from app.services.workbench_sync_service import load_order_items_by_order_ids
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_ORDER_SERVE):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+    if principal.account_id is None:
+        return success_response(data=[])
+
+    safe_limit = max(1, min(int(limit or 10), 10))
+    result = await db.execute(
+        select(Order)
+        .where(
+            Order.tenant_id == principal.tenant_id,
+            Order.served_by_account_id == int(principal.account_id),
+            Order.served_at.is_not(None),
+        )
+        .order_by(Order.served_at.desc(), Order.id.desc())
+        .limit(safe_limit)
+    )
+    orders = list(result.scalars().all())
+    items_by_order = await load_order_items_by_order_ids(db, [o.id for o in orders])
+    return success_response(
+        data=[
+            serialize_recent_served_order(o, items_by_order.get(o.id or 0, []))
+            for o in orders
+        ]
+    )
+
+
 @router.get("/orders/workbench")
 async def list_workbench_orders(
     request: Request,

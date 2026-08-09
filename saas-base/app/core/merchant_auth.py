@@ -185,6 +185,7 @@ _STAFF_ROUTE_RULES: list[tuple[str, re.Pattern[str], Optional[str] | tuple[str, 
     ("POST", re.compile(r"^/api/v1/tenant/logout$"), None),
     ("GET", re.compile(r"^/api/v1/orders/workbench$"), "order.view_fulfillment"),
     ("GET", re.compile(r"^/api/v1/orders/workbench/changes$"), "order.view_fulfillment"),
+    ("GET", re.compile(r"^/api/v1/orders/workbench/recent-served-by-me$"), "order.serve"),
     (
         "PATCH",
         re.compile(r"^/api/v1/orders/\d+/status$"),

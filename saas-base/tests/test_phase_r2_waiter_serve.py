@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -34,6 +34,7 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TENANT = "tenant-r2-a"
+TENANT_B = "tenant-r2-b"
 FAKE_HASH = "test-password-hash-not-used-for-verify"
 
 
@@ -46,6 +47,9 @@ class PhaseR2ServeUnitTest(unittest.TestCase):
         self.assertTrue(staff_route_allowed("POST", "/api/v1/orders/1/serve", ROLE_WAITER))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/1/serve", ROLE_FRONTDESK))
         self.assertFalse(staff_route_allowed("POST", "/api/v1/orders/1/serve", ROLE_KITCHEN))
+        self.assertTrue(staff_route_allowed("GET", "/api/v1/orders/workbench/recent-served-by-me", ROLE_WAITER))
+        self.assertFalse(staff_route_allowed("GET", "/api/v1/orders/workbench/recent-served-by-me", ROLE_FRONTDESK))
+        self.assertFalse(staff_route_allowed("GET", "/api/v1/orders/workbench/recent-served-by-me", ROLE_KITCHEN))
 
     def test_r2_visibility(self):
         self.assertFalse(is_waiting_to_serve(SimpleNamespace(status="pending", served_at=None)))
@@ -216,9 +220,16 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(Base.metadata.create_all)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         self.waiter_id = generate_snowflake_id()
+        self.waiter_b_id = generate_snowflake_id()
         self.frontdesk_id = generate_snowflake_id()
         self.kitchen_id = generate_snowflake_id()
         self.order_id = generate_snowflake_id()
+        self.recent_old_id = generate_snowflake_id()
+        self.recent_new_id = generate_snowflake_id()
+        self.other_waiter_order_id = generate_snowflake_id()
+        self.auto_served_order_id = generate_snowflake_id()
+        self.tenant_b_order_id = generate_snowflake_id()
+        now = datetime.utcnow()
         async with self.SessionLocal() as db:
             db.add_all(
                 [
@@ -230,11 +241,28 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
                         status=True,
                         is_open=True,
                     ),
+                    Tenant(
+                        tenant_id=TENANT_B,
+                        name="R2 HTTP B",
+                        password_hash="x",
+                        phone="13900006666",
+                        status=True,
+                        is_open=True,
+                    ),
                     MerchantAccount(
                         id=self.waiter_id,
                         tenant_id=TENANT,
                         name="W",
                         username="w2",
+                        password_hash=FAKE_HASH,
+                        role="waiter",
+                        status="active",
+                    ),
+                    MerchantAccount(
+                        id=self.waiter_b_id,
+                        tenant_id=TENANT,
+                        name="WB",
+                        username="wb2",
                         password_hash=FAKE_HASH,
                         role="waiter",
                         status="active",
@@ -266,6 +294,99 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
                         payment_status="unpaid",
                         payment_mode="table_account",
                         print_status="UNKNOWN",
+                    ),
+                    Order(
+                        id=self.recent_old_id,
+                        tenant_id=TENANT,
+                        table_no="01",
+                        total=18,
+                        status="done",
+                        payment_status="unpaid",
+                        payment_mode="table_account",
+                        pickup_no="01",
+                        served_at=now - timedelta(minutes=5),
+                        served_by_account_id=self.waiter_id,
+                        served_by_role="waiter",
+                    ),
+                    Order(
+                        id=self.recent_new_id,
+                        tenant_id=TENANT,
+                        table_no="30",
+                        total=26,
+                        status="done",
+                        payment_status="unpaid",
+                        payment_mode="table_account",
+                        pickup_no="30",
+                        served_at=now,
+                        served_by_account_id=self.waiter_id,
+                        served_by_role="waiter",
+                    ),
+                    Order(
+                        id=self.other_waiter_order_id,
+                        tenant_id=TENANT,
+                        table_no="02",
+                        total=12,
+                        status="done",
+                        payment_status="unpaid",
+                        payment_mode="table_account",
+                        pickup_no="02",
+                        served_at=now - timedelta(minutes=1),
+                        served_by_account_id=self.waiter_b_id,
+                        served_by_role="waiter",
+                    ),
+                    Order(
+                        id=self.auto_served_order_id,
+                        tenant_id=TENANT,
+                        table_no="03",
+                        total=12,
+                        status="done",
+                        payment_status="unpaid",
+                        payment_mode="table_account",
+                        pickup_no="03",
+                        served_at=now - timedelta(minutes=2),
+                        served_by_account_id=None,
+                        served_by_role=None,
+                    ),
+                    Order(
+                        id=self.tenant_b_order_id,
+                        tenant_id=TENANT_B,
+                        table_no="99",
+                        total=12,
+                        status="done",
+                        payment_status="unpaid",
+                        payment_mode="table_account",
+                        pickup_no="99",
+                        served_at=now - timedelta(minutes=3),
+                        served_by_account_id=self.waiter_id,
+                        served_by_role="waiter",
+                    ),
+                    OrderItem(
+                        id=generate_snowflake_id(),
+                        order_id=self.recent_old_id,
+                        name="牛肉汤",
+                        price=18,
+                        qty=1,
+                    ),
+                    OrderItem(
+                        id=generate_snowflake_id(),
+                        order_id=self.recent_new_id,
+                        name="牛肉汤",
+                        price=18,
+                        qty=1,
+                    ),
+                    OrderItem(
+                        id=generate_snowflake_id(),
+                        order_id=self.recent_new_id,
+                        name="烧饼",
+                        price=4,
+                        qty=2,
+                    ),
+                    OrderItem(
+                        id=generate_snowflake_id(),
+                        order_id=self.other_waiter_order_id,
+                        name="羊肉汤",
+                        price=12,
+                        qty=1,
                     ),
                 ]
             )
@@ -326,6 +447,31 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
         rows = r.json().get("data") or []
         ids = {str(x.get("id")) for x in rows}
         self.assertIn(str(self.order_id), ids)
+
+    async def test_p0_waiter_recent_served_by_me_filters_account_tenant_and_auto_served(self):
+        h = self._auth("waiter", self.waiter_id)
+        r = await self.client.get("/api/v1/orders/workbench/recent-served-by-me", headers=h)
+        self.assertEqual(r.status_code, 200)
+        rows = r.json().get("data") or []
+        ids = [str(x.get("order_id")) for x in rows]
+        self.assertEqual(ids[:2], [str(self.recent_new_id), str(self.recent_old_id)])
+        self.assertNotIn(str(self.other_waiter_order_id), ids)
+        self.assertNotIn(str(self.auto_served_order_id), ids)
+        self.assertNotIn(str(self.tenant_b_order_id), ids)
+        first = rows[0]
+        self.assertEqual(first["table_no"], "30")
+        self.assertEqual(first["pickup_no"], "30")
+        self.assertEqual(first["items"][0], {"name": "牛肉汤", "qty": 1})
+        self.assertEqual(first["items"][1], {"name": "烧饼", "qty": 2})
+        for forbidden in ("total", "payment_status", "phone", "customer_id", "coupon_id", "openid"):
+            self.assertNotIn(forbidden, first)
+
+    async def test_p0_waiter_recent_served_by_me_limit_latest_first(self):
+        h = self._auth("waiter", self.waiter_id)
+        r = await self.client.get("/api/v1/orders/workbench/recent-served-by-me?limit=1", headers=h)
+        self.assertEqual(r.status_code, 200)
+        rows = r.json().get("data") or []
+        self.assertEqual([str(x.get("order_id")) for x in rows], [str(self.recent_new_id)])
 
 
 if __name__ == "__main__":

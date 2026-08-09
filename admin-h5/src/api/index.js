@@ -36,6 +36,8 @@ export const getWorkbenchOrdersWithCursor = (config = {}) =>
 /** Pure-read workbench delta. Never triggers print reconciliation. */
 export const getWorkbenchOrderChanges = (params, config) =>
   request.get('/v1/orders/workbench/changes', { ...(config || {}), params })
+export const getRecentServedByMe = (params, config) =>
+  request.get('/v1/orders/workbench/recent-served-by-me', { ...(config || {}), params })
 export const registerTenant = (data) => request.post('/v1/register', data)
 export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')

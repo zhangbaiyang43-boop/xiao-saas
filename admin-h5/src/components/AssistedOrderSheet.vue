@@ -1,14 +1,18 @@
 <template>
   <a-drawer
     :open="open"
-    title="代客加单"
+    title="顾客加菜"
     placement="bottom"
-    height="90%"
+    :height="prepayBlocked ? 'auto' : '90%'"
     :body-style="{ padding: 0, display: 'flex', flexDirection: 'column' }"
     @update:open="onOpenChange"
   >
     <div class="ao-body">
-      <div v-if="prepayBlocked" class="ao-empty">{{ prepayMsg || '当前收款模式请由顾客扫码加单' }}</div>
+      <div v-if="prepayBlocked" class="ao-prepay-card">
+        <div class="ao-prepay-title">顾客加菜</div>
+        <div class="ao-prepay-text">{{ prepayMsg || '请顾客扫描桌面二维码继续点餐' }}</div>
+        <a-button type="primary" block size="large" @click="emit('update:open', false)">知道了</a-button>
+      </div>
 
       <template v-else>
         <!-- STEP 1: 选桌 -->
@@ -445,6 +449,9 @@ watch(
 .ao-step-menu { padding-bottom: 96px; }
 .ao-step-label { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
 .ao-empty { padding: 48px 16px; text-align: center; color: #888; font-size: 14px; }
+.ao-prepay-card { padding: 18px 16px 20px; background: #fff; }
+.ao-prepay-title { font-size: 18px; font-weight: 800; color: #111; margin-bottom: 6px; }
+.ao-prepay-text { color: #555; font-size: 15px; line-height: 1.5; margin-bottom: 16px; }
 .ao-tables { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ao-table-card {
   border: 1px solid #e5e5e5; border-radius: 12px; padding: 14px 12px; background: #fff;

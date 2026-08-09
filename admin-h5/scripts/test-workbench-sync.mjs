@@ -24,6 +24,10 @@ function read(rel) {
   return fs.readFileSync(path.join(root, rel), 'utf8')
 }
 
+function countText(source, text) {
+  return source.split(text).length - 1
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
 }
@@ -507,7 +511,17 @@ assert.ok(frontdesk.includes('WorkbenchSyncBar'), 'Frontdesk status bar')
 assert.ok(waiter.includes('waitingToServeIdsFromOrders'), 'Waiter R2: serving alerts')
 assert.ok(waiter.includes('确认已上菜'), 'Waiter serve CTA')
 assert.ok(waiter.includes('serveOrder'), 'Waiter serve API')
-assert.ok(waiter.includes('AssistedOrderSheet') && waiter.includes('代客加单'), 'Waiter R3 assisted add')
+assert.ok(waiter.includes('getRecentServedByMe'), 'Waiter recent served API')
+assert.ok(waiter.includes('最近已上菜'), 'Waiter recent served section')
+assert.ok(waiter.includes('servingLabel(order)'), 'Waiter success toast includes table/pickup context')
+assert.ok(waiter.includes('上菜确认失败，请重试'), 'Waiter failure copy is explicit')
+assert.equal(countText(waiter, '顾客加菜'), 1, 'Waiter has exactly one customer add entry')
+assert.equal(countText(waiter, '代客加单'), 0, 'Waiter removes assisted add wording')
+assert.ok(!waiter.includes('ao-entry'), 'Waiter cards do not show assisted add button')
+assert.ok(!waiter.includes('>刷新<'), 'Waiter refresh is not a main button')
+assert.ok(waiter.includes('sync-link'), 'Waiter refresh is downgraded near sync status')
+assert.ok(!waiter.includes('>退出<'), 'Waiter logout is not a main button')
+assert.ok(waiter.includes('more-menu'), 'Waiter logout is downgraded into a light menu')
 assert.ok(waiter.includes('待上菜'), 'Waiter job-first title')
 assert.ok(!waiter.includes('接单') && !waiter.includes('发桌牌') && !waiter.includes('换桌牌'), 'Waiter non-serve actions removed')
 assert.ok(kitchen.includes('is-new') && kitchen.includes('新'), 'Kitchen highlight')
@@ -520,6 +534,10 @@ assert.ok(frontdesk.includes('待发牌'), 'Frontdesk job-first title')
 assert.ok(!frontdesk.includes('接单') && !frontdesk.includes('补打厨房单'), 'Frontdesk no kitchen actions')
 assert.ok(!frontdesk.includes('确认已上菜'), 'Frontdesk no serve CTA')
 const assisted = read('src/components/AssistedOrderSheet.vue')
+assert.ok(assisted.includes('title=\"顾客加菜\"'), 'Assisted sheet uses customer add wording')
+assert.ok(assisted.includes('ao-prepay-card'), 'Prepay blocked state is a compact card')
+assert.ok(assisted.includes('请顾客扫描桌面二维码继续点餐'), 'Prepay tells staff to ask customer to scan')
+assert.ok(!assisted.includes('height=\"90%\"'), 'Prepay customer-add prompt is not a 90% blank drawer')
 assert.ok(!assisted.includes('placeholder="请输入桌号"'), 'R3 no table text input')
 assert.ok(assisted.includes('ao-table-card'), 'R3 click table cards')
 assert.ok(assisted.includes('确认加单'), 'R3 confirm CTA')
