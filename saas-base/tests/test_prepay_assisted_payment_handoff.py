@@ -33,6 +33,7 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
 TENANT = "tenant-handoff-a"
 STAFF_ID = 91001
 CUSTOMER_ID = 88001
+CUSTOMER_B_ID = 88002
 
 
 @event.listens_for(OrderItem, "before_insert")
@@ -142,6 +143,14 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
                         phone="",
                         status=1,
                     ),
+                    Customer(
+                        id=CUSTOMER_B_ID,
+                        tenant_id=TENANT,
+                        openid="openid-customer-b",
+                        name="顾客B",
+                        phone="",
+                        status=1,
+                    ),
                     DiningSession(
                         id=self.session_id,
                         tenant_id=TENANT,
@@ -237,6 +246,86 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(order.customer_id, CUSTOMER_ID)
             self.assertEqual(order.status, "pending_payment")
             self.assertEqual(order.payment_status, "unpaid")
+
+    async def test_regenerated_handoff_rejects_old_token_and_keeps_same_order(self):
+        async with self.SessionLocal() as db:
+            order = await self._create_staff_prepay_order(db)
+            first = await PaymentHandoffService(db).create_for_order(
+                tenant_id=TENANT,
+                order_id=int(order.id),
+                actor_account_id=STAFF_ID,
+                actor_role="frontdesk",
+            )
+            second = await PaymentHandoffService(db).create_for_order(
+                tenant_id=TENANT,
+                order_id=int(order.id),
+                actor_account_id=STAFF_ID,
+                actor_role="frontdesk",
+            )
+
+            self.assertNotEqual(first["scene"], second["scene"])
+            self.assertEqual(second["order_id"], str(order.id))
+
+            with self.assertRaises(ValueError):
+                await PaymentHandoffService(db).claim(
+                    token=first["scene"],
+                    customer_id=CUSTOMER_ID,
+                    openid="openid-customer-a",
+                )
+
+            claimed = await PaymentHandoffService(db).claim(
+                token=second["scene"],
+                customer_id=CUSTOMER_ID,
+                openid="openid-customer-a",
+            )
+            orders = (
+                await db.execute(select(Order).where(Order.client_request_id == "handoff-order-1"))
+            ).scalars().all()
+
+            self.assertEqual(claimed["status"], "CLAIMED")
+            self.assertEqual(claimed["order_id"], str(order.id))
+            self.assertEqual(len(orders), 1)
+
+    async def test_claim_binding_rejects_second_customer_without_overriding_first(self):
+        async with self.SessionLocal() as db:
+            order = await self._create_staff_prepay_order(db)
+            handoff = await PaymentHandoffService(db).create_for_order(
+                tenant_id=TENANT,
+                order_id=int(order.id),
+                actor_account_id=STAFF_ID,
+                actor_role="frontdesk",
+            )
+
+            first_claim = await PaymentHandoffService(db).claim(
+                token=handoff["scene"],
+                customer_id=CUSTOMER_ID,
+                openid="openid-customer-a",
+            )
+            repeat_claim = await PaymentHandoffService(db).claim(
+                token=handoff["scene"],
+                customer_id=CUSTOMER_ID,
+                openid="openid-customer-a",
+            )
+
+            self.assertEqual(first_claim["claimed_customer_id"], str(CUSTOMER_ID))
+            self.assertEqual(repeat_claim["claimed_customer_id"], str(CUSTOMER_ID))
+
+            with self.assertRaises(ValueError):
+                await PaymentHandoffService(db).claim(
+                    token=handoff["scene"],
+                    customer_id=CUSTOMER_B_ID,
+                    openid="openid-customer-b",
+                )
+
+            row = (
+                await db.execute(select(StaffAssistedPaymentHandoff).where(
+                    StaffAssistedPaymentHandoff.order_id == order.id
+                ))
+            ).scalar_one()
+            await db.refresh(order)
+            self.assertEqual(row.claimed_customer_id, CUSTOMER_ID)
+            self.assertEqual(row.claimed_openid, "openid-customer-a")
+            self.assertEqual(order.customer_id, CUSTOMER_ID)
 
     async def test_expired_handoff_cannot_be_claimed(self):
         async with self.SessionLocal() as db:

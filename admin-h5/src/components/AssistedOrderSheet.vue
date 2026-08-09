@@ -169,7 +169,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onBeforeUnmount, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { createOrder, createPaymentHandoff, getActiveDiningSessions, getMenuItems, getPaymentHandoff } from '../api'
 
@@ -200,7 +200,10 @@ const quickRemarks = ['不要香菜', '少辣', '多辣', '不放葱']
 const handoff = ref(null)
 const handoffOrderId = ref('')
 const handoffError = ref('')
-const handoffTimer = ref(null)
+const paymentStatusTimer = ref(null)
+const paymentStatusInFlight = ref(false)
+const paymentPollingActive = ref(false)
+const PAYMENT_STATUS_POLL_INTERVAL_MS = 2500
 
 const specOpen = ref(false)
 const specDish = ref(null)
@@ -398,11 +401,35 @@ async function loadSessions() {
   }
 }
 
-function stopHandoffPolling() {
-  if (handoffTimer.value) {
-    clearInterval(handoffTimer.value)
-    handoffTimer.value = null
+function handoffStatusOf(next) {
+  if (next?.payment_status === 'paid') return 'PAID'
+  return String(next?.status || '')
+}
+
+function isHandoffTerminal(next) {
+  return ['PAID', 'EXPIRED', 'CANCELLED'].includes(handoffStatusOf(next))
+}
+
+function isHandoffWaiting(next) {
+  return ['PENDING_SCAN', 'CLAIMED'].includes(handoffStatusOf(next))
+}
+
+function clearPaymentStatusTimer() {
+  if (paymentStatusTimer.value) {
+    clearTimeout(paymentStatusTimer.value)
+    paymentStatusTimer.value = null
   }
+}
+
+function shouldPollPaymentHandoff() {
+  if (!paymentPollingActive.value || !props.open || step.value !== 4 || !handoffOrderId.value || !handoff.value) return false
+  if (typeof document !== 'undefined' && document.hidden) return false
+  return isHandoffWaiting(handoff.value)
+}
+
+function stopHandoffPolling() {
+  paymentPollingActive.value = false
+  clearPaymentStatusTimer()
 }
 
 function handleHandoffPaid(next) {
@@ -414,21 +441,54 @@ function handleHandoffPaid(next) {
   }
 }
 
-function startHandoffPolling(orderId) {
-  stopHandoffPolling()
-  handoffTimer.value = setInterval(async () => {
-    if (!props.open || !orderId) return
-    try {
-      const res = await getPaymentHandoff(orderId, {
-        meta: { fromPolling: true, dedupe: true, dedupeKey: `handoff:${orderId}` },
-      })
-      const data = res?.data || res
+function schedulePaymentStatusCheck() {
+  clearPaymentStatusTimer()
+  if (!shouldPollPaymentHandoff()) return
+  paymentStatusTimer.value = setTimeout(() => {
+    paymentStatusTimer.value = null
+    void checkPaymentHandoffStatus({ scheduleAfter: true })
+  }, PAYMENT_STATUS_POLL_INTERVAL_MS)
+}
+
+async function checkPaymentHandoffStatus({ scheduleAfter = true } = {}) {
+  if (paymentStatusInFlight.value) return { skipped: true }
+  const orderId = handoffOrderId.value
+  if (!paymentPollingActive.value || !orderId || !props.open || (typeof document !== 'undefined' && document.hidden)) {
+    clearPaymentStatusTimer()
+    return { skipped: true }
+  }
+  paymentStatusInFlight.value = true
+  try {
+    const res = await getPaymentHandoff(orderId, {
+      meta: { fromPolling: true, dedupe: true, dedupeKey: `handoff:${orderId}` },
+    })
+    const data = res?.data || res
+    if (String(handoffOrderId.value) === String(orderId)) {
       handoff.value = { ...(handoff.value || {}), ...(data || {}) }
       handleHandoffPaid(handoff.value)
-    } catch (err) {
-      if (!err?.__duplicateSkipped) handoffError.value = '付款状态刷新失败'
     }
-  }, 2500)
+    return { skipped: false }
+  } catch (err) {
+    if (!err?.__duplicateSkipped && props.open && step.value === 4) handoffError.value = '付款状态刷新失败'
+    return { skipped: false, error: err }
+  } finally {
+    paymentStatusInFlight.value = false
+    if (scheduleAfter) schedulePaymentStatusCheck()
+  }
+}
+
+function startHandoffPolling() {
+  clearPaymentStatusTimer()
+  paymentPollingActive.value = true
+  void checkPaymentHandoffStatus({ scheduleAfter: true })
+}
+
+function onPaymentVisibilityChange() {
+  if (document.hidden) {
+    clearPaymentStatusTimer()
+    return
+  }
+  if (shouldPollPaymentHandoff()) void checkPaymentHandoffStatus({ scheduleAfter: true })
 }
 
 async function openPaymentHandoff(orderId) {
@@ -441,7 +501,7 @@ async function openPaymentHandoff(orderId) {
     handoff.value = data
     step.value = 4
     handleHandoffPaid(data)
-    startHandoffPolling(orderId)
+    startHandoffPolling()
     if (data?.qr_error) handoffError.value = '二维码生成失败，可点击重新生成'
   } catch {
     handoffError.value = '付款码生成失败，请重试'
@@ -531,7 +591,18 @@ watch(
   },
 )
 
-onBeforeUnmount(stopHandoffPolling)
+onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onPaymentVisibilityChange)
+  }
+})
+
+onBeforeUnmount(() => {
+  stopHandoffPolling()
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onPaymentVisibilityChange)
+  }
+})
 </script>
 
 <style scoped>
