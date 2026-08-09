@@ -44,6 +44,14 @@
             "navigationBarBackgroundColor": "#07C160",
             "navigationBarTextStyle": "white"
           }
+        },
+        {
+          "path": "pages/payment-handoff",
+          "style": {
+            "navigationBarTitleText": "确认付款",
+            "navigationBarBackgroundColor": "#07C160",
+            "navigationBarTextStyle": "white"
+          }
         }
       ]
     },

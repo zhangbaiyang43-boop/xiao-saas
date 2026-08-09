@@ -52,15 +52,13 @@ async def list_active_dining_sessions(
     payment_mode = (getattr(tenant, "payment_mode", None) or "prepay") if tenant else "prepay"
 
     sessions = await DiningSessionService(db).list_active_sessions_for_staff(tenant_id)
-    assisted_allowed = payment_mode in ("postpay", "table_account")
+    assisted_allowed = payment_mode in ("prepay", "postpay", "table_account")
     return success_response(
         data={
             "payment_mode": payment_mode,
             "assisted_add_allowed": assisted_allowed,
             "sessions": sessions,
-            "prepay_blocked_msg": None
-            if assisted_allowed
-            else "当前收款模式请由顾客扫码加单",
+            "prepay_blocked_msg": None,
         },
         msg="ok",
     )

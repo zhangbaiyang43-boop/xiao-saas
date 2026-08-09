@@ -162,6 +162,8 @@ export const uploadDishImage = (file) => {
 
 export const createOrder = (data) => request.post('/v1/orders', data)
 export const getActiveDiningSessions = () => request.get('/v1/dining-sessions/active')
+export const createPaymentHandoff = (orderId) => request.post(`/v1/payment-handoffs/orders/${orderId}`)
+export const getPaymentHandoff = (orderId, config = {}) => request.get(`/v1/payment-handoffs/orders/${orderId}`, config)
 export const getOrders = (params, config = {}) => request.get('/v1/orders', { ...config, params })
 export const updateOrderStatus = (id, status) => request.patch(`/v1/orders/${id}/status`, { status })
 export const serveOrder = (id) => request.post(`/v1/orders/${id}/serve`)

@@ -220,6 +220,12 @@ class OrderPaymentService(BaseService):
 
         # Print order ticket after payment. Printing failures are recoverable and must not affect payment state.
         await _print_paid_order_ticket(order, self.db, reason="payment_success")
+        try:
+            from app.services.payment_handoff_service import PaymentHandoffService
+
+            await PaymentHandoffService(self.db).mark_order_paid(int(order.id))
+        except Exception as e:
+            logger.warning(f"payment handoff paid marker failed: {e}")
 
         # 点餐成功订阅消息：依赖顾客支付前 requestSubscribeMessage 授权；失败不影响支付主流程。
         try:

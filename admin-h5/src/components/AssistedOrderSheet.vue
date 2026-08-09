@@ -3,18 +3,12 @@
     :open="open"
     title="顾客加菜"
     placement="bottom"
-    :height="prepayBlocked ? 'auto' : '90%'"
+    height="90%"
     :body-style="{ padding: 0, display: 'flex', flexDirection: 'column' }"
     @update:open="onOpenChange"
   >
     <div class="ao-body">
-      <div v-if="prepayBlocked" class="ao-prepay-card">
-        <div class="ao-prepay-title">顾客加菜</div>
-        <div class="ao-prepay-text">{{ prepayMsg || '请顾客扫描桌面二维码继续点餐' }}</div>
-        <a-button type="primary" block size="large" @click="emit('update:open', false)">知道了</a-button>
-      </div>
-
-      <template v-else>
+      <template>
         <!-- STEP 1: 选桌 -->
         <div v-if="step === 1" class="ao-step">
           <div class="ao-step-label">选哪一桌</div>
@@ -86,7 +80,7 @@
         </div>
 
         <!-- STEP 3: 确认 -->
-        <div v-else class="ao-step">
+        <div v-else-if="step === 3" class="ao-step">
           <div class="ao-step-label">确认加单</div>
           <div class="ao-confirm-card">
             <div>{{ selectedSession?.table_no || '-' }}号桌
@@ -124,8 +118,29 @@
           <div class="ao-footer">
             <a-button @click="step = 2">返回</a-button>
             <a-button type="primary" size="large" :loading="submitting" :disabled="submitting || cartCount === 0" @click="submit">
-              确认加单
+              {{ paymentMode === 'prepay' ? '生成付款码' : '确认加单' }}
             </a-button>
+          </div>
+        </div>
+
+        <!-- STEP 4: 顾客付款 -->
+        <div v-else class="ao-step">
+          <div class="ao-pay-head">
+            <div>
+              <div class="ao-step-label">请顾客扫码付款</div>
+              <div class="ao-pay-sub">{{ selectedSession?.table_no || '-' }}号桌 · ¥{{ cartTotal.toFixed(2) }}</div>
+            </div>
+            <a-tag color="orange">{{ handoffStatusText }}</a-tag>
+          </div>
+          <div class="ao-pay-card">
+            <img v-if="handoff?.qr_image" class="ao-pay-qr" :src="handoff.qr_image" alt="付款码" />
+            <div v-else class="ao-empty compact">{{ handoff?.qr_error || '付款码生成失败，请重试' }}</div>
+            <div class="ao-pay-tip">顾客付款成功后，系统会自动通知厨房。</div>
+          </div>
+          <div v-if="handoffError" class="ao-fail">{{ handoffError }}</div>
+          <div class="ao-footer">
+            <a-button :disabled="submitting" @click="regenerateHandoff">重新生成</a-button>
+            <a-button type="primary" size="large" @click="emit('update:open', false)">先关闭</a-button>
           </div>
         </div>
       </template>
@@ -154,9 +169,9 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { createOrder, getActiveDiningSessions, getMenuItems } from '../api'
+import { createOrder, createPaymentHandoff, getActiveDiningSessions, getMenuItems, getPaymentHandoff } from '../api'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -172,8 +187,6 @@ const loadingSessions = ref(false)
 const loadingMenu = ref(false)
 const sessions = ref([])
 const paymentMode = ref('')
-const prepayBlocked = ref(false)
-const prepayMsg = ref('')
 const selectedSessionId = ref('')
 const menuItems = ref([])
 const cart = ref([]) // { key, dishId, name, qty, unitPrice, specifications, extras, specText }
@@ -184,6 +197,10 @@ const remarkTags = ref([])
 const showOtherRemark = ref(false)
 const otherRemark = ref('')
 const quickRemarks = ['不要香菜', '少辣', '多辣', '不放葱']
+const handoff = ref(null)
+const handoffOrderId = ref('')
+const handoffError = ref('')
+const handoffTimer = ref(null)
 
 const specOpen = ref(false)
 const specDish = ref(null)
@@ -199,6 +216,14 @@ const categories = computed(() => {
 const cartLines = computed(() => cart.value)
 const cartCount = computed(() => cart.value.reduce((n, l) => n + l.qty, 0))
 const cartTotal = computed(() => cart.value.reduce((n, l) => n + l.qty * l.unitPrice, 0))
+const handoffStatusText = computed(() => {
+  const status = handoff.value?.status || ''
+  if (status === 'PAID' || handoff.value?.payment_status === 'paid') return '已付款'
+  if (status === 'CLAIMED') return '顾客已打开'
+  if (status === 'EXPIRED') return '已过期'
+  if (status === 'CANCELLED') return '已作废'
+  return '待扫码'
+})
 
 function dishesByCategory(cat) {
   return menuItems.value.filter((d) => (d.category || '其他') === cat)
@@ -237,6 +262,10 @@ function resetCart() {
   otherRemark.value = ''
   submitError.value = ''
   requestId.value = ''
+  handoff.value = null
+  handoffOrderId.value = ''
+  handoffError.value = ''
+  stopHandoffPolling()
 }
 
 function selectSession(s) {
@@ -345,8 +374,6 @@ async function loadSessions() {
     const res = await getActiveDiningSessions()
     const data = res?.data?.data || res?.data || {}
     paymentMode.value = data.payment_mode || ''
-    prepayBlocked.value = data.assisted_add_allowed === false
-    prepayMsg.value = data.prepay_blocked_msg || ''
     sessions.value = Array.isArray(data.sessions) ? data.sessions : []
     if (props.presetDiningSessionId) {
       const hit = sessions.value.find(
@@ -369,6 +396,63 @@ async function loadSessions() {
   } finally {
     loadingSessions.value = false
   }
+}
+
+function stopHandoffPolling() {
+  if (handoffTimer.value) {
+    clearInterval(handoffTimer.value)
+    handoffTimer.value = null
+  }
+}
+
+function handleHandoffPaid(next) {
+  if (next?.status === 'PAID' || next?.payment_status === 'paid') {
+    stopHandoffPolling()
+    message.success('顾客已付款，厨房已收到')
+    emit('update:open', false)
+    emit('success')
+  }
+}
+
+function startHandoffPolling(orderId) {
+  stopHandoffPolling()
+  handoffTimer.value = setInterval(async () => {
+    if (!props.open || !orderId) return
+    try {
+      const res = await getPaymentHandoff(orderId, {
+        meta: { fromPolling: true, dedupe: true, dedupeKey: `handoff:${orderId}` },
+      })
+      const data = res?.data || res
+      handoff.value = { ...(handoff.value || {}), ...(data || {}) }
+      handleHandoffPaid(handoff.value)
+    } catch (err) {
+      if (!err?.__duplicateSkipped) handoffError.value = '付款状态刷新失败'
+    }
+  }, 2500)
+}
+
+async function openPaymentHandoff(orderId) {
+  handoffOrderId.value = String(orderId || '')
+  handoffError.value = ''
+  submitting.value = true
+  try {
+    const res = await createPaymentHandoff(orderId)
+    const data = res?.data || res
+    handoff.value = data
+    step.value = 4
+    handleHandoffPaid(data)
+    startHandoffPolling(orderId)
+    if (data?.qr_error) handoffError.value = '二维码生成失败，可点击重新生成'
+  } catch {
+    handoffError.value = '付款码生成失败，请重试'
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function regenerateHandoff() {
+  if (!handoffOrderId.value || submitting.value) return
+  await openPaymentHandoff(handoffOrderId.value)
 }
 
 async function loadMenu() {
@@ -412,6 +496,11 @@ async function submit() {
       request_id: requestId.value,
     })
     if (res?.code === 200) {
+      const data = res?.data || {}
+      if (data.need_payment === true && data.payment_mode === 'prepay') {
+        await openPaymentHandoff(data.order_id || data.id)
+        return
+      }
       message.success('加单成功，厨房已收到')
       emit('update:open', false)
       emit('success')
@@ -426,6 +515,7 @@ async function submit() {
 }
 
 function onOpenChange(v) {
+  if (!v) stopHandoffPolling()
   emit('update:open', v)
 }
 
@@ -436,11 +526,12 @@ watch(
     step.value = 1
     selectedSessionId.value = ''
     resetCart()
-    prepayBlocked.value = false
     await loadSessions()
-    if (!prepayBlocked.value) await loadMenu()
+    await loadMenu()
   },
 )
+
+onBeforeUnmount(stopHandoffPolling)
 </script>
 
 <style scoped>
@@ -449,9 +540,7 @@ watch(
 .ao-step-menu { padding-bottom: 96px; }
 .ao-step-label { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
 .ao-empty { padding: 48px 16px; text-align: center; color: #888; font-size: 14px; }
-.ao-prepay-card { padding: 18px 16px 20px; background: #fff; }
-.ao-prepay-title { font-size: 18px; font-weight: 800; color: #111; margin-bottom: 6px; }
-.ao-prepay-text { color: #555; font-size: 15px; line-height: 1.5; margin-bottom: 16px; }
+.ao-empty.compact { padding: 24px 12px; }
 .ao-tables { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .ao-table-card {
   border: 1px solid #e5e5e5; border-radius: 12px; padding: 14px 12px; background: #fff;
@@ -488,4 +577,9 @@ watch(
 .ao-other { margin-bottom: 8px; }
 .ao-fail { color: #cf1322; font-size: 13px; margin-bottom: 8px; }
 .ao-spec-group { margin-bottom: 10px; }
+.ao-pay-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.ao-pay-sub { color: #666; font-size: 13px; }
+.ao-pay-card { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; }
+.ao-pay-qr { width: 220px; height: 220px; max-width: 74vw; object-fit: contain; }
+.ao-pay-tip { color: #666; font-size: 13px; margin-top: 10px; }
 </style>

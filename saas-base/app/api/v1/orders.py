@@ -335,16 +335,6 @@ async def _resolve_create_order_dining_context(
         merchant_tenant_id = getattr(request.state, "tenant_id", None)
         if not merchant_tenant_id or merchant_tenant_id != tenant_id:
             return error_response(code=403, msg="无权为该门店下单"), customer_id, None, None, None, None, None
-        if payment_mode not in ("postpay", "table_account"):
-            return (
-                error_response(code=400, msg="当前收款模式请由顾客扫码加单"),
-                customer_id,
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
         if body.coupon_id:
             return error_response(code=400, msg="代客加单不支持使用优惠券"), customer_id, None, None, None, None, None
         table_no = (body.table or "").strip()
@@ -752,7 +742,7 @@ async def _persist_create_order_and_build_response(
         remark=body.remark,
         coupon_id=applied_coupon_id,
         discount_amount=typing_cast(Any, float(coupon_discount)) if coupon_discount > 0 else None,
-        source="staff" if is_staff_order else (body.source or "miniprogram"),
+        source="staff_assisted" if is_staff_order and payment_mode == "prepay" else ("staff" if is_staff_order else (body.source or "miniprogram")),
         created_by_account_id=created_by_account_id if is_staff_order else None,
         created_by_role=created_by_role if is_staff_order else None,
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,

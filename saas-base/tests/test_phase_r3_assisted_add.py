@@ -242,15 +242,26 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res.code, 400)
             self.assertIn("没有进行中", res.msg or "")
 
-    async def test_r3_prepay_blocked(self):
+    async def test_r3_prepay_creates_staff_assisted_pending_payment_order(self):
         async with self.SessionLocal() as db:
             tenant = (await db.execute(select(Tenant).where(Tenant.tenant_id == TENANT))).scalar_one()
             tenant.payment_mode = "prepay"
             await db.commit()
             req = make_request(role="waiter", account_id=self.waiter_id)
-            res = await create_order(self._body(request_id="r3-prepay"), req, db)
-            self.assertEqual(res.code, 400)
-            self.assertIn("顾客扫码", res.msg or "")
+            with patch("app.api.v1.orders._spawn_background_print_task") as spawn_print:
+                res = await create_order(self._body(request_id="r3-prepay"), req, db)
+            self.assertEqual(res.code, 200)
+            order = (
+                await db.execute(select(Order).where(Order.client_request_id == "r3-prepay"))
+            ).scalar_one()
+            self.assertEqual(order.source, "staff_assisted")
+            self.assertEqual(order.status, "pending_payment")
+            self.assertEqual(order.payment_status, "unpaid")
+            self.assertIsNone(order.customer_id)
+            self.assertIsNone(order.participant_id)
+            self.assertEqual(order.created_by_account_id, self.waiter_id)
+            self.assertEqual(order.created_by_role, "waiter")
+            spawn_print.assert_not_called()
 
     async def test_r3_list_active_sessions(self):
         async with self.SessionLocal() as db:
