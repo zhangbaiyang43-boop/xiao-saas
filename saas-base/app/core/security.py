@@ -50,6 +50,21 @@ def create_customer_access_token(
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_channel_partner_access_token(
+    partner_id: int,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    expire = datetime.utcnow() + (expires_delta or timedelta(days=7))
+    payload = {
+        "sub": f"channel_partner:{partner_id}",
+        "type": "channel_partner",
+        "partner_id": str(partner_id),
+        "role": "channel_partner",
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def verify_token(token: str) -> Optional[dict]:
     try:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

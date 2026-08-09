@@ -44,6 +44,8 @@ WHITELIST = {
     "/api/v1/login/code",
     "/api/v1/login/staff",
     "/api/v1/login/staff/device",
+    "/api/v1/channel/auth/request-code",
+    "/api/v1/channel/auth/login",
     "/api/v1/register",
     "/api/v1/wework/callback",
     "/api/v1/member/login-or-create",
@@ -51,6 +53,7 @@ WHITELIST = {
     "/api/v1/miniapp/entry/join",
     "/api/v1/open/pos/verify",
     "/api/v1/orders/wxpay-notify",
+    "/api/v1/billing/wxpay-notify",
     "/api/v1/dining-sessions/resolve",
     "/api/v1/perf/report",
 }
@@ -78,6 +81,7 @@ OPTIONAL_AUTH_PREFIXES = (
 )
 
 MEMBER_PATH_PREFIXES = ("/api/v1/member", "/api/v1/miniapp/member", "/api/v1/miniapp/invite")
+CHANNEL_PATH_PREFIX = "/api/v1/channel"
 MERCHANT_PATH_PREFIX = "/api/v1"
 
 
@@ -119,6 +123,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.customer_id = payload.get("customer_id")
         request.state.openid = payload.get("openid")
         request.state.token_type = payload.get("type")
+        request.state.partner_id = payload.get("partner_id")
         request.state.role = None
         request.state.account_id = None
         request.state.account_name = None
@@ -148,6 +153,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     )
 
         if is_optional:
+            return await call_next(request)
+
+        if request.url.path.startswith(CHANNEL_PATH_PREFIX):
+            if payload.get("type") != "channel_partner" or not payload.get("partner_id"):
+                return JSONResponse(
+                    status_code=403,
+                    content=RespVo(code=403, msg="channel auth required").to_response(),
+                )
             return await call_next(request)
 
         if request.state.tenant_id and not await _is_tenant_active(request.state.tenant_id):

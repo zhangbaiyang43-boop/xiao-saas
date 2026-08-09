@@ -28,6 +28,16 @@ from app.models.merchant_account_wechat_binding import MerchantAccountWechatBind
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice
 from app.models.perf_sample import PerfSample
 from app.models.staff_assisted_payment_handoff import StaffAssistedPaymentHandoff
+from app.models.billing import BillingInvoice, BillingPayment
+from app.models.channel_revenue import (
+    ChannelCommissionLedger,
+    ChannelCommissionSettlement,
+    ChannelCommissionSettlementItem,
+    ChannelLead,
+    ChannelLeadMobileLock,
+    ChannelPartner,
+    ChannelPartnerTenantBinding,
+)
 from .tenant import Tenant
 from .customer import Customer
 from .member_account import MemberAccount
@@ -70,5 +80,14 @@ __all__ = [
     'MerchantAccountTrustedDevice',
     'PerfSample',
     'StaffAssistedPaymentHandoff',
+    'BillingInvoice',
+    'BillingPayment',
+    'ChannelPartner',
+    'ChannelLeadMobileLock',
+    'ChannelLead',
+    'ChannelPartnerTenantBinding',
+    'ChannelCommissionLedger',
+    'ChannelCommissionSettlement',
+    'ChannelCommissionSettlementItem',
 ]
 

@@ -12,6 +12,8 @@ WHITELIST = {
     "/redoc",
     "/api/v1/login",
     "/api/v1/login/code",
+    "/api/v1/channel/auth/request-code",
+    "/api/v1/channel/auth/login",
     "/api/v1/register",
     "/api/v1/wework/callback",
     "/api/v1/member/login-or-create",
@@ -36,6 +38,10 @@ class TenantMiddleware(BaseHTTPMiddleware):
         if token and token.startswith("Bearer "):
             payload = verify_token(token[7:])
             if payload:
+                if payload.get("type") == "channel_partner":
+                    request.state.token_type = "channel_partner"
+                    request.state.partner_id = payload.get("partner_id")
+                    return await call_next(request)
                 tenant_id = payload.get("tenant_id")
                 TenantContext.set_tenant_id(tenant_id)
                 request.state.tenant_id = tenant_id

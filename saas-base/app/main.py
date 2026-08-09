@@ -32,6 +32,10 @@ from app.api.v1.menu import router as menu_router
 from app.api.v1.orders import router as order_router
 from app.api.v1.payment_handoffs import router as payment_handoff_router
 from app.api.v1.perf import router as perf_router
+from app.api.v1.billing import router as billing_router
+from app.api.v1.channel import router as channel_router
+from app.api.v1.super_billing import router as super_billing_router
+from app.api.v1.super_channel import router as super_channel_router
 from app.api.v1.super_admin import router as super_admin_router
 from app.config import settings
 from app.core.database import async_engine
@@ -105,8 +109,12 @@ app.include_router(menu_router)
 app.include_router(order_router)
 app.include_router(payment_handoff_router)
 app.include_router(perf_router)
+app.include_router(billing_router)
+app.include_router(channel_router)
 app.include_router(queue_router)
 app.include_router(super_admin_router)
+app.include_router(super_billing_router)
+app.include_router(super_channel_router)
 
 plugin_manager.register_app(app)
 plugin_manager.load_plugins()
