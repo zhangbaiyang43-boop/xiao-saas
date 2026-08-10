@@ -38,6 +38,11 @@ def make_merchant_request(tenant_id=TENANT_A, path="/api/v1/orders/settle-table"
     req.state.tenant_id = tenant_id
     req.state.token_type = "merchant"
     req.state.user_id = "staff-1"
+    # get_request_principal() requires role=="owner" for an account_id-less merchant
+    # request (see app/middleware/auth_middleware.py:127-142, which is what a real
+    # request gets from AuthMiddleware) -- this fixture predates that check.
+    req.state.role = "owner"
+    req.state.account_id = None
     return req
 
 

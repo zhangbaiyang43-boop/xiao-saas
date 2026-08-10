@@ -12,6 +12,12 @@ MENU_API_SOURCE = (ROOT / "app" / "api" / "v1" / "menu.py").read_text(encoding="
 MINIAPP_MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+# The checkout/payment submission logic that used to live inline in menu.vue was
+# already extracted into this composable before this test file was last touched --
+# need_payment/pendingOrderId/_handlePaySuccess etc. now live here, not in menu.vue.
+USE_CHECKOUT_SOURCE = (
+    ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "composables" / "useCheckout.js"
+).read_text(encoding="utf-8-sig")
 ADMIN_PAYMENT_SOURCE = (
     ROOT.parent / "admin-h5" / "src" / "views" / "settings" / "PaymentSettings.vue"
 ).read_text(encoding="utf-8-sig")
@@ -64,10 +70,10 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('"order_id": order_data["id"]', create_source)
         self.assertIn('select(Order).where(Order.id == int(order_id)).with_for_update()', pay_source)
         self.assertIn('out_trade_no=str(order.id)', pay_source)
-        self.assertIn('data.need_payment !== false', MINIAPP_MENU_SOURCE)
+        self.assertIn('data.need_payment !== false', USE_CHECKOUT_SOURCE)
         self.assertLess(
-            MINIAPP_MENU_SOURCE.index("pendingOrderId.value = String(data.id || data.order_id || '')"),
-            MINIAPP_MENU_SOURCE.index('if (data.need_payment !== false)'),
+            USE_CHECKOUT_SOURCE.index("pendingOrderId.value = String(data.id || data.order_id || '')"),
+            USE_CHECKOUT_SOURCE.index('if (data.need_payment !== false)'),
         )
 
     def test_postpay_and_table_account_submit_without_wxpay_and_show_success(self):
@@ -80,8 +86,8 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('reason="order_created_pay_later"', create_source)
         self.assertIn('getattr(order, "payment_mode", "prepay") != "prepay"', pay_source)
         self.assertIn('"PAYMENT_NOT_REQUIRED"', pay_source)
-        self.assertIn('if (data.need_payment !== false)', MINIAPP_MENU_SOURCE)
-        self.assertIn("_handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })", MINIAPP_MENU_SOURCE)
+        self.assertIn('if (data.need_payment !== false)', USE_CHECKOUT_SOURCE)
+        self.assertIn("_handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })", USE_CHECKOUT_SOURCE)
 
 
 if __name__ == "__main__":

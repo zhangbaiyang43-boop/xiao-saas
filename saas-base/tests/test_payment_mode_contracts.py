@@ -17,6 +17,13 @@ MENU_API_SOURCE = (ROOT / "app" / "api" / "v1" / "menu.py").read_text(encoding="
 MINIAPP_MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+# The checkout/payment submission logic that used to live inline in menu.vue was
+# already extracted into this composable before this test file was last touched --
+# need_payment/savePendingPaymentOrder/clearStalePrepayOrderForPayLater etc. now
+# live here, not in menu.vue itself.
+USE_CHECKOUT_SOURCE = (
+    ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "composables" / "useCheckout.js"
+).read_text(encoding="utf-8-sig")
 ADMIN_PAYMENT_SOURCE = (
     ROOT.parent / "admin-h5" / "src" / "views" / "settings" / "PaymentSettings.vue"
 ).read_text(encoding="utf-8-sig")
@@ -100,12 +107,12 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn('getattr(tenant, "payment_mode", "prepay")', source)
 
     def test_frontend_only_pays_when_backend_requires_payment(self):
-        self.assertIn("data.need_payment !== false", MINIAPP_MENU_SOURCE)
+        self.assertIn("data.need_payment !== false", USE_CHECKOUT_SOURCE)
         self.assertIn("paymentMode.value", MINIAPP_MENU_SOURCE)
-        self.assertIn("savePendingPaymentOrder()", MINIAPP_MENU_SOURCE)
+        self.assertIn("savePendingPaymentOrder()", USE_CHECKOUT_SOURCE)
         self.assertLess(
-            MINIAPP_MENU_SOURCE.index("if (data.need_payment !== false)"),
-            MINIAPP_MENU_SOURCE.index("savePendingPaymentOrder()"),
+            USE_CHECKOUT_SOURCE.index("if (data.need_payment !== false)"),
+            USE_CHECKOUT_SOURCE.index("savePendingPaymentOrder()"),
         )
         self.assertIn('v-model:value="paymentMode"', ADMIN_PAYMENT_SOURCE)
         self.assertIn("res.data.payment_mode", ADMIN_PAYMENT_SOURCE)
@@ -121,10 +128,10 @@ class PaymentModeContractsTest(unittest.TestCase):
         self.assertIn("loadShopSettings().catch(() => {})", MINIAPP_MENU_SOURCE)
 
     def test_pay_later_clears_stale_prepay_before_checkout(self):
-        self.assertIn("clearStalePrepayOrderForPayLater", MINIAPP_MENU_SOURCE)
-        self.assertIn("if (isPrepayMode.value || !pendingOrderId.value) return", MINIAPP_MENU_SOURCE)
-        self.assertLess(MINIAPP_MENU_SOURCE.index("clearStalePrepayOrderForPayLater()"), MINIAPP_MENU_SOURCE.index("if (pendingOrderId.value) return confirmPay()"))
-        self.assertIn("paymentMode.value = normalizePaymentMode(data.payment_mode)", MINIAPP_MENU_SOURCE)
+        self.assertIn("clearStalePrepayOrderForPayLater", USE_CHECKOUT_SOURCE)
+        self.assertIn("if (isPrepayMode.value || !pendingOrderId.value) return", USE_CHECKOUT_SOURCE)
+        self.assertLess(USE_CHECKOUT_SOURCE.index("clearStalePrepayOrderForPayLater()"), USE_CHECKOUT_SOURCE.index("if (pendingOrderId.value) return confirmPay()"))
+        self.assertIn("paymentMode.value = normalizePaymentMode(data.payment_mode)", USE_CHECKOUT_SOURCE)
 
 
     def test_admin_order_manage_can_see_pay_later_orders(self):

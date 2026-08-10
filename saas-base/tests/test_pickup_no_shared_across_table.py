@@ -42,6 +42,11 @@ def make_staff_request():
     )
     request.state.tenant_id = TENANT_A
     request.state.token_type = "merchant"
+    # get_request_principal() requires role=="owner" for an account_id-less merchant
+    # request (see app/middleware/auth_middleware.py:127-142, which is what a real
+    # request gets from AuthMiddleware) -- this fixture predates that check.
+    request.state.role = "owner"
+    request.state.account_id = None
     return request
 
 

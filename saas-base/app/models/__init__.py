@@ -29,6 +29,7 @@ from app.models.merchant_account_trusted_device import MerchantAccountTrustedDev
 from app.models.perf_sample import PerfSample
 from app.models.staff_assisted_payment_handoff import StaffAssistedPaymentHandoff
 from app.models.billing import BillingInvoice, BillingPayment
+from app.models.subscription import Plan, Subscription
 from app.models.channel_revenue import (
     ChannelCommissionLedger,
     ChannelCommissionSettlement,
@@ -82,6 +83,8 @@ __all__ = [
     'StaffAssistedPaymentHandoff',
     'BillingInvoice',
     'BillingPayment',
+    'Plan',
+    'Subscription',
     'ChannelPartner',
     'ChannelLeadMobileLock',
     'ChannelLead',

@@ -33,22 +33,22 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     ): "MemberAccount rows loaded by customer_ids from CustomerService.list_customers(tenant_id=...); customers are already tenant-scoped.",
     (
         "app/services/coupon_service.py",
-        1312,
+        1358,
         "_set_order_coupon_status_if_locked",
     ): "Coupon locked by order.coupon_id where order is an already-loaded, tenant-bound Order instance passed into this helper.",
     (
         "app/services/order_lifecycle_service.py",
-        102,
+        95,
         "cancel_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before any mutation.",
     (
         "app/services/order_lifecycle_service.py",
-        154,
+        156,
         "get_my_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before returning data.",
     (
         "app/services/order_lifecycle_service.py",
-        365,
+        366,
         "create_review",
     ): "Order loaded by primary key then customer_id must match caller before review is created.",
     (
@@ -58,39 +58,53 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     ): "Re-locks the same Order row already passed in; tenant scope inherited from the caller's order object.",
     (
         "app/services/order_payment_service.py",
-        358,
+        368,
         "_refund_order_payment",
     ): "Coupon locked by order.coupon_id on an order already loaded in the refund flow.",
     (
         "app/services/order_payment_service.py",
-        453,
+        463,
         "mock_pay_order",
     ): "Order loaded by id then customer/participant ownership is verified before mock payment.",
     (
         "app/services/order_payment_service.py",
-        519,
+        529,
         "create_wxpay_order",
     ): "Order loaded by id then customer/participant ownership is verified; tenant taken from order.tenant_id for WxPayService.",
     (
         "app/services/order_payment_service.py",
-        555,
+        565,
         "create_wxpay_order",
     ): "Re-locks the same order_id after the ownership gate at the top of create_wxpay_order.",
     (
         "app/services/order_payment_service.py",
-        582,
+        592,
         "create_wxpay_order",
     ): "Re-locks the same order_id after the ownership gate at the top of create_wxpay_order.",
     (
         "app/services/order_payment_service.py",
-        690,
+        700,
         "wxpay_notify",
     ): "WeChat notify resolves merchant cert first, then rejects order.tenant_id mismatch against matched_tenant.",
     (
         "app/services/order_print_service.py",
-        129,
+        269,
         "_print_paid_order_ticket",
     ): "Re-locks the same Order row already passed in by order.id for print-state consistency.",
+    (
+        "app/services/payment_handoff_service.py",
+        173,
+        "_load_order_by_id",
+    ): "Private loader; every call site re-verifies ownership after loading (token-hash lookup in resolve(), "
+    "tenant_id-filtered StaffAssistedPaymentHandoff row in resolve_latest_for_order(), explicit "
+    "order.tenant_id != tenant_id check in _load_order_for_staff_handoff()).",
+    (
+        "app/services/order_print_service.py",
+        588,
+        "recover_pending_print_orders_once",
+    ): "Intentionally cross-tenant: a startup/interval background recovery job (see _print_recovery_loop in "
+    "main.py), same trust model as _pending_payment_reconcile_once and _marketing_recall_loop. Each recovered "
+    "Order carries its own tenant_id, used correctly per-order by the printing code it calls into.",
 }
 
 
