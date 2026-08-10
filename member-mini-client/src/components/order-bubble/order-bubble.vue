@@ -320,13 +320,13 @@ export default {
 }
 
 .ob-bubble--paid { background: linear-gradient(145deg, #38bdf8, #0ea5e9); }
-.ob-bubble--preparing { background: linear-gradient(145deg, #fbbf24, #f59e0b); }
+.ob-bubble--preparing { background: linear-gradient(145deg, #fbbf24, var(--warning)); }
 .ob-bubble--served { background: linear-gradient(145deg, #34d399, var(--brand)); }
-.ob-bubble--canceled { background: linear-gradient(145deg, #f87171, #ef4444); }
+.ob-bubble--canceled { background: linear-gradient(145deg, #f87171, var(--danger)); }
 .ob-bubble--settled { background: linear-gradient(145deg, #cbd5e1, #9ca3af); }
 
 .ob-icon {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 40rpx;
   line-height: 1;
   text-shadow: 0 2rpx 4rpx rgba(0, 0, 0, 0.12);
@@ -334,7 +334,7 @@ export default {
 }
 
 .ob-label {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 24rpx;
   font-weight: 700;
   line-height: 1;
@@ -350,9 +350,9 @@ export default {
   height: 32rpx;
   padding: 0 8rpx;
   border-radius: 16rpx;
-  background: #ef4444;
+  background: var(--danger);
   border: 2rpx solid #fff;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 20rpx;
   line-height: 28rpx;
   text-align: center;
@@ -372,18 +372,18 @@ export default {
 }
 
 .ob-callout text {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 22rpx;
 }
 
 .ob-hint {
   position: fixed;
-  right: 24rpx;
+  left: 24rpx;
   z-index: 851;
   padding: 12rpx 20rpx;
   border-radius: 30rpx;
   background: rgba(23, 26, 29, 0.92);
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 22rpx;
   white-space: nowrap;
   animation: ob-in 0.25s ease-out both;

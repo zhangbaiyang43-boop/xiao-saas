@@ -138,6 +138,7 @@ export function useDiningSession({
       createdAt: timeStr,
       createdTs: Number.isNaN(created.getTime()) ? Date.now() : created.getTime(),
       table: order.table_no || tableNo.value,
+      shop: shopId.value,
     }
   }
 

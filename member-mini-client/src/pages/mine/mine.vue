@@ -541,17 +541,29 @@ export default {
         })
         return
       }
+      const url = `/subpkg-common/pages/queue-take?shop=${encodeURIComponent(shop)}`
       uni.navigateTo({
-        url: `/subpkg-common/pages/queue-take?shop=${encodeURIComponent(shop)}`,
+        url,
         fail: (err) => {
+          // 页面栈逛得深了会超过小程序 navigateTo 的 10 层上限，这里退化成
+          // redirectTo（替换当前页，不再压栈）保证排队取号一定能打开，
+          // 只有非栈溢出的失败才提示用户重试。
+          if (String(err?.errMsg || '').indexOf('page limit exceeded') !== -1) {
+            uni.redirectTo({ url })
+            return
+          }
           uni.showToast({ title: '打开失败：' + (err?.errMsg || '请重试'), icon: 'none' })
         },
       })
     }
 
     const openRecentOrder = () => {
-      const table = currentTableNo.value
-      const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+      // 最近订单是跨门店扫全设备 my_orders_* 缓存拿到的（见 loadRecentOrder），
+      // 不一定是当前这次会话所在的门店/桌台——必须用订单自己记的 shop/table
+      // 跳转，不能用 currentTableNo/tenant_id 这类"当前会话"状态，否则查到的
+      // 是这次会话的桌台历史，跟顾客点开的那笔订单对不上，点了没反应。
+      const table = recentOrder.value?.table || currentTableNo.value
+      const shop = recentOrder.value?.shop || uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
       const query = [
         table ? `table=${encodeURIComponent(table)}` : '',
         shop ? `shop=${encodeURIComponent(shop)}` : '',

@@ -24,7 +24,7 @@ import { confirmationText, toastText } from '../utils/orderText.js'
 export function useCheckout({
   shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
   orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,
-  showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed,
+  showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
   payAmount, pendingOrderId, pendingSubmitRequestId,
   myOrders, showOrders, showCart, showSuccess,
   ordering, tableSessionClosed, paymentMode,
@@ -105,6 +105,8 @@ export function useCheckout({
     try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
     pendingOrderId.value = ''
     paymentFailed.value = false
+    if (paymentConfirming) paymentConfirming.value = false
+    if (paymentResultUnknown) paymentResultUnknown.value = false
   }
 
   const clearStalePrepayOrderForPayLater = () => {
@@ -116,6 +118,8 @@ export function useCheckout({
   const isPaidOrSubmittedOrder = (order) => {
     const status = order?.status || ''
     const paymentStatus = order?.payment_status || ''
+    const mode = normalizePaymentMode(order?.payment_mode || paymentMode.value)
+    if (mode === 'prepay') return paymentStatus === 'paid'
     return paymentStatus === 'paid' || ['pending', 'paid', 'accepted', 'preparing', 'done', 'completed', 'settled'].includes(status)
   }
 
@@ -134,6 +138,7 @@ export function useCheckout({
         orderStatus.value = data.status || 'pending'
         showCart.value = false
         showCheckoutAuth.value = false
+        if (paymentResultUnknown) paymentResultUnknown.value = false
         pendingPaymentIntent.value = null
         clearPendingPaymentOrder()
 
@@ -151,6 +156,7 @@ export function useCheckout({
             createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
             createdTs: now.getTime(),
             table: tableNo.value,
+            shop: shopId.value,
           })
         }
         saveMyOrders()
@@ -368,7 +374,7 @@ export function useCheckout({
       paymentStatus: data.payment_status || '', paymentMode: normalizePaymentMode(data.payment_mode || paymentMode.value),
       diningSessionId: diningSessionId.value || '', tableSessionId: diningSessionId.value || '',
       items: successItems.value, total: successTotal.value, createdAt: timeStr,
-      createdTs: now.getTime(), table: tableNo.value,
+      createdTs: now.getTime(), table: tableNo.value, shop: shopId.value,
       pickupNo: data.pickup_no || '',
     })
     saveMyOrders()
@@ -430,6 +436,39 @@ export function useCheckout({
     }
   }
 
+  const waitForBackendPaymentConfirmation = async (id) => {
+    if (!id) return false
+    if (paymentConfirming) paymentConfirming.value = true
+    if (paymentResultUnknown) paymentResultUnknown.value = false
+    try {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 900))
+        }
+        try {
+          const res = await getOrderStatus(id, diningParticipantToken.value)
+          const data = res?.data || {}
+          if (data.payment_status === 'paid') {
+            _handlePaySuccess({ ...data, total: payAmount.value })
+            if (paymentResultUnknown) paymentResultUnknown.value = false
+            return true
+          }
+          if (['cancelled', 'rejected'].includes(data.status)) {
+            clearPendingPaymentOrder()
+            return false
+          }
+        } catch (e) {
+          reportError('checkout.confirm_backend_payment', e)
+        }
+      }
+      if (paymentResultUnknown) paymentResultUnknown.value = true
+      uni.showToast({ title: '支付结果确认中，请勿重复支付', icon: 'none', duration: 1800 })
+      return false
+    } finally {
+      if (paymentConfirming) paymentConfirming.value = false
+    }
+  }
+
   const confirmPay = async () => {
     if (paying.value || !pendingOrderId.value) return false
     paying.value = true
@@ -438,6 +477,9 @@ export function useCheckout({
       // 待支付恢复等只走 confirmPay 的路径，也要再申请一次（已授权时微信通常不再弹框）。
       await requestOrderSubscribeMessages()
       if (await recoverPendingPaymentResult()) return true
+      if (paymentResultUnknown?.value) {
+        return await waitForBackendPaymentConfirmation(pendingOrderId.value)
+      }
       if (showCheckoutAuth.value) authActionStatus.value = 'paying'
       let jsCode = ''
       if (!uni.getStorageSync('customer_token')) {
@@ -467,11 +509,14 @@ export function useCheckout({
       })
 
       const paidOrderId = pendingOrderId.value
-      _handlePaySuccess({ ...data, total: payAmount.value })
-      pendingPaymentIntent.value = null
-      // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去轮询。
-      attachPaymentReward(paidOrderId)
-      return true
+      const confirmed = await waitForBackendPaymentConfirmation(paidOrderId)
+      if (confirmed) {
+        pendingPaymentIntent.value = null
+        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去轮询。
+        attachPaymentReward(paidOrderId)
+        return true
+      }
+      return false
 
     } catch (err) {
       if (isCheckoutAuthError(err)) {
