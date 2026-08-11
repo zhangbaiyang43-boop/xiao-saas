@@ -520,10 +520,10 @@ export default {
         goLogin()
         return
       }
-      if (recentOrder.value) {
-        openRecentOrder()
-        return
-      }
+      // "我的订单" 这一行本身就写着"查看历史订单和消费明细"，点进去应该永远是完整的
+      // 历史订单列表——不能因为本地缓存里存在 recentOrder 就顺手劫持成只看那一笔最新
+      // 订单的详情。最近订单卡片（recent-order-card）自己已经单独绑了 openRecentOrder，
+      // 这里不需要、也不应该重复那条分支。
       go('/subpkg-member/pages/consumptions')
     }
 
