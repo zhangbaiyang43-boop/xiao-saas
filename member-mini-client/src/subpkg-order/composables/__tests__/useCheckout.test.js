@@ -164,7 +164,9 @@ describe('useCheckout', () => {
       createOrder.mockResolvedValue({
         data: { id: 'order_1', order_no: 'ON20260806001', pay_amount: 20, need_payment: true },
       })
-      getOrderStatus.mockResolvedValue({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -379,7 +381,9 @@ describe('useCheckout', () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       state.payAmount.value = 20
-      getOrderStatus.mockResolvedValue({ data: {} })
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} })
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -466,7 +470,7 @@ describe('useCheckout', () => {
     it('订单已支付/已提交时，把本地状态跟服务端对齐并停止占用"待支付"标记', async () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
-      getOrderStatus.mockResolvedValue({ data: { status: 'preparing' } })
+      getOrderStatus.mockResolvedValue({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
 
       const ok = await checkout.recoverPendingPaymentResult()
 
@@ -508,7 +512,7 @@ describe('useCheckout', () => {
       const first = checkout.recoverPendingPaymentResult()
       const second = checkout.recoverPendingPaymentResult()
 
-      resolveStatus({ data: { status: 'preparing' } })
+      resolveStatus({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
       const [firstResult, secondResult] = await Promise.all([first, second])
 
       expect(getOrderStatus).toHaveBeenCalledTimes(1)
