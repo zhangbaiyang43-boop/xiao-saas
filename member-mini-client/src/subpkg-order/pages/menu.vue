@@ -60,7 +60,7 @@
       :category-scroll-top="categoryScrollTop"
       :scroll-target="scrollTarget"
       :last-order-items="lastOrderItems"
-      :loading="loading"
+      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
       :load-error="loadError"
       :all-dishes="allDishes"
       :image-load-failed="imageLoadFailed"
@@ -87,7 +87,7 @@
       @active-category-change="handleActiveCategoryChange"
       @reorder-item="reorderItem"
       @reorder-all="reorderAll"
-      @retry-load="loadMenu"
+      @retry-load="retryMenuInitialization"
       @open-cart="openCart"
       @open-spec-sheet="openSpecSheet"
       @image-error="markDishImageFailed"
@@ -400,8 +400,8 @@
 
     <LoadingStates
       :load-error="loadError"
-      :loading="loading"
-      @retry-load="loadMenu"
+      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
+      @retry-load="retryMenuInitialization"
     />
 
 
@@ -457,20 +457,21 @@ import { useTableCheckout } from '../composables/useTableCheckout.js'
 import { useOrderStatusPoll } from '../composables/useOrderStatusPoll.js'
 import { useCheckout } from '../composables/useCheckout.js'
 import { useDiningSession } from '../composables/useDiningSession.js'
+import { createMenuInitialization } from '../composables/useMenuInitialization.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
 import { orderModeText, confirmationText, successText, specText, authSheetText, toastText, modalText } from '../utils/orderText.js'
 
-const observeMenuContent = (page, pagePerfKey) => {
+const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
   try {
     nextTick(() => {
-      if (!page?.$refs?.dishList) return
+      if (!page?.menuInitializationActive || !page?.$refs?.dishList) return resolve(false)
       const query = uni.createSelectorQuery().in(page.$refs?.dishList)
       query.select('.cat-item').boundingClientRect()
       query.select('.dish-item').boundingClientRect()
       query.exec((nodes) => {
-        if (!nodes?.[0] || !nodes?.[1]) return
+        if (!page?.menuInitializationActive || !nodes?.[0] || !nodes?.[1]) return resolve(false)
         const firstContentAt = Date.now()
         if (markEventOnce('first_content', `${pagePerfKey}:first_content`, { view_observed: true }, firstContentAt)) {
           recordDurationFromStart('menu_onload_to_first_content', 'menu_onload_to_first_content', {
@@ -484,12 +485,14 @@ const observeMenuContent = (page, pagePerfKey) => {
           }, firstContentAt)
           recordDurationFromStart('first_content_to_interactive', 'first_content_to_interactive', undefined, firstContentAt)
         }
+        resolve(true)
       })
     })
   } catch {
     // Selector telemetry is best effort and never changes page rendering.
+    resolve(false)
   }
-}
+})
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -525,6 +528,10 @@ export default {
     const todayActivity = ref('')
     const loading = ref(false)
     const loadError = ref(false)
+    const orderingContextReady = ref(false)
+    const orderingContextFailed = ref(false)
+    const criticalInitializationRetry = ref(null)
+    const retryMenuInitialization = () => criticalInitializationRetry.value?.()
     const ordering = ref(false)
     // 提交订单的幂等键：开开购物车时生成一次，
     // 同一次结算内的重试（弱网超时后重新提交）都带同一个值，
@@ -685,6 +692,10 @@ export default {
       triggerCartSuccessFeedback: (key) => triggerCartSuccessFeedback(key),
     })
     const openSpecSheet = (dish) => {
+      if (!orderingContextReady.value) {
+        uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+        return
+      }
       const firstAction = startFirstCartAction('open_spec_sheet')
       const result = openSpecSheetRaw(dish)
       finishFirstCartAction(firstAction)
@@ -846,7 +857,7 @@ export default {
       return wechatPayAmount.value > 0 ? confirmationText.wechatPay : confirmationText.payable
     })
     const authAmountLabel = computed(() => isPrepayMode.value ? authSheetText.amount : confirmationText.goodsAmount)
-    const canSubmitOrder = computed(() => totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
+    const canSubmitOrder = computed(() => orderingContextReady.value && totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
     const payButtonText = computed(() => {
       if (ordering.value) return confirmationText.confirming
       if (paymentConfirming.value) return confirmationText.paymentConfirming
@@ -903,6 +914,10 @@ export default {
     const cartCount = (id) => cart.value[id] || 0
 
     const addToCart = (dish) => {
+      if (!orderingContextReady.value) {
+        uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+        return
+      }
       if (isSoldOut(dish)) return
       if (hasSpecs(dish)) {
         openSpecSheet(dish)
@@ -1153,7 +1168,7 @@ export default {
     }
 
     const loadShopSettings = async () => {
-      if (!shopId.value) return
+      if (!shopId.value) return false
       const cachedData = readShopInfoCache()
       if (cachedData) applyShopInfoState(cachedData)
       try {
@@ -1176,10 +1191,12 @@ export default {
             })
           }
           if (d.lat && d.lng) loadDistance(d.lat, d.lng)
+          return true
         }
       } catch (e) {
         console.warn('[loadShopSettings] failed', e)
       }
+      return false
     }
 
     // 第2批：菜单按 tenant_id 存本地缓存，带一个 version（后端用这批菜品自己的 updated_at
@@ -1201,14 +1218,12 @@ export default {
       }
     }
 
-    const loadMenu = async (onContentCandidate) => {
-      const notifyContentCandidate = typeof onContentCandidate === 'function' ? onContentCandidate : () => {}
+    const loadMenu = async () => {
       const cached = readMenuCache()
       const hadCacheHit = Boolean(cached && cached.items.length)
       if (hadCacheHit) {
         allDishes.value = cached.items
         if (categories.value.length) activeCategory.value = categories.value[0]
-        notifyContentCandidate()
       }
       loading.value = !hadCacheHit
       loadError.value = false
@@ -1216,7 +1231,7 @@ export default {
         const res = await getMenuItems(shopId.value)
         if (res?.code !== 200) {
           if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
-          return
+          return hadCacheHit
         }
         const payload = res?.data || {}
         const rawItems = Array.isArray(payload) ? payload : (payload.items || [])
@@ -1232,10 +1247,11 @@ export default {
           item_count: mapped.length,
           cache_hit: hadCacheHit,
         })
-        notifyContentCandidate()
         if (version) writeMenuCache(mapped, version)
+        return true
       } catch {
         if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
+        return hadCacheHit
       } finally {
         loading.value = false
         if (categories.value.length) activeCategory.value = categories.value[0]
@@ -1251,7 +1267,7 @@ export default {
 
     return {
       tableNo, shopId, shopName, shopLogo, memberSinceText, tableDisplayText, orderModeDisplayText, showTableHint, todayActivity, orderMode, orderModeText, confirmationText, confirmPaymentLabel, authAmountLabel, successText, specText,
-      loading, loadError, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
+      loading, loadError, orderingContextReady, orderingContextFailed, retryMenuInitialization, criticalInitializationRetry, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
       couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
@@ -1313,25 +1329,22 @@ export default {
       this.loadMyOrders()
       this.restorePendingPaymentOrder()
       this.refreshCustomerAuthState()
-      this.loadMemberStatus({ authRedirect: false })
 
-      // \u83dc\u5355\u80fd\u4e0d\u80fd\u663e\u793a\u53ea\u53d6\u51b3\u4e8e shopId\uff08\u4e0a\u9762\u5df2\u7ecf\u540c\u6b65\u8bbe\u597d\uff09\uff0c\u8ddf\u672c\u684c\u8eab\u4efd/\u684c\u53f0\u8ba2\u5355/
-      // \u5f85\u652f\u4ed8\u6062\u590d\u5b8c\u5168\u65e0\u5173\u2014\u2014\u8fd9\u6761\u94fe\u548c\u4e0b\u9762\u90a3\u6761"\u8eab\u4efd\u2192\u684c\u53f0\u540c\u6b65\u2192\u5f85\u652f\u4ed8\u6062\u590d"\u7684\u94fe\u8def
-      // \u5e76\u884c\u8dd1\uff0c\u4e0d\u518d\u8ba9\u83dc\u5355\u7b49\u4e00\u4e2a\u8ddf\u5b83\u65e0\u5173\u7684\u94fe\u8def\u3002
-      // loadShopSettings（门店信息/分类顺序）和 loadMenu（菜品列表）互不依赖对方的返回
-      // 数据，之前写成先后 await 纯粹是顺序问题——两者互相独立就应该并行发起，少等一次
-      // 网络往返。
-      const shopInfoPromise = this.loadShopSettings()
-      const menuPromise = this.loadMenu(() => observeMenuContent(this, pagePerfKey))
-      const menuReady = Promise.all([shopInfoPromise, menuPromise])
-      menuReady.then(() => {
+      // Only menu data and authoritative shop payment/open-state context block
+      // ordering. Member, coupon, dining/history and payment recovery start
+      // after critical readiness and retain their existing business guards.
+      const startMemberAndCoupon = () => {
+        const memberPromise = this.loadMemberStatus({ authRedirect: false })
         // 第1批：优惠券预拉，别等顾客点开购物车才现拉。故意错开一点延迟，把带宽/CPU
         // 优先让给刚刚渲染出来的菜单，不跟首屏抢；顾客通常也要选几件商品才会点开购物车，
         // 这点延迟基本感觉不到。
-        setTimeout(() => { this.refreshAvailableCoupons() }, 800)
-      })
+        this.menuCouponPrefetchTimer = setTimeout(() => {
+          if (this.menuInitializationActive) this.refreshAvailableCoupons()
+        }, 800)
+        return memberPromise
+      }
 
-      const sessionReady = (async () => {
+      const initializeDiningState = async () => {
         // entry \u9875\u626b\u7801\u8fdb\u6765\u65f6\u5df2\u7ecf\u5f3a\u5236\u5237\u65b0\u8fc7\u4e00\u6b21\u8eab\u4efd\u5e76\u5199\u8fdb\u672c\u5730\u7f13\u5b58\uff08resolveTableSession
         // \u91cc\u7684 force:true\uff09\uff0c\u8fd9\u91cc\u4e0d\u518d\u4f20 force\u2014\u2014ensureDiningSession \u5185\u90e8\u7684
         // resolveDiningIdentity \u4f1a\u81ea\u5df1\u5224\u65ad\u7f13\u5b58\u662f\u5426\u53ef\u4fe1\uff08\u684c\u53f7\u5bf9\u4e0d\u5bf9\u5f97\u4e0a\u3001\u6709\u6ca1\u6709
@@ -1342,9 +1355,36 @@ export default {
         this.startTablePresencePollIfActive()
         await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
         if (options.openOrders === '1') this.showOrders = true
-      })()
+        return true
+      }
 
-      await Promise.all([menuReady, sessionReady])
+      const runCriticalInitialization = () => {
+        if (this.menuInitializationController) this.menuInitializationController.dispose()
+        if (this.menuCouponPrefetchTimer) clearTimeout(this.menuCouponPrefetchTimer)
+        this.menuInitializationActive = true
+        this.orderingContextReady = false
+        this.orderingContextFailed = false
+        const initialization = createMenuInitialization({
+          loadMenu: () => this.loadMenu(),
+          loadCriticalContext: () => this.loadShopSettings(),
+          onCriticalReady: async () => {
+            this.orderingContextReady = true
+            return observeMenuContent(this, pagePerfKey)
+          },
+          onCriticalFailure: (error) => {
+            this.orderingContextFailed = true
+            uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+            reportError('menu.critical_context', error)
+          },
+          onDeferredError: (error) => reportError('menu.deferred_initialization', error),
+        })
+        this.menuInitializationController = initialization
+        return initialization.run({
+          secondaryTasks: [startMemberAndCoupon, initializeDiningState],
+        })
+      }
+      this.criticalInitializationRetry = runCriticalInitialization
+      await runCriticalInitialization()
     })()
   },
   onShow() {
@@ -1354,15 +1394,15 @@ export default {
       uni.removeStorageSync('menu_focus_tab')
     }
     if (this.refreshCustomerAuthState) this.refreshCustomerAuthState()
-    if (this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
-    if (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone')) {
+    if (this.orderingContextReady && this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
+    if (this.orderingContextReady && (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))) {
       this.loadMemberStatus({ authRedirect: false })
     }
     if (this.orderId && !['settled', 'cancelled', 'rejected'].includes(this.orderStatus)) {
       this.startStatusPoll(this.orderId)
     }
     // CLOSED / 退出中 / 无 active session：禁止重启旧桌轮询（死循环根因之一）
-    this.startTablePresencePollIfActive()
+    if (this.orderingContextReady) this.startTablePresencePollIfActive()
   },
   onHide: function () {
     this.stopStatusPoll()
@@ -1372,6 +1412,9 @@ export default {
   onUnload: function () {
     this.stopStatusPoll()
     this.stopTablePresencePoll()
+    this.menuInitializationActive = false
+    if (this.menuCouponPrefetchTimer) clearTimeout(this.menuCouponPrefetchTimer)
+    if (this.menuInitializationController) this.menuInitializationController.dispose()
   },
 }
 </script>
