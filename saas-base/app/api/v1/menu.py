@@ -1,4 +1,5 @@
 import logging
+import time
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,43 @@ from app.models.tenant_config import TenantConfig
 from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/api/v1", tags=["点餐"])
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return max(0.0, (time.perf_counter() - started_at) * 1000)
+
+
+def _new_menu_diagnostics(request: Request, tenant_id: Optional[str]) -> dict:
+    return {
+        "request_id": getattr(request.state, "request_id", "unknown"),
+        "tenant_id": tenant_id,
+        # LoggingMiddleware finalizes full server time after this handler returns.
+        "server_total_ms": None,
+        "handler_total_ms": 0.0,
+        "tenant_query_ms": 0.0,
+        "menu_query_ms": 0.0,
+        "config_query_ms": 0.0,
+        "mapping_ms": 0.0,
+        "serialization_prepare_ms": 0.0,
+        "payload_bytes": None,
+        "menu_item_count": 0,
+        "category_count": 0,
+        "spec_group_count": 0,
+        "spec_option_count": 0,
+        "cache_state": "none",
+        "status_code": 200,
+    }
+
+
+def _finish_menu_response(request: Request, diagnostics: dict, handler_started_at: float, response_builder):
+    prepare_started_at = time.perf_counter()
+    response = response_builder()
+    diagnostics["serialization_prepare_ms"] = _elapsed_ms(prepare_started_at)
+    diagnostics["status_code"] = response.code
+    diagnostics["handler_total_ms"] = _elapsed_ms(handler_started_at)
+
+    request.state.menu_diagnostics = diagnostics
+    return response
 
 
 class MenuItemCreate(PydanticBase):
@@ -188,39 +226,84 @@ async def list_menu_items(
     shop: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
+    handler_started_at = time.perf_counter()
     token_type = getattr(request.state, "token_type", None)
     is_merchant = token_type == "merchant"
+    initial_tenant_id = getattr(request.state, "tenant_id", None) if is_merchant else shop
+    diagnostics = _new_menu_diagnostics(request, initial_tenant_id)
 
     if is_merchant:
         # 商户端：用 token 里的 tenant_id，返回全部菜品（含下架）
         tenant_id = getattr(request.state, "tenant_id", None)
         if not tenant_id:
-            return error_response(code=401, msg="请先登录")
+            return _finish_menu_response(
+                request,
+                diagnostics,
+                handler_started_at,
+                lambda: error_response(code=401, msg="请先登录"),
+            )
         query = select(MenuItem).where(MenuItem.tenant_id == tenant_id)
     else:
         # 顾客端：必须传 shop 参数，只返回上架菜品；商户被平台停用后菜单也不再对外展示
         if not shop:
-            return error_response(code=400, msg="缺少shop参数")
+            return _finish_menu_response(
+                request,
+                diagnostics,
+                handler_started_at,
+                lambda: error_response(code=400, msg="缺少shop参数"),
+            )
         tenant_id = shop
+        tenant_query_started_at = time.perf_counter()
         tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == shop))
         tenant = tenant_result.scalar_one_or_none()
+        diagnostics["tenant_query_ms"] = _elapsed_ms(tenant_query_started_at)
         if not tenant or not tenant.status:
-            return success_response(data=[])
+            return _finish_menu_response(
+                request,
+                diagnostics,
+                handler_started_at,
+                lambda: success_response(data=[]),
+            )
         query = select(MenuItem).where(MenuItem.tenant_id == shop, MenuItem.available == True)
 
     TenantContext.set_tenant_id(tenant_id)
+    diagnostics["tenant_id"] = tenant_id
+    menu_query_started_at = time.perf_counter()
     result = await db.execute(query.order_by(MenuItem.sort_order, MenuItem.id))
     items = result.scalars().all()
+    diagnostics["menu_query_ms"] = _elapsed_ms(menu_query_started_at)
+    config_query_started_at = time.perf_counter()
     specs_map = await load_menu_specs(db, tenant_id)
+    diagnostics["config_query_ms"] = _elapsed_ms(config_query_started_at)
     # version 给客户端做"先用本地缓存秒出首屏、再拿这个字段跟缓存比对要不要换"用的——
     # 不是单独一次查询算出来的，就是这批已经查出来的菜品自己的 updated_at 取最大值，
     # 零额外开销。菜单没变过就是空列表，用 "0" 占位，不影响比对逻辑（缓存的 version
     # 只要不是 "0" 且跟这次不一样就会被换掉；本来就没缓存过也无所谓）。
+    mapping_started_at = time.perf_counter()
     version = max((i.updated_at for i in items), default=None)
-    return success_response(data={
-        "items": [serialize_item(i, specs_map) for i in items],
+    serialized_items = [serialize_item(i, specs_map) for i in items]
+    diagnostics["mapping_ms"] = _elapsed_ms(mapping_started_at)
+    diagnostics["menu_item_count"] = len(serialized_items)
+    diagnostics["category_count"] = len(
+        {item["category"] for item in serialized_items if item["category"] is not None}
+    )
+    diagnostics["spec_group_count"] = sum(len(item["spec_groups"]) for item in serialized_items)
+    diagnostics["spec_option_count"] = sum(
+        len(group.get("options") or [])
+        for item in serialized_items
+        for group in item["spec_groups"]
+        if isinstance(group, dict)
+    )
+    response_data = {
+        "items": serialized_items,
         "version": version.isoformat() if version else "0",
-    })
+    }
+    return _finish_menu_response(
+        request,
+        diagnostics,
+        handler_started_at,
+        lambda: success_response(data=response_data),
+    )
 
 
 @router.post("/menu/items")
