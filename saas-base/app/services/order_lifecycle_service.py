@@ -589,23 +589,43 @@ class OrderLifecycleService(BaseService):
             .limit(1)
         )
         session_id = non_terminal_result.scalar_one_or_none()
-        if not session_id:
-            return error_response(code=404, msg="本桌没有进行中的会话")
 
-        session_result = await self.db.execute(
-            select(DiningSession).where(DiningSession.id == session_id).with_for_update()
-        )
-        active_session = session_result.scalar_one_or_none()
-        if not active_session:
-            return error_response(code=404, msg="本桌没有进行中的会话")
-
-        result = await self.db.execute(
-            select(Order).where(
-                Order.tenant_id == tenant_id,
-                Order.dining_session_id == active_session.id,
+        active_session = None
+        if session_id:
+            session_result = await self.db.execute(
+                select(DiningSession).where(DiningSession.id == session_id).with_for_update()
             )
-        )
-        table_orders = list(result.scalars().all())
+            active_session = session_result.scalar_one_or_none()
+
+        if active_session:
+            result = await self.db.execute(
+                select(Order).where(
+                    Order.tenant_id == tenant_id,
+                    Order.dining_session_id == active_session.id,
+                )
+            )
+            table_orders = list(result.scalars().all())
+        else:
+            # 没有挂 dining_session 的订单（比如超管"填充测试数据"生成的演示订单——见
+            # test_data_seed.py，那批订单从建单起就没有 session；理论上老版本直连 H5
+            # 下单也可能落在这里）永远不会被上面按 session 的查询捞到，但桌台视图仍然
+            # 会把它们按桌号分组展示成"可结账"。不给这类订单一条结账路径，商家会永远
+            # 卡在"本桌没有进行中的会话"上——刷新、重试、换设备、无痕模式都没用，因为
+            # 这压根不是缓存过期，是这批订单从建单起就没有 session 可关。这里退化成
+            # 纯按租户+桌号找非终态订单，跳过所有 DiningSession 专属步骤（没有 session
+            # 可关、没有桌牌租约可释放）。
+            orphan_result = await self.db.execute(
+                select(Order).where(
+                    Order.tenant_id == tenant_id,
+                    Order.table_no == table_no,
+                    Order.dining_session_id.is_(None),
+                    Order.status.notin_(("settled", "cancelled", "rejected")),
+                )
+            )
+            table_orders = list(orphan_result.scalars().all())
+            if not table_orders:
+                return error_response(code=404, msg="本桌没有进行中的会话")
+
         blocking_orders = [
             o for o in table_orders
             if (o.status or "") in TABLE_CLOSE_BLOCKING_STATUSES or (o.status or "") not in TABLE_CLOSE_DONE_STATUSES
@@ -616,21 +636,22 @@ class OrderLifecycleService(BaseService):
                 msg="本桌还有未完成的订单，无法结账",
                 data={
                     "table_no": table_no,
-                    "dining_session_id": str(active_session.id),
+                    "dining_session_id": str(active_session.id) if active_session else None,
                     "blocking_order_ids": [str(o.id) for o in blocking_orders],
                     "blocking_statuses": sorted({o.status for o in blocking_orders}),
                 },
             )
 
-        active_session.status = "CLOSED"
-        active_session.closed_at = datetime.utcnow()
-        active_session.closed_by = closed_by
-        active_session.active_key = None
-        # 释放当前桌牌租约；历史 Order.pickup_no 保留作快照
-        from app.services.pickup_no_service import PickupNoService
-        await PickupNoService(self.db).release_session_assignment(
-            tenant_id, active_session, clear_session_field=True
-        )
+        if active_session:
+            active_session.status = "CLOSED"
+            active_session.closed_at = datetime.utcnow()
+            active_session.closed_by = closed_by
+            active_session.active_key = None
+            # 释放当前桌牌租约；历史 Order.pickup_no 保留作快照
+            from app.services.pickup_no_service import PickupNoService
+            await PickupNoService(self.db).release_session_assignment(
+                tenant_id, active_session, clear_session_field=True
+            )
 
         total = 0.0
         settled_count = 0
@@ -665,7 +686,7 @@ class OrderLifecycleService(BaseService):
         return success_response(
             data={
                 "table_no": table_no,
-                "dining_session_id": str(active_session.id),
+                "dining_session_id": str(active_session.id) if active_session else None,
                 "settled_count": settled_count,
                 "paid_synced_count": paid_synced_count,
                 "payment_status": "paid",
