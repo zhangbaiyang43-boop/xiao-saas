@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 
-# Phase 02/03 — Subscription Data Skeleton + Trial Provisioning
-# (docs/saas-subscription-audit.md).
+# Phase 02/03/04 — Subscription Data Skeleton + Trial Provisioning + Registration
+# Integration (docs/saas-subscription-audit.md).
 #
-# This service is intentionally an isolated domain with no production caller yet.
+# This service is intentionally an isolated domain. Its only production caller
+# (Phase 04) is POST /api/v1/register in app/api/v1/login.py, which calls
+# create_trial_for_tenant() after creating a Tenant — nothing else calls in.
 # It must never call TenantService / OrderService / OrderPaymentService / WxPayService /
 # order_print_service / MembershipService / CouponService / BillingService / SMS,
 # and it must never write to Tenant.status — Tenant.status is a manual ban switch,
@@ -50,7 +52,7 @@ class SubscriptionService:
         result = await self.db.execute(select(Plan).where(Plan.code == code))
         return result.scalar_one_or_none()
 
-    async def ensure_plan(self, code: str, name: str) -> Plan:
+    async def ensure_plan(self, code: str, name: str, *, commit: bool = True) -> Plan:
         """get-or-create, idempotent under concurrent callers.
 
         Plan.code carries a DB-level UniqueConstraint (ux_plan_code, Phase 02).
@@ -60,12 +62,29 @@ class SubscriptionService:
         re-read the row the winner created — never swallowing any other
         IntegrityError (re-raised as-is if the row still isn't there after
         rollback, since that means something else caused the failure).
+
+        commit=False (used by create_trial_for_tenant() when it's itself being
+        called with commit=False, i.e. as part of a larger caller-owned
+        transaction such as registration) deliberately skips that local
+        catch-and-rollback: rolling back here would also discard whatever else
+        the caller already flushed earlier in the SAME transaction (e.g. a
+        just-created, not-yet-committed Tenant), which is not this method's
+        business to decide. A flush()-time IntegrityError is left to propagate
+        to the caller, whose own rollback handles it correctly, and whose retry
+        (or the end client's retry) then finds the Plan the concurrent winner
+        already committed. In practice this only matters for the very first
+        ever ensure_plan("PRO") in the system's history — after that the row
+        exists permanently and every call takes the fast read-only path above.
         """
         existing = await self.get_plan_by_code(code)
         if existing is not None:
             return existing
         plan = Plan(code=code, name=name, is_active=True)
         self.db.add(plan)
+        if not commit:
+            await self.db.flush()
+            await self.db.refresh(plan)
+            return plan
         try:
             await self.db.commit()
         except IntegrityError:
@@ -81,9 +100,10 @@ class SubscriptionService:
         self,
         tenant_id: str,
         trial_days: int = DEFAULT_TRIAL_DAYS,
+        *,
+        commit: bool = True,
     ) -> Subscription:
-        """Create a PRO trial for an explicit, already-existing tenant. Shadow
-        capability only — no production entry point calls this yet.
+        """Create a PRO trial for an explicit, already-existing tenant.
 
         Idempotency rule (deliberately uniform across every status): if the
         tenant already has ANY subscription row — TRIAL, ACTIVE, EXPIRED, or
@@ -104,8 +124,14 @@ class SubscriptionService:
         clause — this only becomes a true lock under MySQL/production. See the
         test file's own docstring for what is and isn't actually proven by the
         test suite.)
+
+        commit=False lets a caller (the self-registration endpoint) fold the
+        Subscription insert -- and, on the rare first-ever call, the Plan insert
+        too, see ensure_plan()'s own docstring -- into the SAME transaction as
+        the Tenant it was just created in, so a failure here rolls back the
+        tenant too instead of leaving an orphaned, trial-less tenant.
         """
-        plan = await self.ensure_plan(PLAN_CODE_PRO, "专业版")
+        plan = await self.ensure_plan(PLAN_CODE_PRO, "专业版", commit=commit)
 
         tenant_result = await self.db.execute(
             select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update()
@@ -124,6 +150,7 @@ class SubscriptionService:
             plan=plan,
             trial_started_at=now,
             trial_ends_at=now + timedelta(days=trial_days),
+            commit=commit,
         )
 
     async def create_trial(
@@ -132,6 +159,8 @@ class SubscriptionService:
         plan: Plan,
         trial_started_at: datetime,
         trial_ends_at: datetime,
+        *,
+        commit: bool = True,
     ) -> Subscription:
         subscription = Subscription(
             tenant_id=tenant_id,
@@ -141,7 +170,10 @@ class SubscriptionService:
             trial_ends_at=trial_ends_at,
         )
         self.db.add(subscription)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(subscription)
         return subscription
 

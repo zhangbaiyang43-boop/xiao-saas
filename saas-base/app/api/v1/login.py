@@ -4,11 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.database import get_db
+from app.core.logger import logger
 from app.core.rate_limiter import login_limit, public_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.permissions import ROLE_OWNER, permission_list
 from app.core.security import create_access_token
 from app.schemas.tenant import LoginRequest, RegisterRequest, normalize_phone
+from app.services.subscription_service import SubscriptionService
 from app.services.tencent_sms_service import TencentSmsService
 from app.services.tenant_service import TenantService
 from app.utils.id_generator import generate_tenant_id
@@ -89,14 +91,31 @@ async def register(request: Request, data: RegisterRequest, db: AsyncSession = D
         return error_response(code=400, msg="手机号已注册，请直接登录")
 
     tenant_id = generate_tenant_id()
-    tenant = await service.create_tenant(
-        tenant_id=tenant_id,
-        name=data.name,
-        password_hash="",
-        phone=data.phone,
-        address=data.address,
-        logo_url=data.logo_url,
-    )
+    # Tenant+TenantConfig and the trial Subscription are one all-or-nothing unit:
+    # both created with commit=False (flush only) and committed together at the
+    # end, so "registration succeeded" always means both exist, never just one.
+    # Any failure in either step rolls back everything flushed so far -- no
+    # orphan tenant, no orphan subscription. (See create_trial_for_tenant()'s own
+    # docstring for why ensure_plan() is the one part of this that's allowed its
+    # own independent commit.)
+    try:
+        tenant = await service.create_tenant(
+            tenant_id=tenant_id,
+            name=data.name,
+            password_hash="",
+            phone=data.phone,
+            address=data.address,
+            logo_url=data.logo_url,
+            commit=False,
+        )
+        await SubscriptionService(db).create_trial_for_tenant(tenant.tenant_id, commit=False)
+    except Exception:
+        await db.rollback()
+        logger.error(f"registration provisioning failed, tenant_id={tenant_id}")
+        return error_response(code=500, msg="注册失败，请稍后重试")
+
+    await db.commit()
+    await db.refresh(tenant)
 
     token = create_access_token(tenant.tenant_id, role=ROLE_OWNER)
     return success_response(data=serialize_tenant_session(tenant, token), msg="注册成功")

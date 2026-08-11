@@ -1,0 +1,274 @@
+"""Phase 04 — Merchant Self Registration + Trial Integration.
+
+Scope: docs/saas-subscription-audit.md Phase 04. POST /api/v1/register is the
+existing, still key-gated self-registration endpoint (unchanged contract: same
+URL, same method, same request/response shape, same registration-key gate).
+The only behavior change is that a successful registration now also creates a
+30-day PRO trial Subscription in the SAME database transaction as the Tenant --
+so "registration succeeded" is an all-or-nothing guarantee covering both rows,
+proven here by directly querying the database after simulated failures, not by
+asserting a mock was called.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import unittest
+from datetime import timedelta
+from unittest.mock import patch
+
+from sqlalchemy import event, select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+from starlette.requests import Request
+
+from app.api.v1 import login as login_module
+from app.config import settings
+from app.models.base import Base
+from app.models.subscription import Plan, Subscription
+from app.models.tenant import Tenant
+from app.models.tenant_config import TenantConfig
+from app.schemas.tenant import RegisterRequest
+from app.services.subscription_service import STATUS_TRIAL, SubscriptionService
+from app.services.tenant_service import TenantService
+from app.utils.id_generator import generate_snowflake_id
+
+if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+TEST_REGISTER_KEY = "test-registration-key"
+
+
+@event.listens_for(Plan, "before_insert")
+def _assign_plan_id_for_sqlite(mapper, connection, target):
+    if target.id is None:
+        target.id = generate_snowflake_id()
+
+
+@event.listens_for(Subscription, "before_insert")
+def _assign_subscription_id_for_sqlite(mapper, connection, target):
+    if target.id is None:
+        target.id = generate_snowflake_id()
+
+
+def make_request() -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/register",
+            "headers": [],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "client": ("testclient", 50000),
+        }
+    )
+
+
+class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        self.db = self.SessionLocal()
+
+        self._original_key = settings.PLATFORM_REGISTER_KEY
+        settings.PLATFORM_REGISTER_KEY = TEST_REGISTER_KEY
+
+    async def asyncTearDown(self):
+        settings.PLATFORM_REGISTER_KEY = self._original_key
+        await self.db.close()
+        await self.engine.dispose()
+
+    def _register_data(self, phone: str, key: str = TEST_REGISTER_KEY, name: str = "老王川菜馆") -> RegisterRequest:
+        return RegisterRequest(name=name, phone=phone, platform_key=key)
+
+    async def _tenant_count(self, phone: str) -> int:
+        result = await self.db.execute(select(Tenant).where(Tenant.phone == phone))
+        return len(result.scalars().all())
+
+    async def _subscription_count_for_phone(self, phone: str) -> int:
+        tenant_result = await self.db.execute(select(Tenant).where(Tenant.phone == phone))
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            return 0
+        sub_result = await self.db.execute(select(Subscription).where(Subscription.tenant_id == tenant.tenant_id))
+        return len(sub_result.scalars().all())
+
+    # ---- Tests 1-5: successful registration creates Tenant + 30-day PRO Trial -
+
+    async def test_valid_registration_creates_tenant(self):
+        res = await login_module.register(make_request(), self._register_data("13800000001"), db=self.db)
+        self.assertEqual(res.code, 200, res.msg)
+        self.assertEqual(await self._tenant_count("13800000001"), 1)
+
+    async def test_valid_registration_creates_exactly_one_trial_subscription(self):
+        res = await login_module.register(make_request(), self._register_data("13800000002"), db=self.db)
+        self.assertEqual(res.code, 200, res.msg)
+        self.assertEqual(await self._subscription_count_for_phone("13800000002"), 1)
+
+    async def test_trial_plan_is_pro_and_status_is_trial_and_30_days(self):
+        res = await login_module.register(make_request(), self._register_data("13800000003"), db=self.db)
+        self.assertEqual(res.code, 200, res.msg)
+
+        tenant_result = await self.db.execute(select(Tenant).where(Tenant.phone == "13800000003"))
+        tenant = tenant_result.scalar_one()
+        subscription = await SubscriptionService(self.db).get_current_subscription(tenant.tenant_id)
+
+        self.assertIsNotNone(subscription)
+        self.assertEqual(subscription.status, STATUS_TRIAL)
+        plan_result = await self.db.execute(select(Plan).where(Plan.id == subscription.plan_id))
+        plan = plan_result.scalar_one()
+        self.assertEqual(plan.code, "PRO")
+        self.assertEqual(subscription.trial_ends_at - subscription.trial_started_at, timedelta(days=30))
+
+    # ---- Test 6 — Trial failure rolls back the whole registration -------------
+
+    async def test_trial_provisioning_failure_leaves_no_tenant_and_no_subscription(self):
+        phone = "13800000006"
+        with patch.object(
+            SubscriptionService, "create_trial_for_tenant", side_effect=RuntimeError("simulated trial failure")
+        ):
+            res = await login_module.register(make_request(), self._register_data(phone), db=self.db)
+
+        self.assertNotEqual(res.code, 200)
+        self.assertEqual(await self._tenant_count(phone), 0)
+        self.assertEqual(await self._subscription_count_for_phone(phone), 0)
+
+    # ---- Test 7 — Tenant creation failure leaves no Subscription --------------
+
+    async def test_tenant_creation_failure_creates_no_subscription(self):
+        phone = "13800000007"
+        with patch.object(TenantService, "create_tenant", side_effect=RuntimeError("simulated tenant failure")):
+            res = await login_module.register(make_request(), self._register_data(phone), db=self.db)
+
+        self.assertNotEqual(res.code, 200)
+        self.assertEqual(await self._tenant_count(phone), 0)
+        # No Tenant means the subscription lookup can't even resolve one, but
+        # assert directly against the whole table too -- nothing should have
+        # been inserted anywhere as a side effect of the failed attempt.
+        all_subs = await self.db.execute(select(Subscription))
+        self.assertEqual(len(all_subs.scalars().all()), 0)
+
+    # ---- Test 8 — Invalid registration key creates nothing --------------------
+
+    async def test_invalid_registration_key_creates_nothing(self):
+        phone = "13800000008"
+        res = await login_module.register(make_request(), self._register_data(phone, key="wrong-key"), db=self.db)
+
+        self.assertEqual(res.code, 403)
+        self.assertEqual(await self._tenant_count(phone), 0)
+        self.assertEqual(await self._subscription_count_for_phone(phone), 0)
+
+    async def test_missing_registration_key_creates_nothing_when_platform_key_unset(self):
+        phone = "13800000009"
+        settings.PLATFORM_REGISTER_KEY = ""  # simulates the out-of-the-box "not yet opened" state
+        res = await login_module.register(make_request(), self._register_data(phone, key=""), db=self.db)
+
+        self.assertEqual(res.code, 403)
+        self.assertEqual(await self._tenant_count(phone), 0)
+
+    # ---- Test 9 — Existing registration response contract is preserved --------
+
+    async def test_registration_response_contract_unchanged(self):
+        res = await login_module.register(make_request(), self._register_data("13800000010"), db=self.db)
+        self.assertEqual(res.code, 200)
+        self.assertEqual(res.msg, "注册成功")
+        data = res.data
+        self.assertIn("tenant_id", data)
+        self.assertIn("name", data)
+        self.assertIn("phone", data)
+        self.assertIn("role", data)
+        self.assertIn("account_id", data)
+        self.assertIn("permissions", data)
+        self.assertIn("home_path", data)
+        self.assertIn("token", data)
+        self.assertIn("token_type", data)
+        self.assertEqual(data["phone"], "13800000010")
+        self.assertEqual(data["name"], "老王川菜馆")
+
+    async def test_duplicate_phone_registration_still_rejected(self):
+        await login_module.register(make_request(), self._register_data("13800000011"), db=self.db)
+        res = await login_module.register(make_request(), self._register_data("13800000011"), db=self.db)
+        self.assertEqual(res.code, 400)
+        self.assertEqual(await self._tenant_count("13800000011"), 1)  # still just the first one
+
+    # ---- Test 10 — Legacy tenant (no registration, no trial) remains valid ----
+
+    async def test_legacy_tenant_without_registration_remains_valid(self):
+        legacy = Tenant(tenant_id="legacy-p04", name="老商户", password_hash="x", status=True)
+        self.db.add(legacy)
+        await self.db.commit()
+
+        current = await SubscriptionService(self.db).get_current_subscription("legacy-p04")
+        self.assertIsNone(current)
+        tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == "legacy-p04"))
+        self.assertTrue(tenant_result.scalar_one().status)
+
+    # ---- Test 11 — Super Admin tenant creation path is unaffected --------------
+
+    async def test_super_admin_style_tenant_creation_does_not_auto_create_trial(self):
+        # Mirrors exactly how app/api/v1/super_admin.py::create_merchant calls
+        # TenantService.create_tenant() -- no commit kwarg, so it still defaults
+        # to commit=True (immediate commit, unchanged from before Phase 04) and,
+        # critically, it must NOT auto-provision a trial the way /register does.
+        service = TenantService(self.db)
+        tenant = await service.create_tenant(
+            tenant_id="super-admin-created",
+            name="Admin Created Shop",
+            password_hash="",
+            phone="13900000000",
+            address=None,
+            logo_url=None,
+        )
+        self.assertEqual(tenant.tenant_id, "super-admin-created")
+
+        current = await SubscriptionService(self.db).get_current_subscription("super-admin-created")
+        self.assertIsNone(current)
+
+        config_result = await self.db.execute(
+            select(TenantConfig).where(TenantConfig.tenant_id == "super-admin-created")
+        )
+        self.assertIsNotNone(config_result.scalar_one_or_none())
+
+    # ---- Test 12 — Tenant.status is never touched by trial integration --------
+
+    async def test_registration_does_not_modify_tenant_status(self):
+        res = await login_module.register(make_request(), self._register_data("13800000012"), db=self.db)
+        self.assertEqual(res.code, 200)
+        tenant_result = await self.db.execute(select(Tenant).where(Tenant.phone == "13800000012"))
+        tenant = tenant_result.scalar_one()
+        self.assertTrue(tenant.status)
+
+    # ---- Test 14 — No Billing/WxPay/Restaurant imports in the integration -----
+
+    def test_login_module_has_no_forbidden_domain_imports(self):
+        forbidden = [
+            "BillingService",
+            "BillingInvoice",
+            "WxPayService",
+            "OrderPaymentService",
+            "order_print_service",
+            "MembershipService",
+            "CouponService",
+            "PickupNoService",
+            "DiningSessionService",
+        ]
+        module_names = set(vars(login_module).keys())
+        for name in forbidden:
+            self.assertNotIn(name, module_names, f"login.py must not import {name}")
+
+        import_lines = [
+            line for line in inspect.getsource(login_module).splitlines()
+            if line.strip().startswith(("import ", "from "))
+        ]
+        for line in import_lines:
+            for name in forbidden:
+                self.assertNotIn(name, line, f"login.py must not import {name}")
+
+
+if __name__ == "__main__":
+    unittest.main()

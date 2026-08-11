@@ -185,7 +185,16 @@ class TenantService:
         address: str = None,
         logo_url: str = None,
         status: bool = True,
+        *,
+        commit: bool = True,
     ) -> Tenant:
+        """commit=False lets a caller (e.g. the self-registration endpoint) fold
+        this insert into a larger all-or-nothing transaction alongside other
+        writes (like trial provisioning) — it flushes instead, so tenant.id is
+        populated and visible to later statements on the same session, but
+        nothing is durable until the caller itself commits. Every existing
+        caller (super-admin merchant creation, the legacy unmounted /api/auth
+        router) omits this argument and keeps committing immediately, unchanged."""
         tenant = Tenant(
             tenant_id=tenant_id,
             name=name,
@@ -205,7 +214,10 @@ class TenantService:
         )
         self.db.add(tenant)
         self.db.add(config)
-        await self.db.commit()
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(tenant)
         return tenant
 
