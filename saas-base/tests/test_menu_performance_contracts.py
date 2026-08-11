@@ -7,7 +7,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from app.api.v1.menu import list_menu_items
 from app.middleware.logging_middleware import LoggingMiddleware
@@ -139,10 +139,11 @@ class MenuPerformanceContractTest(unittest.IsolatedAsyncioTestCase):
 
         response = await list_menu_items(request, shop=TENANT_ID, db=self.db)
 
-        self.assertEqual(response.code, 200)
-        self.assertEqual(set(response.data), {"items", "version"})
-        self.assertEqual(len(response.data["items"]), 2)
-        self.assertEqual(set(response.data["items"][0]), EXPECTED_ITEM_FIELDS)
+        body = json.loads(response.body)
+        self.assertEqual(body["code"], 200)
+        self.assertEqual(set(body["data"]), {"items", "version"})
+        self.assertEqual(len(body["data"]["items"]), 2)
+        self.assertEqual(set(body["data"]["items"][0]), EXPECTED_ITEM_FIELDS)
         self.assertEqual(len(statements), 3)
 
         diagnostics = request.state.menu_diagnostics
@@ -171,6 +172,57 @@ class MenuPerformanceContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(diagnostics["cache_state"], "none")
         self.assertEqual(diagnostics["request_id"], "menu-perf-request")
         self.assertEqual(diagnostics["tenant_id"], TENANT_ID)
+
+    async def test_customer_menu_success_is_finalized_without_losing_diagnostics(self):
+        request = make_request()
+
+        response = await list_menu_items(request, shop=TENANT_ID, db=self.db)
+
+        self.assertIsInstance(response, Response)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/json")
+        body = json.loads(response.body)
+        self.assertEqual(body["code"], 200)
+        self.assertEqual(body["msg"], "ok")
+        self.assertEqual(len(body["data"]["items"]), 2)
+        self.assertEqual(set(body["data"]["items"][0]), EXPECTED_ITEM_FIELDS)
+        self.assertEqual(request.state.menu_diagnostics["request_id"], "menu-perf-request")
+        self.assertEqual(request.state.menu_diagnostics["menu_item_count"], 2)
+
+    async def test_finalized_menu_keeps_slow_log_payload_and_request_correlation(self):
+        request = make_request()
+        finalized = await list_menu_items(request, shop=TENANT_ID, db=self.db)
+
+        async def call_next(current_request):
+            self.assertIs(current_request, request)
+            return finalized
+
+        with patch("app.middleware.logging_middleware.time.time", side_effect=[10.0, 10.6]):
+            with patch("app.middleware.logging_middleware.logger.warning") as warning:
+                response = await LoggingMiddleware(lambda scope, receive, send: None).dispatch(
+                    request,
+                    call_next,
+                )
+
+        diagnostics = request.state.menu_diagnostics
+        self.assertEqual(response.headers["X-Process-Time-Ms"], "600.0")
+        self.assertEqual(diagnostics["payload_bytes"], len(finalized.body))
+        self.assertEqual(diagnostics["request_id"], "menu-perf-request")
+        detailed = [
+            json.loads(call.args[0])
+            for call in warning.call_args_list
+            if call.args and call.args[0].startswith("{")
+        ]
+        self.assertEqual(detailed[0]["event"], "SLOW_MENU_API")
+
+    async def test_menu_error_path_keeps_framework_response_contract(self):
+        request = make_request()
+
+        response = await list_menu_items(request, shop=None, db=self.db)
+
+        self.assertEqual(response.code, 400)
+        self.assertEqual(response.msg, "缺少shop参数")
+        self.assertIsNone(response.data)
 
     async def test_fast_request_does_not_emit_detailed_slow_log(self):
         from app.middleware.logging_middleware import _log_slow_menu_api

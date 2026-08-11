@@ -1,6 +1,7 @@
 import logging
 import time
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel as PydanticBase
@@ -49,7 +50,14 @@ def _new_menu_diagnostics(request: Request, tenant_id: Optional[str]) -> dict:
     }
 
 
-def _finish_menu_response(request: Request, diagnostics: dict, handler_started_at: float, response_builder):
+def _finish_menu_response(
+    request: Request,
+    diagnostics: dict,
+    handler_started_at: float,
+    response_builder,
+    *,
+    finalize_json: bool = False,
+):
     prepare_started_at = time.perf_counter()
     response = response_builder()
     diagnostics["serialization_prepare_ms"] = _elapsed_ms(prepare_started_at)
@@ -57,6 +65,8 @@ def _finish_menu_response(request: Request, diagnostics: dict, handler_started_a
     diagnostics["handler_total_ms"] = _elapsed_ms(handler_started_at)
 
     request.state.menu_diagnostics = diagnostics
+    if finalize_json:
+        return Response(content=response.model_dump_json(), media_type="application/json")
     return response
 
 
@@ -220,11 +230,12 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
     })
 
 
-@router.get("/menu/items")
-async def list_menu_items(
+async def _list_menu_items(
     request: Request,
-    shop: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    shop: Optional[str],
+    db: AsyncSession,
+    *,
+    finalize_json: bool,
 ):
     handler_started_at = time.perf_counter()
     token_type = getattr(request.state, "token_type", None)
@@ -303,6 +314,21 @@ async def list_menu_items(
         diagnostics,
         handler_started_at,
         lambda: success_response(data=response_data),
+        finalize_json=finalize_json,
+    )
+
+
+@router.get("/menu/items")
+async def list_menu_items(
+    request: Request,
+    shop: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await _list_menu_items(
+        request,
+        shop,
+        db,
+        finalize_json=True,
     )
 
 
