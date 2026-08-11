@@ -17,25 +17,37 @@
       </div>
 
       <div v-if="loading" class="pickup-sheet-loading">号码加载中…</div>
-      <div v-else class="pickup-grid">
-        <button
-          v-for="n in numbers"
-          :key="n"
-          type="button"
-          class="pickup-cell"
-          :class="{
-            'pickup-cell--current': String(n) === String(current),
-            'pickup-cell--busy': isBusy(n),
-            'pickup-cell--loading': submitting && String(n) === String(pendingNo),
-          }"
-          :disabled="isBusy(n) || submitting"
-          @click="onSelect(n)"
-        >
-          <span class="pickup-cell-no">{{ n }}</span>
-          <span v-if="String(n) === String(current)" class="pickup-cell-tag">当前</span>
-          <span v-else-if="isBusy(n)" class="pickup-cell-tag">使用中</span>
-        </button>
-      </div>
+      <template v-else>
+        <div v-if="submitting" class="pickup-sheet-status">
+          <LoadingOutlined spin />
+          <span>正在绑定 {{ pendingNo }} 号桌牌…</span>
+        </div>
+        <div class="pickup-grid">
+          <button
+            v-for="n in numbers"
+            :key="n"
+            type="button"
+            class="pickup-cell"
+            :class="{
+              'pickup-cell--current': String(n) === String(current),
+              'pickup-cell--busy': isBusy(n),
+              'pickup-cell--loading': submitting && String(n) === String(pendingNo),
+              'pickup-cell--dimmed': submitting && String(n) !== String(pendingNo),
+            }"
+            :disabled="isBusy(n) || submitting"
+            @click="onSelect(n)"
+          >
+            <template v-if="submitting && String(n) === String(pendingNo)">
+              <LoadingOutlined spin class="pickup-cell-spinner" />
+            </template>
+            <template v-else>
+              <span class="pickup-cell-no">{{ n }}</span>
+              <span v-if="String(n) === String(current)" class="pickup-cell-tag">当前</span>
+              <span v-else-if="isBusy(n)" class="pickup-cell-tag">使用中</span>
+            </template>
+          </button>
+        </div>
+      </template>
 
       <button type="button" class="pickup-sheet-cancel" :disabled="submitting" @click="onClose">取消</button>
     </div>
@@ -44,6 +56,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { LoadingOutlined } from '@ant-design/icons-vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -144,6 +157,19 @@ watch(
   color: var(--text-3);
   font-size: 13px;
 }
+.pickup-sheet-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+}
 .pickup-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -175,7 +201,13 @@ watch(
   color: #9ca3af;
   cursor: not-allowed;
 }
-.pickup-cell--loading { opacity: 0.7; }
+.pickup-cell--loading {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+}
+.pickup-cell--dimmed { opacity: 0.4; }
+.pickup-cell-spinner { font-size: 18px; }
 .pickup-cell-no { line-height: 1; }
 .pickup-cell-tag {
   position: absolute;
