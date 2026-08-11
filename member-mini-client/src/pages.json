@@ -181,11 +181,11 @@
   "preloadRule": {
     "pages/entry/index": {
       "network": "all",
-      "packages": ["subpkg-order", "subpkg-member", "subpkg-coupon", "subpkg-common"]
+      "packages": ["subpkg-order"]
     },
     "pages/index/index": {
       "network": "all",
-      "packages": ["subpkg-order", "subpkg-member", "subpkg-coupon", "subpkg-common"]
+      "packages": ["subpkg-order"]
     }
   },
   "globalStyle": {
