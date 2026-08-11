@@ -19,6 +19,13 @@ import { ref } from 'vue'
 import { resolveEntranceCode } from '@/api/auth'
 import { clearCustomerSession } from '@/utils/auth'
 import { resolveDiningIdentity, getOrCreateDiningClientId, persistDiningContext } from '@/utils/dining'
+import {
+  consumeStart,
+  markEvent,
+  markEventOnce,
+  markStart,
+  recordDurationFromStart,
+} from '@/utils/perf'
 
 const text = {
   retry: '重新识别',
@@ -114,13 +121,21 @@ export default {
     // 失败就直接在入口页报错拦下来，不会带着一个不完整的身份"裸奔"进点餐页。
     const resolveTableSession = async (ctx) => {
       if (!ctx.tenant_id || !ctx.table) throw new Error('缺少门店或桌号信息')
-      const identity = await resolveDiningIdentity({ tenantId: ctx.tenant_id, table: ctx.table, force: true })
-      if (!identity.ok) throw new Error(identity.reason === 'missing_context' ? '缺少门店或桌号信息' : (identity.reason || '本桌身份初始化失败'))
+      markEvent('entry_dining_resolve_start', { fallback: true })
+      try {
+        const identity = await resolveDiningIdentity({ tenantId: ctx.tenant_id, table: ctx.table, force: true })
+        if (!identity.ok) throw new Error(identity.reason === 'missing_context' ? '缺少门店或桌号信息' : (identity.reason || '本桌身份初始化失败'))
+        markEvent('entry_dining_resolve_success', { fallback: true })
+      } catch (err) {
+        markEvent('entry_dining_resolve_failure', { fallback: true })
+        throw err
+      }
     }
     const routeToMenu = async (ctx) => {
       if (isRouting.value) return
       isRouting.value = true
       const url = buildMenuUrl(ctx)
+      markStart('entry_to_menu')
       await new Promise((resolve) => {
         uni.redirectTo({
           url,
@@ -134,6 +149,7 @@ export default {
                 resolve(true)
               },
               fail: (finalErr) => {
+                consumeStart('entry_to_menu')
                 error.value = '进入菜单失败'
                 errorDesc.value = finalErr?.errMsg || '页面跳转失败'
                 isRouting.value = false
@@ -184,12 +200,25 @@ export default {
           // 带上 client_id：后端识别到是桌码场景时会顺带把这一桌的会话建好一起返回，
           // 省掉下面单独再调一次 resolveTableSession 的网络往返。老后端/非桌码场景不会
           // 返回 dining_session_id，走后面的 fallback，行为不变。
-          const res = await resolveEntranceCode(parsed.scene, { clientId: getOrCreateDiningClientId() })
+          markEvent('entry_resolve_start')
+          markStart('entry_resolve')
+          let res
+          try {
+            res = await resolveEntranceCode(parsed.scene, { clientId: getOrCreateDiningClientId() })
+          } catch (err) {
+            markEvent('entry_resolve_failure', { status: 'failure' })
+            recordDurationFromStart('entry_resolve', 'entry_resolve', { status: 'failure' })
+            throw err
+          }
           if (res.code !== 200) {
+            markEvent('entry_resolve_failure', { status: 'failure', response_code: res.code })
+            recordDurationFromStart('entry_resolve', 'entry_resolve', { status: 'failure', response_code: res.code })
             error.value = res.msg || '桌码识别失败'
             errorDesc.value = '请联系门店工作人员处理'
             return
           }
+          markEvent('entry_resolve_success', { status: 'success' })
+          recordDurationFromStart('entry_resolve', 'entry_resolve', { status: 'success' })
           const data = res.data || {}
           const entrance = data.entrance || data
           const ctx = {
@@ -256,6 +285,9 @@ export default {
     return { text, error, errorDesc, loadEntrance, reloadEntrance }
   },
   onLoad(options) {
+    if (markEventOnce('entry_onload', 'entry_onload')) {
+      recordDurationFromStart('launch_to_entry', 'launch_to_entry')
+    }
     uni.setNavigationBarTitle({ title: '开心点单' })
     this.loadEntrance(options)
   }

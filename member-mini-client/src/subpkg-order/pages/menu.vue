@@ -52,6 +52,7 @@
     </view>
 
     <DishList
+      ref="dishList"
       v-show="activeTab === 'order'"
       @scroll-position="onDishScrollPosition"
       :categories="categories"
@@ -412,7 +413,15 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { getMenuItems, getShopInfo } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
-import { consumeStart, flushPending, recordSample } from '@/utils/perf'
+import {
+  discardStart,
+  flushPending,
+  markEvent,
+  markEventOnce,
+  markStart,
+  recordDurationFromStart,
+  recordSample,
+} from '@/utils/perf'
 import { reportError } from '@/utils/monitor'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
@@ -452,6 +461,35 @@ import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
 import { orderModeText, confirmationText, successText, specText, authSheetText, toastText, modalText } from '../utils/orderText.js'
+
+const observeMenuContent = (page, pagePerfKey) => {
+  try {
+    nextTick(() => {
+      if (!page?.$refs?.dishList) return
+      const query = uni.createSelectorQuery().in(page.$refs?.dishList)
+      query.select('.cat-item').boundingClientRect()
+      query.select('.dish-item').boundingClientRect()
+      query.exec((nodes) => {
+        if (!nodes?.[0] || !nodes?.[1]) return
+        const firstContentAt = Date.now()
+        if (markEventOnce('first_content', `${pagePerfKey}:first_content`, { view_observed: true }, firstContentAt)) {
+          recordDurationFromStart('menu_onload_to_first_content', 'menu_onload_to_first_content', {
+            definition: 'category_and_dish_nodes_observed',
+          }, firstContentAt)
+          markStart('first_content_to_interactive', firstContentAt)
+        }
+        if (markEventOnce('interactive', `${pagePerfKey}:interactive`, { basic_ordering_actions_ready: true }, firstContentAt)) {
+          recordDurationFromStart('menu_onload_to_interactive', 'menu_onload_to_interactive', {
+            definition: 'category_and_dish_actions_available',
+          }, firstContentAt)
+          recordDurationFromStart('first_content_to_interactive', 'first_content_to_interactive', undefined, firstContentAt)
+        }
+      })
+    })
+  } catch {
+    // Selector telemetry is best effort and never changes page rendering.
+  }
+}
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -622,17 +660,36 @@ export default {
     const { cleanedText: itemRemarkExtra, toggleChip: toggleItemRemarkChip } = useRemarkChips(itemRemark, remarkChips)
     const { failed: imageLoadFailed, markFailed: markDishImageFailed } = useFailedImageMap()
 
+    let firstCartActionRecorded = false
+    const startFirstCartAction = (action) => {
+      if (firstCartActionRecorded) return null
+      firstCartActionRecorded = true
+      const startedAt = Date.now()
+      markEvent('first_cart_action', { action }, startedAt)
+      return { action, startedAt }
+    }
+    const finishFirstCartAction = (action) => {
+      if (!action) return
+      recordSample('first_cart_response', Date.now() - action.startedAt, { action: action.action })
+    }
+
     const specCartItems = ref([])
     const {
       showSpecSheet, specDish, specQty, specStep, selectedSpecs, selectedExtras, detailImageFailed,
       specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, specBasePrice, specTotalPrice,
       selectedSpecSummary, selectedSpecFullSummary, specDishDesc, canGoNextSpec, specPrimaryText, isSpecSelected, toggleSpec,
-      toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet, openProductDetail,
+      toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet: openSpecSheetRaw, openProductDetail,
     } = useSpecSheet({
       itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
       specCartItems, isSoldOut, hasSpecs, formatPrice,
       triggerCartSuccessFeedback: (key) => triggerCartSuccessFeedback(key),
     })
+    const openSpecSheet = (dish) => {
+      const firstAction = startFirstCartAction('open_spec_sheet')
+      const result = openSpecSheetRaw(dish)
+      finishFirstCartAction(firstAction)
+      return result
+    }
 
     const {
       normalizeOrderStatus, currentTableOrder, historyTableOrders,
@@ -851,10 +908,12 @@ export default {
         openSpecSheet(dish)
         return
       }
+      const firstAction = startFirstCartAction('add_normal_dish')
       triggerAddPress(dish.id)
       cart.value = { ...cart.value, [dish.id]: (cart.value[dish.id] || 0) + 1 }
       triggerCartSuccessFeedback(dish.id)
       uni.vibrateShort({ type: 'light' })
+      finishFirstCartAction(firstAction)
     }
 
     const {
@@ -983,11 +1042,11 @@ export default {
       // 这里只是顺手刷新，不该让购物车面板等它才显示；优惠券同理，正常情况下已经被
       // onLoad 里的预拉垫过底了，这里再刷新一次只是保证不过期，不等它。
       // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段。
-      const _openCartStartedAt = Date.now()
+      const firstAction = startFirstCartAction('open_cart')
       pendingSubmitRequestId.value = ''
       loadShopSettings().catch(() => {})
       showCart.value = true
-      recordSample('cart_open', Date.now() - _openCartStartedAt)
+      finishFirstCartAction(firstAction)
       itemsExpanded.value = totalCount.value <= 1
       refreshAvailableCoupons()
     }
@@ -1142,12 +1201,14 @@ export default {
       }
     }
 
-    const loadMenu = async () => {
+    const loadMenu = async (onContentCandidate) => {
+      const notifyContentCandidate = typeof onContentCandidate === 'function' ? onContentCandidate : () => {}
       const cached = readMenuCache()
       const hadCacheHit = Boolean(cached && cached.items.length)
       if (hadCacheHit) {
         allDishes.value = cached.items
         if (categories.value.length) activeCategory.value = categories.value[0]
+        notifyContentCandidate()
       }
       loading.value = !hadCacheHit
       loadError.value = false
@@ -1160,11 +1221,18 @@ export default {
         const payload = res?.data || {}
         const rawItems = Array.isArray(payload) ? payload : (payload.items || [])
         const version = Array.isArray(payload) ? '' : (payload.version || '')
+        const processingStartedAt = Date.now()
         const mapped = Array.isArray(rawItems) ? rawItems.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
         if (!hadCacheHit || version !== cached.version) {
           allDishes.value = mapped
           if (categories.value.length) activeCategory.value = categories.value[0]
         }
+        markEvent('menu_data_processed', { item_count: mapped.length, cache_hit: hadCacheHit })
+        recordSample('menu_processing', Date.now() - processingStartedAt, {
+          item_count: mapped.length,
+          cache_hit: hadCacheHit,
+        })
+        notifyContentCandidate()
         if (version) writeMenuCache(mapped, version)
       } catch {
         if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
@@ -1230,13 +1298,13 @@ export default {
 
   onLoad: function (options) {
     return (async () => {
-      // 第1批：把"扫码到首屏可交互"这一个总耗时拆成三段，才知道 6-7 秒具体花在
-      // 冷启动、等接口、还是渲染上——只有一个总数没法对症下药。scanStartedAt 在这里
-      // 就读走（consumeStart 读到即删），后面 menuReady.then 里不能再读一次，
-      // 所以先存进局部变量传下去。
-      const onLoadStartedAt = Date.now()
-      const scanStartedAt = consumeStart('scan_to_interactive')
-      if (scanStartedAt) recordSample('stage_cold_start_to_onload', onLoadStartedAt - scanStartedAt)
+      const pagePerfKey = `menu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      // A direct share/deep-link to menu must not leave a cold-launch mark for a later entry page.
+      discardStart('launch_to_entry')
+      markEvent('menu_onload')
+      recordDurationFromStart('entry_to_menu', 'entry_to_menu')
+      markStart('menu_onload_to_first_content')
+      markStart('menu_onload_to_interactive')
 
       this.tableNo = options.table || 'A01'
       this.shopId = options.shop || uni.getStorageSync('tenant_id') || ''
@@ -1253,19 +1321,10 @@ export default {
       // loadShopSettings（门店信息/分类顺序）和 loadMenu（菜品列表）互不依赖对方的返回
       // 数据，之前写成先后 await 纯粹是顺序问题——两者互相独立就应该并行发起，少等一次
       // 网络往返。
-      const menuReady = Promise.all([this.loadShopSettings(), this.loadMenu()])
-      // 第0批性能埋点："扫码到首屏可交互"到这里就算数——菜单数据齐了、顾客能开始点菜了，
-      // 不用等 sessionReady（本桌身份/历史订单同步）一起完成，那些不影响首屏能不能点餐。
-      // 非扫码进来的场景（比如从"我的"页正常打开）consumeStart 拿不到起点，直接跳过。
+      const shopInfoPromise = this.loadShopSettings()
+      const menuPromise = this.loadMenu(() => observeMenuContent(this, pagePerfKey))
+      const menuReady = Promise.all([shopInfoPromise, menuPromise])
       menuReady.then(() => {
-        const menuReadyAt = Date.now()
-        recordSample('stage_onload_to_menu_ready', menuReadyAt - onLoadStartedAt)
-        if (scanStartedAt) recordSample('scan_to_interactive', menuReadyAt - scanStartedAt)
-        // nextTick 之后才是"数据已经写进真实 DOM"的时机，用它来近似"渲染完成"，
-        // 比 menuReady resolve 那一刻（数据到手但可能还没画出来）更贴近顾客真实感知。
-        nextTick(() => {
-          recordSample('stage_menu_ready_to_render', Date.now() - menuReadyAt)
-        })
         // 第1批：优惠券预拉，别等顾客点开购物车才现拉。故意错开一点延迟，把带宽/CPU
         // 优先让给刚刚渲染出来的菜单，不跟首屏抢；顾客通常也要选几件商品才会点开购物车，
         // 这点延迟基本感觉不到。
