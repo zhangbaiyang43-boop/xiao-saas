@@ -262,7 +262,7 @@ export default {
 
 
 .coupon-nudge-action text {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 23rpx;
   line-height: 32rpx;
   font-weight: 900;

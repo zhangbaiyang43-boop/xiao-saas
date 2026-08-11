@@ -2,11 +2,13 @@
   <view class="mask" @click="emitCloseOrFinish">
     <view class="orders-sheet table-account-sheet" @click.stop>
       <view class="orders-sheet-head table-account-head">
-        <view class="table-account-back" @click="emitCloseOrFinish">
+        <view class="table-account-side table-account-back" @click="emitCloseOrFinish">
           <text class="iconfont icon-back"></text>
         </view>
-        <text class="orders-sheet-title">已点菜品</text>
-        <text class="orders-sheet-close iconfont icon-close" @click="emitCloseOrFinish"></text>
+        <text class="orders-sheet-title table-account-title">已点菜品</text>
+        <view class="table-account-side table-account-close" @click="emitCloseOrFinish">
+          <text class="iconfont icon-close"></text>
+        </view>
       </view>
 
       <scroll-view v-if="!loadError" class="table-account-list" scroll-y>
@@ -21,7 +23,7 @@
 
         <view class="table-account-summary">
           <view class="table-account-summary-left">
-            <text class="table-account-table">{{ tableNo || orderModeText.unknownTable }}桌</text>
+            <text class="table-account-table">{{ tableSummaryPrimary }}</text>
             <text class="table-account-sub">{{ sharedBillSubLabel }}</text>
           </view>
           <view class="table-account-summary-right">
@@ -148,6 +150,8 @@ export default {
     loadError: { type: Boolean, default: false },
     tableStatusView: { type: Object, required: true },
     tableNo: { type: [String, Number], default: '' },
+    pickupNoEnabled: { type: Boolean, default: false },
+    tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
@@ -169,6 +173,15 @@ export default {
     orderItemAmount: { type: Function, required: true },
   },
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
+  computed: {
+    // A12桌 · 8号桌牌 / A12桌 · 桌牌待领取 / A12桌（未开启桌牌时）
+    tableSummaryPrimary() {
+      const tableLabel = `${this.tableNo || this.orderModeText.unknownTable}桌`
+      if (!this.pickupNoEnabled) return tableLabel
+      const pickup = String(this.tablePickupNo || '').trim()
+      return pickup ? `${tableLabel} · ${pickup}号桌牌` : `${tableLabel} · 桌牌待领取`
+    },
+  },
   methods: {
     emitCloseOrFinish() {
       if (this.isTableSettled) this.$emit('finish')
@@ -190,28 +203,55 @@ export default {
 
 .table-account-head {
   position: relative;
-  justify-content: center;
-  min-height: 88rpx;
-}
-
-
-
-.table-account-back {
-  position: absolute;
-  left: 18rpx;
-  top: 12rpx;
-  width: 64rpx;
-  height: 64rpx;
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 96rpx;
+  padding: 16rpx 24rpx;
+  box-sizing: border-box;
+}
+
+.table-account-title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 200rpx);
+  text-align: center;
+  pointer-events: none;
+}
+
+.table-account-side {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  z-index: 1;
+}
+
+.table-account-back {
+  left: 16rpx;
   color: var(--text-2);
 }
 
-
-
 .table-account-back text {
   font-size: 34rpx;
+}
+
+.table-account-close {
+  right: 16rpx;
+  border-radius: 50%;
+  background: var(--bg-muted);
+  color: var(--text-3);
+}
+
+.table-account-close text {
+  font-size: 28rpx;
 }
 
 

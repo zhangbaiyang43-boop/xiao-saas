@@ -124,7 +124,7 @@ export default {
 }
 
 .header {
-  background: #07C160;
+  background: var(--brand);
   padding: 60rpx 40rpx 48rpx;
   display: flex;
   flex-direction: column;
@@ -133,7 +133,7 @@ export default {
 
 .rules-card {
   margin: 22rpx 28rpx 0;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   padding: 28rpx 30rpx;
 }
@@ -151,7 +151,7 @@ export default {
   align-items: flex-start;
   gap: 18rpx;
   padding: 16rpx 0;
-  border-bottom: 1rpx solid #f3f4f6;
+  border-bottom: 1rpx solid var(--bg-muted);
 
   &:last-child { border-bottom: 0; }
 }
@@ -163,7 +163,7 @@ export default {
 .rule-main {
   display: block;
   font-size: 28rpx;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 600;
 }
 
@@ -182,7 +182,7 @@ export default {
 
 .record-list {
   margin: 22rpx 28rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   overflow: hidden;
 }
@@ -192,13 +192,13 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 28rpx 32rpx;
-  border-bottom: 1rpx solid #f3f4f6;
+  border-bottom: 1rpx solid var(--bg-muted);
 
   &:last-child { border-bottom: 0; }
 }
 
 .ri-left { flex: 1; }
-.ri-label { display: block; font-size: 28rpx; color: #111827; font-weight: 600; }
+.ri-label { display: block; font-size: 28rpx; color: var(--text-1); font-weight: 600; }
 .ri-remark { display: block; margin-top: 4rpx; font-size: 24rpx; color: #9ca3af; }
 .ri-date { display: block; margin-top: 4rpx; font-size: 22rpx; color: #c8c9cc; }
 
@@ -206,7 +206,7 @@ export default {
   font-size: 36rpx;
   font-weight: 800;
 
-  &.plus { color: #07C160; }
-  &.minus { color: #6b7280; }
+  &.plus { color: var(--brand); }
+  &.minus { color: var(--text-3); }
 }
 </style>

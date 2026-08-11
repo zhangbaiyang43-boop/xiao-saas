@@ -44,6 +44,17 @@ describe('useMemberCard', () => {
       card.bannerInfo.value = { levelLabel: '神秘等级', levelCode: 'LV99' }
       expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.png')
     })
+
+    it('普通会员身份卡使用绿色等级卡 COS 背景', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardStyle.value).toContain('member-levels/card-bg-lv1.webp')
+    })
+
+    it('金卡会员身份卡使用对应等级卡 COS 背景', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV3' }
+      expect(card.memberIdentityCardStyle.value).toContain('member-levels/card-bg-lv3.webp')
+    })
   })
 
   describe('memberProgressPercent', () => {

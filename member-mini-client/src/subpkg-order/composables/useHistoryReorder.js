@@ -1,3 +1,5 @@
+import { toastText } from '../utils/orderText.js'
+
 // 从 menu.vue 拆出来的"重新加入购物车"动作——首页"开始点餐"/推荐卡加购、
 // 首页和菜单页的"再来一单"整单重放、点单个历史商品。之所以是 MEDIUM 而不是
 // LOW：这几个函数会真的调用 addToCart/openSpecSheet 改动购物车，并触发
@@ -12,21 +14,21 @@ export function useHistoryReorder({
 }) {
   const showHistoryReorderToast = ({ added = 0, skippedUnavailable = 0, skippedSpec = 0 }) => {
     if (added > 0) {
-      let title = '已加入' + added + '件'
-      if (skippedUnavailable > 0) title += '，部分菜品已下架或售罄'
-      else if (skippedSpec > 0) title += '，部分规格已变更，请重新选择'
+      let title = toastText.reorderAdded(added)
+      if (skippedUnavailable > 0) title += toastText.reorderPartialUnavailable
+      else if (skippedSpec > 0) title += toastText.reorderPartialSpec
       uni.showToast({ title, icon: 'none', duration: 1400 })
       return
     }
     if (skippedUnavailable > 0) {
-      uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1400 })
+      uni.showToast({ title: toastText.dishUnavailable, icon: 'none', duration: 1400 })
       return
     }
     if (skippedSpec > 0) {
-      uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1400 })
+      uni.showToast({ title: toastText.specChanged, icon: 'none', duration: 1400 })
       return
     }
-    uni.showToast({ title: '没有可重新加入的菜品', icon: 'none', duration: 1200 })
+    uni.showToast({ title: toastText.reorderEmpty, icon: 'none', duration: 1200 })
   }
 
   const handleHomeStartOrder = () => {
@@ -42,12 +44,12 @@ export function useHistoryReorder({
     if (storeClosed.value) return
     const check = validateHistoryReorderItem(item)
     if (!check.dish || check.reason === 'unavailable') {
-      uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
+      uni.showToast({ title: toastText.dishUnavailable, icon: 'none', duration: 1200 })
       return
     }
     if (check.reason === 'spec_changed') {
       openSpecSheet(check.dish)
-      uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
+      uni.showToast({ title: toastText.specChanged, icon: 'none', duration: 1200 })
       return
     }
     addToCart(check.dish)
@@ -77,12 +79,12 @@ export function useHistoryReorder({
   const reorderItem = (item) => {
     const check = validateHistoryReorderItem(item)
     if (!check.dish || check.reason === 'unavailable') {
-      uni.showToast({ title: '菜品已下架或售罄', icon: 'none', duration: 1200 })
+      uni.showToast({ title: toastText.dishUnavailable, icon: 'none', duration: 1200 })
       return
     }
     if (check.reason === 'spec_changed') {
       openSpecSheet(check.dish)
-      uni.showToast({ title: '规格已变更，请重新选择', icon: 'none', duration: 1200 })
+      uni.showToast({ title: toastText.specChanged, icon: 'none', duration: 1200 })
       return
     }
     addToCart(check.dish)

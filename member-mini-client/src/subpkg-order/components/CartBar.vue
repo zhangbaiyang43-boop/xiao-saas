@@ -110,7 +110,7 @@ export default {
 .cart-iconfont {
   width: 48rpx;
   height: 48rpx;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 46rpx;
   line-height: 48rpx;
   text-align: center;
@@ -132,7 +132,7 @@ export default {
   padding: 0 8rpx;
   box-sizing: border-box;
 
-  text { color: #fff; font-size: 22rpx; line-height: 36rpx; font-weight: 600; }
+  text { color: var(--text-inverse); font-size: 22rpx; line-height: 36rpx; font-weight: 600; }
 }
 
 
@@ -146,7 +146,7 @@ export default {
 
 .cart-price {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 48rpx;
   line-height: 56rpx;
   font-weight: 700;
@@ -182,9 +182,9 @@ export default {
 
 .checkout-btn {
   min-width: 236rpx;
-  height: 92rpx;
+  height: var(--btn-primary-height);
   padding: 0 48rpx;
-  border-radius: 46rpx;
+  border-radius: var(--btn-primary-radius);
   background: var(--brand);
   box-shadow: 0 8rpx 24rpx rgba(7,193,96,0.35);
   display: flex;
@@ -193,7 +193,12 @@ export default {
   flex-shrink: 0;
   box-sizing: border-box;
 
-  text { color: #fff; font-size: 32rpx; font-weight: 600; white-space: nowrap; }
+  text {
+    color: var(--text-inverse);
+    font-size: var(--btn-primary-font-size);
+    font-weight: var(--btn-primary-font-weight);
+    white-space: nowrap;
+  }
 
   &.disabled {
     background: #4B5362;

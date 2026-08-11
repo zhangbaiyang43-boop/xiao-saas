@@ -578,6 +578,25 @@ async def reconcile_print_orders(
     return attempted
 
 
+async def recover_pending_print_orders_once(
+    db: AsyncSession,
+    *,
+    trigger: str = "startup_print_recovery",
+) -> int:
+    """Recover printable orders from persistent order.print_status after process restart."""
+    result = await db.execute(
+        select(Order)
+        .where(
+            Order.status.in_(tuple(_AUTO_RECONCILE_STATUSES)),
+            Order.print_status != "SUCCESS",
+        )
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .limit(PRINT_RECONCILE_BATCH_LIMIT)
+    )
+    orders = list(result.scalars().all())
+    return await reconcile_print_orders(db, orders, trigger=trigger)
+
+
 # asyncio.create_task() 返回的 Task 如果没有任何地方存着强引用，理论上可能在下一次
 # 事件循环切换时被垃圾回收掉、任务莫名其妙就没跑完——这是 asyncio 官方文档专门强调过的
 # 坑（"Save a reference to the result of this function"）。对于打印这种失败了也不会有人

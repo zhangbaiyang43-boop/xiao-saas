@@ -45,11 +45,11 @@
           </view>
           <text v-if="dishCardDesc(featuredDish)" class="ht-feature-desc">{{ dishCardDesc(featuredDish) }}</text>
           <view class="ht-feature-bottom">
-            <view class="ht-feature-price">
-              <text class="ht-feature-yen">¥</text>
-              <text class="ht-feature-amount">{{ dishPriceText(featuredDish) }}</text>
-              <text v-if="dishPriceSuffix(featuredDish)" class="ht-feature-suffix">{{ dishPriceSuffix(featuredDish) }}</text>
-            </view>
+            <price-text
+              size="md"
+              :amount="dishPriceText(featuredDish)"
+              :suffix="dishPriceSuffix(featuredDish)"
+            />
             <view
               class="ht-feature-add"
               :class="{ 'ht-feature-add--disabled': !canHomeAdd }"
@@ -91,8 +91,11 @@
 // 里那几个（handleHomeStartOrder/openProductDetail/handleFeaturedAdd/
 // markDishImageFailed/handleHomeReorderItem/handleHomeReorderAll），一行都
 // 没有改，只是从内联模板换成了从父组件监听事件调用。
+import PriceText from './PriceText.vue'
+
 export default {
   name: 'HomeTab',
+  components: { PriceText },
   props: {
     shopName: { type: String, default: '' },
     homeStatusDesc: { type: String, default: '' },
@@ -132,11 +135,11 @@ export default {
 
 
 .home-tab {
-  padding: 32rpx 32rpx calc(132rpx + env(safe-area-inset-bottom));
+  padding: var(--page-pad) var(--page-pad) calc(132rpx + env(safe-area-inset-bottom));
   background: var(--bg-page);
   display: flex;
   flex-direction: column;
-  gap: 28rpx;
+  gap: var(--card-gap);
   box-sizing: border-box;
 }
 
@@ -145,8 +148,8 @@ export default {
 .ht-status-card {
   margin: 0;
   padding: 36rpx;
-  background: #fff;
-  border-radius: 32rpx;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -208,9 +211,9 @@ export default {
 .ht-order-card {
   margin: 0;
   padding: 36rpx;
-  border-radius: 36rpx;
+  border-radius: var(--radius-hero);
   background: var(--brand) url('/static/order/home-hero-bg.jpg') left center / cover no-repeat;
-  color: #fff;
+  color: var(--text-inverse);
   box-sizing: border-box;
   transition: transform 120ms ease-out, opacity 120ms ease-out;
 }
@@ -265,9 +268,9 @@ export default {
 .ht-order-btn {
   margin-top: 32rpx;
   width: 100%;
-  height: 100rpx;
-  border-radius: 50rpx;
-  background: #fff;
+  height: var(--btn-primary-height);
+  border-radius: var(--btn-primary-radius);
+  background: var(--bg-card);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -275,7 +278,12 @@ export default {
 }
 
 
-.ht-order-btn text { color: var(--brand); font-size: 34rpx; line-height: 48rpx; font-weight: 800; }
+.ht-order-btn text {
+  color: var(--brand);
+  font-size: var(--btn-primary-font-size);
+  line-height: 1.2;
+  font-weight: var(--btn-primary-font-weight);
+}
 
 
 .ht-order-btn--disabled { background: rgba(255,255,255,0.82); }
@@ -285,7 +293,7 @@ export default {
 
 
 
-.ht-section { display: flex; flex-direction: column; gap: 16rpx; }
+.ht-section { display: flex; flex-direction: column; gap: var(--card-gap); }
 
 
 .ht-section-head { display: flex; flex-direction: column; gap: 4rpx; }
@@ -324,8 +332,8 @@ export default {
 
 .ht-feature-card {
   padding: 24rpx;
-  background: #fff;
-  border-radius: 32rpx;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
   display: flex;
   gap: 24rpx;
   box-sizing: border-box;
@@ -351,7 +359,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--border);
+  background: #F5F3EE;
 }
 
 
@@ -408,18 +416,6 @@ export default {
 .ht-feature-bottom { margin-top: auto; display: flex; align-items: flex-end; justify-content: space-between; gap: 16rpx; }
 
 
-.ht-feature-price { display: flex; align-items: baseline; min-width: 0; color: var(--brand); }
-
-
-.ht-feature-yen { font-size: 28rpx; line-height: 36rpx; font-weight: 800; }
-
-
-.ht-feature-amount { font-size: 40rpx; line-height: 48rpx; font-weight: 900; }
-
-
-.ht-feature-suffix { margin-left: 4rpx; font-size: 24rpx; line-height: 34rpx; font-weight: 700; }
-
-
 .ht-feature-add {
   flex-shrink: 0;
   height: 72rpx;
@@ -436,7 +432,7 @@ export default {
 .ht-feature-add:active { transform: scale(0.96); }
 
 
-.ht-feature-add text { color: #fff; font-size: 26rpx; line-height: 36rpx; font-weight: 800; }
+.ht-feature-add text { color: var(--text-inverse); font-size: 26rpx; line-height: 36rpx; font-weight: 800; }
 
 
 .ht-feature-add--disabled { background: #D0D5DD; }
@@ -454,7 +450,7 @@ export default {
   min-height: 68rpx;
   padding: 0 22rpx 0 26rpx;
   border-radius: 34rpx;
-  background: #fff;
+  background: var(--bg-card);
   border: 1rpx solid #E5E8EB;
   display: flex;
   align-items: center;

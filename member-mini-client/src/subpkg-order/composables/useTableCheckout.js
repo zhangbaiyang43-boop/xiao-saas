@@ -1,6 +1,7 @@
 import { requestTableCheckout } from '@/api/order'
 import { isDiningIdentityError } from '@/utils/dining'
 import { reportError } from '@/utils/monitor'
+import { toastText, modalText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的桌台账单结账流程——顾客点"去结账"通知服务员、
 // "撤销呼叫"（继续加菜时）、"本桌已结账"的拦截提示。这是 HIGH 风险层里相对
@@ -33,13 +34,13 @@ export function useTableCheckout({
 
   const handleTableContinueOrder = async () => {
     if (!canContinueOrder.value) {
-      uni.showToast({ title: '本桌账单已结束，不能继续加菜', icon: 'none' })
+      uni.showToast({ title: toastText.tableBillEnded, icon: 'none' })
       return
     }
     if (!tableSessionId.value) {
       const ok = await ensureDiningSession(true)
       if (!ok) {
-        uni.showToast({ title: '本桌点餐会话不可用，请重新扫码', icon: 'none' })
+        uni.showToast({ title: toastText.tableSessionUnavailable, icon: 'none' })
         return
       }
     }
@@ -73,9 +74,9 @@ export function useTableCheckout({
       if (res?.code === 200) {
         checkoutRequestedAt.value = res.data?.checkout_requested_at || new Date().toISOString()
         uni.vibrateShort({ type: 'heavy' })
-        uni.showToast({ title: '已通知服务员，请稍候为您结账', icon: 'none', duration: 2000 })
+        uni.showToast({ title: toastText.callWaiterOk, icon: 'none', duration: 2000 })
       } else {
-        uni.showToast({ title: res?.msg || '呼叫失败，请重试', icon: 'none' })
+        uni.showToast({ title: res?.msg || toastText.callWaiterFailed, icon: 'none' })
       }
     } catch (e) {
       if (!isRetry && isDiningIdentityError(e)) {
@@ -86,7 +87,7 @@ export function useTableCheckout({
       // 还是失败）——单独用这个 scene 报一下，方便统计"呼叫服务员失败率"，
       // 不用从一堆通用网络错误里去猜是不是这个功能出了问题。
       reportError('table_checkout.request_failed', e, { isRetry })
-      uni.showToast({ title: '呼叫失败，请重试', icon: 'none' })
+      uni.showToast({ title: toastText.callWaiterFailed, icon: 'none' })
     }
   }
 
@@ -94,15 +95,15 @@ export function useTableCheckout({
     if (tableCheckouting.value || checkoutRequested.value) return
     if (isTableSettled.value) {
       uni.showModal({
-        title: '本桌已结账',
-        content: '本次用餐账单已经结清，如需明细请联系服务员。',
+        title: modalText.tableSettledTitle,
+        content: modalText.tableSettledContent,
         showCancel: false,
-        confirmText: '知道了',
+        confirmText: modalText.tableSettledConfirm,
       })
       return
     }
     if (!tableSessionId.value) {
-      uni.showToast({ title: '缺少桌台账单信息，请重新加载', icon: 'none' })
+      uni.showToast({ title: toastText.tableBillMissing, icon: 'none' })
       return
     }
     tableCheckouting.value = true

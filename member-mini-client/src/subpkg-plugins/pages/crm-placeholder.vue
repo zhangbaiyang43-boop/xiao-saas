@@ -28,7 +28,7 @@ export default {
 .card {
   margin-top: 120rpx;
   padding: 42rpx 34rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   text-align: center;
 }
@@ -39,7 +39,7 @@ export default {
 }
 
 .title {
-  color: #111827;
+  color: var(--text-1);
   font-size: 40rpx;
   font-weight: 800;
 }
@@ -57,7 +57,7 @@ export default {
   margin-top: 34rpx;
   border-radius: 14rpx;
   background: #2563eb;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 30rpx;
   font-weight: 700;
 }

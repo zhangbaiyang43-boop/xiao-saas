@@ -67,7 +67,7 @@ export default {
 }
 
 .content {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   padding: 36rpx 32rpx;
 }
@@ -76,7 +76,7 @@ export default {
   display: block;
   font-size: 36rpx;
   font-weight: 800;
-  color: #111827;
+  color: var(--text-1);
   margin-bottom: 8rpx;
 }
 
@@ -99,7 +99,7 @@ export default {
 .para {
   display: block;
   font-size: 26rpx;
-  color: #6b7280;
+  color: var(--text-3);
   line-height: 1.8;
 }
 </style>

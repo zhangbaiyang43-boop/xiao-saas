@@ -42,7 +42,7 @@ export default {
   right: 0;
   height: calc(100rpx + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
-  background: #fff;
+  background: var(--bg-card);
   border-top: 1rpx solid var(--border);
   display: flex;
   align-items: stretch;

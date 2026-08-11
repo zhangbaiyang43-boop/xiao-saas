@@ -46,10 +46,17 @@
       </view>
 
       <view v-if="!loading && !loadError && !allDishes.length" class="empty-menu">
-        <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
-        <text class="empty-title">暂无菜品</text>
-        <text class="empty-desc">菜单加载失败</text>
-        <view class="empty-retry" @click="$emit('retry-load')"><text>重新加载</text></view>
+        <state-empty
+          padded
+          title="暂无菜品"
+          desc="商家还没有上架菜品，可稍后刷新再试"
+          action-text="重新加载"
+          @action="$emit('retry-load')"
+        >
+          <template #icon>
+            <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
+          </template>
+        </state-empty>
       </view>
       <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
         <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
@@ -91,11 +98,12 @@
               <text v-if="showDishSales(dish)" class="dish-sales">月售{{ dish.sales_count }}</text>
             </view>
             <view class="dish-bottom-row">
-              <view class="dish-price-wrap">
-                <text class="dish-price-currency">¥</text>
-                <text class="dish-price-amount">{{ dishPriceText(dish) }}</text>
-                <text v-if="dishPriceSuffix(dish)" class="dish-price-suffix">{{ dishPriceSuffix(dish) }}</text>
-              </view>
+              <price-text
+                block
+                size="md"
+                :amount="dishPriceText(dish)"
+                :suffix="dishPriceSuffix(dish)"
+              />
               <view class="dish-counter" @click.stop>
                 <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>已售罄</text></view>
                 <template v-else-if="hasSpecs(dish)">
@@ -110,9 +118,9 @@
                   <view v-if="cartCount(dish.id) > 0" class="dish-qty-control">
                     <view class="counter-touch" @click.stop="$emit('remove-from-cart', dish)"><view class="counter-btn minus"><text class="iconfont icon-move"></text></view></view>
                     <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === dish.id }">{{ cartCount(dish.id) }}</text>
-                    <view class="counter-touch" @click.stop="$emit('add-to-cart', dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
+                    <add-btn size="sm" :pressing="addPressKey === dish.id" @click="$emit('add-to-cart', dish)" />
                   </view>
-                  <view v-else class="counter-touch" @click.stop="$emit('add-to-cart', dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
+                  <add-btn v-else size="md" :pressing="addPressKey === dish.id" @click="$emit('add-to-cart', dish)" />
                 </template>
               </view>
             </view>
@@ -146,8 +154,13 @@
 //
 // 另：scrollTop 会经 scroll-position 抛给父组件，用于方案1「全宽头部收起 /
 // 迷你条显隐」；门店大头部不在本列表里，这里不做高度/透明度动画。
+import StateEmpty from '@/components/state-empty/state-empty.vue'
+import PriceText from './PriceText.vue'
+import AddBtn from './AddBtn.vue'
+
 export default {
   name: 'DishList',
+  components: { StateEmpty, PriceText, AddBtn },
   props: {
     categories: { type: Array, default: () => [] },
     activeCategory: { type: String, default: '' },
@@ -264,7 +277,7 @@ export default {
 .category-nav {
   width: 168rpx;
   flex: 0 0 168rpx;
-  background: #F6F7F8;
+  background: var(--bg-subtle);
   overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;
@@ -323,7 +336,7 @@ export default {
 }
 
 .cat-item.active {
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .cat-item.active .cat-icon-wrap {
@@ -432,10 +445,10 @@ export default {
   height: 236rpx;
   min-height: 236rpx;
   max-height: 236rpx;
-  margin: 0 20rpx 16rpx;
+  margin: 0 var(--card-gap) var(--card-gap);
   padding: 20rpx 20rpx 20rpx 24rpx;
   box-sizing: border-box;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: var(--radius-card);
   box-shadow: var(--card-shadow);
   position: relative;
@@ -459,7 +472,7 @@ export default {
   position: relative;
   width: 192rpx;
   height: 192rpx;
-  border-radius: 20rpx;
+  border-radius: var(--radius-card);
   overflow: hidden;
   background: #F5F3EE;
   flex-shrink: 0;
@@ -481,7 +494,7 @@ export default {
 .dish-soldout-mask { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(31,41,55,.42); }
 
 
-.dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: #fff; font-size: 24rpx; font-weight: 700; }
+.dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: var(--text-inverse); font-size: 24rpx; font-weight: 700; }
 
 
 
@@ -493,7 +506,7 @@ export default {
   margin: 16rpx 20rpx 12rpx;
   padding: 16rpx 20rpx;
   border-radius: 20rpx;
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: var(--card-shadow);
   box-sizing: border-box;
 }
@@ -557,7 +570,7 @@ export default {
 
 
 .reorder-all-icon {
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 28rpx;
   line-height: 1;
 }
@@ -594,44 +607,21 @@ export default {
 .dish-bottom-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0; margin-top: auto; min-width: 0; }
 
 
-.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; display: flex; align-items: baseline; color: var(--brand); }
-
-
-.dish-price-currency { flex-shrink: 0; font-size: 24rpx; font-weight: 700; line-height: 1; }
-
-
-.dish-price-amount { min-width: 0; font-size: 40rpx; font-weight: 700; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-
-.dish-price-suffix { flex-shrink: 0; margin-left: 2rpx; font-size: 22rpx; font-weight: 500; line-height: 1; color: var(--brand); }
-
-
 .dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; margin-left: 6rpx; min-width: 60rpx; max-width: 176rpx; padding-right: 0; box-sizing: border-box; }
 
 
-.dish-qty-control { width: 164rpx; max-width: 164rpx; height: 58rpx; padding: 4rpx; display: flex; align-items: center; justify-content: space-between; gap: 0; overflow: hidden; flex-shrink: 0; box-sizing: border-box; border-radius: 29rpx; background: #F3F4F6; }
+.dish-qty-control { width: 164rpx; max-width: 164rpx; height: 58rpx; padding: 4rpx; display: flex; align-items: center; justify-content: space-between; gap: 0; overflow: hidden; flex-shrink: 0; box-sizing: border-box; border-radius: 29rpx; background: var(--bg-muted); }
 
 
-.counter-touch { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
+.counter-touch { width: 50rpx; height: 50rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
 
 
-.dish-qty-control .counter-touch { width: 50rpx; height: 50rpx; }
-
-
-.dish-counter > .counter-touch { width: 76rpx; height: 76rpx; }
-
-
-.dish-qty-control .counter-btn--pressing { animation: none; transform: none; }
-
-.dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
-.dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
+.dish-counter .counter-btn { width: 50rpx; height: 50rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
 .dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
 .dish-counter .counter-btn .iconfont { font-size: 27rpx; font-weight: 400; line-height: 1; }
-.dish-counter .counter-btn.plus { background: var(--brand); }
-.dish-counter .counter-btn.plus text { color: #fff; }
 .dish-counter .counter-btn.minus { border: none; background: #E5E7EB; }
 .dish-qty-control .counter-btn.minus { background: #EAEDF1; }
-.dish-counter .counter-btn.minus text { color: #4B5563; }
+.dish-counter .counter-btn.minus text { color: var(--text-2); }
 .dish-counter .counter-num { width: 36rpx; min-width: 36rpx; text-align: center; font-size: 30rpx; line-height: 32rpx; font-weight: 600; color: var(--text-1); }
 .dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
 
@@ -650,61 +640,22 @@ export default {
 
 .empty-menu {
   min-height: 520rpx;
-  padding: 80rpx 32rpx 32rpx;
-  text-align: center;
   box-sizing: border-box;
 }
-
-
 
 .empty-menu-img {
   width: 280rpx;
   height: 280rpx;
-  margin: 0 auto 8rpx;
-}
-
-
-
-.empty-title {
   display: block;
-  color: var(--text-1);
-  font-size: 34rpx;
-  font-weight: 800;
 }
 
-
-
-.empty-desc {
-  display: block;
-  margin-top: 14rpx;
-  color: var(--text-3);
-  font-size: 26rpx;
-  line-height: 1.6;
-}
-
-
-
-.empty-retry {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 28rpx;
-  padding: 0 36rpx;
-  height: 72rpx;
-  border-radius: 36rpx;
-  background: var(--brand);
-  text { color: #fff; font-size: 28rpx; font-weight: 700; }
-}
-
-
-
-.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 180ms var(--bounce-ease); text { color: #fff; font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
+.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 180ms var(--bounce-ease); text { color: var(--text-inverse); font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
 
 
 .choose-option-btn:active { transform: scale(.97); }
 
 
-.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: var(--brand); font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
+.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: var(--bg-card); border: 2rpx solid var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: var(--brand); font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
 
 
 

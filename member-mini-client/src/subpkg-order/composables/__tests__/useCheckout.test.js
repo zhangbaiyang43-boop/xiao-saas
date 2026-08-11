@@ -44,6 +44,7 @@ function setup(overrides = {}) {
     pendingPaymentIntent: ref(null),
     paying: ref(false),
     paymentFailed: ref(false),
+    paymentConfirming: ref(false),
     payAmount: ref(0),
     pendingOrderId: ref(''),
     pendingSubmitRequestId: ref(''),
@@ -159,12 +160,14 @@ describe('useCheckout', () => {
       expect(callbacks.saveMyOrders).toHaveBeenCalled()
     })
 
-    it('需要支付时创建订单后自动走去支付，微信 requestPayment 成功即完成', async () => {
+    it('需要支付时创建订单后自动走去支付，微信 requestPayment 成功后等后端 paid 才完成', async () => {
       const { state, checkout } = setup()
       createOrder.mockResolvedValue({
         data: { id: 'order_1', order_no: 'ON20260806001', pay_amount: 20, need_payment: true },
       })
-      getOrderStatus.mockResolvedValue({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -176,6 +179,7 @@ describe('useCheckout', () => {
         expect.objectContaining({ provider: 'wxpay', timeStamp: '1' })
       )
       expect(state.showSuccess.value).toBe(true)
+      expect(state.pendingOrderId.value).toBe('')
     })
 
     it('提交请求体带上桌号/购物车/优惠券/幂等请求号', async () => {
@@ -375,11 +379,13 @@ describe('useCheckout', () => {
       expect(callbacks.startStatusPoll).toHaveBeenCalledWith('order_1')
     })
 
-    it('微信支付成功后进入成功页并清空购物车', async () => {
+    it('微信支付成功后必须等后端 paid 才进入成功页并清空购物车', async () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       state.payAmount.value = 20
-      getOrderStatus.mockResolvedValue({ data: {} })
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} })
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -391,6 +397,27 @@ describe('useCheckout', () => {
       expect(state.showSuccess.value).toBe(true)
       expect(state.pendingOrderId.value).toBe('')
       expect(callbacks.saveMyOrders).toHaveBeenCalled()
+    })
+
+    it('微信 requestPayment success 但后端暂未确认 paid 时不进入成功页，并保留待查询订单', async () => {
+      const { state, checkout } = setup()
+      state.pendingOrderId.value = 'order_1'
+      state.payAmount.value = 20
+      getOrderStatus.mockResolvedValue({ data: {} })
+      createWxPayOrder.mockResolvedValue({
+        data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
+      })
+
+      const ok = await checkout.confirmPay()
+
+      expect(ok).toBe(false)
+      expect(uni.requestPayment).toHaveBeenCalled()
+      expect(state.showSuccess.value).toBe(false)
+      expect(state.pendingOrderId.value).toBe('order_1')
+      expect(state.paymentFailed.value).toBe(false)
+      expect(uni.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: expect.stringContaining('确认中') })
+      )
     })
 
     it('用户在微信支付面板主动取消时，提示"已取消支付"而不是通用失败文案', async () => {
@@ -466,7 +493,7 @@ describe('useCheckout', () => {
     it('订单已支付/已提交时，把本地状态跟服务端对齐并停止占用"待支付"标记', async () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
-      getOrderStatus.mockResolvedValue({ data: { status: 'preparing' } })
+      getOrderStatus.mockResolvedValue({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
 
       const ok = await checkout.recoverPendingPaymentResult()
 
@@ -508,7 +535,7 @@ describe('useCheckout', () => {
       const first = checkout.recoverPendingPaymentResult()
       const second = checkout.recoverPendingPaymentResult()
 
-      resolveStatus({ data: { status: 'preparing' } })
+      resolveStatus({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
       const [firstResult, secondResult] = await Promise.all([first, second])
 
       expect(getOrderStatus).toHaveBeenCalledTimes(1)

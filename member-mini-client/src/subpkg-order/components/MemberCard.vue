@@ -1,7 +1,7 @@
 <template>
   <scroll-view class="tab-scroll" scroll-y>
     <view v-if="bannerInfo" class="card-tab member-center">
-      <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
+      <view class="member-identity-card tap-shrink" :style="memberIdentityCardStyle" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
         <view class="mic-glow"></view>
         <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
         <view class="mic-body">
@@ -75,11 +75,15 @@
       </view>
     </view>
     <view v-else-if="hasCustomerIdentity" class="card-tab-empty">
-      <text class="cte-title">会员中心</text>
-      <text class="cte-desc">普通会员</text>
-      <view class="cte-btn cte-btn-plain" @click="$emit('reload')">
-        <text>{{ memberLoading ? '加载中...' : '重新加载' }}</text>
-      </view>
+      <state-loading v-if="memberLoading" text="正在加载会员资料" />
+      <state-error
+        v-else
+        padded
+        title="会员资料加载失败"
+        desc="请重试，或稍后再查看会员权益"
+        retry-text="重新加载"
+        @retry="$emit('reload')"
+      />
       <text class="cte-secondary" @click="$emit('go-order')">去点餐</text>
     </view>
     <view v-else class="card-tab-empty">
@@ -105,12 +109,17 @@
 // （goOrderFromMember/loadMemberStatus/useMemberCoupon/handleMemberCardAuth），
 // 一行都没有改，只是从内联模板换成了从父组件监听事件调用。这样拆分不改变任何
 // 业务行为，只是把模板挪了地方。
+import StateLoading from '@/components/state-loading/state-loading.vue'
+import StateError from '@/components/state-error/state-error.vue'
+
 export default {
   name: 'MemberCard',
+  components: { StateLoading, StateError },
   props: {
     bannerInfo: { type: Object, default: null },
     shopName: { type: String, default: '' },
     memberLevelBadgeSrc: { type: String, default: '' },
+    memberIdentityCardStyle: { type: String, default: '' },
     memberLevelLabel: { type: String, default: '' },
     memberUpgradeText: { type: String, default: '' },
     memberProgressPercent: { type: Number, default: 0 },
@@ -142,25 +151,22 @@ export default {
 }
 
 
-.member-identity-card { position: relative; padding: 30rpx 32rpx 26rpx; border-radius: 32rpx; background: linear-gradient(120deg,#15392a 0%,#0a2216 42%,#1c4530 100%); box-sizing: border-box; overflow: hidden; animation: micBorderGlow 3.2s ease-in-out infinite; }
+.member-identity-card { position: relative; padding: 30rpx 32rpx 26rpx; border-radius: 32rpx; background: #06a35e; box-sizing: border-box; overflow: hidden; animation: micBorderGlow 3.2s ease-in-out infinite; }
 
 
-.member-identity-card::before { content:''; position: absolute; inset: 0; opacity: .5; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); pointer-events: none; }
+.mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.22), transparent 70%); pointer-events: none; }
 
 
-.mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }
-
-
-.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: rgba(232,202,160,.5); text-transform: uppercase; }
+.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: rgba(255,255,255,.62); text-transform: uppercase; }
 
 
 .mic-body { position: relative; z-index: 1; margin-top: 20rpx; display: flex; align-items: center; gap: 22rpx; }
 
 
-.member-avatar { width: 100rpx; height: 100rpx; border-radius: 50%; background: #16311f; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+.member-avatar { width: 100rpx; height: 100rpx; border-radius: 50%; background: rgba(0,0,0,.18); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
 
 
-.member-avatar text { color: #f3e6cf; font-size: 34rpx; line-height: 48rpx; font-weight: 900; }
+.member-avatar text { color: #fff; font-size: 34rpx; line-height: 48rpx; font-weight: 900; }
 
 
 .member-avatar-img { width: 100%; height: 100%; }
@@ -175,37 +181,37 @@ export default {
 .mic-crest-row { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
 
 
-.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #f3e6cf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
-.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: rgba(232,202,160,.55); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
+.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: rgba(255,255,255,.72); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
 
 
-.mic-chevron { position: relative; z-index: 1; color: rgba(232,202,160,.55); font-size: 28rpx; flex-shrink: 0; }
+.mic-chevron { position: relative; z-index: 1; color: rgba(255,255,255,.72); font-size: 28rpx; flex-shrink: 0; }
 
 
 .member-progress-wrap { position: relative; z-index: 1; margin-top: 22rpx; }
 
 
-.member-progress-track { height: 8rpx; border-radius: 999rpx; background: rgba(232,202,160,.16); overflow: hidden; }
+.member-progress-track { height: 8rpx; border-radius: 999rpx; background: rgba(255,255,255,.28); overflow: hidden; }
 
 
-.member-progress-fill { height: 100%; border-radius: 999rpx; background: linear-gradient(90deg,#c9a668,#f3e6cf); }
+.member-progress-fill { height: 100%; border-radius: 999rpx; background: #fff; }
 
 
-.member-upgrade-text { display: block; margin-top: 10rpx; color: rgba(232,202,160,.7); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
+.member-upgrade-text { display: block; margin-top: 10rpx; color: rgba(255,255,255,.86); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
 
 
-.mic-footer { position: relative; z-index: 1; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid rgba(232,202,160,.16); display: flex; align-items: center; justify-content: space-between; }
+.mic-footer { position: relative; z-index: 1; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid rgba(255,255,255,.22); display: flex; align-items: center; justify-content: space-between; }
 
 
-.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: rgba(232,202,160,.65); }
+.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: rgba(255,255,255,.82); }
 
 
-.mic-since { font-size: 20rpx; color: rgba(232,202,160,.4); font-weight: 700; }
+.mic-since { font-size: 20rpx; color: rgba(255,255,255,.58); font-weight: 700; }
 
 
-.member-assets-card { min-height: 168rpx; background: #fff; border-radius: 32rpx; display: flex; align-items: stretch; padding: 28rpx 0; box-sizing: border-box; }
+.member-assets-card { min-height: 168rpx; background: var(--bg-card); border-radius: 32rpx; display: flex; align-items: stretch; padding: 28rpx 0; box-sizing: border-box; }
 
 
 .member-asset-item { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8rpx; }
@@ -226,10 +232,10 @@ export default {
 .member-main-action-card { padding: 34rpx; border-radius: var(--radius-hero); background: var(--brand-gradient); box-sizing: border-box; }
 
 
-.member-action-title { display: block; color: #fff; font-size: 36rpx; line-height: 48rpx; font-weight: 900; }
+.member-action-title { display: block; color: var(--text-inverse); font-size: 36rpx; line-height: 48rpx; font-weight: 900; }
 
 
-.member-action-btn { margin-top: 24rpx; height: 96rpx; border-radius: 48rpx; background: #fff; display: flex; align-items: center; justify-content: center; }
+.member-action-btn { margin-top: 24rpx; height: 96rpx; border-radius: 48rpx; background: var(--bg-card); display: flex; align-items: center; justify-content: center; }
 
 
 .member-action-btn:active { transform: scale(.98); }
@@ -247,7 +253,7 @@ export default {
 .member-coupon-list { display: flex; flex-direction: column; gap: 16rpx; }
 
 
-.member-coupon-card { min-height: 132rpx; padding: 24rpx; border-radius: 28rpx; background: #fff; display: flex; align-items: center; gap: 20rpx; box-sizing: border-box; }
+.member-coupon-card { min-height: 132rpx; padding: 24rpx; border-radius: 28rpx; background: var(--bg-card); display: flex; align-items: center; gap: 20rpx; box-sizing: border-box; }
 
 
 .member-coupon-card:active { opacity: .74; }
@@ -274,10 +280,10 @@ export default {
 .member-coupon-use { height: 64rpx; padding: 0 24rpx; border-radius: 32rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
 
-.member-coupon-use text { color: #fff; font-size: 24rpx; line-height: 34rpx; font-weight: 800; }
+.member-coupon-use text { color: var(--text-inverse); font-size: 24rpx; line-height: 34rpx; font-weight: 800; }
 
 
-.member-service-card { background: #fff; border-radius: 32rpx; overflow: hidden; }
+.member-service-card { background: var(--bg-card); border-radius: 32rpx; overflow: hidden; }
 
 
 .member-service-row { min-height: 96rpx; padding: 0 30rpx; display: flex; align-items: center; gap: 20rpx; color: var(--text-1); font-size: 30rpx; line-height: 42rpx; font-weight: 800; box-sizing: border-box; }
@@ -308,7 +314,7 @@ export default {
 .cte-desc { display: block; font-size: 26rpx; color: var(--text-3); line-height: 1.6; }
 
 
-.cte-btn { margin-top: 32rpx; width: 100%; height: 96rpx; line-height: 96rpx; border-radius: 48rpx; background: var(--brand); color: #fff; font-size: 30rpx; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; }
+.cte-btn { margin-top: 32rpx; width: 100%; height: 96rpx; line-height: 96rpx; border-radius: 48rpx; background: var(--brand); color: var(--text-inverse); font-size: 30rpx; font-weight: 800; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; }
 
 
 .cte-btn::after { border: 0; }
@@ -320,7 +326,7 @@ export default {
 .cte-btn-plain { background: #EEF2F5; color: #3F4650; }
 
 
-.cte-secondary { display: block; margin-top: 24rpx; color: #6B7280; font-size: 26rpx; line-height: 38rpx; }
+.cte-secondary { display: block; margin-top: 24rpx; color: var(--text-3); font-size: 26rpx; line-height: 38rpx; }
 
 
 
@@ -328,7 +334,7 @@ export default {
 .cte-btn {
   margin-top: 32rpx; padding: 24rpx 80rpx;
   background: var(--brand); border-radius: 16rpx;
-  color: #fff; font-size: 30rpx; font-weight: 700;
+  color: var(--text-inverse); font-size: 30rpx; font-weight: 700;
 }
 
 @keyframes micBorderGlow { 0%, 100% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 24rpx rgba(0,0,0,.22), 0 0 0 1px rgba(212,175,110,.28); } 50% { box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), 0 10rpx 26rpx rgba(0,0,0,.26), 0 0 0 1px rgba(232,202,160,.6); } }

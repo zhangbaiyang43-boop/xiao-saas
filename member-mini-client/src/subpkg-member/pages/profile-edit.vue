@@ -366,7 +366,7 @@ export default {
 }
 
 .form-card {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   padding: 32rpx;
 }
@@ -374,7 +374,7 @@ export default {
 .state-card {
   margin: 160rpx 32rpx 0;
   padding: 40rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   text-align: center;
 }
@@ -382,7 +382,7 @@ export default {
 .form-title {
   font-size: 36rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--text-1);
   margin-bottom: 40rpx;
   text-align: center;
 }
@@ -409,7 +409,7 @@ export default {
 }
 
 .form-input:focus {
-  border-color: #07C160;
+  border-color: var(--brand);
 }
 
 .avatar-section {
@@ -433,7 +433,7 @@ export default {
 .avatar-placeholder {
   width: 100%;
   height: 100%;
-  background: #f3f4f6;
+  background: var(--bg-muted);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -459,13 +459,13 @@ export default {
 
 .phone-value {
   font-size: 30rpx;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .phone-btn {
   padding: 12rpx 24rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 24rpx;
   border-radius: 8rpx;
 }
@@ -473,7 +473,7 @@ export default {
 .info-value {
   display: block;
   font-size: 30rpx;
-  color: #111827;
+  color: var(--text-1);
   padding: 20rpx 24rpx;
   background: #f9fafb;
   border-radius: 12rpx;
@@ -485,8 +485,8 @@ export default {
 
 .save-btn {
   height: 96rpx;
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
-  color: #fff;
+  background: var(--brand-gradient);
+  color: var(--text-inverse);
   font-size: 32rpx;
   font-weight: 600;
   border-radius: 14rpx;
@@ -495,13 +495,13 @@ export default {
 
 .save-btn[disabled] {
   background: #d1d5db;
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .cancel-btn {
   height: 88rpx;
-  background: #fff;
-  color: #6b7280;
+  background: var(--bg-card);
+  color: var(--text-3);
   font-size: 30rpx;
   border-radius: 14rpx;
   border: 2rpx solid #e5e7eb;
@@ -513,7 +513,7 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--mask-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -522,7 +522,7 @@ export default {
 
 .modal-content {
   width: 600rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 24rpx;
   overflow: hidden;
 }
@@ -538,7 +538,7 @@ export default {
 .modal-title {
   font-size: 32rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .modal-close {
@@ -557,8 +557,8 @@ export default {
 
 .modal-confirm-btn {
   height: 88rpx;
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
-  color: #fff;
+  background: var(--brand-gradient);
+  color: var(--text-inverse);
   font-size: 30rpx;
   font-weight: 600;
   border-radius: 14rpx;
@@ -576,8 +576,8 @@ export default {
 .code-btn {
   width: 200rpx;
   height: 88rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 26rpx;
   border-radius: 12rpx;
   display: flex;
@@ -587,6 +587,6 @@ export default {
 
 .code-btn[disabled] {
   background: #d1d5db;
-  color: #fff;
+  color: var(--text-inverse);
 }
 </style>

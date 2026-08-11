@@ -445,7 +445,7 @@ export default {
 /* ── 通用卡片 ─────────────────────────────── */
 .card {
   padding: 40rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   box-shadow: 0 2rpx 16rpx rgba(0, 0, 0, 0.06);
   text-align: center;
@@ -459,13 +459,13 @@ export default {
   height: 120rpx;
   margin: 0 auto 28rpx;
   border-radius: 50%;
-  background: #07C160;
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.success-check  { display: block; color: #fff; font-size: 72rpx; font-weight: bold; line-height: 1; }
-.success-amount { display: block; margin-top: 16rpx; color: #07C160; font-size: 60rpx; font-weight: bold; }
+.success-check  { display: block; color: var(--text-inverse); font-size: 72rpx; font-weight: bold; line-height: 1; }
+.success-amount { display: block; margin-top: 16rpx; color: var(--brand); font-size: 60rpx; font-weight: bold; }
 .success-member { display: block; margin-top: 8rpx; color: #999; font-size: 28rpx; }
 
 /* ── 状态文字 ─────────────────────────────── */
@@ -474,7 +474,7 @@ export default {
 
 /* ── 备用短码 ─────────────────────────────── */
 .fallback-box { margin: 24rpx 0; padding: 24rpx; background: #F7F8FA; border-radius: 20rpx; }
-.fallback-code { display: block; color: #07C160; font-size: 72rpx; font-weight: bold; letter-spacing: 10rpx; word-break: normal; }
+.fallback-code { display: block; color: var(--brand); font-size: 72rpx; font-weight: bold; letter-spacing: 10rpx; word-break: normal; }
 
 /* ── 二维码区 ─────────────────────────────── */
 .qr-title { display: block; color: #111; font-size: 40rpx; font-weight: bold; }
@@ -484,9 +484,9 @@ export default {
   width: 540rpx; height: 540rpx;
   margin: 24rpx auto;
   display: flex; align-items: center; justify-content: center;
-  border: 10rpx solid #07C160;
+  border: 10rpx solid var(--brand);
   border-radius: 24rpx;
-  background: #fff;
+  background: var(--bg-card);
   overflow: hidden;
 }
 .qr-refresh-mask {
@@ -498,7 +498,7 @@ export default {
 .loading-ring-sm {
   width: 56rpx; height: 56rpx;
   border: 6rpx solid #e8e8e8;
-  border-top-color: #07C160;
+  border-top-color: var(--brand);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -508,7 +508,7 @@ export default {
 /* ── 券信息栏 ─────────────────────────────── */
 .coupon-info-bar { margin-bottom: 8rpx; }
 .cib-name  { display: block; color: #111; font-size: 32rpx; font-weight: 600; }
-.cib-value { display: block; margin-top: 8rpx; color: #07C160; font-size: 28rpx; font-weight: 600; }
+.cib-value { display: block; margin-top: 8rpx; color: var(--brand); font-size: 28rpx; font-weight: 600; }
 
 /* ── 短券码 ──────────────────────────────── */
 .code-box { padding: 24rpx; background: #F7F8FA; border-radius: 20rpx; margin-bottom: 24rpx; }
@@ -522,7 +522,7 @@ export default {
 /* ── 按钮 ────────────────────────────────── */
 .btn-primary {
   display: block; width: 100%; height: 96rpx; line-height: 96rpx;
-  background: #07C160; color: #fff;
+  background: var(--brand); color: var(--text-inverse);
   font-size: 34rpx; font-weight: 600; text-align: center;
   border-radius: 24rpx; border: none; padding: 0; box-sizing: border-box;
   &::after { border: none; }
@@ -598,7 +598,7 @@ export default {
   width: 100%;
   max-width: 640rpx;
   border-radius: 40rpx;
-  background: #fff;
+  background: var(--bg-card);
   overflow: hidden;
   text-align: center;
   animation: nc-card-in 0.38s cubic-bezier(0.34, 1.56, 0.64, 1) both;
@@ -633,7 +633,7 @@ export default {
   display: block;
   font-size: 52rpx;
   font-weight: 900;
-  color: #1a1a1a;
+  color: var(--ink);
   letter-spacing: 4rpx;
 }
 .nc-subtitle {
@@ -651,7 +651,7 @@ export default {
   align-items: center;
   border-radius: 24rpx;
   overflow: visible;
-  background: #07C160;
+  background: var(--brand);
   box-shadow: 0 8rpx 32rpx rgba(7, 193, 96, 0.35);
   min-height: 180rpx;
 }
@@ -664,7 +664,7 @@ export default {
   width: 32rpx;
   height: 32rpx;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bg-card);
   z-index: 2;
 }
 .nc-serration-left  { left:  -16rpx; }
@@ -678,7 +678,7 @@ export default {
 }
 .nc-amount {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 88rpx;
   font-weight: 900;
   line-height: 1;
@@ -724,7 +724,7 @@ export default {
 }
 .nc-coupon-name {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 30rpx;
   font-weight: 700;
   line-height: 1.4;
@@ -743,8 +743,8 @@ export default {
   margin: 0 32rpx 20rpx;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 34rpx;
   font-weight: 800;
   text-align: center;

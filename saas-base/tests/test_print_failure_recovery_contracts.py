@@ -15,6 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "app" / "api" / "v1" / "orders.py"
 PRINT_SERVICE_PATH = ROOT / "app" / "services" / "order_print_service.py"
 LIFECYCLE_SERVICE_PATH = ROOT / "app" / "services" / "order_lifecycle_service.py"
+MAIN_PATH = ROOT / "app" / "main.py"
 
 
 class FakeColumn:
@@ -664,6 +665,17 @@ class PrintPhase4BContractsTest(unittest.TestCase):
         self.assertEqual(attempted, 1)
         self.assertEqual(KuaimaiStub.calls, 1)
         self.assertEqual(order.print_status, "SUCCESS")
+
+    def test_startup_print_recovery_uses_persistent_order_state(self):
+        main_source = MAIN_PATH.read_text(encoding="utf-8-sig")
+        print_source = PRINT_SERVICE_PATH.read_text(encoding="utf-8-sig")
+
+        self.assertIn("recover_pending_print_orders_once", print_source)
+        self.assertIn("Order.print_status != \"SUCCESS\"", print_source)
+        self.assertIn("reconcile_print_orders", print_source)
+        self.assertIn("_print_recovery_loop", main_source)
+        self.assertIn("recover_pending_print_orders_once", main_source)
+        self.assertIn("asyncio.create_task(_print_recovery_loop())", main_source)
 
     def test_build_staff_print_summary_safe_fields_only(self):
         order = FakeOrder()

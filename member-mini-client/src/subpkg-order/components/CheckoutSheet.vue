@@ -41,7 +41,7 @@
                 <view class="cart-row-right">
                   <view class="counter-btn minus sm" @click="$emit('remove-from-cart', item)"><text class="iconfont icon-move"></text></view>
                   <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === (item.specKey || item.id) }">{{ item.qty }}</text>
-                  <view class="counter-btn plus sm" @click="$emit('increase-cart-item', item)"><text class="iconfont icon-add"></text></view>
+                  <add-btn size="sm" @click="$emit('increase-cart-item', item)" />
                   <text class="cart-row-price">{{ confirmationText.currency }}{{ (item.price * item.qty).toFixed(2) }}</text>
                 </view>
               </view>
@@ -110,8 +110,11 @@
 // openCouponPicker/goCheckout），一行都没有改。CouponPicker 本身仍然是
 // menu.vue 里的兄弟组件（因为顶部优惠券横幅等其它入口也会打开它），这里只负责
 // emit 打开事件，不拥有 showCouponPicker 状态。
+import AddBtn from './AddBtn.vue'
+
 export default {
   name: 'CheckoutSheet',
+  components: { AddBtn },
   props: {
     confirmationText: { type: Object, required: true },
     orderModeText: { type: Object, required: true },
@@ -177,8 +180,7 @@ export default {
   flex-direction: column;
 }
 
-
-.order-confirm-head { flex-shrink: 0; display: grid; grid-template-columns: 1fr 64rpx; align-items: center; padding: 30rpx 28rpx 22rpx; background: #fff; border-bottom: 1rpx solid #edf0f2; }
+.order-confirm-head { flex-shrink: 0; display: grid; grid-template-columns: 1fr 64rpx; align-items: center; padding: 30rpx 28rpx 22rpx; background: var(--bg-card); border-bottom: 1rpx solid #edf0f2; }
 
 
 .order-confirm-title { font-size: 36rpx; font-weight: 900; color: var(--text-1); }
@@ -233,7 +235,7 @@ export default {
 .member-summary-card--member .member-summary-text { color: #1d4f91; }
 
 
-.summary-mode-pill { height: 46rpx; padding: 0 18rpx; border-radius: 999rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; text { color: #fff; font-size: 24rpx; font-weight: 900; } }
+.summary-mode-pill { height: 46rpx; padding: 0 18rpx; border-radius: 999rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; text { color: var(--text-inverse); font-size: 24rpx; font-weight: 900; } }
 
 
 .summary-table-no { font-size: 32rpx; color: var(--text-1); font-weight: 900; line-height: 1; }
@@ -242,7 +244,7 @@ export default {
 .summary-table-tip { color: #9a6f22; font-size: 24rpx; font-weight: 800; flex-shrink: 0; margin-left: auto; }
 
 
-.confirm-card { background: #fff; border: 1rpx solid #eef1f3; border-radius: var(--radius-card); margin-bottom: 18rpx; overflow: hidden; }
+.confirm-card { background: var(--bg-card); border: 1rpx solid #eef1f3; border-radius: var(--radius-card); margin-bottom: 18rpx; overflow: hidden; }
 
 
 .selected-items-summary { min-height: 118rpx; padding: 0 28rpx; display: flex; justify-content: space-between; align-items: center; gap: 18rpx; }
@@ -324,7 +326,7 @@ export default {
 .order-preference-section .remark-chips { margin-top: 22rpx; margin-bottom: 22rpx; }
 
 
-.order-preference-section .remark-chip { margin-right: 14rpx; margin-bottom: 14rpx; padding: 14rpx 24rpx; border-radius: 999rpx; border: 1rpx solid #dfe5e8; background: #fff; }
+.order-preference-section .remark-chip { margin-right: 14rpx; margin-bottom: 14rpx; padding: 14rpx 24rpx; border-radius: 999rpx; border: 1rpx solid #dfe5e8; background: var(--bg-card); }
 
 
 .order-preference-section .remark-chip--on { border-color: var(--brand); background: #ecfbf3; }
@@ -369,7 +371,26 @@ export default {
 .price-row--payable text:last-child { color: var(--brand); font-size: 52rpx; font-weight: 900; }
 
 
-.checkout-btn-full { height: 104rpx; border-radius: 28rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; gap: 10rpx; box-shadow: 0 16rpx 32rpx rgba(16,196,105,0.22); text { color: #fff; font-size: 34rpx; font-weight: 900; } .checkout-btn-icon { font-size: 34rpx; line-height: 38rpx; font-weight: 400; } }
+.checkout-btn-full {
+  height: var(--btn-primary-height);
+  border-radius: var(--btn-primary-radius);
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  box-shadow: 0 16rpx 32rpx rgba(16,196,105,0.22);
+  text {
+    color: var(--text-inverse);
+    font-size: var(--btn-primary-font-size);
+    font-weight: var(--btn-primary-font-weight);
+  }
+  .checkout-btn-icon {
+    font-size: var(--btn-primary-font-size);
+    line-height: 1.2;
+    font-weight: 400;
+  }
+}
 
 
 .checkout-btn-full--disabled { background: #cbd5e1; box-shadow: none; }
@@ -407,7 +428,7 @@ export default {
   align-items: center;
   gap: 16rpx;
   padding: 12rpx 0 16rpx;
-  border-top: 1rpx solid #f3f4f6;
+  border-top: 1rpx solid var(--bg-muted);
 }
 
 

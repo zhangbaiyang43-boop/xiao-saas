@@ -1,9 +1,15 @@
 <template>
   <view class="shop-header">
     <view class="shop-header-row">
-      <image v-if="shopLogo" class="shop-logo" :src="shopLogo" mode="aspectFill" />
+      <image
+        v-if="shopLogo && !logoFailed"
+        class="shop-logo"
+        :src="shopLogo"
+        mode="aspectFill"
+        @error="logoFailed = true"
+      />
       <view v-else class="shop-logo shop-logo--placeholder">
-        <text class="shop-logo-char">{{ logoChar }}</text>
+        <image class="shop-logo-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
       </view>
       <view class="shop-title-main">
         <view class="shop-name-row">
@@ -35,8 +41,8 @@
 </template>
 
 <script>
-// 门店头条（方案 B）：Logo + 店名 + 营业状态 + 桌号/堂食芯片 + 轻量副文案。
-// 纯展示，点击桌号芯片只 emit show-table-hint，逻辑仍在 menu.vue。
+// 门店头条（方案1+B）：全宽 Logo + 店名 + 桌号芯片。纯展示。
+// 布局剧本见 menu.vue 模板注释——不要把头塞回右侧 scroll。
 export default {
   name: 'ShopHeader',
   props: {
@@ -49,10 +55,12 @@ export default {
     couponCount: { type: Number, default: 0 },
   },
   emits: ['show-table-hint'],
-  computed: {
-    logoChar() {
-      const name = String(this.shopName || '').trim()
-      return name ? name.slice(0, 1) : '店'
+  data() {
+    return { logoFailed: false }
+  },
+  watch: {
+    shopLogo() {
+      this.logoFailed = false
     },
   },
 }
@@ -63,7 +71,7 @@ export default {
   position: relative;
   flex-shrink: 0;
   background: var(--bg-card);
-  padding: 24rpx 32rpx 20rpx;
+  padding: 24rpx var(--page-pad) 20rpx;
   box-sizing: border-box;
 }
 
@@ -82,21 +90,19 @@ export default {
   height: 88rpx;
   border-radius: 20rpx;
   flex-shrink: 0;
-  background: #f0f2f5;
+  background: var(--bg-muted);
 }
 
 .shop-logo--placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, #ffd89b, #e17055);
+  background: #F5F3EE;
 }
 
-.shop-logo-char {
-  color: #fff;
-  font-size: 36rpx;
-  font-weight: 700;
-  line-height: 1;
+.shop-logo-placeholder-img {
+  width: 60%;
+  height: 60%;
 }
 
 .shop-title-main {
@@ -115,7 +121,7 @@ export default {
 .shop-name {
   flex: 1;
   min-width: 0;
-  color: var(--text-1, #1a1a1a);
+  color: var(--text-1, var(--ink));
   font-size: 34rpx;
   font-weight: 700;
   line-height: 48rpx;
@@ -131,13 +137,13 @@ export default {
   font-size: 22rpx;
   font-weight: 600;
   line-height: 32rpx;
-  color: #06ad56;
-  background: rgba(7, 193, 96, 0.12);
+  color: var(--brand-dark);
+  background: var(--brand-light);
 }
 
 .shop-status--closed {
-  color: #999;
-  background: #f0f2f5;
+  color: var(--text-3);
+  background: var(--bg-muted);
 }
 
 .shop-chip-row {
@@ -159,20 +165,20 @@ export default {
 }
 
 .shop-chip--table {
-  background: #1a1a1a;
+  background: var(--ink);
 }
 
 .shop-chip--table .shop-chip-text,
 .shop-chip--table .shop-chip-arrow {
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .shop-chip--mode {
-  background: #f0f2f5;
+  background: var(--bg-muted);
 }
 
 .shop-chip--mode .shop-chip-text {
-  color: var(--text-2, #666);
+  color: var(--text-2);
   font-weight: 500;
 }
 
@@ -197,12 +203,12 @@ export default {
 
 .shop-sub-item {
   font-size: 22rpx;
-  color: var(--text-3, #999);
+  color: var(--text-3);
   line-height: 32rpx;
 }
 
 .shop-sub-em {
-  color: var(--text-2, #666);
+  color: var(--text-2);
   font-weight: 600;
 }
 </style>

@@ -78,9 +78,9 @@ export default {
     // 所以叠一层跟等级色调匹配的半透明渐变，既保留背景图的光泽纹理，又保证
     // 白色文字在任何一张图上都读得清楚。
     const LEVEL_CARD_META = {
-      LV1: { bg: '/static/member-levels/card-bg-lv1.jpg', tint: '6,163,94' },
-      LV2: { bg: '/static/member-levels/card-bg-lv2.jpg', tint: '100,112,128' },
-      LV3: { bg: '/static/member-levels/card-bg-lv3.jpg', tint: '176,130,32' },
+      LV1: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv1.webp', tint: '6,163,94' },
+      LV2: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv2.webp', tint: '100,112,128' },
+      LV3: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv3.webp', tint: '176,130,32' },
     }
     const levelCardStyle = computed(() => {
       const meta = LEVEL_CARD_META[data.value.level_code] || LEVEL_CARD_META.LV1
@@ -166,7 +166,7 @@ export default {
   padding: 36rpx 32rpx;
   background: var(--brand-gradient);
   border-radius: 24rpx;
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .level-head {
@@ -222,7 +222,7 @@ export default {
 
 .progress-fill {
   height: 100%;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 999rpx;
   transition: width 0.3s;
 }
@@ -237,7 +237,7 @@ export default {
 .points-card {
   margin: 20rpx 28rpx 0;
   padding: 28rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   display: flex;
   align-items: center;
@@ -252,13 +252,13 @@ export default {
 
 .points-label {
   font-size: 28rpx;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 600;
 }
 
 .points-value {
   font-size: 30rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 800;
 }
 
@@ -270,7 +270,7 @@ export default {
 .benefits-card {
   margin: 20rpx 28rpx 0;
   padding: 28rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
 }
 
@@ -282,14 +282,14 @@ export default {
 }
 
 .benefits-title-icon {
-  color: #07C160;
+  color: var(--brand);
   font-size: 32rpx;
 }
 
 .benefits-title {
   font-size: 30rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .benefits-grid {
@@ -318,7 +318,7 @@ export default {
 }
 
 .benefit-icon-glyph {
-  color: #07C160;
+  color: var(--brand);
   font-size: 40rpx;
 }
 
@@ -347,7 +347,7 @@ export default {
   display: block;
   margin-top: 12rpx;
   font-size: 26rpx;
-  color: #111827;
+  color: var(--text-1);
   font-weight: 600;
 }
 

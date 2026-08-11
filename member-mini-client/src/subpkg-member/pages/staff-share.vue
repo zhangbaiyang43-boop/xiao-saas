@@ -57,12 +57,12 @@ export default {
 
 .hero-card {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .hc-title {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 40rpx;
   font-weight: bold;
   line-height: 1.35;
@@ -79,7 +79,7 @@ export default {
 .card {
   margin: 24rpx 24rpx 0;
   padding: 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
@@ -97,8 +97,8 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 34rpx;
   font-weight: 600;
   text-align: center;

@@ -41,7 +41,7 @@ export default {
 .hero-stat-value {
   font-size: 72rpx;
   font-weight: 900;
-  color: #fff;
+  color: var(--text-inverse);
   line-height: 1;
 }
 
@@ -57,6 +57,6 @@ export default {
 
 .hero-stat-label--error {
   text-decoration: underline;
-  color: #fff;
+  color: var(--text-inverse);
 }
 </style>

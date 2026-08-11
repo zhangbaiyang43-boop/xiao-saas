@@ -32,6 +32,16 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
   const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '普通会员')
   const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
   const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
+  // 会员身份卡底图：COS 压缩 WebP（普通绿 / 银 / 金），勿打包原图进小程序包
+  const MEMBER_LEVEL_CARD_META = {
+    LV1: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv1.webp', tint: '6,163,94' },
+    LV2: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv2.webp', tint: '100,112,128' },
+    LV3: { bg: 'https://poster-system-1253573799.cos.ap-guangzhou.myqcloud.com/member-levels/card-bg-lv3.webp', tint: '176,130,32' },
+  }
+  const memberIdentityCardStyle = computed(() => {
+    const meta = MEMBER_LEVEL_CARD_META[bannerInfo.value?.levelCode] || MEMBER_LEVEL_CARD_META.LV1
+    return `background-image: linear-gradient(135deg, rgba(${meta.tint},0.62), rgba(${meta.tint},0.36)), url('${meta.bg}'); background-size: cover; background-position: center;`
+  })
   const memberProgressPercent = computed(() => {
     const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)
     const target = Number(bannerInfo.value?.nextGrowth || 0)
@@ -58,6 +68,7 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
     memberSinceText,
     memberLevelLabel,
     memberLevelBadgeSrc,
+    memberIdentityCardStyle,
     memberProgressPercent,
     memberUpgradeText,
     usableMemberCoupons,

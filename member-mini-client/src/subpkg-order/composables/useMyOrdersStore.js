@@ -1,5 +1,6 @@
 import { cancelOrder } from '@/api/order'
 import { reportError } from '@/utils/monitor'
+import { toastText, modalText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的"本地订单列表"持久化 + 取消订单。myOrders 是本设备/本桌
 // 在这个店見过的订单列表，存本地（不是从后端整体拉取的权威列表，权威列表靠
@@ -33,8 +34,8 @@ export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStat
 
   const doCancelOrder = (order) => {
     uni.showModal({
-      title: '取消订单',
-      content: '确认取消此订单吗？商家接单后无法取消。',
+      title: modalText.cancelOrderTitle,
+      content: modalText.cancelOrderContent,
       success: async ({ confirm }) => {
         if (!confirm) return
         try {
@@ -46,10 +47,10 @@ export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStat
             orderStatus.value = 'cancelled'
             showSuccess.value = false
           }
-          uni.showToast({ title: '订单已取消', icon: 'success', duration: 1200 })
+          uni.showToast({ title: toastText.orderCancelled, icon: 'success', duration: 1200 })
         } catch (e) {
           reportError('my_orders.cancel', e, { orderId: order.id })
-          uni.showToast({ title: '取消失败，请重试', icon: 'none', duration: 1200 })
+          uni.showToast({ title: toastText.cancelOrderFailed, icon: 'none', duration: 1200 })
         }
       }
     })

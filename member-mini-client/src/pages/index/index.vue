@@ -120,7 +120,7 @@ export default {
   flex-direction: column;
   align-items: center;
   padding: 56rpx 32rpx 40rpx;
-  background: #FFFFFF;
+  background: var(--bg-card);
   border-radius: 32rpx;
   box-sizing: border-box;
 }
@@ -130,7 +130,7 @@ export default {
   height: 96rpx;
   border-radius: 48rpx;
   background: #E8F9F0;
-  color: #07C160;
+  color: var(--brand);
   font-size: 44rpx;
   font-weight: 800;
   line-height: 96rpx;
@@ -175,8 +175,8 @@ export default {
 
 .entry-primary {
   margin-top: 48rpx;
-  background: #07C160;
-  color: #FFFFFF;
+  background: var(--brand);
+  color: var(--text-inverse);
 }
 
 .entry-secondary {

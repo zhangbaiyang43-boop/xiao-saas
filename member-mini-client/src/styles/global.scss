@@ -4,22 +4,38 @@
 // 跟商家后台（admin-h5/src/styles/global.scss）用同一套命名和数值，
 // 两端是同一个品牌，不应该各存一份"差不多但不完全一样"的灰/绿。
 // 新增令牌前先看商家后台那份有没有同名的，没有必要不要另起名字。
+//
+// 2026-08-07 Token 收口：业务样式里禁止再写 #07C160 / #111827 等硬编码，
+// 一律用下面这些变量。纯白文字用 --text-inverse；浅灰底用 --bg-muted。
 page {
   --brand:           #07C160;
   --brand-dark:      #059952;
   --brand-light:     #e8f9f0;
+  --brand-mid:       #9de8c4;   /* 与 admin-h5 对齐 */
   --brand-gradient:  linear-gradient(135deg, #07C160 0%, #10A85A 100%);
   --text-1:          #111827;
   --text-2:          #4b5563;
   --text-3:          #6b7280;   /* 跟商家后台同一次 WCAG AA 对比度修复保持一致，不要退回旧的浅灰 */
+  --text-inverse:    #ffffff;   /* 绿底/深底上的字 */
+  --ink:             #1a1a1a;   /* 桌号芯片等深色块 */
   --bg-page:         #f5f6fa;
   --bg-card:         #ffffff;
+  --bg-muted:        #f3f4f6;   /* 次级按钮底、关闭钮底 */
+  --bg-subtle:       #f6f7f8;   /* 分类栏等更浅的灰底 */
   --border:          #f0f0f0;
-  --radius-card:     24rpx;     /* 750rpx 设计稿下约等于商家后台的 12px */
+  --radius-card:     24rpx;     /* 750rpx 设计稿下约等于商家后台的 12px；禁止另起 16rpx 平行圆角 */
   --radius-hero:     36rpx;
+  --card-gap:        16rpx;     /* 列表卡间距（菜卡外边距、首页区块间距） */
+  --page-pad:        32rpx;     /* 页面左右内边距 */
+  /* 顾客端主 CTA（去结算 / 确认 / 开始点餐）：只统一尺寸字重，不改点击逻辑 */
+  --btn-primary-height: 96rpx;
+  --btn-primary-radius: 48rpx;
+  --btn-primary-font-size: 32rpx;
+  --btn-primary-font-weight: 700;
   --success:         #059952;
   --danger:          #ef4444;
   --warning:         #f59e0b;
+  --mask-bg:         rgba(0, 0, 0, 0.5);
   --card-shadow:     0 4rpx 16rpx rgba(17, 24, 39, 0.06);
   --bounce-ease:     cubic-bezier(0.34, 1.56, 0.64, 1);
 

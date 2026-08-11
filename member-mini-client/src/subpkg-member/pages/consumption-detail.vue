@@ -139,7 +139,7 @@ export default {
 }
 
 .header-card {
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
+  background: var(--brand-gradient);
   border-radius: 20rpx;
   padding: 60rpx 40rpx;
   text-align: center;
@@ -152,20 +152,20 @@ export default {
 
 .currency {
   font-size: 36rpx;
-  color: #fff;
+  color: var(--text-inverse);
   margin-right: 4rpx;
 }
 
 .amount {
   font-size: 80rpx;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .product-name {
   display: block;
   font-size: 36rpx;
-  color: #fff;
+  color: var(--text-inverse);
   margin-bottom: 12rpx;
 }
 
@@ -173,13 +173,13 @@ export default {
   display: inline-block;
   padding: 8rpx 24rpx;
   background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 24rpx;
   border-radius: 999rpx;
 }
 
 .info-section {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 16rpx;
   overflow: hidden;
 }
@@ -189,7 +189,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 32rpx 24rpx;
-  border-bottom: 1rpx solid #f3f4f6;
+  border-bottom: 1rpx solid var(--bg-muted);
 }
 
 .info-item:last-child {
@@ -198,12 +198,12 @@ export default {
 
 .info-label {
   font-size: 28rpx;
-  color: #6b7280;
+  color: var(--text-3);
 }
 
 .info-value {
   font-size: 28rpx;
-  color: #111827;
+  color: var(--text-1);
   text-align: right;
   max-width: 60%;
 }

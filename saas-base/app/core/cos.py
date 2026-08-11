@@ -41,7 +41,10 @@ def process_image(content: bytes, max_dimension: int = IMAGE_MAX_DIMENSION) -> b
     这一步和上层的 magic-bytes 嗅探是同一道防线的两层，跳过 Pillow 解码失败直接放行，
     等于把两层校验都绕开了。这是同步/CPU 密集操作，调用方应在线程池里跑，避免阻塞事件循环。
     """
-    from PIL import Image, ImageOps
+    try:
+        from PIL import Image, ImageOps
+    except ModuleNotFoundError as e:
+        raise RuntimeError("服务器未安装 Pillow，请执行: pip install Pillow==10.4.0") from e
 
     try:
         img = Image.open(BytesIO(content))

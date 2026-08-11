@@ -167,7 +167,7 @@ export default {
 .state-wrap {
   margin: 120rpx 24rpx 0;
   padding: 64rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   display: flex;
   flex-direction: column;
@@ -209,12 +209,12 @@ export default {
   width: 20rpx;
   height: 20rpx;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .ac-amount {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 72rpx;
   font-weight: bold;
   line-height: 1;
@@ -230,7 +230,7 @@ export default {
 
 .ac-right {
   flex: 1;
-  background: #fff;
+  background: var(--bg-card);
   padding: 40rpx 28rpx;
   display: flex;
   flex-direction: column;
@@ -262,7 +262,7 @@ export default {
 
 .badge-active {
   background: #e8f9ef;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .badge-inactive {
@@ -274,7 +274,7 @@ export default {
 .card {
   margin: 24rpx 24rpx 0;
   padding: 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
@@ -305,8 +305,8 @@ export default {
   width: 48rpx;
   height: 48rpx;
   border-radius: 50%;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 26rpx;
   font-weight: bold;
   display: flex;
@@ -358,7 +358,7 @@ export default {
   left: 0;
   right: 0;
   padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
-  background: #fff;
+  background: var(--bg-card);
   box-shadow: 0 -2rpx 12rpx rgba(0, 0, 0, 0.08);
   z-index: 100;
 }
@@ -369,8 +369,8 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 36rpx;
   font-weight: 700;
   text-align: center;

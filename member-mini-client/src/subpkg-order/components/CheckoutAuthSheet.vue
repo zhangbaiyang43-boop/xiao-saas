@@ -56,7 +56,7 @@ export default {
 .checkout-auth-mask { align-items: flex-end; }
 
 
-.checkout-auth-sheet { width: 100%; max-height: 55vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
+.checkout-auth-sheet { width: 100%; max-height: 55vh; background: var(--bg-card); border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
 
 
 .checkout-auth-handle { width: 72rpx; height: 8rpx; border-radius: 999rpx; background: #e5e7eb; align-self: center; margin-bottom: 20rpx; }
@@ -86,7 +86,19 @@ export default {
 .checkout-auth-auto { margin-top: 18rpx; padding: 18rpx 20rpx; border-radius: 18rpx; background: #ecfbf3; color: #0f8f50; font-size: 24rpx; line-height: 1.55; }
 
 
-.checkout-auth-primary { margin-top: 24rpx; height: 96rpx; border-radius: var(--radius-card); background: #16c76f; color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
+.checkout-auth-primary {
+  margin-top: 24rpx;
+  height: var(--btn-primary-height);
+  border-radius: var(--btn-primary-radius);
+  background: var(--brand);
+  color: var(--text-inverse);
+  font-size: var(--btn-primary-font-size);
+  font-weight: var(--btn-primary-font-weight);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22);
+}
 
 
 .checkout-auth-primary[disabled] { opacity: .72; box-shadow: none; }

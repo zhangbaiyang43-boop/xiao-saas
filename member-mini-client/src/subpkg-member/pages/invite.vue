@@ -190,7 +190,7 @@ export default {
 .state-wrap {
   margin: 120rpx 24rpx 0;
   padding: 64rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   display: flex;
   flex-direction: column;
@@ -205,12 +205,12 @@ export default {
 /* ── 英雄卡 ──────────────────────────────── */
 .hero-card {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .hc-title {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 40rpx;
   font-weight: bold;
   line-height: 1.35;
@@ -240,7 +240,7 @@ export default {
 
 .stat-num {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 36rpx;
   font-weight: bold;
   line-height: 1.2;
@@ -269,14 +269,14 @@ export default {
 
 .summary-error-text {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 26rpx;
 }
 
 .summary-retry-btn {
   display: inline-block;
   margin-top: 12rpx;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 26rpx;
   font-weight: 600;
   text-decoration: underline;
@@ -286,7 +286,7 @@ export default {
 .card {
   margin: 24rpx 24rpx 0;
   padding: 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
@@ -306,7 +306,7 @@ export default {
 }
 
 .refresh-btn {
-  color: #07C160;
+  color: var(--brand);
   font-size: 28rpx;
 }
 
@@ -345,8 +345,8 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 34rpx;
   font-weight: 600;
   text-align: center;
@@ -428,7 +428,7 @@ export default {
 }
 
 .visited-text {
-  color: #07C160;
+  color: var(--brand);
 }
 
 .ri-right {
@@ -450,7 +450,7 @@ export default {
 
 .badge-visited {
   background: #e8f9ef;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .badge-pending {
@@ -464,7 +464,7 @@ export default {
 }
 
 .reward-done {
-  color: #07C160;
+  color: var(--brand);
 }
 
 .reward-pending {

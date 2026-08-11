@@ -11,6 +11,14 @@ MENU_SOURCE = (
     / "pages"
     / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+CHECKOUT_SOURCE = (
+    ROOT.parent
+    / "member-mini-client"
+    / "src"
+    / "subpkg-order"
+    / "composables"
+    / "useCheckout.js"
+).read_text(encoding="utf-8-sig")
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
 PAYMENT_SERVICE_SOURCE = (
     ROOT / "app" / "services" / "order_payment_service.py"
@@ -25,6 +33,8 @@ def function_source(source: str, name: str) -> str:
     starts = [
         f"    const {name} = async",
         f"    const {name} = (",
+        f"  const {name} = async",
+        f"  const {name} = (",
         f"    function {name}",
         f"    async def {name}(",
         f"async def {name}(",
@@ -38,7 +48,7 @@ def function_source(source: str, name: str) -> str:
     for idx in range(start + 1, len(lines)):
         line = lines[idx]
         if (
-            line.startswith("    const ")
+            line.startswith("  const ")
             or line.startswith("    function ")
             or line.startswith("    async def ")
             or line.startswith("  async onLoad")
@@ -64,29 +74,31 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
     def test_frontend_persists_pending_order_before_payment(self):
         # 实际下单逻辑在 performSubmitOrder 里——submitOrder 现在只是加了重入锁的薄封装，
         # 这样"本桌身份失效，重建后自动重试一次"才能在不撞锁的情况下递归重试。
-        submit_order = function_source(MENU_SOURCE, "performSubmitOrder")
+        submit_order = function_source(CHECKOUT_SOURCE, "performSubmitOrder")
         self.assertIn("savePendingPaymentOrder()", submit_order)
         self.assertLess(submit_order.index("savePendingPaymentOrder()"), submit_order.index("confirmPay()"))
-        self.assertIn("const savePendingPaymentOrder", MENU_SOURCE)
-        self.assertIn("const restorePendingPaymentOrder", MENU_SOURCE)
-        self.assertIn("return await performSubmitOrder()", function_source(MENU_SOURCE, "submitOrder"))
+        self.assertIn("const savePendingPaymentOrder", CHECKOUT_SOURCE)
+        self.assertIn("const restorePendingPaymentOrder", CHECKOUT_SOURCE)
+        self.assertIn("return await performSubmitOrder()", function_source(CHECKOUT_SOURCE, "submitOrder"))
 
     def test_frontend_checks_order_status_before_starting_payment_again(self):
-        confirm_pay = function_source(MENU_SOURCE, "confirmPay")
+        confirm_pay = function_source(CHECKOUT_SOURCE, "confirmPay")
         self.assertIn("recoverPendingPaymentResult()", confirm_pay)
         self.assertLess(confirm_pay.index("recoverPendingPaymentResult()"), confirm_pay.index("createWxPayOrder"))
         self.assertLess(confirm_pay.index("recoverPendingPaymentResult()"), confirm_pay.index("uni.requestPayment"))
+        self.assertIn("waitForBackendPaymentConfirmation(paidOrderId)", confirm_pay)
+        self.assertLess(confirm_pay.index("uni.requestPayment"), confirm_pay.index("waitForBackendPaymentConfirmation(paidOrderId)"))
 
     def test_frontend_recovers_after_request_payment_error_and_page_reentry(self):
-        confirm_pay = function_source(MENU_SOURCE, "confirmPay")
+        confirm_pay = function_source(CHECKOUT_SOURCE, "confirmPay")
         self.assertIn("recoverPendingPaymentResult({ showDetail: true })", confirm_pay)
-        self.assertIn("getOrderStatus", MENU_SOURCE)
+        self.assertIn("getOrderStatus", CHECKOUT_SOURCE)
         self.assertIn("this.restorePendingPaymentOrder()", MENU_SOURCE)
         self.assertIn("this.recoverPendingPaymentResult", MENU_SOURCE)
         self.assertIn("onShow()", MENU_SOURCE)
 
     def test_paid_recovery_clears_pending_payment_id_to_prevent_repay(self):
-        recover = function_source(MENU_SOURCE, "recoverPendingPaymentResult")
+        recover = function_source(CHECKOUT_SOURCE, "recoverPendingPaymentResult")
         self.assertIn("isPaidOrSubmittedOrder(data)", recover)
         self.assertIn("clearPendingPaymentOrder()", recover)
         self.assertLess(recover.index("clearPendingPaymentOrder()"), recover.index("startStatusPoll(id)"))

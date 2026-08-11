@@ -1,7 +1,12 @@
 <template>
   <view v-if="loadError && !loading" class="loading-mask">
-    <text class="loading-text">菜单加载中...</text>
-    <view class="retry-btn" @click="$emit('retry-load')"><text>重新加载</text></view>
+    <state-error
+      padded
+      title="菜单加载失败"
+      desc="请检查网络后重试"
+      retry-text="重新加载"
+      @retry="$emit('retry-load')"
+    />
   </view>
 
   <view v-if="loading" class="loading-mask skeleton-mask">
@@ -22,11 +27,12 @@
 </template>
 
 <script>
-// 从 menu.vue 拆出来的两个加载态遮罩：加载失败提示（loadError）和骨架屏
-// （loading）。纯展示组件，不带任何业务逻辑——重新加载按钮只 emit 出去，真正
-// 的处理函数还是原来 menu.vue 里的 loadMenu，一行都没有改。
+// 加载失败用全局 StateError；首屏 loading 保留菜单骨架屏（贴合双列布局）。
+import StateError from '@/components/state-error/state-error.vue'
+
 export default {
   name: 'LoadingStates',
+  components: { StateError },
   props: {
     loadError: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
@@ -50,17 +56,13 @@ export default {
 
 
 
-.loading-text { font-size: 28rpx; color: var(--text-3); }
-
-
-
 .skeleton-mask {
   position: fixed;
   top: calc(176rpx + env(safe-area-inset-top));
   left: 0;
   right: 0;
   bottom: 0;
-  background: #fff;
+  background: var(--bg-card);
   display: flex;
   flex-direction: row;
   align-items: stretch;
@@ -73,7 +75,7 @@ export default {
 .skeleton-nav {
   width: 156rpx;
   flex: 0 0 156rpx;
-  background: #F6F7F8;
+  background: var(--bg-subtle);
   padding-top: 20rpx;
   box-sizing: border-box;
 }
@@ -154,17 +156,6 @@ export default {
 }
 
 
-
-.retry-btn {
-  margin-top: 24rpx;
-  padding: 16rpx 48rpx;
-  border-radius: var(--radius-card);
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text { color: #fff; font-size: 30rpx; font-weight: 700; }
-}
 
 @keyframes skeletonShimmer {
   0% { background-position: 100% 50%; }

@@ -94,12 +94,12 @@ export default {
 /* ── 顶部绿色区 ───────────────────────────── */
 .page-header {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .ph-title {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 44rpx;
   font-weight: bold;
   line-height: 1.3;
@@ -116,7 +116,7 @@ export default {
 .state-wrap {
   margin: 48rpx 24rpx 0;
   padding: 64rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   display: flex;
   flex-direction: column;
@@ -137,7 +137,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   padding: 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 24rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
 }
@@ -174,7 +174,7 @@ export default {
 
 .rc-amount {
   flex-shrink: 0;
-  color: #07C160;
+  color: var(--brand);
   font-size: 36rpx;
   font-weight: bold;
 }

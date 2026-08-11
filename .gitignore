@@ -13,6 +13,7 @@ __pycache__/
 dist/
 build/
 unpackage/
+_final_gate_worktrees/
 
 # Runtime / local data
 logs/

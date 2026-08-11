@@ -176,6 +176,7 @@ async def _stale_order_cleanup_once():
 
 PENDING_PAYMENT_RECONCILE_AFTER_SECONDS = 90
 PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS = 60
+PRINT_RECOVERY_INTERVAL_SECONDS = 60
 
 
 async def _pending_payment_reconcile_once():
@@ -225,6 +226,29 @@ async def _pending_payment_reconcile_loop():
         except Exception:
             pass
         await asyncio.sleep(PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS)
+
+
+async def _print_recovery_once():
+    """Recover orders that should have printed but only persisted PENDING/FAILED state."""
+    from app.core.database import AsyncSessionLocal
+    from app.services.order_print_service import recover_pending_print_orders_once
+
+    async with AsyncSessionLocal() as db:
+        recovered = await recover_pending_print_orders_once(db)
+        if recovered:
+            await db.commit()
+
+
+async def _print_recovery_loop():
+    import asyncio
+
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await _print_recovery_once()
+        except Exception:
+            pass
+        await asyncio.sleep(PRINT_RECOVERY_INTERVAL_SECONDS)
 
 
 async def _stale_order_cleanup_loop():
@@ -384,6 +408,9 @@ async def startup():
     # 更高频地确认"已支付但 webhook 未到"的订单，不等 15 分钟的取消阈值——见
     # _pending_payment_reconcile_once 上的注释
     asyncio.create_task(_pending_payment_reconcile_loop())
+
+    # 支付/后付订单已落库但进程重启丢掉内存打印任务时，从 order.print_status 恢复。
+    asyncio.create_task(_print_recovery_loop())
 
     # 启动老客召回自动发券任务
     asyncio.create_task(_marketing_recall_loop())

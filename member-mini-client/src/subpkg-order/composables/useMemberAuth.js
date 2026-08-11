@@ -3,6 +3,7 @@ import { getMemberProfile, getMembershipGrowth, joinByEntranceCode } from '@/api
 import { saveCustomerSession } from '@/utils/auth'
 import { getCustomerCoupons } from '@/api/coupon'
 import { reportError } from '@/utils/monitor'
+import { toastText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的"会员登录 + 拉会员资料"整条流程——手机号授权登录、
 // 登录后刷新会员卡片数据、判断"当前算不算有会员身份"。之所以是 MEDIUM 而不是
@@ -89,7 +90,7 @@ export function useMemberAuth({
   const handleMemberCardAuth = async (event) => {
     if (memberAuthorizing.value) return
     const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
-    if (!phoneCode) return uni.showToast({ title: '未完成授权，请重试', icon: 'none' })
+    if (!phoneCode) return uni.showToast({ title: toastText.authIncomplete, icon: 'none' })
     memberAuthorizing.value = true
     try {
       const code = await wxLogin()
@@ -103,7 +104,7 @@ export function useMemberAuth({
         invite_code: uni.getStorageSync('invite_code') || '',
       }, { authRedirect: false })
       if (res?.code !== 200) {
-        uni.showToast({ title: res?.msg || '加入会员失败，请重试', icon: 'none' })
+        uni.showToast({ title: res?.msg || toastText.joinMemberFailed, icon: 'none' })
         return
       }
       // 邀请码用过就清掉，避免以后在别的店误用
@@ -112,10 +113,10 @@ export function useMemberAuth({
       await bindCurrentDiningParticipant()
       await loadMemberStatus({ authRedirect: false })
       activeTab.value = 'card'
-      uni.showToast({ title: '已登录', icon: 'none' })
+      uni.showToast({ title: toastText.loggedIn, icon: 'none' })
       checkWelcomeCoupon()
     } catch (err) {
-      uni.showToast({ title: err?.message || '授权未完成，请重试', icon: 'none' })
+      uni.showToast({ title: err?.message || toastText.authIncomplete, icon: 'none' })
     } finally {
       memberAuthorizing.value = false
     }

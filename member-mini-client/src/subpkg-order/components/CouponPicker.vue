@@ -53,7 +53,14 @@
           </view>
         </view>
 
-        <view v-if="!couponPickerList.length" class="cp-empty"><text>暂无可用优惠券</text></view>
+        <view v-if="!couponPickerList.length" class="cp-empty">
+          <state-empty
+            padded
+            icon="🎫"
+            title="暂无可用优惠券"
+            desc="满减券会在满足条件时出现在这里"
+          />
+        </view>
 
         <view class="cp-skip-wrap">
           <text class="cp-skip-link" @click="$emit('select-coupon', null)">不使用优惠券</text>
@@ -69,8 +76,11 @@
 // 还是原来 menu.vue 里的 closeCouponPicker/pickCoupon，一行都没有改。可用性
 // 判断（c.eligible）、金额和条件文案的计算，全部留在父组件，这里只读取父组件
 // 算好的结果。
+import StateEmpty from '@/components/state-empty/state-empty.vue'
+
 export default {
   name: 'CouponPicker',
+  components: { StateEmpty },
   props: {
     selectedCouponId: { type: [Number, String], default: null },
     couponPickerList: { type: Array, default: () => [] },
@@ -111,15 +121,13 @@ export default {
 .coupon-picker-sheet {
   width: 100%;
   max-height: 76vh;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx 32rpx 0 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   animation: slide-up 0.25s ease;
 }
-
-
 
 .cp-head {
   position: relative;
@@ -224,7 +232,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  text { color: #fff; font-size: 20rpx; font-weight: 900; }
+  text { color: var(--text-inverse); font-size: 20rpx; font-weight: 900; }
 }
 
 
@@ -301,9 +309,7 @@ export default {
 
 
 .cp-empty {
-  padding: 64rpx 0 24rpx;
-  text-align: center;
-  text { color: var(--text-3); font-size: 26rpx; }
+  padding: 24rpx 0;
 }
 
 

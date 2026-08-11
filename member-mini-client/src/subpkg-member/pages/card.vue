@@ -90,7 +90,7 @@ export default {
 .tip-card,
 .menu-card {
   padding: 34rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 20rpx;
   box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.05);
 }
@@ -110,8 +110,8 @@ export default {
 }
 
 .member-card {
-  color: #fff;
-  background: #07C160;
+  color: var(--text-inverse);
+  background: var(--brand);
   box-shadow: 0 10rpx 28rpx rgba(7, 193, 96, 0.24);
 }
 
@@ -145,7 +145,7 @@ export default {
 }
 
 .tip-title {
-  color: #111827;
+  color: var(--text-1);
   font-size: 32rpx;
   font-weight: 800;
 }
@@ -163,7 +163,7 @@ export default {
   align-items: center;
   min-height: 86rpx;
   border-bottom: 1rpx solid #edf2f7;
-  color: #111827;
+  color: var(--text-1);
   font-size: 30rpx;
   font-weight: 700;
 }

@@ -103,23 +103,41 @@ export function useTableBillView({
     if (!no || no < 1) return PARTICIPANT_COLORS[0]
     return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
   }
+  // 本桌桌牌：取会话订单里最新非空 pickupNo（商家换牌后 sync 会写到各单快照）。
+  // 与 PaymentSuccessSheet 同源：Order.pickup_no → mapServerOrder.pickupNo，不另建 store。
+  const tablePickupNo = computed(() => {
+    for (let i = tableSessionOrders.value.length - 1; i >= 0; i -= 1) {
+      const no = tableSessionOrders.value[i]?.pickupNo
+      if (no) return String(no)
+    }
+    return ''
+  })
+
   const tableOrderGroups = computed(() =>
-    tableSessionOrders.value.map((order, index) => ({
-      id: order.id || String(index),
-      title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
-      statusText: tableGroupStatusText(order.status),
-      tone: tableGroupStatusTone(order.status),
-      discountAmount: Number(order.discountAmount || 0),
-      participantNo: order.participantNo || null,
-      participantColor: participantColor(order.participantNo),
-      isStaff: Boolean(order.isStaff),
-      staffNote: order.staffNote || '',
-      items: (order.items || []).map(item => ({
-        ...item,
-        isInvalid: isOrderInvalid(order) || isItemInvalid(item),
-        invalidText: isOrderInvalid(order) ? '已取消' : '已退菜',
-      })),
-    }))
+    tableSessionOrders.value.map((order, index) => {
+      // 与 PaymentSuccessSheet / useDiningSession.mapServerOrder 同一规则：order_no|id 尾 4 位
+      const displayNo = order.orderNo || (order.id ? String(order.id).slice(-4) : '')
+      const timePart = (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜')
+      const title = displayNo ? `#${displayNo} · ${timePart}` : timePart
+      return {
+        id: order.id || String(index),
+        title,
+        orderNo: displayNo,
+        statusText: tableGroupStatusText(order.status),
+        tone: tableGroupStatusTone(order.status),
+        discountAmount: Number(order.discountAmount || 0),
+        participantNo: order.participantNo || null,
+        participantColor: participantColor(order.participantNo),
+        isStaff: Boolean(order.isStaff),
+        staffNote: order.staffNote || '',
+        pickupNo: order.pickupNo || '',
+        items: (order.items || []).map(item => ({
+          ...item,
+          isInvalid: isOrderInvalid(order) || isItemInvalid(item),
+          invalidText: isOrderInvalid(order) ? '已取消' : '已退菜',
+        })),
+      }
+    })
   )
   const isTableSettled = computed(() => {
     if (tableSessionClosed.value) return true
@@ -284,6 +302,7 @@ export function useTableBillView({
     validTableOrders,
     tableTotal,
     tableItemCount,
+    tablePickupNo,
     tableOrderGroups,
     isTableSettled,
     canContinueOrder,

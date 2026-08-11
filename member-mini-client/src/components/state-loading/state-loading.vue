@@ -28,8 +28,8 @@ export default {
   width: 56rpx;
   height: 56rpx;
   margin-bottom: 20rpx;
-  border: 6rpx solid #d1fae5;
-  border-top-color: #07C160;
+  border: 6rpx solid var(--brand-light);
+  border-top-color: var(--brand);
   border-radius: 50%;
   animation: state-loading-spin 0.9s linear infinite;
 }
@@ -38,7 +38,7 @@ export default {
   display: block;
   font-size: 30rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .state-loading--small {
@@ -52,7 +52,7 @@ export default {
   .state-loading-text {
     font-size: 26rpx;
     font-weight: 400;
-    color: #6b7280;
+    color: var(--text-3);
   }
 }
 

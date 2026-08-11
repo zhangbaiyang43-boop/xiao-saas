@@ -50,14 +50,14 @@ export default {
 
 <style scoped>
 .perf-page { min-height: 100vh; background: #f5f7fb; padding: 24rpx; box-sizing: border-box; }
-.perf-hint { font-size: 24rpx; color: #6b7280; margin-bottom: 24rpx; line-height: 1.5; }
-.perf-card { background: #fff; border-radius: 20rpx; padding: 24rpx; margin-bottom: 20rpx; }
-.perf-card-title { font-size: 28rpx; font-weight: 700; color: #111827; margin-bottom: 16rpx; }
+.perf-hint { font-size: 24rpx; color: var(--text-3); margin-bottom: 24rpx; line-height: 1.5; }
+.perf-card { background: var(--bg-card); border-radius: 20rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.perf-card-title { font-size: 28rpx; font-weight: 700; color: var(--text-1); margin-bottom: 16rpx; }
 .perf-empty { font-size: 24rpx; color: #9ca3af; }
 .perf-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16rpx; }
 .perf-cell { display: flex; flex-direction: column; gap: 4rpx; }
 .perf-cell-label { font-size: 22rpx; color: #9ca3af; }
-.perf-cell-value { font-size: 30rpx; font-weight: 800; color: #111827; }
+.perf-cell-value { font-size: 30rpx; font-weight: 800; color: var(--text-1); }
 .perf-cell--warn .perf-cell-value { color: #ea580c; }
-.perf-clear { margin-top: 12rpx; height: 88rpx; border-radius: 22rpx; background: #fff; display: flex; align-items: center; justify-content: center; text { color: #ef4444; font-size: 28rpx; font-weight: 600; } }
+.perf-clear { margin-top: 12rpx; height: 88rpx; border-radius: 22rpx; background: var(--bg-card); display: flex; align-items: center; justify-content: center; text { color: var(--danger); font-size: 28rpx; font-weight: 600; } }
 </style>

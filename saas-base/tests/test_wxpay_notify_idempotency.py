@@ -214,7 +214,9 @@ def install_stubs():
     modules["app.services.order_print_service"]._serialize_print_meta = lambda order: {}
     modules["app.services.order_print_service"]._spawn_background_print_task = lambda *args, **kwargs: None
     modules["app.services.order_print_service"]._split_merchant_note_and_print_meta = lambda note: (note, {})
+    modules["app.services.order_print_service"].build_staff_print_summary = lambda order, **kwargs: {}
     modules["app.services.order_print_service"].can_reprint_order = lambda order, print_type="kitchen": (True, None)
+    modules["app.services.order_print_service"].reconcile_print_orders = _noop_async
     modules["app.services.wxpay_service"].WxPayService = FakeWxPayService
 
 

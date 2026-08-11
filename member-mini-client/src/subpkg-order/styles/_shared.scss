@@ -1,7 +1,11 @@
 // 点餐子包（subpkg-order）内跨组件共享的样式原语。
 //
 // 这里只放"3 个以上组件都在用、且如果各自复制一份会导致改一处忘改另一处"
-// 的东西——遮罩、加减数量按钮、数量跳动动画、无障碍减弱动效媒体查询。
+// 的东西——遮罩、加减数量按钮（减号）、数量跳动动画、无障碍减弱动效媒体查询。
+// 绿底圆形加号请用 AddBtn.vue。
+// 底部弹层统一方式（对齐知识库 / .orders-sheet）：共用 .mask + slide-up，
+// 面板外观仍写在各组件自己的 class（cart-sheet / spec-sheet / coupon-picker-sheet），
+// 不要用自定义组件 + slot 包一层（微信会隔掉父样式）。
 // 只属于某一个组件的样式不要往这里加，直接写进那个组件自己的 <style> 里。
 //
 // 用法：谁的模板里出现了下面这些类名，谁就在自己的 <style lang="scss"> 顶部
@@ -12,7 +16,7 @@
   position: fixed;
   inset: 0;
   z-index: 3100;
-  background: rgba(0,0,0,0.5);
+  background: var(--mask-bg);
   display: flex;
   align-items: flex-end;
 }
@@ -39,13 +43,8 @@
     line-height: 1;
   }
 
-  &.plus {
-    background: var(--brand);
-    text { color: #fff; }
-  }
-
   &.minus {
-    background: #f3f4f6;
+    background: var(--bg-muted);
     text { color: var(--text-2); }
   }
 
@@ -85,7 +84,7 @@
   }
 }
 
-// 弹层从底部滑入的入场动画——CouponPicker/SpecSheet 两个弹层都在用同一个效果。
+// 弹层从底部滑入——SpecSheet / CouponPicker 等面板共用。
 @keyframes slide-up {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
@@ -105,7 +104,7 @@
 // （桌台账单）是同一套"本桌订单类弹层"的两种视图，共用同一个外壳骨架。
 .orders-sheet {
   width: 100%;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx 32rpx 0 0;
   padding: 0 0 calc(24rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
@@ -138,43 +137,17 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #f3f4f6;
+  background: var(--bg-muted);
   color: var(--text-3);
   font-size: 28rpx;
 }
 
-// 两个"本桌订单类弹层"共用的空状态——没有可展示的订单时显示的图标+标题+说明。
+// 本桌订单类弹层里挂载 StateEmpty / StateError 的容器（内容由全局三态组件负责）。
 .table-status-empty {
-  padding: 90rpx 40rpx;
+  padding: 40rpx 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  text-align: center;
-}
-
-.table-status-empty-icon {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 50%;
-  background: #f3f5f7;
-  color: #b8bfc7;
-  font-size: 44rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 20rpx;
-}
-
-.table-status-empty-title {
-  font-size: 30rpx;
-  font-weight: 900;
-  color: var(--text-1);
-}
-
-.table-status-empty-desc {
-  margin-top: 10rpx;
-  font-size: 24rpx;
-  color: var(--text-3);
 }
 
 // 奖励券卡片的入场动效——PaymentSuccessSheet（支付成功送券）和

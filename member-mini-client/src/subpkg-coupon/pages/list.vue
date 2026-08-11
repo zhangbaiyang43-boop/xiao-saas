@@ -189,12 +189,12 @@ export default {
 /* ── 顶部绿色区 ───────────────────────────── */
 .page-header {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .ph-title {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 44rpx;
   font-weight: bold;
   line-height: 1.3;
@@ -211,7 +211,7 @@ export default {
 .tabs {
   display: flex;
   margin: 24rpx 24rpx 0;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 24rpx;
   padding: 8rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.05);
@@ -232,8 +232,8 @@ export default {
 }
 
 .tab-item.active {
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-weight: 600;
 }
 
@@ -241,7 +241,7 @@ export default {
 .state-wrap {
   margin: 48rpx 24rpx 0;
   padding: 64rpx 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 32rpx;
   display: flex;
   flex-direction: column;
@@ -260,7 +260,7 @@ export default {
 .coupon-card {
   display: flex;
   align-items: stretch;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 24rpx;
   overflow: hidden;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
@@ -288,7 +288,7 @@ export default {
   width: 20rpx;
   height: 20rpx;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bg-card);
 }
 
 .coupon-card.inactive .cc-left {
@@ -297,7 +297,7 @@ export default {
 
 .cc-amount {
   display: block;
-  color: #fff;
+  color: var(--text-inverse);
   font-size: 48rpx;
   font-weight: bold;
   line-height: 1.1;
@@ -330,7 +330,7 @@ export default {
 
 .cc-urgent {
   font-size: 20rpx;
-  color: #ef4444;
+  color: var(--danger);
   background: #fef2f2;
   border-radius: 8rpx;
   padding: 2rpx 10rpx;
@@ -366,8 +366,8 @@ export default {
   line-height: 60rpx;
   margin-top: 16rpx;
   padding: 0 24rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 26rpx;
   font-weight: 600;
   border-radius: 16rpx;
@@ -396,7 +396,7 @@ export default {
   width: 96rpx;
   height: 96rpx;
   border-radius: 50%;
-  background: #e8f9f0;
+  background: var(--brand-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -407,7 +407,7 @@ export default {
   width: 48rpx;
   height: 48rpx;
   border-radius: 50%;
-  border: 6rpx dashed #07C160;
+  border: 6rpx dashed var(--brand);
 }
 </style>
 
