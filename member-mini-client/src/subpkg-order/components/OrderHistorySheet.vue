@@ -9,28 +9,37 @@
       <scroll-view v-if="currentTableOrder" class="orders-list" scroll-y>
         <view class="table-status-card" :class="'table-status-card--' + tableOrderStatusTone">
           <view class="table-status-top">
-            <view class="table-status-badge">
+            <view class="table-status-badge" :class="{ 'table-status-badge--live': tableOrderStatusTone === 'preparing' }">
               <text class="table-status-badge-icon iconfont" :class="tableOrderStatusIcon"></text>
               <text>{{ tableOrderStatusBadge }}</text>
             </view>
             <text class="table-status-order-no">#{{ currentTableOrder.orderNo }}</text>
           </view>
+          <!-- 之前这里连着堆了标题+副标题(tableOrderStatusHint)+下面的"下一步"提示条
+          (tableOrderNextAction) 三层，preparing/paid 状态下三层说的其实是同一件事
+          （"别管了，等着就行"），顾客要花时间确认这不是三条不同的信息。只留标题
+          （"当前是什么状态"）和下一步提示条（"接下来该干嘛，逐状态都不一样、信息量
+          更大"），去掉纯重复的副标题层。 -->
           <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
-          <text class="table-status-sub">{{ tableOrderStatusHint }}</text>
           <view class="table-status-action">
             <text class="table-status-action-icon iconfont icon-roundright"></text>
             <text class="table-status-action-text">{{ tableOrderNextAction }}</text>
           </view>
         </view>
 
+        <!-- 取餐牌号是顾客用来对上自己那份餐的实体凭证，比金额/时间更重要，之前跟其它
+        四个小方块挤在同一个四列网格里、权重一样大，pickupNo 有值时还会多出第五个格子
+        撑破网格排版、单独换行显得像排版错误。这里单独拎出来做成一整条、字号明显更大，
+        网格永远固定桌号/金额/时间/份数四项，不会再因为桌牌号有没有而错位。 -->
+        <view v-if="currentTableOrder.pickupNo" class="pickup-no-banner">
+          <text class="pickup-no-banner-icon iconfont icon-form"></text>
+          <text class="pickup-no-banner-text">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
+        </view>
+
         <view class="order-core-strip">
           <view class="order-core-item">
             <text class="order-core-icon iconfont icon-zuowei"></text>
             <text class="order-core-value">{{ tableNo || orderModeText.unknownTable }}</text>
-          </view>
-          <view v-if="currentTableOrder.pickupNo" class="order-core-item">
-            <text class="order-core-icon iconfont icon-form"></text>
-            <text class="order-core-value">桌牌 {{ currentTableOrder.pickupNo }}</text>
           </view>
           <view class="order-core-item">
             <text class="order-core-icon order-core-icon--amount iconfont icon-pay"></text>
@@ -61,19 +70,14 @@
         </view>
 
         <view class="current-order-card">
+          <!-- 订单号/下单时间/份数上面状态卡和信息条已经露过一次了，这里只保留这个
+          区块真正独有的信息——菜品清单本身，标题旁边留总价方便对着清单核对金额。 -->
           <view class="current-order-head">
-            <view>
-              <view class="current-order-title-line">
-                <text class="current-order-title-icon iconfont icon-list"></text>
-                <text class="current-order-title">菜品明细</text>
-              </view>
-              <text class="current-order-no">#{{ currentTableOrder.orderNo }}</text>
+            <view class="current-order-title-line">
+              <text class="current-order-title-icon iconfont icon-list"></text>
+              <text class="current-order-title">菜品明细</text>
             </view>
             <text class="current-order-total">{{ '¥' + formatPrice(currentTableOrder.total || 0) }}</text>
-          </view>
-          <view class="current-order-summary">
-            <text>{{ '下单时间 ' + (currentTableOrder.createdAt || '-') }}</text>
-            <text>{{ '共' + currentOrderItemCount + '份' }}</text>
           </view>
           <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="current-order-items current-order-items--visible">
             <view v-for="(item, idx) in currentTableOrder.items" :key="item.specKey || item.id || item.name || idx" class="order-detail-row">
@@ -278,16 +282,37 @@ export default {
 
 
 
-.table-status-sub {
-  display: block;
-  margin-top: 12rpx;
-  color: var(--text-2);
-  font-size: 26rpx;
-  line-height: 38rpx;
-  font-weight: 600;
+@keyframes order-status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
 }
 
+.table-status-badge--live .table-status-badge-icon {
+  animation: order-status-pulse 1.6s ease-in-out infinite;
+}
 
+.pickup-no-banner {
+  margin-top: 16rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: rgba(255,255,255,.85);
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.pickup-no-banner-icon {
+  color: var(--order-status-main, var(--brand));
+  font-size: 32rpx;
+  line-height: 1;
+}
+
+.pickup-no-banner-text {
+  color: var(--order-status-main, var(--brand));
+  font-size: 34rpx;
+  font-weight: 900;
+  letter-spacing: 1rpx;
+}
 
 .table-status-action {
   margin-top: 20rpx;
@@ -396,7 +421,6 @@ export default {
 
 .order-progress-head,
 .current-order-head,
-.current-order-summary,
 .history-orders-head,
 .history-order-row {
   display: flex;
@@ -500,8 +524,13 @@ export default {
   color: var(--text-inverse);
 }
 
+@keyframes order-progress-ring-pulse {
+  0%, 100% { box-shadow: 0 0 0 8rpx #dcfce7; }
+  50% { box-shadow: 0 0 0 14rpx #dcfce7; }
+}
+
 .order-progress-step.active .order-progress-dot {
-  box-shadow: 0 0 0 8rpx #dcfce7;
+  animation: order-progress-ring-pulse 1.8s ease-in-out infinite;
 }
 
 .order-progress-step.done .order-progress-title,
@@ -536,29 +565,10 @@ export default {
 
 
 
-.current-order-no {
-  display: block;
-  margin-top: 4rpx;
-  font-size: 24rpx;
-  color: var(--text-3);
-}
-
-
-
 .current-order-total {
   font-size: 36rpx;
   font-weight: 900;
   color: var(--brand);
-}
-
-
-
-.current-order-summary {
-  margin-top: 20rpx;
-  padding-top: 18rpx;
-  border-top: 2rpx solid #f1f5f9;
-  text { font-size: 26rpx; color: var(--text-2); }
-  text:first-child { color: var(--text-1); font-weight: 900; }
 }
 
 
