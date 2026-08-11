@@ -11,6 +11,15 @@ export const createCustomerQueueTicket = (data, options = {}) =>
     authRedirect: options.authRedirect !== false,
   })
 
+/** 查询当前顾客在这家店是否已经有一张还没被叫到/坐下的活跃排队号（进页面时用来恢复状态）。 */
+export const getMyActiveQueueTicket = (shop, options = {}) =>
+  request({
+    url: '/queue/my-ticket',
+    method: 'GET',
+    data: { shop },
+    authRedirect: options.authRedirect !== false,
+  })
+
 /**
  * 按 query_token 查排队进度。
  * /queue/status 返回 {success,data}，与 v1 的 {code:200} 不同，这里单独适配。

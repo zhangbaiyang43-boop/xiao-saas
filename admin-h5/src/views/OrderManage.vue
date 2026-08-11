@@ -1165,6 +1165,13 @@ async function confirmSettle() {
       const statuses = res.data?.blocking_statuses
       const detail = Array.isArray(statuses) && statuses.length ? `（${statuses.map(statusLabel).join('、')}）` : ''
       message.error(`${res.msg || '结账失败'}${detail}`)
+      // 结账失败常常是因为这张桌台卡片本身已经过期——比如这一桌已经被结过账了
+      // （另一台设备操作、或者上一次点击其实已经成功但本地没刷新），本地缓存的
+      // orders.value 还停在结账前的快照。不重新拉一次订单的话，商家会对着一张
+      // 服务端早就不认的过期卡片反复点"确认收款"，每次都收到同一个错误，界面上
+      // 却什么都不会变。这里主动关掉弹窗、重新拉取，让桌台视图跟服务端状态对齐。
+      showSettleDialog.value = false
+      loadOrders()
       return
     }
     const table = settlingTable.value

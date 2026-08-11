@@ -53,7 +53,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getShopInfo } from '@/api/order'
 import { loginOrCreateMember } from '@/api/auth'
-import { createCustomerQueueTicket, getQueueTicketStatusByToken } from '@/api/queue'
+import { createCustomerQueueTicket, getMyActiveQueueTicket, getQueueTicketStatusByToken } from '@/api/queue'
 import { hasCustomerToken, saveCustomerSession } from '@/utils/auth'
 
 const partyOptions = [
@@ -195,6 +195,24 @@ export default {
       }
     }
 
+    // 进页面时如果这个顾客在本店已经有一张还没被叫到/坐下的活跃号，直接把它显示出来，
+    // 不要求再点一次"取号"——不然顾客退出小程序再进来看到的永远是"取号"按钮，一按
+    // 就以为是重新排队（虽然后端 create_ticket 现在幂等，不会真的插队，但界面上应该
+    // 直接就是"你已经在排队了"，不用靠再点一次按钮去发现这件事）。只在顾客已经登录过
+    // （之前取过号必然登录过）时才查，不对还没登录的新访客强制弹微信授权。
+    const restoreExistingTicket = async () => {
+      if (!hasCustomerToken() || String(uni.getStorageSync('tenant_id') || '') !== shopId.value) return
+      try {
+        const res = await getMyActiveQueueTicket(shopId.value, { authRedirect: false })
+        if (res?.code === 200 && res?.data?.queue_no) {
+          ticket.value = res.data
+          startPoll()
+        }
+      } catch (e) {
+        // 查询失败就当没有活跃号处理，正常走"取号"入口，不打扰用户
+      }
+    }
+
     onMounted(() => {
       const pages = getCurrentPages()
       const page = pages[pages.length - 1]
@@ -205,6 +223,7 @@ export default {
         return
       }
       loadShop()
+      restoreExistingTicket()
     })
 
     onUnmounted(stopPoll)

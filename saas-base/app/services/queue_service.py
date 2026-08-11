@@ -299,6 +299,34 @@ class QueueService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def find_active_ticket_for_customer(
+        self,
+        tenant_id: str,
+        *,
+        customer_id: int | None = None,
+        openid: str | None = None,
+    ) -> QueueTicket | None:
+        customer_id_value = int(customer_id) if customer_id else None
+        openid_value = (openid or "").strip() or None
+        if customer_id_value is None and openid_value is None:
+            return None
+        identity_filter = (
+            QueueTicket.customer_id == customer_id_value
+            if customer_id_value is not None
+            else QueueTicket.openid == openid_value
+        )
+        result = await self.db.execute(
+            select(QueueTicket)
+            .where(
+                QueueTicket.tenant_id == tenant_id,
+                QueueTicket.status.in_(ACTIVE_STATUSES),
+                identity_filter,
+            )
+            .order_by(QueueTicket.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def create_ticket(
         self,
         tenant_id: str,
@@ -313,6 +341,18 @@ class QueueService:
         today = _today_local_date()
         openid_value = (openid or "").strip() or None
         customer_id_value = int(customer_id) if customer_id else None
+
+        # 顾客自助取号必须幂等：已经有一张还没被叫到/坐下的活跃号，再点一次"排队取号"
+        # 应该原样把这张号还回去，而不是再开一张——不然顾客退出小程序再进来，一按就往后
+        # 插了新队，旧号变成永远叫不到人的死号。只在真的带着顾客身份（customer_id/openid）
+        # 取号时才做这个检查；商家前台给到店客人现场取号没有这个身份，不受影响。
+        if customer_id_value is not None or openid_value is not None:
+            existing = await self.find_active_ticket_for_customer(
+                tenant_id, customer_id=customer_id_value, openid=openid_value
+            )
+            if existing is not None:
+                ahead_count = await self.count_ahead(existing)
+                return existing, ahead_count
 
         for _ in range(3):
             max_result = await self.db.execute(

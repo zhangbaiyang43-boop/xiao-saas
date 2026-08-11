@@ -125,6 +125,42 @@ async def create_customer_queue_ticket(
         return error_response(code=500, msg=msg)
 
 
+@router.get("/my-ticket")
+async def get_my_active_queue_ticket(
+    request: Request,
+    shop: str | None = None,
+    tenant_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """小程序排队页进入时用来恢复"我已经取过号"的状态：有活跃号就把它原样返回，
+    没有就返回空——前端据此决定显示"取号"按钮还是已有的排号信息，不用非得先点一次
+    取号按钮（撞上 create_ticket 的幂等兜底）才能看到自己的号。"""
+    token_type = getattr(request.state, "token_type", None)
+    customer_id = getattr(request.state, "customer_id", None)
+    openid = getattr(request.state, "openid", None)
+    token_tenant_id = getattr(request.state, "tenant_id", None)
+    if token_type not in ("member", "customer") or not customer_id:
+        return error_response(code=401, msg="请先登录")
+
+    shop_id = _tenant_id(shop or tenant_id or token_tenant_id)
+    if not shop_id:
+        return error_response(code=400, msg="缺少门店参数")
+    if token_tenant_id and str(token_tenant_id) != shop_id:
+        return error_response(code=403, msg="门店与登录身份不匹配，请重新进入")
+
+    TenantContext.set_tenant_id(shop_id)
+    service = QueueService(db)
+    ticket = await service.find_active_ticket_for_customer(
+        shop_id, customer_id=int(customer_id), openid=str(openid or "").strip() or None
+    )
+    if ticket is None:
+        return success_response(data=None)
+    ahead_count = await service.count_ahead(ticket)
+    data = serialize_queue_ticket(ticket, ahead_count=ahead_count)
+    data["query_token"] = ticket.query_token
+    return success_response(data=data)
+
+
 @router.get("/tickets")
 async def list_queue_tickets(
     tenant_id: int | str,
