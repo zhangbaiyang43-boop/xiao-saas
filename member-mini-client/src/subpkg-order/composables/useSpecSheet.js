@@ -100,6 +100,15 @@ export function useSpecSheet({
   const specTotalPrice = computed(() => specUnitPrice.value * specQty.value)
   const selectedSpecRows = computed(() => specRadioGroups.value.map(group => ({ group: group.name, value: (selectedSpecs.value[group.name] || [])[0] || '' })).filter(i => i.value))
   const selectedSpecSummary = computed(() => selectedSpecRows.value.map(i => i.value).join(specText.separator))
+  // 给弹层底部的"已选：..."实时小结用——跟 confirmSpec() 里拼 orderName/specLabel
+  // 用的是同一套"规格+附加+备注"拼接逻辑，不能只显示 selectedSpecSummary（只有
+  // 辣度/做法这类必选项），不然顾客勾了"附加要求"却在小结里看不到，以为没选上。
+  const selectedSpecFullSummary = computed(() => {
+    const parts = [...selectedSpecRows.value.map(i => i.value), ...selectedExtras.value]
+    const remarkText = itemRemark.value.trim()
+    if (remarkText) parts.push(remarkText)
+    return parts.join(specText.separator)
+  })
   const specDishDesc = computed(() => String(specDish.value.desc || specDish.value.description || '').trim())
   const missingRequiredSpecGroup = computed(() => specRadioGroups.value.find(group => group.required && !(selectedSpecs.value[group.name] || []).length))
   const requiredGroupPrompt = (group) => /辣|口味|甜度|温度/.test(group?.name || '') ? specText.chooseTaste : specText.chooseSpec
@@ -189,6 +198,7 @@ export function useSpecSheet({
     specBasePrice,
     specTotalPrice,
     selectedSpecSummary,
+    selectedSpecFullSummary,
     specDishDesc,
     canGoNextSpec,
     specPrimaryText,

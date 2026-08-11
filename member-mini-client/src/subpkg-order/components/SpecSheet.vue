@@ -9,16 +9,15 @@
           mode="aspectFill"
           @error="$emit('image-error')"
         />
-        <view v-else class="spec-detail-placeholder" :style="dishPlaceholderStyle(specDish)">
-          <text>{{ specDish.name ? specDish.name[0] : '菜' }}</text>
+        <view v-else class="spec-detail-placeholder">
+          <image class="spec-detail-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
         </view>
       </view>
       <view class="spec-sheet-head">
         <text class="spec-sheet-title">{{ specDish.name }}</text>
         <text v-if="specDishDesc" class="spec-sheet-desc">{{ specDishDesc }}</text>
         <view class="spec-sheet-price">
-          <text class="spec-price-symbol">{{ currency }}</text>
-          <text class="spec-price-num">{{ formatPrice(specBasePrice) }}</text>
+          <price-text size="lg" :amount="formatPrice(specBasePrice)" />
         </view>
         <view class="spec-sheet-close" @click="$emit('cancel')"><text class="iconfont icon-close"></text></view>
       </view>
@@ -62,9 +61,13 @@
             <text class="item-remark-count">{{ itemRemark.length }}/50</text>
           </template>
         </view>
-        <view class="spec-qty-row"><text class="spec-group-name">{{ specText.qty }}</text><view class="spec-counter-row"><view class="counter-btn minus" @click="decreaseQty"><text class="iconfont icon-move"></text></view><text class="counter-num">{{ specQty }}</text><view class="counter-btn plus" @click="$emit('qty-increase')"><text class="iconfont icon-add"></text></view></view></view>
+        <view class="spec-qty-row"><text class="spec-group-name">{{ specText.qty }}</text><view class="spec-counter-row"><view class="counter-btn minus" @click="decreaseQty"><text class="iconfont icon-move"></text></view><text class="counter-num">{{ specQty }}</text><add-btn size="md" @click="$emit('qty-increase')" /></view></view>
       </scroll-view>
       <view class="spec-footer">
+        <!-- 顾客选完辣度/做法/附加要求要一路滚回顶部才能确认自己到底选了什么——这里在
+        提交前把已选项汇总成一行，不用再往上翻。已选空的时候（还没选完必选项）不
+        显示，避免在还没什么可总结的时候占地方、跟上面的必选提示语义重复。 -->
+        <text v-if="selectedSpecSummary" class="spec-selected-summary">已选：{{ selectedSpecSummary }}</text>
         <view class="spec-confirm-btn" :class="{ 'spec-confirm-btn--disabled': !canGoNextSpec }" @click="$emit('confirm')"><text>{{ specPrimaryText }}</text></view>
       </view>
     </view>
@@ -79,8 +82,12 @@
 // cancelSpec/handleSpecPrimary），一行都没有改，只是从内联模板换成了从父组件
 // 监听事件调用。价格计算、必选校验等逻辑全部留在父组件，这里只读取父组件算好
 // 的结果（specBasePrice/canGoNextSpec/specPrimaryText 等）。
+import PriceText from './PriceText.vue'
+import AddBtn from './AddBtn.vue'
+
 export default {
   name: 'SpecSheet',
+  components: { PriceText, AddBtn },
   props: {
     specDish: { type: Object, default: () => ({}) },
     detailImageFailed: { type: Boolean, default: false },
@@ -97,10 +104,10 @@ export default {
     specQty: { type: Number, default: 1 },
     canGoNextSpec: { type: Boolean, default: false },
     specPrimaryText: { type: String, default: '' },
+    selectedSpecSummary: { type: String, default: '' },
     // 纯查询/格式化函数直接从父组件原样传进来（不是在这里重写一份同名逻辑），
     // 保证跟父组件其它地方用到的结果 100% 一致。
     dishImage: { type: Function, required: true },
-    dishPlaceholderStyle: { type: Function, required: true },
     formatPrice: { type: Function, required: true },
     isSpecSelected: { type: Function, required: true },
   },
@@ -133,12 +140,28 @@ export default {
 <style lang="scss">
 @import '../styles/_shared.scss';
 
+.spec-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-height: 90vh;
+  background: var(--bg-card);
+  border-radius: 40rpx 40rpx 0 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  animation: slide-up 0.25s ease;
+}
+
 .spec-detail-hero {
   width: 100%;
   height: 460rpx;
   min-height: 460rpx;
   max-height: 460rpx;
-  background: #f6f7f8;
+  background: var(--bg-subtle);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -159,40 +182,12 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: #F5F3EE;
 }
 
-
-
-.spec-detail-placeholder text {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 48rpx;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text-2);
-  font-size: 44rpx;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-
-
-/* Detail / SKU bottom sheet */
-.spec-sheet {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  width: 100%;
-  max-height: 90vh;
-  background: #fff;
-  border-radius: 40rpx 40rpx 0 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  animation: slide-up 0.25s ease;
+.spec-detail-placeholder-img {
+  width: 40%;
+  height: 40%;
 }
 
 
@@ -200,7 +195,7 @@ export default {
 .spec-sheet-head {
   position: relative;
   padding: 32rpx;
-  background: #fff;
+  background: var(--bg-card);
   box-sizing: border-box;
   flex-shrink: 0;
 }
@@ -259,27 +254,7 @@ export default {
 
 
 .spec-sheet-price {
-  display: flex;
-  align-items: flex-end;
   margin-top: 16rpx;
-  color: var(--brand);
-  line-height: 1;
-}
-
-
-
-.spec-price-symbol {
-  font-size: 28rpx;
-  font-weight: 700;
-  line-height: 1;
-}
-
-
-
-.spec-price-num {
-  font-size: 44rpx;
-  font-weight: 700;
-  line-height: 1;
 }
 
 
@@ -380,7 +355,7 @@ export default {
 
   &--on {
     border-color: var(--brand);
-    background: #e8f9f0;
+    background: var(--brand-light);
     color: var(--brand);
     font-weight: 600;
   }
@@ -437,7 +412,7 @@ export default {
 
 .remark-chip-option--on {
   border-color: var(--brand);
-  background: #e8f9f0;
+  background: var(--brand-light);
   color: var(--brand);
   font-weight: 600;
 }
@@ -452,7 +427,7 @@ export default {
   padding: 24rpx;
   border: 1rpx solid #e5e7ea;
   border-radius: 20rpx;
-  background: #fff;
+  background: var(--bg-card);
   box-sizing: border-box;
   color: var(--text-1);
   font-size: 28rpx;
@@ -492,16 +467,6 @@ export default {
   flex-shrink: 0;
 }
 
-.spec-counter-row .counter-btn {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  box-sizing: border-box;
-}
-
 .spec-counter-row .counter-btn.minus {
   width: 64rpx;
   height: 64rpx;
@@ -509,18 +474,13 @@ export default {
   color: var(--text-2);
 }
 
-.spec-counter-row .counter-btn.plus {
-  background: var(--brand);
-  color: #fff;
-}
-
-.spec-counter-row .counter-btn text {
+.spec-counter-row .counter-btn.minus text {
   font-size: 36rpx;
   font-weight: 600;
   line-height: 1;
 }
 
-.spec-counter-row .counter-btn .iconfont {
+.spec-counter-row .counter-btn.minus .iconfont {
   font-size: 30rpx;
   font-weight: 400;
 }
@@ -540,27 +500,38 @@ export default {
   flex-shrink: 0;
   padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
   border-top: 1rpx solid #f0f1f2;
-  background: #fff;
+  background: var(--bg-card);
   box-sizing: border-box;
+}
+
+.spec-selected-summary {
+  display: block;
+  margin-bottom: 16rpx;
+  color: var(--text-2);
+  font-size: 24rpx;
+  line-height: 34rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 
 
 .spec-confirm-btn {
   width: 100%;
-  height: 100rpx;
-  border-radius: 50rpx;
+  height: var(--btn-primary-height);
+  border-radius: var(--btn-primary-radius);
   background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--text-inverse);
 
   text {
-    color: #fff;
-    font-size: 32rpx;
-    font-weight: 600;
-    line-height: 44rpx;
+    color: var(--text-inverse);
+    font-size: var(--btn-primary-font-size);
+    font-weight: var(--btn-primary-font-weight);
+    line-height: 1.2;
   }
 }
 

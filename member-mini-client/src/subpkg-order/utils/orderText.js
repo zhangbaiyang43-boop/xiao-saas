@@ -13,7 +13,7 @@ export const confirmationText = {
   selectedItems: '已选商品', clear: '清空',
   remark: '备注', remarkPlaceholder: '其他要求…', goodsAmount: '商品金额', coupon: '优惠券', couponAvailable: '张可用', couponNone: '暂无可用', noThreshold: '无门槛', thresholdPrefix: '满',
   payable: '应付金额', wechatPay: '微信支付', tableAccount: '桌台账单', postpay: '餐后付款', payNow: '立即支付', submitTableAccount: '提交到桌台账单', submitOrder: '提交订单',
-  orderRemark: '整单备注', orderRemarkPlaceholder: '例如：一起上菜、全部打包、需要儿童餐具', orderRemarkEmpty: '无', unavailable: '当前不可下单', confirming: '正在确认订单…', paying: '正在发起支付…', currency: '¥', close: 'x', arrow: '>',
+  orderRemark: '整单备注', orderRemarkPlaceholder: '例如：一起上菜、全部打包、需要儿童餐具', orderRemarkEmpty: '无', unavailable: '当前不可下单', confirming: '正在确认订单…', paying: '正在发起支付…', paymentConfirming: '支付确认中…', queryPaymentResult: '重新查询支付结果', currency: '¥', close: 'x', arrow: '>',
   memberSummaryMember: '{level} · 本单预计+{points}积分',
   memberSummaryMemberCoupons: ' · {count}张可用',
   memberSummaryGuest: '本单预计可得 {points} 积分，加入会员解锁专属券',
@@ -41,7 +41,11 @@ export const successText = {
 }
 
 export const specText = {
-  defaultDesc: '选好口味后加入购物车', required: '必选', optional: '可选', multi: '可多选', extras: '附加要求', itemRemark: '单品备注', itemRemarkPlaceholder: '例如：少盐、不要香菜、对花生过敏',
+  defaultDesc: '选好口味后加入购物车', required: '必选', optional: '可选', multi: '可多选', extras: '附加要求', itemRemark: '单品备注', // "不要香菜"这类口味类例子经常已经是这道菜自己的"附加要求"选项（filteredRemarkChips
+  // 会把这类重复词从快捷标签里过滤掉，但这句静态占位符文案不会跟着过滤），顾客会
+  // 疑惑到底该点选项还是自己打字。这里换成不会跟规格/附加要求撞的例子：过敏原和
+  // 打包分装是这道菜的结构化选项永远覆盖不到的信息。
+  itemRemarkPlaceholder: '例如：少盐、对花生过敏、帮忙分开装',
   dish: '菜品', spec: '规格', qty: '数量', none: '无', prev: '返回上一步', next: '下一步', add: '加入购物车', chooseTaste: '选口味', chooseSpec: '选规格', selectedKinds: '已选', kindUnit: '种', separator: '、', dotSeparator: '·'
 }
 
@@ -62,4 +66,70 @@ export const authSheetText = {
   cancel: '暂不支付',
   member: '支付成功后自动成为本店会员，可在“我的”中查看订单与权益。',
   privacy: '授权仅用于识别本次订单与会员身份，不会发布内容。',
+}
+
+// Toast / Modal 反馈文案字典（ROI #4）。
+// 点餐子包内 showToast / showModal 的固定中文只从这里取，禁止业务文件再手写同义句。
+// 对照知识库：OPPO 禁用裸「失败」；客如云要求失败带下一步（重试 / 重新扫码 / 联系服务员）。
+export const toastText = {
+  authIncomplete: '未完成授权，请重试',
+  joinMemberFailed: '加入会员失败，请重试',
+  loggedIn: '已登录',
+
+  tableBillEnded: '本桌账单已结束，不能继续加菜',
+  tableSessionEnded: '本桌已结束，请重新扫码点餐',
+  tableSessionUnavailable: '本桌点餐会话不可用，请重新扫码',
+  tableBillMissing: '缺少桌台账单信息，请重新加载',
+  callWaiterOk: '已通知服务员，请稍候为您结账',
+  callWaiterFailed: '呼叫失败，请重试',
+  newParticipant: '有新伙伴扫码加入了本桌',
+
+  payCancelled: '已取消支付',
+  createOrderFailed: '订单创建失败，请重试',
+  submitOrderFailed: '下单失败，请告知服务员',
+
+  dishUnavailable: '菜品已下架或售罄',
+  specChanged: '规格已变更，请重新选择',
+  reorderEmpty: '没有可重新加入的菜品',
+  reorderPartialUnavailable: '，部分菜品已下架或售罄',
+  reorderPartialSpec: '，部分规格已变更，请重新选择',
+  reorderAdded(count) {
+    return '已加入' + count + '件'
+  },
+
+  orderCancelled: '订单已取消',
+  cancelOrderFailed: '取消失败，请重试',
+
+  merchantAccepted: '商家已接单，正在备餐',
+
+  reminderOk: '好的，到期前会提醒你',
+  reminderFailed: '设置失败，请重试',
+  deliveryUnavailable: '外卖配送正在完善，当前先支持堂食点餐',
+  entryCoupon(amountText, thresholdText) {
+    return '已发放进店券 ¥' + amountText + '，满' + thresholdText + '元可用'
+  },
+}
+
+export const modalText = {
+  tableHintTitle: '桌号提示',
+  tableHintContent(tableLabel) {
+    return '当前桌号：' + tableLabel + '\n请确认桌号后继续点餐'
+  },
+  tableHintConfirm: '知道了',
+
+  tableSettledTitle: '本桌已结账',
+  tableSettledContent: '本次用餐账单已经结清，如需明细请联系服务员。',
+  tableSettledConfirm: '知道了',
+
+  clearCartTitle: '清空购物车',
+  clearCartContent(count) {
+    return '确定要清空已选的' + count + '件商品吗？'
+  },
+  clearCartConfirm: '清空',
+
+  cancelOrderTitle: '取消订单',
+  cancelOrderContent: '确认取消此订单吗？商家接单后无法取消。',
+
+  orderRejectedTitle: '订单已被拒绝',
+  orderRejectedContent: '商家暂时无法处理此订单，请联系服务员',
 }

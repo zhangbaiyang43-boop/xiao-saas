@@ -307,6 +307,8 @@
       :load-error="loadError"
       :table-status-view="tableStatusView"
       :table-no="tableNo"
+      :pickup-no-enabled="pickupNoEnabled"
+      :table-pickup-no="tablePickupNo"
       :order-mode-text="orderModeText"
       :shared-bill-sub-label="sharedBillSubLabel"
       :table-total="tableTotal"
@@ -378,6 +380,7 @@
       :spec-qty="specQty"
       :can-go-next-spec="canGoNextSpec"
       :spec-primary-text="specPrimaryText"
+      :selected-spec-summary="selectedSpecFullSummary"
       :dish-image="dishImage"
       :format-price="formatPrice"
       :is-spec-selected="isSpecSelected"
@@ -538,6 +541,8 @@ export default {
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
     const paymentFailed = ref(false)  // 上一次点"去支付"真的失败了（不是用户取消）——按钮要明确提示这是在重试，不能让用户猜要不要再点一次
+    const paymentConfirming = ref(false)
+    const paymentResultUnknown = ref(false)
     const payAmount = ref(0)
     const pendingOrderId = ref('')
 
@@ -621,7 +626,7 @@ export default {
     const {
       showSpecSheet, specDish, specQty, specStep, selectedSpecs, selectedExtras, detailImageFailed,
       specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, specBasePrice, specTotalPrice,
-      selectedSpecSummary, specDishDesc, canGoNextSpec, specPrimaryText, isSpecSelected, toggleSpec,
+      selectedSpecSummary, selectedSpecFullSummary, specDishDesc, canGoNextSpec, specPrimaryText, isSpecSelected, toggleSpec,
       toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet, openProductDetail,
     } = useSpecSheet({
       itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
@@ -634,7 +639,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId,
       tableTotal, tableItemCount, tableOrderGroups,
       isTableSettled, canContinueOrder, stillPreparing, checkoutRequested,
-      canCheckout, postpayReadyToSettle, tableStatusView,
+      canCheckout, postpayReadyToSettle, tableStatusView, tablePickupNo,
       currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
       tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle,
       tableOrderStatusHint, tableOrderTimeline, currentOrderItemCount, currentOrderItems,
@@ -787,6 +792,8 @@ export default {
     const canSubmitOrder = computed(() => totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
     const payButtonText = computed(() => {
       if (ordering.value) return confirmationText.confirming
+      if (paymentConfirming.value) return confirmationText.paymentConfirming
+      if (paymentResultUnknown.value && pendingOrderId.value) return confirmationText.queryPaymentResult
       if (paying.value) return confirmationText.paying
       if (tableSessionClosed.value) return '\u672c\u684c\u5df2\u7ed3\u675f'
       if (!canSubmitOrder.value) return confirmationText.unavailable
@@ -810,6 +817,8 @@ export default {
       pendingOrderId.value = ''
       pendingPaymentIntent.value = null
       paymentFailed.value = false
+      paymentConfirming.value = false
+      paymentResultUnknown.value = false
     }
     const activeCategory = ref('')
     const orderMode = ref('dineIn')
@@ -999,7 +1008,7 @@ export default {
     } = useCheckout({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
       orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,
-      showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed,
+      showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
       payAmount, pendingOrderId, pendingSubmitRequestId,
       myOrders, showOrders, showCart, showSuccess,
       ordering, tableSessionClosed, paymentMode,
@@ -1178,7 +1187,7 @@ export default {
       couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
-      paying, payAmount, confirmPay,
+      paying, paymentConfirming, paymentResultUnknown, payAmount, confirmPay,
       orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, startTablePresencePollIfActive,
       finishSettledSession, acknowledgeClosedSession, showUnexpectedClosedMask, exitDiningSession, isExitingSession,
@@ -1197,7 +1206,7 @@ export default {
       switchCategory, switchOrderMode,
       goCheckout, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
-      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
+      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tablePickupNo, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
@@ -1211,7 +1220,7 @@ export default {
       loadMemberStatus, refreshCustomerAuthState, loadShopSettings,
       deliveryEnabled, entryCoupon, newCustomerCouponPreview, newCustomerHookText,
       showSpecSheet, specDish, specQty, selectedSpecs, specTotalPrice,
-      isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
+      isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, selectedSpecFullSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured,
       lastOrderItems, reorderItem, reorderAll,
       handleActiveCategoryChange, ignoreScroll,
