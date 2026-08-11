@@ -139,6 +139,9 @@ def install_stubs():
     async def _noop_async(*args, **kwargs):
         return None
 
+    async def _zero_async(*args, **kwargs):
+        return 0
+
     modules = {
         "app": types.ModuleType("app"),
         "app.api": types.ModuleType("app.api"),
@@ -214,7 +217,15 @@ def install_stubs():
     modules["app.services.order_print_service"]._serialize_print_meta = lambda order: {}
     modules["app.services.order_print_service"]._spawn_background_print_task = lambda *args, **kwargs: None
     modules["app.services.order_print_service"]._split_merchant_note_and_print_meta = lambda note: (note, {})
+    modules["app.services.order_print_service"].build_staff_print_summary = lambda order, defer_kitchen_print=False: {
+        "print_status": None,
+        "print_status_label": "",
+        "print_attempts": 0,
+        "print_issue": None,
+        "can_reprint": True,
+    }
     modules["app.services.order_print_service"].can_reprint_order = lambda order, print_type="kitchen": (True, None)
+    modules["app.services.order_print_service"].reconcile_print_orders = _zero_async
     modules["app.services.wxpay_service"].WxPayService = FakeWxPayService
 
 

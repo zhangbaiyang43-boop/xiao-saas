@@ -34,6 +34,9 @@ def make_request(tenant_id=TENANT_A, token_type="merchant"):
     )
     req.state.tenant_id = tenant_id
     req.state.token_type = token_type
+    if token_type == "merchant":
+        req.state.role = "owner"
+        req.state.account_id = None
     return req
 
 

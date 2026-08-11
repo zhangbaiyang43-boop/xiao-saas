@@ -24,6 +24,9 @@ TENANT = "tenant-settle-behavior"
 
 class FakeRequest:
     def __init__(self, **state):
+        if state.get("token_type") == "merchant":
+            state.setdefault("role", "owner")
+            state.setdefault("account_id", None)
         self.state = SimpleNamespace(**state)
 
 

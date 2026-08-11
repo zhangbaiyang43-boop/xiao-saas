@@ -11,6 +11,9 @@ PRINT_SERVICE_SOURCE = (ROOT / "app" / "services" / "order_print_service.py").re
 MINIAPP_MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
+MINIAPP_CHECKOUT_SOURCE = (
+    ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "composables" / "useCheckout.js"
+).read_text(encoding="utf-8-sig")
 
 
 def function_source(source: str, name: str) -> str:
@@ -57,11 +60,14 @@ class PaymentModeP1ContractsTest(unittest.TestCase):
         self.assertIn('raise ValueError("unsupported payment mode")', action_source)
 
     def test_miniapp_keeps_id_compatibility_and_accepts_order_id_fallback(self):
-        self.assertIn("pendingOrderId.value = String(data.id || data.order_id || '')", MINIAPP_MENU_SOURCE)
-        self.assertIn("if (data.need_payment !== false)", MINIAPP_MENU_SOURCE)
+        self.assertIn("import { useCheckout } from '../composables/useCheckout.js'", MINIAPP_MENU_SOURCE)
+        self.assertIn("} = useCheckout({", MINIAPP_MENU_SOURCE)
+        self.assertIn("pendingOrderId,", MINIAPP_MENU_SOURCE)
+        self.assertIn("pendingOrderId.value = String(data.id || data.order_id || '')", MINIAPP_CHECKOUT_SOURCE)
+        self.assertIn("if (data.need_payment !== false)", MINIAPP_CHECKOUT_SOURCE)
         self.assertLess(
-            MINIAPP_MENU_SOURCE.index("pendingOrderId.value = String(data.id || data.order_id || '')"),
-            MINIAPP_MENU_SOURCE.index("if (data.need_payment !== false)"),
+            MINIAPP_CHECKOUT_SOURCE.index("pendingOrderId.value = String(data.id || data.order_id || '')"),
+            MINIAPP_CHECKOUT_SOURCE.index("if (data.need_payment !== false)"),
         )
 
     def test_postpay_settlement_marks_offline_paid_only_at_settled_transition(self):

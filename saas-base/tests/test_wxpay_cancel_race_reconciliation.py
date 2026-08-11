@@ -43,6 +43,9 @@ def make_request(customer_id=None, tenant_id=None, token_type=None, path="/api/v
         req.state.tenant_id = tenant_id
     if token_type is not None:
         req.state.token_type = token_type
+    if token_type == "merchant":
+        req.state.role = "owner"
+        req.state.account_id = None
     return req
 
 
