@@ -819,6 +819,25 @@ async def create_order(
 
     assert tenant_id is not None
 
+    # P0-01: server-side table ownership authority. This runs before every other
+    # table/session-specific branch below (staff order, client-supplied
+    # dining_session_id, or neither) so it protects all of them uniformly --
+    # in particular the anonymous prepay/postpay path that can omit
+    # dining_session_id entirely, which previously persisted body.table with no
+    # validation at all. Empty table (takeaway/pickup/poster/douyin/staff_share,
+    # none of which populate `table`) is explicitly exempt, not validated here.
+    # Deliberately separate from _resolve_create_order_payment_mode's zone_type
+    # lookup just below: that query treats "no match" as "no zone configured,
+    # keep tenant default payment_mode" (a lenient fallback, unchanged by this
+    # fix); this check treats "no match" as "not a real table" and rejects.
+    # These are different questions and must not be conflated into one query.
+    table_no_for_authority = (body.table or "").strip()
+    if table_no_for_authority:
+        from app.services.entrance_code_service import EntranceCodeService
+
+        if not await EntranceCodeService(db).table_registry_active(tenant_id, table_no_for_authority):
+            return error_response(code=400, msg="桌台无效或已停用，请重新扫码")
+
     payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
         tenant, tenant_id, body, db
     )

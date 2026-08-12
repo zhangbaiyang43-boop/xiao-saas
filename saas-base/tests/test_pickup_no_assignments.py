@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.pickup_no_assignment import PickupNoAssignment
@@ -98,6 +99,19 @@ class PickupNoAssignmentsP0Test(unittest.IsolatedAsyncioTestCase):
         self.db.add(self.dish)
         self.dish_b = MenuItem(tenant_id=TENANT_B, name="SoupB", price="25.00", available=True)
         self.db.add(self.dish_b)
+        # P0-01: this suite is about pickup-number assignment behavior, not table
+        # validity -- register every table_no value used across its tests, per tenant.
+        for table_no in ("A05", "A01", "A02", "A20", "P1", "P2", "P3", "A09", "A10"):
+            self.db.add(EntranceCode(
+                id=generate_snowflake_id(),
+                tenant_id=TENANT_A, name=table_no, scene=f"E0000A{table_no}",
+                table_no=table_no, entry_type="table", status=1,
+            ))
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_B, name="B01", scene="E0000BB01",
+            table_no="B01", entry_type="table", status=1,
+        ))
         await self.db.commit()
 
     async def asyncTearDown(self):

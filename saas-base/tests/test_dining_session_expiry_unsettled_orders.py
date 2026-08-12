@@ -8,10 +8,12 @@ from starlette.requests import Request
 
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.order import Order
 from app.models.tenant import Tenant
 from app.services.dining_session_service import SESSION_EXPIRE_HOURS, DiningSessionService
 from app.api.v1.orders import list_orders
+from app.utils.id_generator import generate_snowflake_id
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -53,6 +55,14 @@ class DiningSessionExpiryTestBase(unittest.IsolatedAsyncioTestCase):
             status=True, is_open=True, payment_mode="postpay",
         )
         self.db.add(self.tenant)
+        # P0-01: expiry-then-recreate (the "still expires as before" tests) now goes
+        # through the new table-authority check before opening the replacement
+        # session -- this suite is about expiry semantics, not table validity.
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A, name="A9", scene="E000000000A9",
+            table_no="A9", entry_type="table", status=1,
+        ))
         await self.db.flush()
         await self.db.commit()
 

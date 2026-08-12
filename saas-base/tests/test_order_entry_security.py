@@ -9,6 +9,7 @@ from starlette.requests import Request
 from sqlalchemy import event
 
 from app.models.base import Base
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import OrderItem
 from app.models.tenant import Tenant
@@ -74,6 +75,21 @@ class OrderEntrySecurityTest(unittest.IsolatedAsyncioTestCase):
             available=True,
         )
         self.db.add(self.dish)
+
+        # P0-01: these tests exercise tenant-level ordering behavior (suspended/
+        # closed-for-business/active), not table validity -- give them a real,
+        # active table registry entry for "A12" so the P0-01 table-authority check
+        # doesn't interfere with what they're actually testing.
+        self.entrance_code = EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A,
+            name="A12",
+            scene="E00000000012",
+            table_no="A12",
+            entry_type="table",
+            status=1,
+        )
+        self.db.add(self.entrance_code)
         await self.db.flush()
         await self.db.commit()
 

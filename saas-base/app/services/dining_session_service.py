@@ -449,6 +449,21 @@ class DiningSessionService:
             else:
                 return session
 
+        # P0-01: before opening a brand-new session for this table, prove the table
+        # actually exists for this tenant. Covers both this function's callers --
+        # resolve_session (customer scan) and get_or_create_open_session_for_staff
+        # (owner-role staff opening a table's first order) -- since both delegate
+        # here. get_open_session_for_staff (frontdesk/waiter add-on) never creates,
+        # so it doesn't call this function and isn't affected. An existing OPEN
+        # session found above (the two `return session` branches) is never blocked
+        # by this check, even if its table's registry has since gone stale -- P0-01B
+        # only stops *new* sessions from being opened against an invalid table;
+        # session cleanup for already-open sessions is P0-10, out of scope here.
+        from app.services.entrance_code_service import EntranceCodeService
+
+        if not await EntranceCodeService(self.db).table_registry_active(tenant_id, table_no):
+            raise ValueError("桌台无效或已停用，请重新扫码")
+
         new_session = DiningSession(
             tenant_id=tenant_id,
             table_no=table_no,

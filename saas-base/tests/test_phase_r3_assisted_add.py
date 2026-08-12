@@ -24,6 +24,7 @@ from app.core.permissions import (
 )
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice  # noqa: F401
@@ -154,6 +155,22 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
                         price="12.00",
                         available=True,
                         category="热菜",
+                    ),
+                    # P0-01: this suite is about staff-assisted add-on permissions/
+                    # idempotency, not table validity -- register both tables it
+                    # uses. "99" (test_r3_no_open_session) intentionally has no
+                    # OPEN session but must still be a *registered* table, so that
+                    # test keeps exercising "no open session" rather than tripping
+                    # the new table-authority check first.
+                    EntranceCode(
+                        id=generate_snowflake_id(),
+                        tenant_id=TENANT, name="12", scene="E00000000112",
+                        table_no="12", entry_type="table", status=1,
+                    ),
+                    EntranceCode(
+                        id=generate_snowflake_id(),
+                        tenant_id=TENANT, name="99", scene="E00000000199",
+                        table_no="99", entry_type="table", status=1,
                     ),
                 ]
             )

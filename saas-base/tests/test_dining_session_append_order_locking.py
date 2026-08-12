@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from app.models.base import Base
 from app.models.dining import DiningParticipant, DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import OrderItem
 from app.models.tenant import Tenant
@@ -72,6 +73,13 @@ class AppendOrderReadsDiningSessionUnderLockTest(unittest.IsolatedAsyncioTestCas
         self.db.add(self.tenant)
         self.dish = MenuItem(tenant_id=TENANT_A, name="Kung Pao Chicken", price="28.00", available=True)
         self.db.add(self.dish)
+        # P0-01: this test is about append-order locking against settle_table, not
+        # table validity -- give A12 a real, active registry entry.
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A, name="A12", scene="E00000000012",
+            table_no="A12", entry_type="table", status=1,
+        ))
         await self.db.flush()
 
         now = datetime.utcnow()

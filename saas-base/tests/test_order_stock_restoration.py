@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.models.base import Base
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
@@ -72,6 +73,12 @@ class OrderStockRestorationTestBase(unittest.IsolatedAsyncioTestCase):
             status=True, is_open=True, payment_mode="postpay",
         )
         self.db.add(self.tenant)
+        # P0-01: this suite is about stock restoration, not table validity.
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A, name="B2", scene="E000000000B2",
+            table_no="B2", entry_type="table", status=1,
+        ))
         await self.db.flush()
         await self.db.commit()
 

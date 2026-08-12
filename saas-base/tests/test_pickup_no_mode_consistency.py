@@ -19,6 +19,7 @@ from app.api.v1.orders import (
 from app.api.v1.tenant import serialize_settings
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.pickup_no_assignment import PickupNoAssignment
@@ -91,6 +92,15 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
         )
         self.dish = MenuItem(tenant_id=TENANT, name="Soup", price="25.00", available=True)
         self.db.add(self.dish)
+        # P0-01: this suite is about pickup-number mode consistency, not table
+        # validity -- register every table_no value used across its tests
+        # (R01 default plus R1-R5 overrides in individual tests).
+        for table_no in ("R01", "R1", "R2", "R3", "R4", "R5"):
+            self.db.add(EntranceCode(
+                id=generate_snowflake_id(),
+                tenant_id=TENANT, name=table_no, scene=f"E0000000{table_no}",
+                table_no=table_no, entry_type="table", status=1,
+            ))
         await self.db.commit()
 
     async def asyncTearDown(self):

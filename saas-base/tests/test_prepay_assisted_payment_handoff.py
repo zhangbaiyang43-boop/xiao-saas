@@ -16,6 +16,7 @@ from app.api.v1.orders import OrderCreate, OrderItemIn, create_order, wxpay_noti
 from app.models.base import Base
 from app.models.customer import Customer
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice  # noqa: F401
@@ -179,6 +180,12 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
                         price="18.00",
                         available=True,
                         category="小吃",
+                    ),
+                    # P0-01: this suite is about assisted-payment handoff, not table validity.
+                    EntranceCode(
+                        id=generate_snowflake_id(),
+                        tenant_id=TENANT, name="8", scene="E000000000008",
+                        table_no="8", entry_type="table", status=1,
                     ),
                 ]
             )
