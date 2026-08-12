@@ -35,6 +35,7 @@
 
 <script>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { shouldShowInitialHint, shouldShowStatusCallout } from './order-bubble-logic.js'
 
 const HINT_STORAGE_KEY = 'order_bubble_hint_shown'
 const BUBBLE_WIDTH_RPX = 190
@@ -201,34 +202,45 @@ export default {
     }
     const hintBottomRpx = computed(() => props.bottomClearRpx + BUBBLE_HEIGHT_RPX + 40)
 
-    watch(() => props.visible, (val, oldVal) => {
-      if (val && !oldVal && !uni.getStorageSync(HINT_STORAGE_KEY)) {
-        showHint.value = true
-        uni.setStorageSync(HINT_STORAGE_KEY, '1')
-        hintTimer = setTimeout(dismissHint, 4000)
-      }
-    })
-
     // 状态变化：震动 + 短暂脉冲 + 临时提示条，说明"进入了新阶段、现在该干嘛"
     const justChanged = ref(false)
     const showChangeCallout = ref(false)
     let pulseTimer = null
     let calloutTimer = null
-    watch(() => props.tone, (val, oldVal) => {
-      if (!oldVal || val === oldVal) return
-      // 震动只是个反馈锦上添花，设备不支持或权限没开时静默跳过，不影响状态切换本身。
-      // eslint-disable-next-line no-empty
-      try { uni.vibrateShort({ type: 'light' }) } catch (_) {}
-      justChanged.value = false
-      showChangeCallout.value = false
-      clearTimeout(pulseTimer)
-      clearTimeout(calloutTimer)
-      if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(triggerChangeFeedback)
-      } else {
-        triggerChangeFeedback()
+
+    // 首次引导提示（ob-hint）和状态变化提示（ob-callout）合并成一个 watcher，
+    // 一起看 visible + tone 这两个来源：气泡从"不可见"变"可见"的那一刻，不管
+    // tone 是从什么占位值变成什么真实值，都不算一次"状态变化"——调用方对占位值
+    // 的约定并不统一（menu.vue 用 'empty'，mine.vue 复用 'paid'），唯一两边都
+    // 成立的信号是 visible 本身的翻转，所以拿它而不是某个具体 tone 字符串来判定
+    // "是不是第一次出现"。只有 visible 在变化前后都为 true（气泡已经在屏幕上）
+    // 且 tone 真的变了，才算真实的状态切换、触发 callout。合并成一个 watcher 还
+    // 顺带去掉了"两个独立 watcher 谁先跑"这层依赖——结果只取决于这四个值本身。
+    watch(
+      [() => props.visible, () => props.tone],
+      ([visible, tone], [prevVisible, prevTone]) => {
+        if (shouldShowInitialHint(visible, prevVisible) && !uni.getStorageSync(HINT_STORAGE_KEY)) {
+          showHint.value = true
+          uni.setStorageSync(HINT_STORAGE_KEY, '1')
+          hintTimer = setTimeout(dismissHint, 4000)
+        }
+
+        if (shouldShowStatusCallout(visible, prevVisible, tone, prevTone)) {
+          // 震动只是个反馈锦上添花，设备不支持或权限没开时静默跳过，不影响状态切换本身。
+          // eslint-disable-next-line no-empty
+          try { uni.vibrateShort({ type: 'light' }) } catch (_) {}
+          justChanged.value = false
+          showChangeCallout.value = false
+          clearTimeout(pulseTimer)
+          clearTimeout(calloutTimer)
+          if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(triggerChangeFeedback)
+          } else {
+            triggerChangeFeedback()
+          }
+        }
       }
-    })
+    )
     function triggerChangeFeedback() {
       justChanged.value = true
       pulseTimer = setTimeout(() => { justChanged.value = false }, 700)
