@@ -20,6 +20,20 @@ export const persistDiningContext = (data = {}) => {
   if (data.participant_token) uni.setStorageSync('dining_participant_token', data.participant_token)
   if (data.client_id) uni.setStorageSync('dining_client_id', data.client_id)
   if (data.table_no) uni.setStorageSync('dining_table_no', data.table_no)
+  if (data.tenant_id) uni.setStorageSync('dining_tenant_id', data.tenant_id)
+}
+
+// P0-01C: cached dining identity (session_id/token) is only safe to reuse if it was
+// established for this exact (tenant_id, table_no) pair. Comparing table_no alone
+// (the original check) misses a same-table-number collision across two different
+// tenants -- e.g. scan tenant A's table "3", then tenant B's table "3": the table
+// string matches, so the old check wouldn't invalidate the cache even though it
+// belongs to a different shop entirely. No cached table at all is not "stale" --
+// there's simply nothing to reuse, so the existing session/token-presence check
+// below falls through to a fresh resolve on its own.
+export const isCachedIdentityStale = (cachedTenantId, cachedTableNo, tenantId, tableNo) => {
+  if (!cachedTableNo) return false
+  return cachedTenantId !== tenantId || cachedTableNo !== tableNo
 }
 
 /**
@@ -31,11 +45,13 @@ export const resolveDiningIdentity = async ({ tenantId, table, force = false } =
   table = (table || '').trim()
   if (!tenantId || !table) return { ok: false, reason: 'missing_context' }
 
-  // 缓存的 dining_session_id/participant_token 可能是上一次扫别的桌留下的（比如强制
-  // 解析那次请求被打断，没来得及覆盖旧缓存）。如果缓存记录的桌号和当前这一桌对不上，
-  // 缓存已经不可信，必须强制重新解析，否则会把这一桌的点单悄悄挂到别的桌的会话上。
+  // 缓存的 dining_session_id/participant_token 可能是上一次扫别的桌（甚至别的租户）
+  // 留下的（比如强制解析那次请求被打断，没来得及覆盖旧缓存）。如果缓存记录的
+  // tenant_id/桌号跟当前这一桌对不上，缓存已经不可信，必须强制重新解析，否则会把
+  // 这一桌的点单悄悄挂到别的租户/别的桌的会话上。
   const cachedTable = uni.getStorageSync('dining_table_no') || ''
-  const staleForOtherTable = Boolean(cachedTable) && cachedTable !== table
+  const cachedTenantId = uni.getStorageSync('dining_tenant_id') || ''
+  const staleForOtherTable = isCachedIdentityStale(cachedTenantId, cachedTable, tenantId, table)
   const cachedSessionId = uni.getStorageSync('dining_session_id') || ''
   const cachedToken = uni.getStorageSync('dining_participant_token') || ''
 

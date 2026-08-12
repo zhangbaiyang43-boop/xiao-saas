@@ -1322,7 +1322,15 @@ export default {
       markStart('menu_onload_to_first_content')
       markStart('menu_onload_to_interactive')
 
-      this.tableNo = options.table || 'A01'
+      // P0-01C: an empty table_no is a legitimate "no table context" state, not an
+      // error to paper over with a fake table number -- 'A01' looked like a real
+      // scanned table to every downstream consumer (ensureDiningSession, order
+      // submission), silently misrouting orders. Browsing the menu still works
+      // with an empty tableNo (loadMenu only needs shopId); resolveDiningIdentity
+      // already returns { ok:false, reason:'missing_context' } for an empty table,
+      // which correctly fails ensureDiningSession and blocks checkout with the
+      // existing "本桌点餐会话不可用，请重新扫码" toast -- no new UI needed.
+      this.tableNo = options.table || ''
       this.shopId = options.shop || uni.getStorageSync('tenant_id') || ''
       if (options.activity) this.todayActivity = decodeURIComponent(options.activity)
       uni.setNavigationBarTitle({ title: this.shopName + ' \u70b9\u9910' })
