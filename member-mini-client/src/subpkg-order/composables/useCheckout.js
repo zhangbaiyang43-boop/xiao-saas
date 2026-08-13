@@ -302,7 +302,13 @@ export function useCheckout({
         participant_token: diningParticipantToken.value || undefined,
         client_id: diningClientId.value || undefined,
         request_id: ensureSubmitRequestId(),
-        items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined })),
+        // P0-04 remark reconciliation: item_remark must come from the cart line's real
+        // itemRemark field (set by useSpecSheet's confirmSpec, spec'd items only) --
+        // never re-derived from orderName/name, which are display-only folded text.
+        // Sent explicitly (even as '') for spec'd items so the server trusts this field
+        // instead of falling back to legacy name-parsing; omitted for simple items,
+        // which have no remark concept at all (no UI path to enter one).
+        items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined, item_remark: item.itemRemark !== undefined ? item.itemRemark : undefined })),
       }
       const res = await createOrder(payload, { authRedirect: false })
       const data = res?.data || {}
@@ -322,6 +328,29 @@ export function useCheckout({
       pendingPaymentIntent.value = null
       return true
     } catch (err) {
+      // P0-04: same request_id retried with genuinely different cart content --
+      // server fails closed instead of silently replaying stale content (or,
+      // worse, silently creating a second order). Must be checked BEFORE
+      // isDiningIdentityError below: both use code===409, but they mean
+      // completely different things, and this one must never fall into that
+      // branch's "rebuild identity and blindly retry" behavior -- retrying
+      // blindly here would just hit the exact same conflict again.
+      // Never clears pendingSubmitRequestId or generates a new key: the
+      // existing order this key already produced is what we bind to and
+      // recover, reusing the same paths a normal pending-payment recovery
+      // already uses (never a second order-recovery UI).
+      if (err?.bizCode === 'IDEMPOTENCY_CONFLICT' && err?.data?.existing_order_id) {
+        pendingOrderId.value = String(err.data.existing_order_id)
+        orderNo.value = String(err.data.existing_order_no || err.data.existing_order_id).slice(-4)
+        paymentMode.value = normalizePaymentMode(err.data.payment_mode)
+        if (err.data.need_payment) {
+          return await confirmPay()
+        }
+        const recovered = await recoverPendingPaymentResult({ showDetail: true })
+        if (recovered) return true
+        uni.showToast({ title: toastText.submitOrderFailed, icon: 'none' })
+        return false
+      }
       // 本桌匿名身份失效（后端统一返回 409）不是会员登录问题，静默重建身份后自动重试
       // 一次；仍失败才走下面的兜底提示，不会弹"继续支付/授权"这种会员专属的措辞。
       if (!isRetry && isDiningIdentityError(err)) {

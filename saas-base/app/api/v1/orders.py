@@ -1,5 +1,6 @@
 # mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, check-untyped-defs=False
 from datetime import date, datetime, timezone
+import hashlib
 import json
 from decimal import Decimal
 from typing import Any, List, Optional, TypeAlias, cast as typing_cast
@@ -211,10 +212,52 @@ def serialize_order(
     }
 
 
+def _compute_request_fingerprint(body: OrderCreate) -> str:
+    """P0-04: deterministic digest of the *business intent* a create_order request
+    carries, used only to detect a client_request_id being reused with a genuinely
+    different submission -- never as the idempotency identity itself (that remains
+    (tenant_id, client_request_id)). Computed purely from the raw request body, with
+    NO database/menu lookups, so a later dish/spec/addon rename or price change can
+    never flip an original request from MATCH to MISMATCH (P0-04 audit requirement).
+
+    Deliberately excludes: client-displayed price/total (decorative, never
+    authoritative -- see P0-02), item display name (varies with legacy-vs-new naming
+    conventions, not business intent), request_id itself, and any other non-content
+    field. specifications/extras are sorted so P0-03's established "click order
+    doesn't change identity" principle also holds here; the items list itself is
+    sorted too, since cart/array display order is not business intent either.
+    """
+    items_repr = []
+    for item in body.items:
+        specs_repr = sorted((spec.group, spec.value) for spec in (item.specifications or []))
+        extras_repr = sorted(item.extras or [])
+        items_repr.append({
+            "dish_id": item.dish_id,
+            "qty": item.qty,
+            "specifications": specs_repr,
+            "extras": extras_repr,
+            "item_remark": (item.item_remark or "").strip() or None,
+        })
+    items_repr.sort(key=lambda entry: json.dumps(entry, sort_keys=True, ensure_ascii=True))
+
+    canonical = {
+        "table": (body.table or "").strip(),
+        "dining_session_id": body.dining_session_id,
+        "coupon_id": body.coupon_id,
+        "remark": (body.remark or "").strip(),
+        "items": items_repr,
+    }
+    canonical_bytes = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
 async def _replay_order_response(
-    db: AsyncSession, tenant_id: str, request_id: str | None
+    db: AsyncSession, tenant_id: str, request_id: str | None, body: OrderCreate
 ) -> ApiResponse | None:
-    """Look up an existing order by client_request_id and build the create_order replay response."""
+    """Look up an existing order by client_request_id and build the create_order replay
+    response -- or, if its fingerprint disagrees with the current request's, an
+    IDEMPOTENCY_CONFLICT response instead of silently replaying stale content.
+    """
     if not request_id:
         return None
     replay_result = await db.execute(
@@ -223,6 +266,27 @@ async def _replay_order_response(
     replay_order = replay_result.scalar_one_or_none()
     if not replay_order:
         return None
+
+    # P0-04: NULL fingerprint means this order predates the fingerprint column
+    # (legacy pre-migration order, LEGACY_REPLAY_COMPAT) -- keep the original
+    # unconditional-replay contract for it rather than retroactively enforcing a
+    # check it was never subject to.
+    if replay_order.request_fingerprint is not None:
+        if _compute_request_fingerprint(body) != replay_order.request_fingerprint:
+            conflict_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+            return error_response(
+                code=409,
+                msg="订单信息已变化，请重新确认后再提交",
+                data={
+                    "code": "IDEMPOTENCY_CONFLICT",
+                    "existing_order_id": str(replay_order.id),
+                    "existing_order_no": str(replay_order.id)[-4:],
+                    "payment_mode": conflict_payment_mode,
+                    "payment_status": getattr(replay_order, "payment_status", "unpaid"),
+                    "need_payment": conflict_payment_mode == "prepay" and replay_order.payment_status != "paid",
+                },
+            )
+
     replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
     replay_items = list(replay_items_result.scalars().all())
     replay_data = serialize_order(replay_order, replay_items)
@@ -268,8 +332,10 @@ async def _prepare_create_order_tenant_and_replay(
         return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
 
     request_id = (body.request_id or "").strip() or None
+    if request_id and len(request_id) > 64:
+        return error_response(code=400, msg="request_id 过长"), None, tenant_id
     if request_id:
-        replay_response = await _replay_order_response(db, tenant_id, request_id)
+        replay_response = await _replay_order_response(db, tenant_id, request_id, body)
         if replay_response is not None:
             return replay_response, None, tenant_id
 
@@ -842,6 +908,7 @@ async def _persist_create_order_and_build_response(
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
         pickup_no=resolved_pickup_no,
         client_request_id=request_id,
+        request_fingerprint=_compute_request_fingerprint(body) if request_id else None,
     )
     db.add(order)
     try:
@@ -849,9 +916,12 @@ async def _persist_create_order_and_build_response(
     except IntegrityError:
         # 前面查重的那一刻还没有这张订单，但几乎同一时间的第二个请求已经抢先建好了
         # （真正意义上的并发重复提交）——这里接住唯一索引冲突，直接把已建好的那张
-        # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。
+        # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。P0-04：如果两个
+        # 并发请求带着同一个 request_id 却是不同的 payload，这里的 fingerprint 比对
+        # 会让它变成 IDEMPOTENCY_CONFLICT，而不是把 loser 的内容悄悄丢弃、静默返回
+        # winner 的订单。
         await db.rollback()
-        replay_response = await _replay_order_response(db, tenant_id, request_id)
+        replay_response = await _replay_order_response(db, tenant_id, request_id, body)
         if replay_response is not None:
             return replay_response
         return error_response(code=409, msg="订单提交冲突，请重试")

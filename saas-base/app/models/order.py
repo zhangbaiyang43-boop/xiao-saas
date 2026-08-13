@@ -54,6 +54,14 @@ class Order(BaseModel):
     # NULL 不受这个唯一约束限制（MySQL/SQLite 的唯一索引都把 NULL 视为互不相同），
     # 老订单和没传这个字段的调用方完全不受影响。
     client_request_id = Column(String(64), nullable=True)
+    # P0-04: SHA-256 hex digest of the canonical, normalized submission semantics
+    # (see _compute_request_fingerprint in app/api/v1/orders.py). NOT the idempotency
+    # identity -- (tenant_id, client_request_id) above remains that. This only
+    # detects when a client_request_id retry carries a genuinely different business
+    # intent than the original submission, so the server can fail closed instead of
+    # silently replaying stale content. NULL on legacy (pre-migration) orders --
+    # those keep the existing unconditional-replay behavior.
+    request_fingerprint = Column(String(64), nullable=True)
 
     __table_args__ = (
         Index("idx_orders_tenant_session", "tenant_id", "dining_session_id"),

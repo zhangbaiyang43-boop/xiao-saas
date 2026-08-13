@@ -16,7 +16,7 @@ import { specText, confirmationText } from '../utils/orderText.js'
 //   组合式函数是分开调用的两个composable，这里只是复用其中一个触发函数。
 export function useSpecSheet({
   itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
-  specCartItems, isSoldOut, formatPrice, triggerCartSuccessFeedback,
+  specCartItems, isSoldOut, formatPrice, triggerCartSuccessFeedback, ordering,
 }) {
   const showSpecSheet = ref(false)
   const specDish = ref({})
@@ -149,6 +149,11 @@ export function useSpecSheet({
     confirmSpec()
   }
   function confirmSpec() {
+    // P0-04-02: a submit already in flight must not accept a new cart commit
+    // (see menu.vue's addToCart comment for why) -- ordering is undefined for
+    // callers that don't pass it (e.g. isolated composable tests), so this
+    // never throws when it's absent.
+    if (ordering?.value) return
     if (isSoldOut(specDish.value)) return
     if (specConfirmCommitted.value) return
     specConfirmCommitted.value = true

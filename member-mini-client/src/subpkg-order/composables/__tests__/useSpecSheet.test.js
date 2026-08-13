@@ -25,6 +25,7 @@ function setup() {
     isSoldOut: vi.fn(() => false),
     formatPrice: (n) => Number(n).toFixed(2),
     triggerCartSuccessFeedback: vi.fn(),
+    ordering: ref(false),
   }
   const sheet = useSpecSheet(state)
   return { state, sheet }
@@ -139,6 +140,45 @@ describe('useSpecSheet', () => {
 
       expect(state.specCartItems.value).toHaveLength(1)
       expect(state.specCartItems.value[0].qty).toBe(2)
+    })
+  })
+
+  describe('P0-04 C02/C03: cart is locked while a submit is in flight', () => {
+    it('C02: ordering=true 时 confirmSpec 不产生任何 cart mutation', () => {
+      const { state, sheet } = setup()
+      openAndSelect(sheet, { addons: ['鸡蛋'] })
+      state.ordering.value = true
+
+      sheet.confirmSpec()
+
+      expect(state.specCartItems.value).toHaveLength(0)
+    })
+
+    it('C02: ordering=false 恢复后，同一次 sheet 状态仍能正常 confirm', () => {
+      const { state, sheet } = setup()
+      openAndSelect(sheet, { addons: ['鸡蛋'] })
+      state.ordering.value = true
+      sheet.confirmSpec()
+      expect(state.specCartItems.value).toHaveLength(0)
+
+      state.ordering.value = false
+      sheet.confirmSpec()
+
+      expect(state.specCartItems.value).toHaveLength(1)
+    })
+
+    it('C03: ordering 未设置（如独立单测场景）时不抛错，正常放行', () => {
+      const state = {
+        itemRemark: ref(''), showItemRemarkExtra: ref(false), itemRemarkExtra: ref(''),
+        remarkChips: ref([]), specCartItems: ref([]), isSoldOut: vi.fn(() => false),
+        formatPrice: (n) => Number(n).toFixed(2), triggerCartSuccessFeedback: vi.fn(),
+        // ordering deliberately omitted
+      }
+      const sheet = useSpecSheet(state)
+      openAndSelect(sheet, { addons: ['鸡蛋'] })
+
+      expect(() => sheet.confirmSpec()).not.toThrow()
+      expect(state.specCartItems.value).toHaveLength(1)
     })
   })
 })

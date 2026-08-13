@@ -690,10 +690,11 @@ export default {
       toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet: openSpecSheetRaw, openProductDetail,
     } = useSpecSheet({
       itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
-      specCartItems, isSoldOut, hasSpecs, formatPrice,
+      specCartItems, isSoldOut, hasSpecs, formatPrice, ordering,
       triggerCartSuccessFeedback: (key) => triggerCartSuccessFeedback(key),
     })
     const openSpecSheet = (dish) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (!orderingContextReady.value) {
         uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
         return
@@ -961,6 +962,13 @@ export default {
     const cartCount = (id) => cart.value[id] || 0
 
     const addToCart = (dish) => {
+      // P0-04-02: once a submit's payload has been captured and sent, the cart
+      // must not change until that request resolves -- otherwise a later item
+      // added here could be silently discarded by the success handler's cart
+      // clear without ever having been part of the order that was actually
+      // created. This is a request-in-flight lock, not a permanent one: it
+      // clears in submitOrder's `finally`, same as `ordering` itself.
+      if (ordering.value) return
       if (!orderingContextReady.value) {
         uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
         return
@@ -988,6 +996,7 @@ export default {
     })
 
     const removeFromCart = (dish) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (dish.specKey) {
         const item = specCartItems.value.find(i => i.specKey === dish.specKey)
         if (!item) return
@@ -1001,6 +1010,7 @@ export default {
     }
 
     const increaseCartItem = (item) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (item.specKey) {
         const target = specCartItems.value.find(i => i.specKey === item.specKey)
         if (target) {
@@ -1013,6 +1023,7 @@ export default {
     }
 
     const clearCart = () => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (!totalCount.value) return
       uni.showModal({
         title: modalText.clearCartTitle,

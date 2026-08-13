@@ -147,10 +147,44 @@ describe('P0-03 T17/T18: cart -> payload 字段映射', () => {
     expect(sentItem.qty).toBe(3)
     expect(sentItem.specifications).toEqual([{ group: '份量', value: '大份' }])
     expect(sentItem.extras).toEqual(['鸡蛋'])
-    // Current legacy-compatible transmission: remark travels folded into
-    // `name` (orderName), not as a dedicated field -- see P0-03 audit §22/§8
-    // and the explicit instruction not to change this in this phase.
+    // name keeps the legacy folded format for backward compatibility with
+    // old Admin/staff-workbench consumers -- display-only, not authority.
     expect(sentItem.name).toBe('水煮牛肉(大份、鸡蛋、少辣)')
-    expect(sentItem.name).toContain('少辣') // REMARK_SEMANTIC_PRESERVED
+    // P0-04 remark reconciliation: remark must ALSO travel as a dedicated
+    // structured field (source: cart line's real itemRemark, not re-parsed
+    // from name) so the server fingerprint can distinguish same-dish/spec/
+    // addon requests that differ only by remark. REMARK_STRUCTURED_SEMANTIC_SENT.
+    expect(sentItem.item_remark).toBe('少辣')
+  })
+
+  it('P0-04: 无备注的规格商品仍显式发送空字符串 item_remark（而不是省略字段）', async () => {
+    const specItemNoRemark = {
+      id: 'dish_c', name: '宫保鸡丁', price: 30, qty: 1,
+      orderName: '宫保鸡丁(大份)',
+      specifications: [{ group: '份量', value: '大份' }],
+      extras: [],
+      itemRemark: '',
+    }
+    const { checkout } = setup([specItemNoRemark])
+    createOrder.mockResolvedValue({ data: { id: 'order_3', need_payment: false } })
+
+    await checkout.performSubmitOrder()
+
+    const sentItem = createOrder.mock.calls[0][0].items[0]
+    // Explicit '' (not omitted) -- signals the server "this client knows
+    // about item_remark, trust it" rather than falling back to legacy
+    // name-parsing extraction.
+    expect(sentItem.item_remark).toBe('')
+  })
+
+  it('P0-04: 简单商品（无规格）不携带 item_remark 字段', async () => {
+    const simple = { id: 'dish_d', name: 'D', price: 10, qty: 1, orderName: 'D' }
+    const { checkout } = setup([simple])
+    createOrder.mockResolvedValue({ data: { id: 'order_4', need_payment: false } })
+
+    await checkout.performSubmitOrder()
+
+    const sentItem = createOrder.mock.calls[0][0].items[0]
+    expect(sentItem.item_remark).toBeUndefined()
   })
 })

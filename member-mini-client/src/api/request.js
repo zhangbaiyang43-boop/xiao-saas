@@ -186,6 +186,7 @@ const request = (options) => {
           error.statusCode = statusCode || body.code
           error.code = body.code || statusCode
           error.bizCode = body?.data?.code
+          error.data = body?.data
           // 401/403 大多是"登录态过期"这种预期内的正常事件，不是代码 bug，
           // 单独用 auth_error 这个 scene 报，方便以后在后台把它跟真正的接口
           // 故障分开看，不要混在一起互相掩盖。
