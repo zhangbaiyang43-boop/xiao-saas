@@ -458,6 +458,8 @@ import { useOrderStatusPoll } from '../composables/useOrderStatusPoll.js'
 import { useCheckout } from '../composables/useCheckout.js'
 import { useDiningSession } from '../composables/useDiningSession.js'
 import { createMenuInitialization } from '../composables/useMenuInitialization.js'
+import { saveCartSnapshot, restoreCartSnapshot } from '@/utils/cartContextCache.js'
+import { incrementSimpleCart, decrementSimpleCart } from '@/utils/simpleCartMath.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
@@ -895,6 +897,51 @@ export default {
     const scrollTarget = ref('')
     const allDishes = ref([])
     const cart = ref({}) // { dishId: qty }
+
+    // P0-03-03: same-context route re-entry must not lose the cart (menu ->
+    // 首页/其他页 -> menu, same tenant/table/session), but a different
+    // context must never see the old cart. Snapshotting on every cart
+    // change (rather than only on page-leave) means we don't need a new
+    // onUnload/onHide hook to catch every possible navigation path away.
+    //
+    // cartHydrated guards a real race: diningSessionId is one of this watch's
+    // sources, and ensureDiningSession() sets it *before* restoreCartIfSame
+    // Context() gets a chance to run -- that ref change alone fires this
+    // watcher, with cart.value still {} at that instant (confirmed empirically:
+    // an un-guarded version saves an empty snapshot right then, clobbering
+    // whatever a previous instance had saved, and the restore call a moment
+    // later reads back the now-empty cache instead of the real cart). Saves
+    // stay suppressed until restoreCartIfSameContext has had its turn.
+    const cartHydrated = ref(false)
+    watch([cart, specCartItems, diningSessionId], () => {
+      if (!cartHydrated.value) return
+      saveCartSnapshot(
+        { tenant_id: shopId.value, table_no: tableNo.value, dining_session_id: diningSessionId.value },
+        cart.value,
+        specCartItems.value,
+      )
+    }, { deep: true })
+
+    // Called from onLoad once ensureDiningSession has resolved. Only defined
+    // here (not inlined in onLoad) because diningSessionId is a setup()-local
+    // ref, not exposed on `this` -- this keeps the this-based Options API
+    // lifecycle hooks working the same way every other cross-cutting call
+    // here does (this.ensureDiningSession, this.syncDiningOrders, etc.).
+    const restoreCartIfSameContext = () => {
+      if (Object.keys(cart.value).length || specCartItems.value.length) {
+        cartHydrated.value = true
+        return
+      }
+      const restored = restoreCartSnapshot({
+        tenant_id: shopId.value, table_no: tableNo.value, dining_session_id: diningSessionId.value,
+      })
+      if (restored) {
+        cart.value = restored.cart
+        specCartItems.value = restored.specCartItems
+      }
+      cartHydrated.value = true
+    }
+
     const {
       addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       triggerAddPress, triggerCartSuccessFeedback, triggerCartValueFeedback,
@@ -925,7 +972,7 @@ export default {
       }
       const firstAction = startFirstCartAction('add_normal_dish')
       triggerAddPress(dish.id)
-      cart.value = { ...cart.value, [dish.id]: (cart.value[dish.id] || 0) + 1 }
+      cart.value = incrementSimpleCart(cart.value, dish.id)
       triggerCartSuccessFeedback(dish.id)
       uni.vibrateShort({ type: 'light' })
       finishFirstCartAction(firstAction)
@@ -949,15 +996,8 @@ export default {
         triggerCartValueFeedback(dish.specKey)
         return
       }
-      const cur = cart.value[dish.id] || 0
-      if (cur <= 1) {
-        const next = { ...cart.value }
-        delete next[dish.id]
-        cart.value = next
-      } else {
-        cart.value = { ...cart.value, [dish.id]: cur - 1 }
-      }
-    triggerCartValueFeedback(dish.id)
+      cart.value = decrementSimpleCart(cart.value, dish.id)
+      triggerCartValueFeedback(dish.id)
     }
 
     const increaseCartItem = (item) => {
@@ -1293,7 +1333,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tablePickupNo, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
-      saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
+      saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders, restoreCartIfSameContext,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
       successDiscount, wechatPayAmount, expectedOrderPoints, checkoutMemberSummaryText, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
@@ -1359,6 +1399,11 @@ export default {
         // session/token\uff09\uff0c\u7f13\u5b58\u4e0d\u53ef\u4fe1\u65f6\u4f9d\u7136\u4f1a\u81ea\u52a8\u53d1\u771f\u5b9e\u8bf7\u6c42\uff0c\u4e0d\u4f1a\u5e26\u7740\u8fc7\u671f\u8eab\u4efd"\u88f8\u5954"\uff0c
         // \u4f46\u53ef\u4fe1\u65f6\u5c31\u7701\u6389\u4e00\u6b21\u53c2\u6570\u5b8c\u5168\u76f8\u540c\u7684\u91cd\u590d\u7f51\u7edc\u5f80\u8fd4\u3002
         await this.ensureDiningSession(false)
+        // P0-03-03: only applies if this fresh instance's own cart is still
+        // empty (never clobbers anything already added during the brief
+        // async window before the session resolved) and only if the
+        // restored snapshot's tenant+table+session matches exactly.
+        this.restoreCartIfSameContext()
         await this.syncDiningOrders()
         this.startTablePresencePollIfActive()
         await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
