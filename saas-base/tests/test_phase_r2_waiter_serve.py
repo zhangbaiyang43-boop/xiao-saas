@@ -461,8 +461,10 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
         first = rows[0]
         self.assertEqual(first["table_no"], "30")
         self.assertEqual(first["pickup_no"], "30")
-        self.assertEqual(first["items"][0], {"name": "牛肉汤", "qty": 1})
-        self.assertEqual(first["items"][1], {"name": "烧饼", "qty": 2})
+        # P0-02: serialize_recent_served_order now also carries item_remark
+        # (None here -- no remark was submitted for these fixture items).
+        self.assertEqual(first["items"][0], {"name": "牛肉汤", "item_remark": None, "qty": 1})
+        self.assertEqual(first["items"][1], {"name": "烧饼", "item_remark": None, "qty": 2})
         for forbidden in ("total", "payment_status", "phone", "customer_id", "coupon_id", "openid"):
             self.assertNotIn(forbidden, first)
 

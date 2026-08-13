@@ -42,7 +42,7 @@ from app.services.order_print_service import (
 )
 from app.services.order_stock_service import _restore_order_stock
 
-OrderItemRow: TypeAlias = tuple[int, str, float, int]
+OrderItemRow: TypeAlias = tuple[int, str, float, int, Optional[str]]
 ApiResponse: TypeAlias = RespVo[Any]
 PrepareTenantReplayResult: TypeAlias = tuple[ApiResponse | None, Tenant | None, str | None]
 PaymentModeFlags: TypeAlias = tuple[str, bool, bool, bool]
@@ -105,6 +105,12 @@ class OrderItemIn(PydanticBase):
     qty: int = 1
     specifications: Optional[List[OrderItemSpecIn]] = None  # 单选规格（如辣度/份量），按商家配置的 price_delta 计费
     extras: Optional[List[str]] = None  # 多选附加项（如加料），按商家配置的 price_delta 计费
+    # P0-02: user free-text per-item note (e.g. "不要香菜"). Never part of the
+    # commerce-fact snapshot -- see _validate_create_order_items_and_compute_total.
+    # Optional[str] with no default sentinel other than None: presence is checked
+    # via item_in.model_fields_set, not via truthiness, so an explicit empty
+    # string ("no remark") is distinguishable from "field omitted" (legacy client).
+    item_remark: Optional[str] = None
 
 
 class OrderCreate(PydanticBase):
@@ -126,6 +132,22 @@ class OrderCreate(PydanticBase):
 
 class MockPayBody(PydanticBase):
     participant_token: Optional[str] = None
+
+
+def _compose_backward_compatible_item_name(canonical_name: str, item_remark: Optional[str]) -> str:
+    """P0-02: OrderItem.name is stored as a pure canonical dish+spec+addon
+    description (no remark folded in -- see _validate_create_order_items_and_
+    compute_total). Every existing JSON consumer (Admin, current Mini, staff
+    workbenches) has only ever read a single `name` field that used to
+    include the customer's remark text inline, though -- compose it back at
+    serialize time so none of them silently stop showing remarks without
+    needing their own code changes. Reproduces the exact old wire format.
+    """
+    if not item_remark:
+        return canonical_name
+    if canonical_name.endswith(")"):
+        return canonical_name[:-1] + "、" + item_remark + ")"
+    return canonical_name + "(" + item_remark + ")"
 
 
 def serialize_order(
@@ -179,7 +201,8 @@ def serialize_order(
         "items": [
             {
                 "dish_id": str(i.dish_id) if i.dish_id else None,
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "price": float(i.price),
                 "qty": i.qty,
             }
@@ -498,7 +521,7 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
 
 
 async def _validate_create_order_items_and_compute_total(
-    body: OrderCreate, db: AsyncSession, tenant_id: str
+    body: OrderCreate, db: AsyncSession, tenant_id: str, is_staff_order: bool = False
 ) -> ValidateItemsResult:
     """Validate menu items, deduct stock per line, and compute order total.
 
@@ -513,6 +536,40 @@ async def _validate_create_order_items_and_compute_total(
         return error_response(code=400, msg="订单商品不能为空"), None, None
 
     specs_map = await load_menu_specs(db, tenant_id)
+
+    ITEM_NAME_MAX_LEN = 255  # matches order_items.name / order_items.item_remark column width
+
+    def _extract_legacy_item_remark(base_name: str, canonical_labels: list[str], submitted_name: str) -> Optional[str]:
+        """Best-effort recovery of a pre-item_remark Mini client's folded-in
+        remark text, for clients that only ever sent the merged display name
+        (dish + spec/addon labels + free-text remark, all joined with '、').
+
+        Never used to determine spec/addon selection or price -- those are
+        already fully resolved from the validated `specifications`/`extras`
+        fields by this point. This only ever produces an opaque trailing
+        remark string, or None if the client's name doesn't agree with the
+        server's own canonical prefix (forged/stale text is discarded, not
+        misread as a remark).
+        """
+        submitted_name = submitted_name.strip()
+        if not submitted_name:
+            return None
+        if not canonical_labels:
+            prefix = base_name + "("
+            if submitted_name == base_name:
+                return None
+            if submitted_name.startswith(prefix) and submitted_name.endswith(")"):
+                residual = submitted_name[len(prefix):-1]
+                return residual or None
+            return None
+        prefix = base_name + "(" + "、".join(canonical_labels)
+        if submitted_name == prefix + ")":
+            return None
+        prefix_with_sep = prefix + "、"
+        if submitted_name.startswith(prefix_with_sep) and submitted_name.endswith(")"):
+            residual = submitted_name[len(prefix_with_sep):-1]
+            return residual or None
+        return None
 
     def _resolve_spec_delta(dish: MenuItem, item_in: OrderItemIn) -> float:
         """Recompute the spec/extra surcharge from the merchant-configured spec_groups
@@ -571,17 +628,54 @@ async def _validate_create_order_items_and_compute_total(
             if not dish.available:
                 return error_response(code=400, msg=f"菜品已下架:{dish.name}"), None, None
             if dish.stock is not None and dish.stock <= 0:
-                return error_response(code=400, msg=f"dish sold out: {dish.name}"), None, None
+                return error_response(code=400, msg=f"菜品已售罄:{dish.name}"), None, None
             if dish.stock is not None and dish.stock < item_in.qty:
-                return error_response(code=400, msg=f"dish stock not enough: {dish.name}, left {dish.stock}"), None, None
+                return error_response(code=400, msg=f"菜品库存不足:{dish.name}，剩余{dish.stock}份"), None, None
             try:
                 spec_delta = _resolve_spec_delta(dish, item_in)
             except ValueError as exc:
                 return error_response(code=400, msg=str(exc)), None, None
             unit_price = _numeric_float(dish.price) + spec_delta
+            # P0-02: item_in.price is the client's *displayed* unit price (base +
+            # spec/extra deltas, same basis useSpecSheet.js computes as
+            # specUnitPrice) -- never used as the financial authority, only as a
+            # staleness hint. If the server's freshly-recomputed unit_price
+            # disagrees with what the customer's page showed by more than float-
+            # noise, reject rather than silently charging the new price: the
+            # customer would otherwise pay an amount they never saw and never
+            # confirmed. 0.005 tolerance absorbs JS float representation dust
+            # without masking a genuine 1-fen-or-more price change.
+            # Staff-assisted orders (frontdesk/waiter, merchant-authenticated) are
+            # exempt: this guard exists for customers looking at a possibly-stale
+            # menu page, not for trusted staff tooling, and test_r3_price_from_backend
+            # already pins the pre-existing contract that staff-submitted price is
+            # purely decorative -- the backend price always wins, silently.
+            if not is_staff_order and abs(unit_price - item_in.price) > 0.005:
+                return error_response(code=400, msg=f"价格已更新，请重新确认:{item_in.name}"), None, None
             base_name = str(dish.name or "")
-            submitted_name = str(item_in.name or "").strip()
-            name = submitted_name[:64] if submitted_name and submitted_name.startswith(base_name) else base_name
+            # P0-02 snapshot closure: OrderItem.name is a pure server-canonical
+            # dish+spec+addon description -- never the client's free-text name.
+            # spec_sel.value / extra_name have already survived exact-match
+            # validation against the server's own canonical option labels
+            # above (_resolve_spec_delta), so they *are* canonical, not a
+            # client guess reused verbatim.
+            canonical_labels = [spec_sel.value for spec_sel in (item_in.specifications or [])] + list(item_in.extras or [])
+            name = base_name if not canonical_labels else base_name + "(" + "、".join(canonical_labels) + ")"
+            if len(name) > ITEM_NAME_MAX_LEN:
+                return error_response(code=400, msg=f"商品名称过长:{item_in.name}"), None, None
+
+            item_fields_set = getattr(item_in, "model_fields_set", getattr(item_in, "__fields_set__", set()))
+            if "item_remark" in item_fields_set:
+                # New client explicitly supplied item_remark (even "" for "no
+                # remark") -- trust it outright, never fall back to parsing
+                # item_in.name for a legacy residual.
+                item_remark = (item_in.item_remark or "").strip() or None
+            else:
+                # Legacy client -- item_in.name may still carry a folded-in
+                # remark from before this field existed.
+                item_remark = _extract_legacy_item_remark(base_name, canonical_labels, str(item_in.name or ""))
+            if item_remark is not None and len(item_remark) > ITEM_NAME_MAX_LEN:
+                return error_response(code=400, msg=f"备注过长，请精简后重试:{item_in.name}"), None, None
             # 同一道菜在这一单里可能拆成好几行（比如同一道菜点了不同辣度），库存扣减必须
             # 在这一行处理完就立刻生效，而不是等所有行都校验完再统一扣——SQLAlchemy 对
             # 同一个 dish_id 的重复查询会拿到同一个已加锁的对象，如果扣减延后到循环外，
@@ -592,7 +686,7 @@ async def _validate_create_order_items_and_compute_total(
         else:
             return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}"), None, None
         real_total += unit_price * item_in.qty
-        order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty))
+        order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty, item_remark))
 
     return None, real_total, order_items_data
 
@@ -764,13 +858,14 @@ async def _persist_create_order_and_build_response(
 
     order_items = []
     assert order.id is not None
-    for dish_id, name, unit_price, qty in order_items_data:
+    for dish_id, name, unit_price, qty, item_remark in order_items_data:
         oi = OrderItem(
             order_id=order.id,
             dish_id=dish_id,
             name=name,
             price=typing_cast(Any, unit_price),
             qty=qty,
+            item_remark=item_remark,
         )
         db.add(oi)
         order_items.append(oi)
@@ -876,7 +971,7 @@ async def create_order(
     await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
     early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
-        body, db, tenant_id
+        body, db, tenant_id, is_staff_order
     )
     if early_response is not None:
         return early_response
@@ -1233,7 +1328,8 @@ def serialize_fulfillment_order(
         "can_assign_pickup_no": bool(can_assign_pickup),
         "items": [
             {
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "qty": i.qty,
             }
             for i in order_items
@@ -1253,7 +1349,8 @@ def serialize_recent_served_order(order, order_items) -> dict:
         "served_by_role": getattr(order, "served_by_role", None) or "",
         "items": [
             {
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "qty": i.qty,
             }
             for i in order_items

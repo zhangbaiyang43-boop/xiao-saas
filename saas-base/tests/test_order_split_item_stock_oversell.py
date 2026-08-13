@@ -94,7 +94,9 @@ class SplitLineItemStockOversellTest(unittest.IsolatedAsyncioTestCase):
         result = await create_order(body, make_request(), db=self.db)
 
         self.assertEqual(result.code, 400)
-        self.assertIn("stock not enough", result.msg)
+        # P0-02: insufficient-stock message was translated to Chinese for user-facing
+        # consistency (was English "stock not enough").
+        self.assertIn("库存不足", result.msg)
         # create_order never called db.commit() on this path -- in the real request
         # lifecycle, FastAPI's get_db() closes the session at the end of the request, which
         # implicitly rolls back anything only flushed-not-committed. Do the same here before

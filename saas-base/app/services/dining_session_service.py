@@ -596,6 +596,8 @@ class DiningSessionService:
         dish_images: dict[int, str] | None = None,
         participant_no: int | None = None,
     ) -> dict:
+        from app.api.v1.orders import _compose_backward_compatible_item_name
+
         dish_images = dish_images or {}
         return {
             "id": str(order.id),
@@ -620,7 +622,8 @@ class DiningSessionService:
             "items": [
                 {
                     "dish_id": str(item.dish_id) if item.dish_id else None,
-                    "name": item.name,
+                    "name": _compose_backward_compatible_item_name(item.name, getattr(item, "item_remark", None)),
+                    "item_remark": getattr(item, "item_remark", None),
                     "price": float(item.price or 0),
                     "qty": item.qty,
                     "image": dish_images.get(item.dish_id) or None,

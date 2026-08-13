@@ -199,7 +199,10 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
             shop=TENANT,
             table="8",
             dining_session_id=self.session_id,
-            items=[OrderItemIn(dish_id=self.dish_id, name="小酥肉", price=0.01, qty=1)],
+            # P0-02: use the dish's real server price (18.00) instead of the old
+            # 0.01 placeholder -- this suite is about assisted payment handoff, not
+            # pricing, so the fixture should reflect a realistic order.
+            items=[OrderItemIn(dish_id=self.dish_id, name="小酥肉", price=18.0, qty=1)],
             total=0.01,
             request_id="handoff-order-1",
         )

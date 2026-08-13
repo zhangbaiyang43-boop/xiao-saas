@@ -69,9 +69,10 @@ class OrderItem(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     order_id = Column(BigInteger, ForeignKey("orders.id"), nullable=False, index=True)
     dish_id = Column(BigInteger, nullable=True)
-    name = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
     qty = Column(Integer, nullable=False, default=1)
+    item_remark = Column(String(255), nullable=True)
 
 
 

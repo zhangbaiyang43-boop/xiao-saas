@@ -67,10 +67,14 @@ class ProductSelectionConsistencyContractsTest(unittest.TestCase):
         self.assertIn("MenuItem.id == item_in.dish_id", ORDERS_SOURCE)
         self.assertIn("MenuItem.tenant_id == tenant_id", ORDERS_SOURCE)
         self.assertIn("unit_price = _numeric_float(dish.price)", ORDERS_SOURCE)
-        self.assertIn("submitted_name = str(item_in.name or \"\").strip()", ORDERS_SOURCE)
-        self.assertIn("submitted_name.startswith(base_name)", ORDERS_SOURCE)
-        self.assertIn("name = submitted_name[:64] if submitted_name", ORDERS_SOURCE)
-        self.assertIn("name=name", ORDERS_SOURCE)
+        # P0-02 snapshot closure: OrderItem.name is no longer derived from the
+        # client-submitted item_in.name at all (previously trusted it when
+        # prefixed by the real dish name) -- it's now a pure server-canonical
+        # dish+validated-spec+validated-addon description. Pin the new source
+        # shape instead of the superseded client-trust mechanism.
+        self.assertIn("canonical_labels = [spec_sel.value for spec_sel in", ORDERS_SOURCE)
+        self.assertIn("name = base_name if not canonical_labels else base_name", ORDERS_SOURCE)
+        self.assertIn("item_remark=item_remark", ORDERS_SOURCE)
 
     def test_display_name_matrix_for_database_order_detail(self):
         cases = [
@@ -90,7 +94,9 @@ class ProductSelectionConsistencyContractsTest(unittest.TestCase):
         self.assertIn("if not dish.available", ORDERS_SOURCE)
         self.assertIn("if not dish.available", ORDERS_SOURCE)
         self.assertIn("dish.stock is not None and dish.stock <= 0", ORDERS_SOURCE)
-        self.assertIn("dish sold out", ORDERS_SOURCE)
+        # P0-02: sold-out rejection message was translated to Chinese for user-facing
+        # consistency (was English "dish sold out") -- pin the new message instead.
+        self.assertIn("菜品已售罄", ORDERS_SOURCE)
         self.assertIn("import DishList from '../components/DishList.vue'", MENU_SOURCE)
         self.assertIn(":is-sold-out=\"isSoldOut\"", MENU_SOURCE)
         self.assertIn("isSoldOut(dish)", DISH_LIST_SOURCE)
@@ -122,11 +128,18 @@ class ProductSelectionConsistencyContractsTest(unittest.TestCase):
         self.assertEqual(row["quantity_text"], "×99")
         self.assertEqual(row["item_amount_text"], "2178.00")
 
-    def test_order_item_model_uses_existing_name_field_no_migration_required(self):
+    def test_order_item_model_carries_widened_name_and_dedicated_remark_column(self):
+        # P0-02 snapshot closure (later phase, explicitly authorized): the
+        # original P0-02 pass found no migration was needed for pricing
+        # authority alone, but per-item remark support genuinely required one
+        # -- spec/addon option names/counts are unconstrained in the current
+        # schema, so no fixed bound on the canonical name could be proven,
+        # and there was no separate channel for user remarks. This
+        # supersedes the old "no migration required" assumption.
         self.assertIn("class OrderItem", ORDER_MODEL_SOURCE)
-        self.assertIn("name = Column(String(64)", ORDER_MODEL_SOURCE)
+        self.assertIn("name = Column(String(255)", ORDER_MODEL_SOURCE)
+        self.assertIn("item_remark = Column(String(255)", ORDER_MODEL_SOURCE)
         self.assertNotIn("sku_text = Column", ORDER_MODEL_SOURCE)
-        self.assertNotIn("item_remark = Column", ORDER_MODEL_SOURCE)
 
 
 if __name__ == "__main__":
