@@ -234,6 +234,7 @@ def install_stubs():
     }
     modules["app.services.order_print_service"].can_reprint_order = lambda order, print_type="kitchen": (True, None)
     modules["app.services.order_print_service"].reconcile_print_orders = _zero_async
+    modules["app.services.order_print_service"].supports_independent_print_session = lambda db: False
     modules["app.services.wxpay_service"].WxPayService = FakeWxPayService
 
 

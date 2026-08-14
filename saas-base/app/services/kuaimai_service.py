@@ -113,7 +113,6 @@ def _build_print_item_row(item) -> dict[str, Any]:
         "sku_text": sku_text,
         "option_text": option_text,
         "addons": addons,
-        "item_remark": item_remark,
     }
 
 
@@ -423,10 +422,15 @@ def _parse_kuaimai_response(resp) -> Dict[str, Any]:
         is_success = 200 <= int(getattr(resp, "status_code", 0) or 0) < 300
 
     if not is_success:
+        response_code = (
+            "KUAIMAI_HTTP_5XX"
+            if int(getattr(resp, "status_code", 0) or 0) >= 500
+            else "KUAIMAI_HTTP_4XX"
+        )
         raise KuaimaiPrintError(
             f"Kuaimai HTTP request failed: HTTP {resp.status_code}, "
             f"Content-Type={content_type}, response={raw_text[:500]}",
-            code="KUAIMAI_HTTP_ERROR",
+            code=response_code,
             status_code=resp.status_code,
         )
 
@@ -511,9 +515,14 @@ async def _post_kuaimai_payload(kuaimai_url: str, payload: Dict[str, Any], app_s
         )
     except httpx.HTTPStatusError as exc:
         logger.exception("[KUAIMAI_TEST_EXCEPTION] type=HTTPStatusError error=%s", str(exc))
+        response_code = (
+            "KUAIMAI_HTTP_5XX"
+            if int(exc.response.status_code) >= 500
+            else "KUAIMAI_HTTP_4XX"
+        )
         raise KuaimaiPrintError(
             f"Kuaimai HTTP error: {exc.response.status_code}",
-            code="KUAIMAI_HTTP_ERROR",
+            code=response_code,
             status_code=exc.response.status_code,
         )
     except KuaimaiPrintError:

@@ -40,6 +40,7 @@ from app.services.order_print_service import (
     build_staff_print_summary,
     can_reprint_order,
     reconcile_print_orders,
+    supports_independent_print_session,
 )
 from app.services.order_stock_service import _restore_order_stock
 
@@ -941,15 +942,39 @@ async def _persist_create_order_and_build_response(
         order_items.append(oi)
 
     await db.flush()
+    if pay_later_mode:
+        from app.services.order_print_service import ensure_initial_print_intent
+
+        defer_initial_print = bool(
+            pickup_settings.get("enabled")
+            and pickup_settings.get("required_before_print")
+            and not resolved_pickup_no
+        )
+        await ensure_initial_print_intent(
+            order,
+            db,
+            eligible=not defer_initial_print,
+            reason="order_created_pay_later",
+        )
     await db.commit()
     await db.refresh(order)
     # 出票挪到 commit 之后、且不 await——顾客提交订单不该等一次第三方打印机 API。
     # 必须在 commit 之后才调度：后台任务用的是独立 session，提前调度会因为这笔订单
     # 在别的 session 里还看不见（还没提交）而被 _print_paid_order_ticket 误判成
     # "订单不存在/还没付款"，直接跳过打印。
-    if pay_later_mode:
+    if pay_later_mode and supports_independent_print_session(db):
         _spawn_background_print_task(
-            _print_paid_order_ticket_background(int(order.id), str(order.tenant_id), reason="order_created_pay_later")
+            _print_paid_order_ticket_background(
+                int(order.id),
+                str(order.tenant_id),
+                reason="order_created_pay_later",
+                bind=getattr(db, "bind", None),
+            )
+        )
+    elif pay_later_mode:
+        logger.warning(
+            "[PRINT_BACKGROUND_DEFERRED_TO_RECOVERY] order_id=%s dialect=sqlite",
+            order.id,
         )
 
     order_data = serialize_order(
@@ -1307,13 +1332,16 @@ async def reprint_order_ticket(
     if not principal:
         return error_response(code=401, msg="请先登录")
     print_type = (body.print_type if body else "kitchen") or "kitchen"
-    # Staff may only reprint kitchen tickets; owners keep full reprint capability.
+    # Authorize the requested ticket type before reporting renderer support. This keeps
+    # non-kitchen ticket types owner-only and prevents staff from probing unsupported types.
     if not principal.is_owner:
         if print_type != "kitchen" or not principal.can(PERM_KITCHEN_PRINT_REPRINT):
             return JSONResponse(
                 status_code=403,
                 content=RespVo(code=403, msg="当前账号无此权限").to_response(),
             )
+    if print_type != "kitchen":
+        return error_response(code=400, msg="receipt reprint is not supported")
     result = await db.execute(
         select(Order).where(Order.id == int(order_id), Order.tenant_id == principal.tenant_id)
     )

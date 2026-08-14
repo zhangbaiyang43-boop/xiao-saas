@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 
 from fastapi import FastAPI, Request
@@ -55,6 +57,7 @@ from app.middleware.tenant_middleware import TenantMiddleware
 from app.models import Base
 from app.plugins.plugin_manager import plugin_manager
 from app.services.consumption_event_handlers import handle_consumption_membership
+from app.services.order_print_service import print_recovery_loop
 
 os.makedirs("logs", exist_ok=True)
 os.makedirs("static", exist_ok=True)
@@ -64,6 +67,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.state.limiter = limiter
 app.state.tenant_limiter = tenant_limiter
+
+_print_recovery_task: asyncio.Task[None] | None = None
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(TenantMiddleware)
@@ -364,7 +369,7 @@ async def _coupon_expiry_reminder_loop():
 
 @app.on_event("startup")
 async def startup():
-    import asyncio
+    global _print_recovery_task
     # 排队票 openid/customer_id 等补列：生产常关 AUTO_CREATE_TABLES，但仍需幂等补齐，
     # 否则顾客自助取号 INSERT 会因 Unknown column 连续失败。
     async with async_engine.begin() as conn:
@@ -390,6 +395,20 @@ async def startup():
 
     # 启动优惠券到期提醒任务（订阅消息未配置模板 ID 时循环内部会直接跳过）
     asyncio.create_task(_coupon_expiry_reminder_loop())
+
+    # Printing has its own retained task so shutdown can cancel it deterministically.
+    _print_recovery_task = asyncio.create_task(print_recovery_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown_print_recovery():
+    global _print_recovery_task
+    if _print_recovery_task is None:
+        return
+    _print_recovery_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _print_recovery_task
+    _print_recovery_task = None
 
 
 @app.get("/")

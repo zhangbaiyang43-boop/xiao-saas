@@ -111,7 +111,8 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         self.assertIn('operator_role=principal.role', reprint_source)
         self.assertNotIn('payment_status = "paid"', reprint_source)
         self.assertNotIn('payment_method =', reprint_source)
-        self.assertIn('select(Order).where(Order.id == order.id).with_for_update()', print_source)
+        self.assertIn('Order.id == order.id, Order.tenant_id == tenant_id', print_source)
+        self.assertIn('.with_for_update()', print_source)
 
 
 if __name__ == "__main__":

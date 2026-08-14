@@ -66,6 +66,10 @@
         </div>
         <span class="wait">等待 {{ waitMinutes(order.created_at) }} 分钟</span>
       </div>
+      <div
+        v-if="order.print_issue === 'failed' || order.print_issue === 'unknown'"
+        class="print-detail"
+      >{{ printDiagnostic(order) }}</div>
       <div class="items">
         <div v-for="(item, idx) in order.items" :key="idx" class="item-line">
           <b>{{ item.name }}</b> ×{{ item.qty }}
@@ -149,6 +153,17 @@ const printIssueCount = computed(() =>
 
 const visible = computed(() => orders.value.filter((o) => o.status === statusFilter.value))
 
+function printDiagnostic(order) {
+  const route = [order.print_provider, order.print_printer_identifier].filter(Boolean).join(' / ')
+  const attempt = order.print_last_attempt_at
+    ? new Date(order.print_last_attempt_at).toLocaleString('zh-CN', { hour12: false })
+    : '暂无时间'
+  const manual = Number(order.manual_reprint_count || 0)
+    ? ` · 补打${order.manual_reprint_count}次(${order.manual_reprint_last_status || '处理中'})`
+    : ''
+  return `${order.print_error_code || '未返回错误码'} · ${attempt}${route ? ` · ${route}` : ''}${manual}`
+}
+
 async function logout() {
   await auth.logoutCurrentDevice()
   router.replace('/login?mode=staff')
@@ -192,6 +207,7 @@ async function reprint(order) {
 
 <style scoped>
 .wb-page { padding: 12px 12px 80px; background: #111827; min-height: 100%; color: #f9fafb; }
+.print-detail { margin: -2px 0 8px; color: #fca5a5; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .wb-header { display: flex; justify-content: space-between; margin-bottom: 12px; }
 .wb-actions { display: flex; gap: 8px; }
 .wb-title { font-size: 22px; font-weight: 800; }

@@ -74,7 +74,10 @@ class OrderLifecycleService(BaseService):
         if not order:
             return error_response(code=404, msg="order not found")
         _, meta = _split_merchant_note_and_print_meta(order.merchant_note)
-        order.merchant_note = _compose_merchant_note_with_print_meta(note.strip() or None, meta)
+        try:
+            order.merchant_note = _compose_merchant_note_with_print_meta(note.strip() or None, meta)
+        except ValueError as exc:
+            return error_response(code=422, msg=str(exc))
         await self.db.commit()
         display_note, _ = _split_merchant_note_and_print_meta(order.merchant_note)
         return success_response(data={"id": str(order.id), "merchant_note": display_note}, msg="merchant note updated")

@@ -161,6 +161,9 @@
               </div>
             </div>
             <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
+            <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
+              {{ printDiagnostic(order) }}
+            </div>
             <div class="order-items">
               <div v-for="(item, idx) in order.items" :key="idx" class="order-item-row">
                 <span class="order-item-name">{{ item.name }}</span>
@@ -294,6 +297,9 @@
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">单号尾号 {{ orderTail(order) }}<template v-if="order.paymentMethodText"> · {{ order.paymentMethodText }}</template></div>
+          <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
+            {{ printDiagnostic(order) }}
+          </div>
           <div class="order-items">
             <div v-for="(item, idx) in order.items" :key="idx" class="order-item-row">
               <span class="order-item-name">{{ item.name }}</span>
@@ -848,6 +854,12 @@ async function loadOrders(pollMeta = {}) {
       served_at: o.served_at || null,
       paymentStatus: o.payment_status || '',
       printStatus: o.print_status || null,
+      printErrorCode: o.print_error_code || '',
+      printLastAttemptAt: o.print_last_attempt_at || '',
+      printProvider: o.print_provider || '',
+      printPrinterIdentifier: o.print_printer_identifier || '',
+      printManualReprintCount: Number(o.print_manual_reprint_count || 0),
+      printManualReprintLastStatus: o.print_manual_reprint_last_status || '',
       createdAt: o.created_at || '',
       time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
       items: Array.isArray(o.items) ? o.items : [],
@@ -1132,6 +1144,17 @@ async function reprintOrderTicket(order) {
   } catch { message.error('补打失败') } finally { order.reprinting = false }
 }
 
+function printDiagnostic(order) {
+  const route = [order.printProvider, order.printPrinterIdentifier].filter(Boolean).join(' / ')
+  const attempt = order.printLastAttemptAt
+    ? new Date(order.printLastAttemptAt).toLocaleString('zh-CN', { hour12: false })
+    : '暂无时间'
+  const manual = order.printManualReprintCount
+    ? ` · 补打${order.printManualReprintCount}次(${order.printManualReprintLastStatus || '处理中'})`
+    : ''
+  return `${order.printErrorCode || '未返回错误码'} · ${attempt}${route ? ` · ${route}` : ''}${manual}`
+}
+
 async function acceptTableOrders(table) {
   table.updating = true
   try {
@@ -1214,6 +1237,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.print-diagnostic { margin: -2px 0 6px; color: #b45309; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
 .page-header {
   display: flex;
   align-items: center;

@@ -255,6 +255,17 @@ class OrderPaymentService(BaseService):
         order.payment_method = effective_method
         order.payment_time = datetime.now(timezone.utc).isoformat()
         order.status = "pending"
+        try:
+            from app.services.order_print_service import ensure_initial_print_intent
+        except ImportError:  # compatibility for isolated legacy contract harnesses
+            ensure_initial_print_intent = None
+        if ensure_initial_print_intent is not None:
+            await ensure_initial_print_intent(
+                order,
+                self.db,
+                eligible=True,
+                reason="payment_success",
+            )
         await self.db.flush()
 
 
