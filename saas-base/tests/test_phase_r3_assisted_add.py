@@ -38,6 +38,10 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TENANT = "tenant-r3-a"
+
+
+def close_background_print_coroutine(coroutine):
+    coroutine.close()
 FAKE_HASH = "test-password-hash"
 
 
@@ -192,7 +196,7 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_r3_waiter_assisted_add_audit(self):
         async with self.SessionLocal() as db:
             req = make_request(role="waiter", account_id=self.waiter_id)
-            with patch("app.api.v1.orders._spawn_background_print_task"):
+            with patch("app.api.v1.orders._spawn_background_print_task", side_effect=close_background_print_coroutine):
                 res = await create_order(self._body(request_id="r3-wa-1"), req, db)
             self.assertEqual(res.code, 200)
             result = await db.execute(
@@ -211,7 +215,7 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_r3_role_snapshot_survives_role_change(self):
         async with self.SessionLocal() as db:
             req = make_request(role="waiter", account_id=self.waiter_id)
-            with patch("app.api.v1.orders._spawn_background_print_task"):
+            with patch("app.api.v1.orders._spawn_background_print_task", side_effect=close_background_print_coroutine):
                 res = await create_order(self._body(request_id="r3-snap-1"), req, db)
             self.assertEqual(res.code, 200)
             account = (
@@ -227,7 +231,7 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_r3_price_from_backend(self):
         async with self.SessionLocal() as db:
             req = make_request(role="frontdesk", account_id=self.frontdesk_id)
-            with patch("app.api.v1.orders._spawn_background_print_task"):
+            with patch("app.api.v1.orders._spawn_background_print_task", side_effect=close_background_print_coroutine):
                 res = await create_order(self._body(request_id="r3-price", price=0.01), req, db)
             self.assertEqual(res.code, 200)
             order = (
@@ -238,7 +242,7 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_r3_idempotency(self):
         async with self.SessionLocal() as db:
             req = make_request(role="waiter", account_id=self.waiter_id)
-            with patch("app.api.v1.orders._spawn_background_print_task"):
+            with patch("app.api.v1.orders._spawn_background_print_task", side_effect=close_background_print_coroutine):
                 r1 = await create_order(self._body(request_id="r3-idem"), req, db)
                 r2 = await create_order(self._body(request_id="r3-idem"), req, db)
             self.assertEqual(r1.code, 200)
@@ -265,7 +269,10 @@ class PhaseR3AssistedAddServiceTest(unittest.IsolatedAsyncioTestCase):
             tenant.payment_mode = "prepay"
             await db.commit()
             req = make_request(role="waiter", account_id=self.waiter_id)
-            with patch("app.api.v1.orders._spawn_background_print_task") as spawn_print:
+            with patch(
+                "app.api.v1.orders._spawn_background_print_task",
+                side_effect=close_background_print_coroutine,
+            ) as spawn_print:
                 res = await create_order(self._body(request_id="r3-prepay"), req, db)
             self.assertEqual(res.code, 200)
             order = (

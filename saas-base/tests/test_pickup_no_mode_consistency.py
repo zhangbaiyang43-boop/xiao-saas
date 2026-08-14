@@ -40,6 +40,10 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
 TENANT = "tenant-mode"
 
 
+def close_background_print_coroutine(coroutine):
+    coroutine.close()
+
+
 @event.listens_for(OrderItem, "before_insert")
 def _assign_order_item_id_for_sqlite(mapper, connection, target):
     if target.id is None:
@@ -265,7 +269,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             total=25,
             pickup_no=pickup_no,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res = await create_order(body, make_merchant_request(), self.db)
         self.assertEqual(res.code, 200, res.msg)
         return await self.db.get(Order, int(res.data["id"]))
@@ -291,7 +298,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             items=[OrderItemIn(dish_id=self.dish.id, name=self.dish.name, price=25, qty=1)],
             total=25,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res_b = await create_order(body, make_merchant_request(), self.db)
         self.assertEqual(res_b.code, 200, res_b.msg)
         order_b = await self.db.get(Order, int(res_b.data["id"]))
@@ -316,7 +326,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             items=[OrderItemIn(dish_id=self.dish.id, name=self.dish.name, price=25, qty=1)],
             total=25,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res_b = await create_order(body, make_merchant_request(), self.db)
         order_b = await self.db.get(Order, int(res_b.data["id"]))
 

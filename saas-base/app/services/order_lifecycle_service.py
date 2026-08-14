@@ -441,6 +441,12 @@ class OrderLifecycleService(BaseService):
                 data={"id": str(order.id), "status": order.status, "idempotent": True},
                 msg="状态未变化",
             )
+        payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
+        requires_table_settlement = payment_mode == "table_account" or (
+            payment_mode == "postpay" and getattr(order, "dining_session_id", None) is not None
+        )
+        if body.status == "settled" and requires_table_settlement:
+            return error_response(code=409, msg="后付/桌台账单请通过整桌结账完成")
         if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
             return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
         entered_done = body.status == "done"
