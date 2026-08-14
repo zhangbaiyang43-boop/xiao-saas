@@ -380,6 +380,7 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
             resource = {
                 "out_trade_no": str(order.id),
                 "trade_state": "SUCCESS",
+                "transaction_id": f"wx-handoff-{order.id}",
                 "amount": {"total": 1800, "payer_total": 1800, "currency": "CNY"},
             }
             with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \

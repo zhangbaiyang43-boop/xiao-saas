@@ -445,7 +445,12 @@ class CommissionService(BaseService):
 
         return customer
 
-    async def record_after_verify(self, coupon, template=None) -> list[CommissionRecord]:
+    async def record_after_verify(
+        self,
+        coupon,
+        template=None,
+        auto_commit: bool = True,
+    ) -> list[CommissionRecord]:
         tenant_id = self.require_tenant_id()
 
         customer_result = await self.db.execute(
@@ -553,7 +558,10 @@ class CommissionService(BaseService):
             return []
 
         # ── 第一步：先落库 PENDING 记录，确保奖励凭证不丢失 ──────────────
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         for item in created:
             await self.db.refresh(item)
 
@@ -599,6 +607,7 @@ class CommissionService(BaseService):
                     min_spend=min_spend,
                     valid_days=valid_days,
                     template_name=info["template_name"],
+                    auto_commit=auto_commit,
                 )
                 if ok:
                     rec.status = "SETTLED"
@@ -616,7 +625,10 @@ class CommissionService(BaseService):
                     )
 
             if any_settled:
-                await self.db.commit()
+                if auto_commit:
+                    await self.db.commit()
+                else:
+                    await self.db.flush()
                 for item in created:
                     await self.db.refresh(item)
 
@@ -626,6 +638,8 @@ class CommissionService(BaseService):
                 f"invite_reward: 发券阶段异常，记录保留为PENDING "
                 f"tenant={tenant_id} user={customer.id} error={exc}"
             )
+            if not auto_commit:
+                raise
             # 不 re-raise，主核销流程不受影响
 
         return created

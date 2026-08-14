@@ -22,6 +22,7 @@ class Order(BaseModel):
     payment_status = Column(String(16), nullable=False, default="unpaid")  # unpaid | paid
     payment_mode = Column(String(32), nullable=False, default="prepay")  # prepay | postpay | table_account
     payment_method = Column(String(16), nullable=True)   # mock | wxpay | balance
+    wx_transaction_id = Column(String(64), nullable=True)
     payment_time = Column(String(32), nullable=True)     # ISO string，避免加列类型迁移
     print_status = Column(String(16), nullable=False, default="PENDING")  # PENDING | SUCCESS | FAILED | UNKNOWN
     printed_at = Column(DateTime, nullable=True)
@@ -69,6 +70,7 @@ class Order(BaseModel):
         Index("idx_orders_tenant_session_status", "tenant_id", "dining_session_id", "status"),
         Index("idx_orders_parent_order", "parent_order_id"),
         Index("ux_orders_tenant_client_request_id", "tenant_id", "client_request_id", unique=True),
+        Index("ux_orders_wx_transaction_id", "wx_transaction_id", unique=True),
     )
 
 class OrderItem(Base):

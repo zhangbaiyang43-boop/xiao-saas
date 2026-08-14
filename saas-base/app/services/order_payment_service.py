@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Any, TYPE_CHECKING, TypedDict, cast
 
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from starlette.requests import Request
@@ -40,6 +41,14 @@ class PostPaymentCouponData(TypedDict, total=False):
 ApiResponse = RespVo[Any]
 
 
+class PaymentFactError(ValueError):
+    pass
+
+
+class PaymentTransactionConflict(PaymentFactError):
+    pass
+
+
 def _numeric_decimal(value: object) -> Decimal:
     if isinstance(value, Decimal):
         return value
@@ -51,10 +60,82 @@ def _numeric_float(value: object) -> float:
 
 
 class OrderPaymentService(BaseService):
+    @staticmethod
+    def _validate_confirmed_wx_payment(order: Order, resource: dict[str, Any]) -> str:
+        if resource.get("trade_state") != "SUCCESS":
+            raise PaymentFactError("payment not successful")
+        if str(resource.get("out_trade_no") or "") != str(order.id):
+            raise PaymentFactError("out_trade_no mismatch")
+        transaction_id = str(resource.get("transaction_id") or "").strip()
+        if not transaction_id or len(transaction_id) > 64:
+            raise PaymentFactError("invalid transaction_id")
+        amount = resource.get("amount")
+        if not isinstance(amount, dict) or amount.get("total") is None:
+            raise PaymentFactError("missing amount")
+        if amount.get("currency") != "CNY":
+            raise PaymentFactError("currency mismatch")
+        expected_fen = int((_numeric_decimal(order.total) * Decimal("100")).quantize(Decimal("1")))
+        try:
+            paid_fen = int(amount["total"])
+        except (TypeError, ValueError) as exc:
+            raise PaymentFactError("invalid amount") from exc
+        if paid_fen != expected_fen:
+            raise PaymentFactError("amount mismatch")
+        return transaction_id
+
+    async def _claim_wx_transaction(self, order: Order, transaction_id: str) -> str:
+        current = str(order.wx_transaction_id or "")
+        if current:
+            if current == transaction_id:
+                return "duplicate"
+            raise PaymentTransactionConflict("order transaction conflict")
+
+        owner_result = await self.db.execute(
+            select(Order)
+            .where(
+                Order.tenant_id == str(order.tenant_id),
+                Order.wx_transaction_id == transaction_id,
+                Order.id != order.id,
+            )
+            .with_for_update()
+        )
+        if owner_result.scalar_one_or_none():
+            raise PaymentTransactionConflict("transaction already claimed")
+        order.wx_transaction_id = transaction_id
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            raise PaymentTransactionConflict("transaction already claimed") from exc
+        return "bound"
+
+    async def _apply_confirmed_wx_payment(
+        self,
+        order: Order,
+        resource: dict[str, Any],
+    ) -> tuple[bool, PostPaymentCouponData | None, bool]:
+        transaction_id = self._validate_confirmed_wx_payment(order, resource)
+        claim = await self._claim_wx_transaction(order, transaction_id)
+        if order.payment_status == "paid":
+            return False, None, claim == "bound"
+        if order.payment_mode != "prepay" or order.status != "pending_payment":
+            raise PaymentFactError("order cannot accept online payment")
+        coupon_data, _ = await self._on_payment_success(order, payment_method="wxpay")
+        return True, coupon_data, claim == "bound"
+
+    async def _run_post_commit_payment_effects(self, order: Order) -> None:
+        await _print_paid_order_ticket(order, self.db, reason="payment_success")
+        try:
+            from app.services.subscribe_message_service import send_order_success_subscribe
+
+            await send_order_success_subscribe(self.db, order)
+        except Exception as exc:
+            logger.warning(f"post-payment order success subscribe failed: {exc}")
+
     async def _recover_wxpay_order_if_paid(self, order: Order) -> bool:
         """Recover paid orders when WeChat callback is delayed or lost."""
-        if not order or order.status != "pending_payment":
+        if not order or order.payment_mode != "prepay":
             return False
+        order_id = order.id
         try:
             from app.models.tenant import Tenant
             from app.services.wxpay_service import WxPayService
@@ -66,24 +147,41 @@ class OrderPaymentService(BaseService):
                 return False
 
             pay_resource = await svc.query_order_by_out_trade_no(str(order.id))
-            if not pay_resource or pay_resource.get("trade_state") != "SUCCESS":
+            if not pay_resource:
                 return False
 
-            locked_result = await self.db.execute(select(Order).where(Order.id == order.id).with_for_update())
+            locked_result = await self.db.execute(
+                select(Order)
+                .where(
+                    Order.id == order.id,
+                    Order.tenant_id == str(order.tenant_id),
+                )
+                .with_for_update()
+            )
             locked_order = locked_result.scalar_one_or_none()
-            if not locked_order or locked_order.status != "pending_payment":
+            if not locked_order:
                 return False
 
-            await self._on_payment_success(locked_order, payment_method="wxpay")
+            transitioned, _, binding_changed = await self._apply_confirmed_wx_payment(
+                locked_order,
+                pay_resource,
+            )
+            if transitioned or binding_changed:
+                await self.db.commit()
+            else:
+                await self.db.rollback()
+            if transitioned:
+                await self._run_post_commit_payment_effects(locked_order)
             logger.warning(
                 "[WXPAY_ORDER_RECOVERED] order_id=%s transaction_id=%s out_trade_no=%s",
-                locked_order.id,
+                order_id,
                 pay_resource.get("transaction_id") or "",
-                pay_resource.get("out_trade_no") or str(locked_order.id),
+                pay_resource.get("out_trade_no") or str(order_id),
             )
             return True
         except Exception as exc:
-            logger.warning("[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s", getattr(order, "id", ""), exc)
+            await self.db.rollback()
+            logger.warning("[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s", order_id, exc)
             return False
 
 
@@ -133,13 +231,17 @@ class OrderPaymentService(BaseService):
                     coupon_template = template_result.scalar_one_or_none()
                     commission_svc = CommissionService(self.db)
                     commission_svc.set_tenant_id(str(order.tenant_id))
-                    await commission_svc.record_after_verify(locked_coupon, coupon_template)
-                    # record_after_verify 内部会 commit，之后同一 session 里所有对象（包括
-                    # order）的属性都会被标记过期；显式 refresh 一次，避免下面继续读写
-                    # order 时触发 SQLAlchemy 异步会话下的懒加载报错。
+                    await commission_svc.record_after_verify(
+                        locked_coupon,
+                        coupon_template,
+                        auto_commit=False,
+                    )
+                    # Payment transition uses flush-only mode; refresh keeps the
+                    # shared session state explicit before the remaining writes.
                     await self.db.refresh(order)
                 except Exception as e:
                     logger.warning(f"post-payment invite reward failed: {e}")
+                    raise
             elif locked_coupon and locked_coupon.status != "USED":
                 order.coupon_id = None
                 order.discount_amount = None
@@ -156,7 +258,7 @@ class OrderPaymentService(BaseService):
         await self.db.flush()
 
 
-        # Coupon issuance and points are post-payment side effects.
+        # DB-only coupon/member effects remain inside the outer payment transaction.
         if customer_id:
             try:
                 svc = CouponService(self.db)
@@ -178,7 +280,10 @@ class OrderPaymentService(BaseService):
                     exclude_order_id=int(order.id),
                 )
                 issue_result = await svc.issue_auto_coupon(
-                    int(customer_id), rule_type, consumption_amount=float(order.total or 0)
+                    int(customer_id),
+                    rule_type,
+                    consumption_amount=float(order.total or 0),
+                    auto_commit=False,
                 )
                 # issue_auto_coupon() 的返回值是内部服务间约定的形状（success_count/sent/
                 # weighted_coupon 嵌套），不是给客户端消费的。这里只在真的发出新券时才
@@ -202,9 +307,14 @@ class OrderPaymentService(BaseService):
                 # 只回给微信、回不到小程序客户端。存到订单上，客户端支付成功后轮询
                 # /orders/my 就能把这次实际发放的奖励券（或者"这次没发"）拿回来，而不是
                 # 依赖 createWxPayOrder 那个支付前就返回、结构上根本不含 coupon 的旧响应。
-                order.reward_coupon_snapshot = json.dumps(coupon_data, ensure_ascii=False) if coupon_data else None
+                order.reward_coupon_snapshot = (
+                    json.dumps(coupon_data, ensure_ascii=False, default=str)
+                    if coupon_data
+                    else None
+                )
             except Exception as e:
                 logger.warning(f"post-payment coupon failed: {e}")
+                raise
 
             try:
                 from app.services.membership_service import MembershipService
@@ -213,26 +323,18 @@ class OrderPaymentService(BaseService):
                 customer_obj = await CustomerService(self.db).get_customer(int(customer_id))
                 if customer_obj:
                     await membership_svc.apply_consumption(
-                        customer_obj, float(order.total or 0), consumption_id=int(order.id or 0)
+                        customer_obj,
+                        float(order.total or 0),
+                        consumption_id=int(order.id or 0),
+                        auto_commit=False,
                     )
             except Exception as e:
                 logger.warning(f"post-payment points failed: {e}")
+                raise
 
-        # Print order ticket after payment. Printing failures are recoverable and must not affect payment state.
-        await _print_paid_order_ticket(order, self.db, reason="payment_success")
-        try:
-            from app.services.payment_handoff_service import PaymentHandoffService
+        from app.services.payment_handoff_service import PaymentHandoffService
 
-            await PaymentHandoffService(self.db).mark_order_paid(int(order.id))
-        except Exception as e:
-            logger.warning(f"payment handoff paid marker failed: {e}")
-
-        # 点餐成功订阅消息：依赖顾客支付前 requestSubscribeMessage 授权；失败不影响支付主流程。
-        try:
-            from app.services.subscribe_message_service import send_order_success_subscribe
-            await send_order_success_subscribe(self.db, order)
-        except Exception as e:
-            logger.warning(f"post-payment order success subscribe failed: {e}")
+        await PaymentHandoffService(self.db).mark_order_paid(int(order.id))
 
         return cast(PostPaymentCouponData | None, coupon_data), 0.0
 
@@ -365,7 +467,12 @@ class OrderPaymentService(BaseService):
             from app.models.coupon import Coupon
 
             coupon_result = await self.db.execute(
-                select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+                select(Coupon)
+                .where(
+                    Coupon.id == order.coupon_id,
+                    Coupon.tenant_id == str(order.tenant_id),
+                )
+                .with_for_update()
             )
             coupon = coupon_result.scalar_one_or_none()
             if coupon and coupon.status in ("LOCKED", "USED"):
@@ -460,7 +567,11 @@ class OrderPaymentService(BaseService):
             return error_response(code=403, msg="mock pay is only available in debug mode")
         try:
             customer_id = getattr(request.state, "customer_id", None)
-            result = await self.db.execute(select(Order).where(Order.id == int(order_id)).with_for_update())
+            tenant_id = getattr(request.state, "tenant_id", None)
+            order_query = select(Order).where(Order.id == int(order_id))
+            if tenant_id:
+                order_query = order_query.where(Order.tenant_id == str(tenant_id))
+            result = await self.db.execute(order_query.with_for_update())
             order = result.scalar_one_or_none()
             if not order:
                 return error_response(code=404, msg="order not found")
@@ -490,6 +601,7 @@ class OrderPaymentService(BaseService):
 
             coupon_data, _ = await self._on_payment_success(order, payment_method="mock")
             await self.db.commit()
+            await self._run_post_commit_payment_effects(order)
             await self.db.refresh(order)
 
             items_result = await self.db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
@@ -502,6 +614,7 @@ class OrderPaymentService(BaseService):
                 msg="支付成功",
             )
         except Exception as e:
+            await self.db.rollback()
             logger.error(f"mock_pay_order error: {e}\n{traceback.format_exc()}")
             return error_response(code=500, msg=f"支付处理失败: {str(e)}")
 
@@ -526,7 +639,11 @@ class OrderPaymentService(BaseService):
             customer_id = getattr(request.state, "customer_id", None)
             openid = getattr(request.state, "openid", None)
 
-            result = await self.db.execute(select(Order).where(Order.id == int(order_id)))
+            tenant_id = getattr(request.state, "tenant_id", None)
+            order_query = select(Order).where(Order.id == int(order_id))
+            if tenant_id:
+                order_query = order_query.where(Order.tenant_id == str(tenant_id))
+            result = await self.db.execute(order_query)
             order = result.scalar_one_or_none()
             if not order:
                 raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
@@ -562,7 +679,12 @@ class OrderPaymentService(BaseService):
 
             if pay_amount <= 0:
                 locked_order_result = await self.db.execute(
-                    select(Order).where(Order.id == int(order_id)).with_for_update()
+                    select(Order)
+                    .where(
+                        Order.id == int(order_id),
+                        Order.tenant_id == str(order.tenant_id),
+                    )
+                    .with_for_update()
                 )
                 order = locked_order_result.scalar_one_or_none()
                 if not order or order.status != "pending_payment":
@@ -570,6 +692,7 @@ class OrderPaymentService(BaseService):
 
                 free_coupon_data, _ = await self._on_payment_success(order, payment_method="free")
                 await self.db.commit()
+                await self._run_post_commit_payment_effects(order)
                 await self.db.refresh(order)
                 from app.models.order import OrderItem
 
@@ -589,7 +712,12 @@ class OrderPaymentService(BaseService):
             svc = WxPayService(tenant) if tenant else None
             if svc and svc.enabled:
                 locked_order_result = await self.db.execute(
-                    select(Order).where(Order.id == int(order_id)).with_for_update()
+                    select(Order)
+                    .where(
+                        Order.id == int(order_id),
+                        Order.tenant_id == str(order.tenant_id),
+                    )
+                    .with_for_update()
                 )
                 order = locked_order_result.scalar_one_or_none()
                 if not order or order.status != "pending_payment":
@@ -697,11 +825,20 @@ class OrderPaymentService(BaseService):
             if trade_state != "SUCCESS":
                 return {"code": "SUCCESS", "message": "ok"}
 
-            result = await self.db.execute(select(Order).where(Order.id == int(out_trade_no)).with_for_update())
+            try:
+                order_id = int(out_trade_no)
+            except (TypeError, ValueError):
+                return {"code": "FAIL", "message": "invalid out_trade_no"}
+            result = await self.db.execute(
+                select(Order)
+                .where(
+                    Order.id == order_id,
+                    Order.tenant_id == str(matched_tenant.tenant_id),
+                )
+                .with_for_update()
+            )
             order = result.scalar_one_or_none()
             if not order:
-                return {"code": "SUCCESS", "message": "ok"}
-            if order.status not in ("pending_payment", "cancelled", "rejected"):
                 return {"code": "SUCCESS", "message": "ok"}
             if matched_tenant and str(order.tenant_id) != str(matched_tenant.tenant_id):
                 logger.warning(
@@ -710,23 +847,30 @@ class OrderPaymentService(BaseService):
                 )
                 return {"code": "FAIL", "message": "tenant mismatch"}
 
-            paid_fen = resource.get("amount", {}).get("total")
-            if paid_fen is not None:
-                expected_fen = round(float(order.total or 0) * 100)
-                if int(paid_fen) != expected_fen:
-                    logger.error(
-                        "[WXPAY_AMOUNT_MISMATCH] order_id=%s expected_fen=%s paid_fen=%s",
-                        out_trade_no, expected_fen, paid_fen,
-                    )
-                    return {"code": "FAIL", "message": "amount mismatch"}
+            transaction_id = self._validate_confirmed_wx_payment(order, resource)
+            claim = await self._claim_wx_transaction(order, transaction_id)
 
-            if order.status == "pending_payment":
+            if order.payment_status == "paid":
+                if claim == "bound":
+                    await self.db.commit()
+                else:
+                    await self.db.rollback()
+                return {"code": "SUCCESS", "message": "ok"}
+
+            if order.status == "pending_payment" and order.payment_mode == "prepay":
                 await self._on_payment_success(order, payment_method="wxpay")
                 await self.db.commit()
+                await self._run_post_commit_payment_effects(order)
                 logger.info(f"微信支付回调成功: order_id={out_trade_no}")
                 return {"code": "SUCCESS", "message": "ok"}
 
+            if order.status not in ("cancelled", "rejected"):
+                raise PaymentFactError("order cannot accept online payment")
             if getattr(order, "refund_status", None) == "success":
+                if claim == "bound":
+                    await self.db.commit()
+                else:
+                    await self.db.rollback()
                 return {"code": "SUCCESS", "message": "ok"}
             logger.error(
                 "[WXPAY_NOTIFY_RACE_WITH_CANCEL] order_id=%s order_status=%s -- WeChat confirmed "
@@ -739,5 +883,6 @@ class OrderPaymentService(BaseService):
             return {"code": "SUCCESS", "message": "ok"}
 
         except Exception as e:
+            await self.db.rollback()
             logger.error(f"wxpay_notify error: {e}\n{traceback.format_exc()}")
             return {"code": "FAIL", "message": str(e)}

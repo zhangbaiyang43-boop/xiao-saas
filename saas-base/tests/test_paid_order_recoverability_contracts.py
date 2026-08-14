@@ -88,9 +88,11 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):
         recover_source = function_source("_recover_wxpay_order_if_paid", source=PAYMENT_SERVICE_SOURCE)
         self.assertIn("query_order_by_out_trade_no", recover_source)
-        self.assertIn('pay_resource.get("trade_state") != "SUCCESS"', recover_source)
+        self.assertIn("_apply_confirmed_wx_payment", recover_source)
         self.assertIn("with_for_update()", recover_source)
-        self.assertIn("_on_payment_success", recover_source)
+        apply_source = function_source("_apply_confirmed_wx_payment", source=PAYMENT_SERVICE_SOURCE)
+        self.assertIn("_validate_confirmed_wx_payment", apply_source)
+        self.assertIn("_on_payment_success", apply_source)
 
 
 if __name__ == "__main__":

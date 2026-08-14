@@ -70,7 +70,13 @@ class MemberCouponRuleConsistencyTest(unittest.IsolatedAsyncioTestCase):
         self.captured_rule_types: list[str] = []
         captured = self.captured_rule_types
 
-        async def record_issue(_svc, customer_id, rule_type, consumption_amount=None):
+        async def record_issue(
+            _svc,
+            customer_id,
+            rule_type,
+            consumption_amount=None,
+            auto_commit=True,
+        ):
             captured.append(rule_type)
             return {"success_count": 1, "source": rule_type}
 

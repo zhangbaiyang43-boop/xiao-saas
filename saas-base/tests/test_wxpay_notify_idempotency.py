@@ -30,6 +30,7 @@ class FakeTenant:
 
 class FakeOrder:
     id = FakeColumn()
+    tenant_id = FakeColumn()
 
     def __init__(self):
         self.id = 10001
@@ -37,6 +38,9 @@ class FakeOrder:
         self.status = "pending_payment"
         self.payment_status = "unpaid"
         self.payment_method = None
+        self.payment_mode = "prepay"
+        self.total = 28
+        self.wx_transaction_id = None
 
 
 class FakeQuery:
@@ -97,6 +101,9 @@ class FakeDB:
     async def commit(self):
         self.commit_count += 1
 
+    async def rollback(self):
+        return None
+
 
 class FakeRequest:
     headers = {"wechatpay-signature": "valid"}
@@ -117,6 +124,7 @@ class FakeWxPayService:
             "out_trade_no": "10001",
             "transaction_id": "4200000000000000001",
             "trade_state": "SUCCESS",
+            "amount": {"total": 2800, "currency": "CNY"},
         }
 
 
@@ -271,7 +279,6 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
             side_effects["payment_updates"] += 1
             side_effects["coupon_writeoffs"] += 1
             side_effects["points_changes"] += 1
-            side_effects["print_jobs"] += 1
             order_obj.payment_status = "paid"
             order_obj.payment_method = payment_method
             order_obj.status = "pending"
@@ -279,6 +286,18 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
 
         payment_module = sys.modules["app.services.order_payment_service"]
         payment_module.OrderPaymentService._on_payment_success = fake_on_payment_success
+
+        async def fake_claim(self, order_obj, transaction_id):
+            if order_obj.wx_transaction_id == transaction_id:
+                return "duplicate"
+            order_obj.wx_transaction_id = transaction_id
+            return "bound"
+
+        async def fake_post_commit(self, order_obj):
+            side_effects["print_jobs"] += 1
+
+        payment_module.OrderPaymentService._claim_wx_transaction = fake_claim
+        payment_module.OrderPaymentService._run_post_commit_payment_effects = fake_post_commit
 
         results = [
             asyncio.run(module.wxpay_notify(FakeRequest(), db))

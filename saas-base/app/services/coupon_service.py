@@ -296,7 +296,13 @@ class CouponService(BaseService):
             # 数据库行锁兜底，不需要再退化成完全不加锁。
             yield not await self._has_dup_after_lock(customer_id, rule_type)
 
-    async def issue_auto_coupon(self, customer_id: int, rule_type: str, consumption_amount: float = None) -> dict:
+    async def issue_auto_coupon(
+        self,
+        customer_id: int,
+        rule_type: str,
+        consumption_amount: float = None,
+        auto_commit: bool = True,
+    ) -> dict:
         rules = await self.get_coupon_rules()
         rule_config = rules.get(rule_type, {})
         
@@ -320,13 +326,19 @@ class CouponService(BaseService):
                 amount=amount,
                 threshold=threshold,
                 valid_days=valid_days,
-                template_name=template_name
+                template_name=template_name,
+                auto_commit=auto_commit,
             )
 
             if not template:
                 return {"success_count": 0, "reason": "建优惠券模失败"}
 
-            result = await self.send_coupons_with_result(template.id, [customer_id], source=rule_type)
+            result = await self.send_coupons_with_result(
+                template.id,
+                [customer_id],
+                source=rule_type,
+                auto_commit=auto_commit,
+            )
 
             if result["success_count"] > 0:
                 result["source"] = rule_type
@@ -459,7 +471,8 @@ class CouponService(BaseService):
         amount: float,
         threshold: float,
         valid_days: int,
-        template_name: str | None = None
+        template_name: str | None = None,
+        auto_commit: bool = True,
     ) -> CouponTemplate:
         template_names = {
             "new_customer_coupon": "新客券",
@@ -508,7 +521,10 @@ class CouponService(BaseService):
             description=rule_type,
         )
         self.db.add(template)
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(template)
         return template
 
@@ -591,6 +607,7 @@ class CouponService(BaseService):
         min_spend: float,
         valid_days: int,
         template_name: str,
+        auto_commit: bool = True,
     ) -> bool:
         """为邀请奖励发放优惠券。
 
@@ -606,6 +623,7 @@ class CouponService(BaseService):
                 threshold=min_spend,
                 valid_days=valid_days,
                 template_name=template_name,
+                auto_commit=auto_commit,
             )
             if not template:
                 logger.error(
@@ -614,7 +632,10 @@ class CouponService(BaseService):
                 )
                 return False
             result = await self.send_coupons_with_result(
-                template.id, [customer_id], source="invite_reward"
+                template.id,
+                [customer_id],
+                source="invite_reward",
+                auto_commit=auto_commit,
             )
             ok = result.get("success_count", 0) > 0
             if not ok:
@@ -629,6 +650,8 @@ class CouponService(BaseService):
                 f"invite_reward: 发券异常 "
                 f"tenant={self.tenant_id} customer={customer_id} amount={amount} error={e}"
             )
+            if not auto_commit:
+                raise
             return False
 
     async def get_template(self, template_id: int) -> CouponTemplate | None:
@@ -792,7 +815,13 @@ class CouponService(BaseService):
         result = await self.send_coupons_with_result(template_id, customer_ids)
         return result["sent"]
 
-    async def send_coupons_with_result(self, template_id, customer_ids, source: str = None) -> dict:
+    async def send_coupons_with_result(
+        self,
+        template_id,
+        customer_ids,
+        source: str = None,
+        auto_commit: bool = True,
+    ) -> dict:
         tenant_id = self.require_tenant_id()
 
         # 安全转换 （支持 string 和 int）
@@ -946,7 +975,10 @@ class CouponService(BaseService):
             template.used_stock = int(template.used_stock or 0) + 1
             coupons.append(coupon)
 
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
 
         for coupon in coupons:
             await self.db.refresh(coupon)
@@ -1355,7 +1387,12 @@ async def _set_order_coupon_status_if_locked(order, db: AsyncSession, status: st
     from app.models.coupon import Coupon
 
     coupon_result = await db.execute(
-        select(Coupon).where(Coupon.id == order.coupon_id).with_for_update()
+        select(Coupon)
+        .where(
+            Coupon.id == order.coupon_id,
+            Coupon.tenant_id == str(order.tenant_id),
+        )
+        .with_for_update()
     )
     coupon = coupon_result.scalar_one_or_none()
     if coupon and coupon.status == "LOCKED":

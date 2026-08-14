@@ -162,7 +162,8 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         self._resource = {
             "out_trade_no": out_trade_no,
             "trade_state": "SUCCESS",
-            "amount": {"total": 5800},
+            "transaction_id": f"wx-cancel-race-{out_trade_no}",
+            "amount": {"total": 5800, "currency": "CNY"},
         }
         return req
 

@@ -102,9 +102,11 @@ class PaymentIdempotencyContractsTest(unittest.TestCase):
         self.assertLess(notify_source.index("with_for_update()"), notify_source.index("_on_payment_success"))
 
     def test_printing_is_only_triggered_after_payment_success(self):
-        payment_success_source = function_source("_on_payment_success", source=PAYMENT_SERVICE_SOURCE)
-        self.assertIn("_print_paid_order_ticket", payment_success_source)
-        self.assertIn("reason=\"payment_success\"", payment_success_source)
+        post_commit_source = function_source("_run_post_commit_payment_effects", source=PAYMENT_SERVICE_SOURCE)
+        self.assertIn("_print_paid_order_ticket", post_commit_source)
+        self.assertIn("reason=\"payment_success\"", post_commit_source)
+        notify_source = function_source("wxpay_notify", source=PAYMENT_SERVICE_SOURCE)
+        self.assertLess(notify_source.index("await self.db.commit()"), notify_source.index("_run_post_commit_payment_effects"))
         self.assertNotIn("print_template_order", function_source("create_wxpay_order", source=PAYMENT_SERVICE_SOURCE))
 
 

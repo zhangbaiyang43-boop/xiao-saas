@@ -71,8 +71,8 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
         recover = function_source(PAYMENT_SERVICE_SOURCE, "_recover_wxpay_order_if_paid")
         self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", get_my_order)
         self.assertIn("query_order_by_out_trade_no", recover)
-        self.assertIn('pay_resource.get("trade_state") != "SUCCESS"', recover)
-        self.assertIn("_on_payment_success", recover)
+        self.assertIn("_apply_confirmed_wx_payment", recover)
+        self.assertIn("with_for_update()", recover)
 
     def test_frontend_persists_pending_order_before_payment(self):
         # 实际下单逻辑在 performSubmitOrder 里——submitOrder 现在只是加了重入锁的薄封装，

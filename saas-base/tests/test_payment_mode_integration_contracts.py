@@ -68,7 +68,9 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('"need_payment": payment_mode == "prepay"', create_source)
         self.assertIn('"next_action": build_order_next_action(payment_mode)', create_source)
         self.assertIn('"order_id": order_data["id"]', create_source)
-        self.assertIn('select(Order).where(Order.id == int(order_id)).with_for_update()', pay_source)
+        self.assertIn('Order.id == int(order_id)', pay_source)
+        self.assertIn('Order.tenant_id == str(order.tenant_id)', pay_source)
+        self.assertIn('.with_for_update()', pay_source)
         self.assertIn('out_trade_no=str(order.id)', pay_source)
         self.assertIn('data.need_payment !== false', USE_CHECKOUT_SOURCE)
         self.assertLess(
