@@ -1,0 +1,80 @@
+name: Backend Full Certification
+
+# TEST-INFRA-01: authoritative, serial migration of the local Backend Full run
+# (`python -m pytest tests/ -q -W error::RuntimeWarning`, ~60-70min) to CI.
+# Manual trigger only in this first version, to avoid burning Actions minutes
+# on every push. No -x / --lf / xdist / sharding — see TEST-INFRA-03 for that.
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: backend-full-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: saas-base
+    shell: bash
+
+jobs:
+  full:
+    name: Backend Full (serial, authoritative)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    # Test suite is self-contained (aiosqlite in-memory DB); no test connects to a
+    # real MySQL/Redis host, so no service containers are needed here.
+    #
+    # JWT_SECRET_KEY: app/config.py's Settings.model_post_init raises RuntimeError
+    # if this is left at its class-default placeholder value. Locally this is
+    # overridden by a real value in saas-base/.env, but .env is gitignored and does
+    # not exist on a CI checkout (verified: import fails without it). The value
+    # below is a CI-only dummy signing key with no relation to any real secret —
+    # tokens signed with it never leave this ephemeral job.
+    env:
+      REDIS_ENABLED: 'false'
+      JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Identity proof
+        run: |
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "HEAD_SHA=$(git rev-parse HEAD)"
+          echo "TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "--- git status --porcelain ---"
+          git status --porcelain
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            saas-base/requirements.txt
+            saas-base/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Collect (inventory + fail-fast gate)
+        run: |
+          set -o pipefail
+          python -m pytest tests/ --collect-only -q 2>&1 | tee collect-output.log
+
+      - name: Backend authoritative Full
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q -W error::RuntimeWarning 2>&1 | tee full-output.log
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-logs-${{ github.sha }}
+          path: |
+            saas-base/collect-output.log
+            saas-base/full-output.log
+          retention-days: 14
