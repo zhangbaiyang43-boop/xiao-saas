@@ -153,6 +153,7 @@
                 <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
                 <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
                 <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
+                <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
               </div>
               <div style="text-align:right">
@@ -161,6 +162,7 @@
               </div>
             </div>
             <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
+            <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要人工处理退款。系统不自动退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。</div>
             <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
               {{ printDiagnostic(order) }}
             </div>
@@ -180,7 +182,8 @@
             </div>
             <div class="order-action-row">
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
-              <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
+              <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
+              <span v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" class="paid-cancel-sop">已付款订单不可直接取消</span>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
               <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
               <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
@@ -211,7 +214,7 @@
               顾客还没完成支付，这单会挡住本桌结账。确认顾客不会再付款的话，可以取消这单。
             </div>
             <div class="order-action-row">
-              <a-button danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
+              <a-button v-if="order.canCancel" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             </div>
           </div>
 
@@ -289,6 +292,7 @@
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
               <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
               <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
+              <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
             </div>
             <div style="text-align:right">
@@ -297,6 +301,7 @@
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">单号尾号 {{ orderTail(order) }}<template v-if="order.paymentMethodText"> · {{ order.paymentMethodText }}</template></div>
+          <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要人工处理退款。系统不自动退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。</div>
           <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
             {{ printDiagnostic(order) }}
           </div>
@@ -320,11 +325,12 @@
               @click="openPickupSheet(order)"
             >发桌牌</a-button>
             <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
-            <a-button v-if="order.status === 'pending'" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
+            <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
+            <span v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" class="paid-cancel-sop">已付款订单不可直接取消</span>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
             <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
             <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
-            <a-button v-if="order.status === 'pending_payment'" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
+            <a-button v-if="order.canCancel" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
             <button
               v-if="orderCanReplacePickup(order)"
@@ -840,6 +846,9 @@ function mapOwnerOrders(raw) {
       canAssignPickupNo: !!o.can_assign_pickup_no,
       served_at: o.served_at || null,
       paymentStatus: o.payment_status || '',
+      canCancel: o.can_cancel === true,
+      canReject: o.can_reject === true,
+      refundRequired: o.refund_required === true,
       printStatus: o.print_status || null,
       printErrorCode: o.print_error_code || '',
       printLastAttemptAt: o.print_last_attempt_at || '',
@@ -965,6 +974,7 @@ const statusFilters = [
   { label: '已结账', val: 'settled' },
   { label: '待支付', val: 'pending_payment' },
   { label: '已拒单', val: 'rejected' },
+  { label: '已取消', val: 'cancelled' },
 ]
 
 // 顾客来店里反馈"我这单有问题"时，能报出来的通常就是桌号、大概几点、点了什么菜——
@@ -1092,6 +1102,14 @@ async function reconcileAfterOrderAction() {
   await syncNow()
 }
 
+function showPaidCancelSop() {
+  Modal.warning({
+    title: '已付款订单不可直接取消',
+    content: '系统不自动退款。如需退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。',
+    okText: '我知道了',
+  })
+}
+
 function cancelPendingPaymentOrder(order) {
   Modal.confirm({
     title: '取消这单待支付订单？',
@@ -1104,6 +1122,7 @@ function cancelPendingPaymentOrder(order) {
       try {
         const res = await updateOrderStatus(order.id, 'cancelled')
         if (res.code === 200) message.success('已取消')
+        else if (res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND') showPaidCancelSop()
         else message.error(res.msg || '取消失败，请刷新页面重试')
         await reconcileAfterOrderAction()
       } catch { message.error('取消失败'); await reconcileAfterOrderAction() }
@@ -1140,6 +1159,9 @@ async function rejectOrder(order) {
     const res = await updateOrderStatus(order.id, 'rejected')
     if (res.code === 200) {
       message.warning('已拒单，请联系顾客说明原因')
+      await reconcileAfterOrderAction()
+    } else if (res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND') {
+      showPaidCancelSop()
       await reconcileAfterOrderAction()
     } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
@@ -1514,6 +1536,21 @@ onMounted(async () => {
 }
 .order-action-btn--reject {
   font-weight: 700 !important;
+}
+.paid-cancel-sop {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 700;
+}
+.refund-attention {
+  margin-bottom: 8px;
+  padding: 9px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 .tag-rejected {
   color: #fff !important;

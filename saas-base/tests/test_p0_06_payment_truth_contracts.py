@@ -341,7 +341,7 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(order.wx_transaction_id, fact["transaction_id"])
                 self.assertEqual(printer.await_count, 1)
 
-    async def test_valid_late_payment_for_cancelled_order_still_enters_refund_flow(self):
+    async def test_valid_late_payment_for_cancelled_order_records_truth_without_refund(self):
         order = await self.make_order(status="cancelled")
         fact = self.resource(order)
         refund = AsyncMock()
@@ -353,9 +353,10 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
             response = await wxpay_notify(make_notify_request(), db=self.db)
 
         self.assertEqual(response.get("code"), "SUCCESS")
-        refund.assert_awaited_once()
+        refund.assert_not_called()
         await self.db.refresh(order)
-        self.assertEqual(order.payment_status, "unpaid")
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(order.status, "cancelled")
         self.assertEqual(order.wx_transaction_id, fact["transaction_id"])
 
     async def test_mock_payment_never_fabricates_wechat_transaction_identity(self):

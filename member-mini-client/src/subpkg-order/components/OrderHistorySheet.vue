@@ -27,6 +27,11 @@
           </view>
         </view>
 
+        <view v-if="currentTableOrder.refundRequired" class="refund-attention-card">
+          <text class="refund-attention-title">订单已取消，付款已成功，请联系商家处理退款</text>
+          <text class="refund-attention-sub">系统不会自动退款，请保留订单信息并联系商家。</text>
+        </view>
+
         <!-- 取餐牌号是顾客用来对上自己那份餐的实体凭证，比金额/时间更重要，之前跟其它
         四个小方块挤在同一个四列网格里、权重一样大，pickupNo 有值时还会多出第五个格子
         撑破网格排版、单独换行显得像排版错误。这里单独拎出来做成一整条、字号明显更大，
@@ -206,6 +211,33 @@ export default {
   --order-status-soft: #e0f2fe;
   --order-status-bg: #eff8ff;
   --order-status-border: #bae6fd;
+}
+
+.refund-attention-card {
+  margin-top: 16rpx;
+  padding: 22rpx 24rpx;
+  border: 2rpx solid #fecaca;
+  border-radius: 18rpx;
+  background: #fef2f2;
+}
+
+.refund-attention-title,
+.refund-attention-sub {
+  display: block;
+}
+
+.refund-attention-title {
+  color: #b91c1c;
+  font-size: 28rpx;
+  font-weight: 900;
+  line-height: 40rpx;
+}
+
+.refund-attention-sub {
+  margin-top: 8rpx;
+  color: #7f1d1d;
+  font-size: 24rpx;
+  line-height: 34rpx;
 }
 
 .table-status-card--accepted {

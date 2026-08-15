@@ -123,6 +123,48 @@ export function useCheckout({
     return paymentStatus === 'paid' || ['pending', 'paid', 'accepted', 'preparing', 'done', 'completed', 'settled'].includes(status)
   }
 
+  const reconcileTerminalOrder = async (id, data, { showDetail = false } = {}) => {
+    orderId.value = id
+    orderStatus.value = data.status
+    showSuccess.value = false
+    pendingPaymentIntent.value = null
+    clearPendingPaymentOrder()
+    // The table-session DTO is intentionally narrower than the order status DTO.
+    // Sync first, then re-apply the authoritative late-payment attention so the
+    // narrower snapshot cannot erase refundRequired from the local order card.
+    await syncDiningOrders()
+    const now = new Date()
+    const existing = myOrders.value.find(o => String(o.id) === String(id))
+    const patch = {
+      status: data.status,
+      paymentStatus: data.payment_status || 'unpaid',
+      refundRequired: data.refund_required === true,
+    }
+    if (existing) Object.assign(existing, patch)
+    else {
+      myOrders.value.unshift({
+        id,
+        orderNo: orderNo.value || String(id).slice(-4),
+        ...patch,
+        items: successItems.value,
+        total: successTotal.value || payAmount.value,
+        createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
+        createdTs: now.getTime(),
+        table: tableNo.value,
+        shop: shopId.value,
+      })
+    }
+    saveMyOrders()
+    showOrders.value = showDetail || showOrders.value
+    if (data.refund_required === true) {
+      uni.showToast({
+        title: '订单已取消，付款已成功，请联系商家处理退款',
+        icon: 'none',
+        duration: 2600,
+      })
+    }
+  }
+
   let recoveringPayment = false
   const recoverPendingPaymentResult = async ({ showDetail = false } = {}) => {
     if (recoveringPayment) return false
@@ -133,6 +175,10 @@ export function useCheckout({
     try {
       const res = await getOrderStatus(id, diningParticipantToken.value)
       const data = res?.data || {}
+      if (['cancelled', 'rejected'].includes(data.status)) {
+        await reconcileTerminalOrder(id, data, { showDetail })
+        return false
+      }
       if (isPaidOrSubmittedOrder(data)) {
         orderId.value = id
         orderStatus.value = data.status || 'pending'
@@ -164,9 +210,6 @@ export function useCheckout({
         await syncDiningOrders()
         showOrders.value = showDetail || showOrders.value
         return true
-      }
-      if (['cancelled', 'rejected'].includes(data.status)) {
-        clearPendingPaymentOrder()
       }
       return false
     } catch (e) {
@@ -455,6 +498,10 @@ export function useCheckout({
       try {
         const res = await getOrderStatus(id, diningParticipantToken.value)
         const d = res?.data || {}
+        if (['cancelled', 'rejected'].includes(d.status)) {
+          await reconcileTerminalOrder(id, d)
+          return
+        }
         if (d.payment_status === 'paid') {
           if (showSuccess.value && orderId.value === id && d.reward_coupon) {
             applyRewardCoupon(d.reward_coupon)
@@ -477,14 +524,14 @@ export function useCheckout({
         try {
           const res = await getOrderStatus(id, diningParticipantToken.value)
           const data = res?.data || {}
+          if (['cancelled', 'rejected'].includes(data.status)) {
+            await reconcileTerminalOrder(id, data)
+            return false
+          }
           if (data.payment_status === 'paid') {
             _handlePaySuccess({ ...data, total: payAmount.value })
             if (paymentResultUnknown) paymentResultUnknown.value = false
             return true
-          }
-          if (['cancelled', 'rejected'].includes(data.status)) {
-            clearPendingPaymentOrder()
-            return false
           }
         } catch (e) {
           reportError('checkout.confirm_backend_payment', e)

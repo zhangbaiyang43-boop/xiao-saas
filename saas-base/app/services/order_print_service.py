@@ -485,6 +485,8 @@ async def _claim_initial_print_attempt(
     if not order:
         return None, {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
     await db.refresh(order)
+    if str(getattr(order, "status", "") or "") in {"cancelled", "rejected"}:
+        return None, {"success": False, "skipped": True, "code": "ORDER_TERMINAL"}
     meta = _get_print_meta(order)
     initial = _initial_print_meta(meta)
     status = str(initial.get("status") or getattr(order, "print_status", "PENDING")).upper()

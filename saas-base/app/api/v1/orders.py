@@ -89,6 +89,24 @@ ORDER_NEXT_ACTIONS = {
 }
 
 
+def build_order_financial_capabilities(order) -> dict[str, bool]:
+    """Return server-authoritative cancel/reject and manual-refund attention flags.
+
+    Phase P0-09 deliberately treats every paid terminal order as requiring attention.
+    The legacy ``refund_status=success`` value only meant that a provider request was
+    accepted; it is not provider-confirmed refund truth and therefore cannot clear the
+    warning.
+    """
+    status = str(getattr(order, "status", "") or "")
+    is_paid = str(getattr(order, "payment_status", "") or "") == "paid"
+    is_unpaid_actionable = not is_paid and status in {"pending_payment", "pending"}
+    return {
+        "can_cancel": is_unpaid_actionable,
+        "can_reject": not is_paid and status == "pending",
+        "refund_required": is_paid and status in {"cancelled", "rejected"},
+    }
+
+
 def build_order_next_action(payment_mode: str) -> str:
     if payment_mode not in ORDER_NEXT_ACTIONS:
         raise ValueError("unsupported payment mode")
@@ -179,6 +197,7 @@ def serialize_order(
         "payment_status": getattr(order, "payment_status", "paid"),
         "payment_mode": getattr(order, "payment_mode", "prepay"),
         "payment_method": getattr(order, "payment_method", None),
+        **build_order_financial_capabilities(order),
         "checkout_requested_at": checkout_requested_at,
         "dining_session_id": str(order.dining_session_id) if getattr(order, "dining_session_id", None) else None,
         "participant_id": str(order.participant_id) if getattr(order, "participant_id", None) else None,
@@ -625,10 +644,24 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
         recovered = await payment_svc._recover_wxpay_order_if_paid(stale)
         if recovered:
             continue
-        await _restore_order_stock(stale, db)
-        stale.status = "cancelled"
-        if stale.coupon_id:
-            stale_coupon = await db.get(Coupon, stale.coupon_id)
+        # Provider I/O above may commit/rollback and invalidate the discovery
+        # snapshot.  The mutation authority is a fresh tenant-scoped row lock.
+        locked_result = await db.execute(
+            select(Order)
+            .where(
+                Order.id == stale.id,
+                Order.tenant_id == tenant_id,
+                Order.status == "pending_payment",
+            )
+            .with_for_update()
+        )
+        locked = locked_result.scalar_one_or_none()
+        if not locked or getattr(locked, "payment_status", None) == "paid":
+            continue
+        await _restore_order_stock(locked, db)
+        locked.status = "cancelled"
+        if locked.coupon_id:
+            stale_coupon = await db.get(Coupon, locked.coupon_id)
             if stale_coupon and stale_coupon.status == "LOCKED":
                 stale_coupon.status = "UNUSED"
     if stale_orders:

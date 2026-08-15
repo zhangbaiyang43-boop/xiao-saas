@@ -122,6 +122,36 @@ class OrderPaymentService(BaseService):
         coupon_data, _ = await self._on_payment_success(order, payment_method="wxpay")
         return True, coupon_data, claim == "bound"
 
+    async def _reconcile_confirmed_payment_for_terminal_order(
+        self,
+        order: Order,
+        resource: dict[str, Any],
+    ) -> tuple[bool, bool]:
+        """Persist a verified late payment without resurrecting or fulfilling the order.
+
+        The caller must hold the tenant-scoped Order row lock.  This intentionally
+        performs no print, member, points, commission, reward-coupon, or refund action.
+        The paid + cancelled/rejected combination is exposed as ``refund_required`` by
+        the DTO capability builder until a future provider-confirmed refund phase exists.
+        """
+        if order.status not in ("cancelled", "rejected"):
+            raise PaymentFactError("order is not terminal")
+        transaction_id = self._validate_confirmed_wx_payment(order, resource)
+        claim = await self._claim_wx_transaction(order, transaction_id)
+        transitioned = order.payment_status != "paid"
+        if transitioned:
+            order.payment_status = "paid"
+            order.payment_method = "wxpay"
+            order.payment_time = datetime.now(timezone.utc).isoformat()
+
+        from app.services.payment_handoff_service import PaymentHandoffService
+
+        await PaymentHandoffService(self.db)._cancel_active_handoffs(
+            str(order.tenant_id), int(order.id)
+        )
+        await self.db.flush()
+        return transitioned, claim == "bound"
+
     async def _run_post_commit_payment_effects(self, order: Order) -> None:
         await _print_paid_order_ticket(order, self.db, reason="payment_success")
         try:
@@ -162,15 +192,24 @@ class OrderPaymentService(BaseService):
             if not locked_order:
                 return False
 
-            transitioned, _, binding_changed = await self._apply_confirmed_wx_payment(
-                locked_order,
-                pay_resource,
-            )
+            if locked_order.status in ("cancelled", "rejected"):
+                transitioned, binding_changed = (
+                    await self._reconcile_confirmed_payment_for_terminal_order(
+                        locked_order, pay_resource
+                    )
+                )
+                terminal_reconciliation = True
+            else:
+                transitioned, _, binding_changed = await self._apply_confirmed_wx_payment(
+                    locked_order,
+                    pay_resource,
+                )
+                terminal_reconciliation = False
             if transitioned or binding_changed:
                 await self.db.commit()
             else:
                 await self.db.rollback()
-            if transitioned:
+            if transitioned and not terminal_reconciliation:
                 await self._run_post_commit_payment_effects(locked_order)
             logger.warning(
                 "[WXPAY_ORDER_RECOVERED] order_id=%s transaction_id=%s out_trade_no=%s",
@@ -858,6 +897,22 @@ class OrderPaymentService(BaseService):
                 )
                 return {"code": "FAIL", "message": "tenant mismatch"}
 
+            if order.status in ("cancelled", "rejected"):
+                terminal_status = str(order.status)
+                transitioned, binding_changed = (
+                    await self._reconcile_confirmed_payment_for_terminal_order(order, resource)
+                )
+                if transitioned or binding_changed:
+                    await self.db.commit()
+                else:
+                    await self.db.rollback()
+                logger.error(
+                    "[WXPAY_LATE_PAYMENT_REQUIRES_REFUND] order_id=%s order_status=%s",
+                    out_trade_no,
+                    terminal_status,
+                )
+                return {"code": "SUCCESS", "message": "ok"}
+
             transaction_id = self._validate_confirmed_wx_payment(order, resource)
             claim = await self._claim_wx_transaction(order, transaction_id)
 
@@ -875,23 +930,7 @@ class OrderPaymentService(BaseService):
                 logger.info(f"微信支付回调成功: order_id={out_trade_no}")
                 return {"code": "SUCCESS", "message": "ok"}
 
-            if order.status not in ("cancelled", "rejected"):
-                raise PaymentFactError("order cannot accept online payment")
-            if getattr(order, "refund_status", None) == "success":
-                if claim == "bound":
-                    await self.db.commit()
-                else:
-                    await self.db.rollback()
-                return {"code": "SUCCESS", "message": "ok"}
-            logger.error(
-                "[WXPAY_NOTIFY_RACE_WITH_CANCEL] order_id=%s order_status=%s -- WeChat confirmed "
-                "payment after this order was already %s locally; auto-refunding instead of fulfilling",
-                out_trade_no, order.status, order.status,
-            )
-
-            await self._refund_orphaned_wxpay_payment(order)
-            await self.db.commit()
-            return {"code": "SUCCESS", "message": "ok"}
+            raise PaymentFactError("order cannot accept online payment")
 
         except Exception as e:
             await self.db.rollback()

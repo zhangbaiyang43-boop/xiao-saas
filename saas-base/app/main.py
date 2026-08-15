@@ -169,10 +169,25 @@ async def _stale_order_cleanup_once():
             recovered = await payment_svc._recover_wxpay_order_if_paid(o)
             if recovered:
                 continue
-            await _restore_order_stock(o, db)
-            o.status = "cancelled"
-            if o.coupon_id:
-                coupon = await db.get(_Coupon, o.coupon_id)
+            # Discovery is intentionally unlocked.  After the external payment
+            # query, reacquire a fresh row lock and recheck both lifecycle and
+            # money truth before applying the cancellation mutation.
+            locked_result = await db.execute(
+                _select(Order)
+                .where(
+                    Order.id == o.id,
+                    Order.tenant_id == o.tenant_id,
+                    Order.status == "pending_payment",
+                )
+                .with_for_update()
+            )
+            locked = locked_result.scalar_one_or_none()
+            if not locked or getattr(locked, "payment_status", None) == "paid":
+                continue
+            await _restore_order_stock(locked, db)
+            locked.status = "cancelled"
+            if locked.coupon_id:
+                coupon = await db.get(_Coupon, locked.coupon_id)
                 if coupon and coupon.status == "LOCKED":
                     coupon.status = "UNUSED"
         if stale:
