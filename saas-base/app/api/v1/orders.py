@@ -958,7 +958,14 @@ async def _apply_create_order_coupon(
             return error_response(code=400, msg="优惠券不可用或已失效"), applied_coupon_id, coupon_discount
 
         tpl = await db.get(CouponTemplate, coupon.template_id)
-        if not tpl:
+        # P0-13-02: defense-in-depth -- Coupon.tenant_id is already the authority that
+        # gates redemption (checked above), so this can't currently be reached by a
+        # real cross-tenant coupon given how issuance always sets both consistently.
+        # Re-verifying the template's own tenant here means a future issuance bug (or
+        # a hand-crafted coupon_id whose Coupon row was somehow mis-tenanted) can't
+        # silently apply another tenant's discount rule. Same generic message as the
+        # "template missing" case -- never disclose which tenant the template belongs to.
+        if not tpl or str(tpl.tenant_id) != str(tenant_id):
             return error_response(code=400, msg="优惠券规则不存在"), applied_coupon_id, coupon_discount
 
         min_amount = float(tpl.min_amount or 0)
