@@ -319,8 +319,50 @@ def _compute_request_fingerprint(body: OrderCreate) -> str:
     return hashlib.sha256(canonical_bytes).hexdigest()
 
 
+async def _verify_replay_owner(
+    db: AsyncSession,
+    tenant_id: str,
+    replay_order: Order,
+    customer_id: int | None,
+    participant_token: str | None,
+) -> bool:
+    """P0-11: an idempotency-key hit must only ever be replayed back to the same
+    principal that created it. tenant_id + client_request_id alone is not enough
+    scope -- two different diners sharing one table/dining_session can otherwise
+    (accidentally or adversarially) submit under the same client_request_id, and
+    without this check the second caller would receive the first caller's order
+    as their own "replay". Returns True iff the current caller is verified to be
+    that same principal, or the order predates per-order ownership tracking
+    (e.g. a staff-created order with no customer_id/participant_id at all), in
+    which case there is no personal identity boundary to enforce.
+    """
+    if replay_order.customer_id is not None:
+        return customer_id is not None and int(customer_id) == int(replay_order.customer_id)
+    if replay_order.participant_id is not None:
+        if not participant_token:
+            return False
+        from app.models.dining import DiningParticipant
+        from app.services.dining_session_service import hash_participant_token
+
+        owner_result = await db.execute(
+            select(DiningParticipant).where(
+                DiningParticipant.id == replay_order.participant_id,
+                DiningParticipant.tenant_id == tenant_id,
+                DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
+            )
+        )
+        return owner_result.scalar_one_or_none() is not None
+    return True
+
+
 async def _replay_order_response(
-    db: AsyncSession, tenant_id: str, request_id: str | None, body: OrderCreate
+    db: AsyncSession,
+    tenant_id: str,
+    request_id: str | None,
+    body: OrderCreate,
+    *,
+    customer_id: int | None,
+    participant_token: str | None,
 ) -> ApiResponse | None:
     """Look up an existing order by client_request_id and build the create_order replay
     response -- or, if its fingerprint disagrees with the current request's, an
@@ -334,6 +376,17 @@ async def _replay_order_response(
     replay_order = replay_result.scalar_one_or_none()
     if not replay_order:
         return None
+
+    # P0-11: owner check comes before the fingerprint check and is decisive on its
+    # own -- a different principal reusing this request_id must fail closed even
+    # if the payload happens to match byte-for-byte, and must never see the
+    # original order's id/no/amount/items/payment data (minimal disclosure).
+    if not await _verify_replay_owner(db, tenant_id, replay_order, customer_id, participant_token):
+        return error_response(
+            code=409,
+            msg="请重新提交订单",
+            data={"code": "IDEMPOTENCY_CONFLICT"},
+        )
 
     # P0-04: NULL fingerprint means this order predates the fingerprint column
     # (legacy pre-migration order, LEGACY_REPLAY_COMPAT) -- keep the original
@@ -373,7 +426,7 @@ async def _replay_order_response(
 
 
 async def _prepare_create_order_tenant_and_replay(
-    body: OrderCreate, db: AsyncSession
+    body: OrderCreate, request: Request, db: AsyncSession
 ) -> PrepareTenantReplayResult:
     """Validate tenant/business hours and replay idempotent create_order requests.
 
@@ -403,7 +456,17 @@ async def _prepare_create_order_tenant_and_replay(
     if request_id and len(request_id) > 64:
         return error_response(code=400, msg="request_id 过长"), None, tenant_id
     if request_id:
-        replay_response = await _replay_order_response(db, tenant_id, request_id, body)
+        early_customer_id = getattr(request.state, "customer_id", None)
+        if early_customer_id:
+            early_customer_id = int(early_customer_id)
+        replay_response = await _replay_order_response(
+            db,
+            tenant_id,
+            request_id,
+            body,
+            customer_id=early_customer_id,
+            participant_token=body.participant_token,
+        )
         if replay_response is not None:
             return replay_response, None, tenant_id
 
@@ -1003,7 +1066,14 @@ async def _persist_create_order_and_build_response(
         # 会让它变成 IDEMPOTENCY_CONFLICT，而不是把 loser 的内容悄悄丢弃、静默返回
         # winner 的订单。
         await db.rollback()
-        replay_response = await _replay_order_response(db, tenant_id, request_id, body)
+        replay_response = await _replay_order_response(
+            db,
+            tenant_id,
+            request_id,
+            body,
+            customer_id=customer_id,
+            participant_token=body.participant_token,
+        )
         if replay_response is not None:
             return replay_response
         return error_response(code=409, msg="订单提交冲突，请重试")
@@ -1081,7 +1151,7 @@ async def _persist_create_order_and_build_response(
 async def create_order(
     body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)
 ) -> ApiResponse:
-    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, request, db)
     if early_response is not None:
         return early_response
 
