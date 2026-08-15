@@ -442,20 +442,28 @@ async def _prepare_create_order_tenant_and_replay(
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         return error_response(code=404, msg="商户不存在"), None, tenant_id
+    # Platform-level suspension (Tenant.status) is a different authority than the
+    # merchant's own temporary open/close toggle checked further below
+    # (TenantConfig.business_info["is_open"]) -- see P0-12. A platform-suspended
+    # tenant is denied even on an exact idempotent retry; it is never replayed.
     if not tenant.status:
         return error_response(code=403, msg="商户已停业，暂不接受点餐"), None, tenant_id
-    from app.models.tenant_config import TenantConfig
-
-    config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
-    tenant_config = config_result.scalar_one_or_none()
-    business_info: dict[str, Any] = (tenant_config.business_info or {}) if tenant_config else {}
-    if not business_info.get("is_open", True):
-        return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
 
     request_id = (body.request_id or "").strip() or None
     if request_id and len(request_id) > 64:
         return error_response(code=400, msg="request_id 过长"), None, tenant_id
     if request_id:
+        # P0-12: an exact idempotent retry of an ALREADY-CREATED order must win
+        # over the merchant's current temporary-close admission config checked
+        # below -- a store that closes between the original success and a
+        # lost-response retry must not strand that legitimate order by rejecting
+        # the retry outright. This replay lookup still goes through P0-11's owner
+        # check and P0-04's fingerprint check, so it can neither leak/misreplay to
+        # the wrong caller nor silently accept a genuinely different submission
+        # reusing the same key. If no order was ever created under this
+        # request_id (e.g. the original attempt itself failed the is_open check
+        # below), this returns None and the key is not "burned" -- a later retry
+        # after the store reopens falls through to a normal fresh admission check.
         early_customer_id = getattr(request.state, "customer_id", None)
         if early_customer_id:
             early_customer_id = int(early_customer_id)
@@ -469,6 +477,14 @@ async def _prepare_create_order_tenant_and_replay(
         )
         if replay_response is not None:
             return replay_response, None, tenant_id
+
+    from app.models.tenant_config import TenantConfig
+
+    config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
+    tenant_config = config_result.scalar_one_or_none()
+    business_info: dict[str, Any] = (tenant_config.business_info or {}) if tenant_config else {}
+    if not business_info.get("is_open", True):
+        return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
 
     return None, tenant, tenant_id
 
@@ -991,6 +1007,18 @@ async def _persist_create_order_and_build_response(
     from app.services.pickup_no_service import PickupNoService, load_pickup_settings
 
     pickup_settings = await load_pickup_settings(db, tenant_id)
+    # P0-12: pickup_no_enabled is the merchant's server-side authority over whether
+    # a CUSTOMER-supplied pickup number can create/claim an active table-pager
+    # lease -- an ordinary customer request must never be able to force an
+    # assignment the merchant has turned off just by including this field.
+    # Staff-assisted orders (is_staff_order is derived server-side from the
+    # authenticated merchant token, never from a client-spoofable field) may
+    # still carry a physical tag number even when the toggle is off, since that's
+    # a separate staff business need, independent of the customer-facing digital
+    # pickup feature. Ignored, not an error -- identical to a client that never
+    # sent this field at all.
+    if explicit_pickup_no and not is_staff_order and not pickup_settings.get("enabled"):
+        explicit_pickup_no = None
     # prepay + 启用桌牌：创建时未支付不能新占号（仍可继承会话已有牌号）
     if (
         explicit_pickup_no
