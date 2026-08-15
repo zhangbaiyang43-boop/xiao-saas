@@ -94,10 +94,37 @@ jobs:
         working-directory: target/saas-base
         run: pip install -r requirements-dev.txt
 
+      - name: Fail closed on deleted backend test files
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # A candidate must never be able to make Gate A/Gate B/Full "pass"
+          # by deleting an inconvenient test rather than fixing the code.
+          # --diff-filter=D isolates deletions specifically (separate from
+          # the ACMR discovery step below, which deliberately excludes D so
+          # a deleted file never gets passed to pytest as a nonexistent
+          # path). Same repo-root-relative-output caveat as the ACMR step.
+          git diff --name-only --diff-filter=D HEAD^ HEAD -- 'tests/*.py' \
+            | sed 's|^saas-base/||' > deleted-tests.txt || true
+          if [ -s deleted-tests.txt ]; then
+            echo "DELETED_BACKEND_TESTS_NOT_ALLOWED"
+            echo "This candidate commit deletes the following saas-base/tests/*.py file(s):"
+            cat deleted-tests.txt
+            exit 1
+          fi
+          echo "No backend test files deleted by this candidate commit."
+
       - name: Discover changed backend test files
         working-directory: target/saas-base
         run: |
           set -o pipefail
+          # Gate A assumes the current P0 candidate contract: exactly one
+          # final commit on top of the previously certified base, so HEAD^ is
+          # always the right diff base (see identity-proof step's root-commit
+          # guard above). If this project ever moves to a multi-commit
+          # candidate model, this diff base needs to become an explicit
+          # base_ref/merge-base input instead -- not assumed here.
+          #
           # The pathspec below is relative to cwd (target/saas-base), which is
           # correct as-is. But git diff --name-only always PRINTS paths
           # relative to the repo ROOT (target/), regardless of cwd or the
@@ -131,13 +158,14 @@ jobs:
         with:
           name: backend-gate-a-${{ github.run_id }}
           path: |
+            target/saas-base/deleted-tests.txt
             target/saas-base/gate-a-files.txt
             target/saas-base/gate-a-output.log
           retention-days: 14
           if-no-files-found: ignore
 
   gate-b:
-    name: Gate B (fixed cross-P0 regression profile)
+    name: Gate B (cumulative P0 contracts + static core regression)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -182,13 +210,43 @@ jobs:
         working-directory: target/saas-base
         run: pip install -r requirements-dev.txt
 
+      - name: Discover all P0 test files (tracked-only, cumulative)
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # git ls-files only lists files git itself tracks in THIS checkout
+          # -- no working-tree/untracked-file injection risk, unlike a raw
+          # filesystem glob. Cumulative by design and requiring no manual
+          # manifest upkeep per P0: a P0-14 candidate automatically picks up
+          # every test_p0_*.py already merged into target_ref's history
+          # (P0-01..P0-13), a P0-15 candidate automatically picks up
+          # P0-01..P0-14, and so on. Unlike git diff, ls-files output is
+          # already relative to cwd -- confirmed by a dry-run, no prefix
+          # stripping needed here.
+          git ls-files 'tests/test_p0_*.py' > gate-b-p0-files.txt
+          echo "GATE_B_AUTO_DISCOVERED_P0_FILES="
+          cat gate-b-p0-files.txt
+
+      - name: Combine with static core regression manifest
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # backend-gate-b.txt (from the infra checkout) is the NON-P0 core
+          # regression profile only -- P0 coverage comes entirely from the
+          # auto-discovery step above. Concatenate + dedupe; comments/blanks
+          # in either source are harmless no-ops for the validator.
+          cat gate-b-p0-files.txt "${{ github.workspace }}/infra/saas-base/ci/backend-gate-b.txt" \
+            | sort -u > gate-b-combined.txt
+          echo "GATE_B_COMBINED_FILES="
+          cat gate-b-combined.txt
+
       - name: Validate + run Gate B
         working-directory: target/saas-base
         run: |
           set -o pipefail
           python "${{ github.workspace }}/infra/saas-base/scripts/ci_backend_gate_runner.py" \
             --repo-root "${{ github.workspace }}/target/saas-base" \
-            --paths-file "${{ github.workspace }}/infra/saas-base/ci/backend-gate-b.txt" \
+            --paths-file gate-b-combined.txt \
             run 2>&1 | tee gate-b-output.log \
           || { echo "GATE_B_MANIFEST_INVALID_OR_FAILED"; exit 1; }
 
@@ -199,6 +257,8 @@ jobs:
           name: backend-gate-b-${{ github.run_id }}
           path: |
             infra/saas-base/ci/backend-gate-b.txt
+            target/saas-base/gate-b-p0-files.txt
+            target/saas-base/gate-b-combined.txt
             target/saas-base/gate-b-output.log
           retention-days: 14
           if-no-files-found: ignore
