@@ -503,12 +503,12 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrders, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
-import pollingManager from '../utils/pollingManager'
-import { useOrderAlert } from '../composables/useOrderAlert'
+import { getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { useWorkbenchSync } from '../composables/useWorkbenchSync'
+import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 import { sortMerchantOrders } from '../utils/orderListSort'
@@ -527,8 +527,6 @@ function getCurrentTenantId() {
   return String(tokenPayload?.tenant_id || localStorage.getItem('tenant_id') || '')
 }
 
-const loading = ref(false)
-const orders = ref([])
 const reviewsMap = ref({}) // order_id -> review
 // 默认打开"订单列表"而不是"桌台视图"——按桌视图要点开桌子详情抽屉才能看到接单/出餐
 // 按钮，多了一步；订单列表按钮直接在卡片上。桌台视图还在，需要看整桌汇总时手动切过去。
@@ -540,8 +538,6 @@ const settlingTable = ref(null)
 const settling = ref(false)
 const showReceiptDialog = ref(false)
 const receiptData = ref(null)
-const lastRefreshed = ref('')
-const pollFailCount = ref(0)
 
 // 代客加单：只在「记账后付/桌台账」模式下开放——预付模式每单都要在线支付，
 // 服务员没法替顾客走支付流程，这个入口对预付商户没有意义。
@@ -664,17 +660,20 @@ async function handlePickupSelect(n) {
   try {
     const res = await updateOrderPickupNo(order.id, value)
     if (res?.code === 200) {
-      applyPickupNoToOrders(res.data?.pickup_no || value, res.data?.order_ids)
       pickupSheetOpen.value = false
       message.success(`已绑定${value}号桌牌`)
+      await reconcileAfterOrderAction()
     } else if (res?.code === 409) {
       message.warning(pickupConflictToast(value))
       await refreshPickupStatus()
+      await reconcileAfterOrderAction()
     } else {
       message.error(res?.msg || '绑定失败，请重试')
+      await reconcileAfterOrderAction()
     }
   } catch {
     message.error('网络异常，请重试')
+    await reconcileAfterOrderAction()
   } finally {
     pickupSheetSubmitting.value = false
   }
@@ -821,21 +820,9 @@ async function submitStaffOrder() {
     staffSubmitting.value = false
   }
 }
-// 提醒的开关/解锁状态是模块级单例（见 useOrderAlert.js），不是这个组件自己的 ref——
-// 后台切 Tab 不带 keep-alive，OrderManage.vue 会被反复卸载重建，状态挂在组件实例上
-// 的话，AudioContext 每次都要重新解锁一遍。
-const { alertEnabled, audioNeedsUnlock, enableAlert, disableAlert, unlockAudio, ensureAlertProbed, noteNewPendingCount } = useOrderAlert()
-
-async function loadOrders(pollMeta = {}) {
-  loading.value = true
-  try {
-    const res = await getOrders({ date_str: 'today' }, { meta: { fromPolling: Boolean(pollMeta.fromPolling), dedupe: true, dedupeKey: 'admin:orders:today:manage' } })
-    pollFailCount.value = 0
-    const raw = res?.data?.data || res?.data || []
-    const uniqueOrders = Array.from(new Map((Array.isArray(raw) ? raw : []).map(o => [String(o.id), o])).values())
-    const newPending = uniqueOrders.filter(o => o.status === 'pending').length
-    noteNewPendingCount(newPending)
-    orders.value = uniqueOrders.map(o => ({
+function mapOwnerOrders(raw) {
+  const uniqueOrders = Array.from(new Map((Array.isArray(raw) ? raw : []).map(o => [String(o.id), o])).values())
+  return uniqueOrders.map(o => ({
       id: String(o.id),
       table: o.table_no || '-',
       diningSessionId: o.dining_session_id || null,
@@ -867,14 +854,69 @@ async function loadOrders(pollMeta = {}) {
       updating: false,
       reprinting: false,
     }))
-  } catch {
-    pollFailCount.value++
+}
+
+function readOwnerCursor(headers) {
+  return headers?.['x-workbench-cursor'] || headers?.['X-Workbench-Cursor'] ||
+    headers?.get?.('x-workbench-cursor') || headers?.get?.('X-Workbench-Cursor') || null
+}
+
+async function fetchOwnerFull() {
+  const res = await getOrdersWithCursor(
+    { date_str: 'today' },
+    { meta: { fromPolling: true, dedupe: true, dedupeKey: 'admin:orders:today:manage' } },
+  )
+  return { orders: res?.data?.data || [], cursor: readOwnerCursor(res?.headers) }
+}
+
+async function fetchOwnerChanges(cursor) {
+  const res = await getOwnerOrderChanges(
+    { cursor },
+    { meta: { fromPolling: true, dedupe: true, dedupeKey: 'admin:orders:today:changes' } },
+  )
+  const data = res?.data || {}
+  return {
+    items: Array.isArray(data.items) ? data.items : [],
+    removed_ids: Array.isArray(data.removed_ids) ? data.removed_ids : [],
+    next_cursor: data.next_cursor || cursor,
+    has_more: Boolean(data.has_more),
+    bootstrap: Boolean(data.bootstrap),
   }
-  finally {
-    loading.value = false
-    const now = new Date()
-    lastRefreshed.value = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
-  }
+}
+
+const {
+  orders,
+  initialLoading,
+  backgroundSyncing,
+  syncFailureCount,
+  lastSuccessfulSyncAt,
+  alertEnabled,
+  audioNeedsUnlock,
+  enableAlert,
+  disableAlert,
+  unlockAudio,
+  syncNow,
+  startSync,
+} = useWorkbenchSync({
+  dedupeKey: 'owner:orders',
+  fetchFull: fetchOwnerFull,
+  fetchChanges: fetchOwnerChanges,
+  filterOrders: (raw) => raw,
+  mapOrders: mapOwnerOrders,
+  alertIdsFromOrders: ownerActionableIdsFromOrders,
+  autoStart: false,
+})
+
+const loading = computed(() => initialLoading.value || backgroundSyncing.value)
+const pollFailCount = syncFailureCount
+const lastRefreshed = computed(() => {
+  if (!lastSuccessfulSyncAt.value) return ''
+  const now = new Date(lastSuccessfulSyncAt.value)
+  return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
+})
+
+async function loadOrders() {
+  return syncNow()
 }
 
 async function loadReviews() {
@@ -1046,6 +1088,10 @@ function participantColor(no) {
   return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
 }
 
+async function reconcileAfterOrderAction() {
+  await syncNow()
+}
+
 function cancelPendingPaymentOrder(order) {
   Modal.confirm({
     title: '取消这单待支付订单？',
@@ -1057,9 +1103,10 @@ function cancelPendingPaymentOrder(order) {
       order.updating = true
       try {
         const res = await updateOrderStatus(order.id, 'cancelled')
-        if (res.code === 200) { order.status = 'cancelled'; message.success('已取消') }
+        if (res.code === 200) message.success('已取消')
         else message.error(res.msg || '取消失败，请刷新页面重试')
-      } catch { message.error('取消失败') }
+        await reconcileAfterOrderAction()
+      } catch { message.error('取消失败'); await reconcileAfterOrderAction() }
       finally { order.updating = false }
     },
   })
@@ -1069,10 +1116,10 @@ async function acceptOrder(order) {
   order.updating = true
   try {
     const res = await updateOrderStatus(order.id, 'preparing')
-    if (res.code === 200) order.status = 'preparing'
-    else message.error(res.msg || '操作失败，请刷新页面重试')
+    if (res.code === 200) await reconcileAfterOrderAction()
+    else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
-  catch { message.error('操作失败') } finally { order.updating = false }
+  catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
 }
 
 // 牌子管的是这一桌这一次吃饭：接口会把号同步给同一桌台会话下所有订单，立刻回写本地列表。
@@ -1092,11 +1139,11 @@ async function rejectOrder(order) {
   try {
     const res = await updateOrderStatus(order.id, 'rejected')
     if (res.code === 200) {
-      order.status = 'rejected'
       message.warning('已拒单，请联系顾客说明原因')
-    } else message.error(res.msg || '操作失败，请刷新页面重试')
+      await reconcileAfterOrderAction()
+    } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
-  catch { message.error('操作失败') } finally { order.updating = false }
+  catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
 }
 
 async function finishOrder(order) {
@@ -1104,11 +1151,10 @@ async function finishOrder(order) {
   try {
     const res = await updateOrderStatus(order.id, 'done')
     if (res.code === 200) {
-      order.status = 'done'
-      order.served_at = null
-    } else message.error(res.msg || '操作失败，请刷新页面重试')
+      await reconcileAfterOrderAction()
+    } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
-  catch { message.error('操作失败') } finally { order.updating = false }
+  catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
 }
 
 function orderNeedsServe(order) {
@@ -1120,11 +1166,12 @@ async function confirmServed(order) {
   try {
     const res = await serveOrder(order.id)
     if (res?.code === 200) {
-      order.served_at = res.data?.served_at || new Date().toISOString()
       message.success('已确认上菜')
-    } else message.error(res?.msg || '操作失败，请刷新页面重试')
+      await reconcileAfterOrderAction()
+    } else { message.error(res?.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   } catch {
     message.error('操作失败')
+    await reconcileAfterOrderAction()
   } finally {
     order.updating = false
   }
@@ -1135,13 +1182,15 @@ async function reprintOrderTicket(order) {
   try {
     const res = await reprintOrder(order.id)
     if (res.code === 200) {
-      order.printStatus = res.data?.print_status || null
-      if (order.printStatus === 'printed') message.success('已重新打印')
+      const printStatus = res.data?.print_status || null
+      if (printStatus === 'printed') message.success('已重新打印')
       else message.warning('打印结果仍未知，请核实小票机是否已出票')
+      await reconcileAfterOrderAction()
     } else {
       message.error(res.msg || '补打失败')
+      await reconcileAfterOrderAction()
     }
-  } catch { message.error('补打失败') } finally { order.reprinting = false }
+  } catch { message.error('补打失败'); await reconcileAfterOrderAction() } finally { order.reprinting = false }
 }
 
 function printDiagnostic(order) {
@@ -1160,10 +1209,10 @@ async function acceptTableOrders(table) {
   try {
     for (const o of table.pendingOrders) {
       const res = await updateOrderStatus(o.id, 'preparing')
-      if (res.code === 200) o.status = 'preparing'
-      else { message.error(res.msg || '操作失败，请刷新页面重试'); break }
+      if (res.code !== 200) { message.error(res.msg || '操作失败，请刷新页面重试'); break }
     }
-  } catch { message.error('操作失败') } finally { table.updating = false }
+    await reconcileAfterOrderAction()
+  } catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { table.updating = false }
 }
 
 async function finishTableOrders(table) {
@@ -1171,10 +1220,10 @@ async function finishTableOrders(table) {
   try {
     for (const o of table.preparingOrders) {
       const res = await updateOrderStatus(o.id, 'done')
-      if (res.code === 200) o.status = 'done'
-      else { message.error(res.msg || '操作失败，请刷新页面重试'); break }
+      if (res.code !== 200) { message.error(res.msg || '操作失败，请刷新页面重试'); break }
     }
-  } catch { message.error('操作失败') } finally { table.updating = false }
+    await reconcileAfterOrderAction()
+  } catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { table.updating = false }
 }
 
 function settleTableClick(table) { settlingTable.value = table; showSettleDialog.value = true }
@@ -1194,11 +1243,10 @@ async function confirmSettle() {
       // 服务端早就不认的过期卡片反复点"确认收款"，每次都收到同一个错误，界面上
       // 却什么都不会变。这里主动关掉弹窗、重新拉取，让桌台视图跟服务端状态对齐。
       showSettleDialog.value = false
-      loadOrders()
+      await reconcileAfterOrderAction()
       return
     }
     const table = settlingTable.value
-    for (const o of table.orders) o.status = 'settled'
     showSettleDialog.value = false
     const now = new Date()
     receiptData.value = {
@@ -1208,7 +1256,8 @@ async function confirmSettle() {
       orders: table.orders.map(o => ({ id: o.id, items: o.items, discount_amount: o.discount_amount })),
     }
     showReceiptDialog.value = true
-  } catch { message.error('结账失败，请重试') }
+    await reconcileAfterOrderAction()
+  } catch { message.error('结账失败，请重试'); await reconcileAfterOrderAction() }
   finally { settling.value = false }
 }
 
@@ -1218,21 +1267,8 @@ onMounted(async () => {
   // 的租户身份解析方式不一样，混在同一批并发请求里偶发会互相打架导致查错商户，
   // 拆开顺序请求可以避开这个问题。
   await loadPaymentMode()
-  loadOrders()
+  startSync()
   loadReviews()
-  pollingManager.start('orders:today', {
-    task: loadOrders,
-    interval: 5000,
-    hiddenInterval: 30000,
-    idleInterval: 30000,
-    immediate: false,
-  })
-  // 探测一次 AudioContext 是不是被浏览器挂起了；具体的"只探测一次"逻辑在
-  // useOrderAlert.js 里，这里每次挂载都调用没关系，真正解锁过之后它自己会跳过。
-  ensureAlertProbed()
-})
-onBeforeUnmount(() => {
-  pollingManager.stop('orders:today')
 })
 </script>
 

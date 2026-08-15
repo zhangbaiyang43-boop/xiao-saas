@@ -50,10 +50,12 @@ export function useWorkbenchSync(options) {
   const filterStatuses = options.filterStatuses || []
   const alertIdsFromOrders = options.alertIdsFromOrders
   const alertsEnabled = options.alertsEnabled !== false
+  const mapOrders = options.mapOrders || ((list) => list)
   const {
     alertEnabled,
     audioNeedsUnlock,
     enableAlert,
+    disableAlert,
     unlockAudio,
     ensureAlertProbed,
     playNewOrderBeep,
@@ -66,11 +68,18 @@ export function useWorkbenchSync(options) {
   const syncFailed = ref(false)
   const networkOnline = ref(typeof navigator === 'undefined' ? true : navigator.onLine !== false)
   const lastSuccessfulSyncAt = ref(null)
+  const syncFailureCount = ref(0)
   const highlightTick = ref(0)
   const syncAgeTick = ref(0)
 
   let core = null
   let ageTimer = null
+
+  function currentIdentity() {
+    if (typeof options.getIdentity === 'function') return String(options.getIdentity() ?? '')
+    if (typeof localStorage === 'undefined') return ''
+    return `${localStorage.getItem('tenant_id') || ''}:${localStorage.getItem('token') || ''}`
+  }
 
   function applyState(state) {
     orders.value = state.orders
@@ -79,6 +88,7 @@ export function useWorkbenchSync(options) {
     syncFailed.value = state.syncFailed
     networkOnline.value = state.networkOnline
     lastSuccessfulSyncAt.value = state.lastSuccessfulSyncAt
+    syncFailureCount.value = state.consecutiveFailures || 0
     highlightTick.value += 1
   }
 
@@ -106,6 +116,10 @@ export function useWorkbenchSync(options) {
   })
 
   async function fetchFull() {
+    if (typeof options.fetchFull === 'function') {
+      const result = await options.fetchFull()
+      return { ...result, orders: mapOrders(result?.orders || []) }
+    }
     const res = await getWorkbenchOrdersWithCursor({
       meta: {
         dedupe: true,
@@ -118,10 +132,14 @@ export function useWorkbenchSync(options) {
     const body = res?.data
     const list = unwrapWorkbenchPayload(body)
     const cursor = readWorkbenchCursor(res?.headers)
-    return { orders: list, cursor }
+    return { orders: mapOrders(list), cursor }
   }
 
   async function fetchChanges(cursor) {
+    if (typeof options.fetchChanges === 'function') {
+      const result = await options.fetchChanges(cursor)
+      return { ...result, items: mapOrders(result?.items || []) }
+    }
     const res = await getWorkbenchOrderChanges(
       { cursor },
       {
@@ -135,7 +153,7 @@ export function useWorkbenchSync(options) {
     )
     const data = res?.data?.data || res?.data || res || {}
     return {
-      items: Array.isArray(data.items) ? data.items : [],
+      items: mapOrders(Array.isArray(data.items) ? data.items : []),
       removed_ids: Array.isArray(data.removed_ids) ? data.removed_ids : [],
       next_cursor: data.next_cursor != null ? String(data.next_cursor) : cursor,
       has_more: Boolean(data.has_more),
@@ -144,6 +162,7 @@ export function useWorkbenchSync(options) {
   }
 
   function filterOrders(raw) {
+    if (typeof options.filterOrders === 'function') return options.filterOrders(raw)
     return raw.filter((o) => filterStatuses.includes(o.status))
   }
 
@@ -155,6 +174,11 @@ export function useWorkbenchSync(options) {
   function onFocus() {
     if (!core) return
     if (document.visibilityState === 'visible') core.syncNow()
+  }
+
+  function onPageShow() {
+    if (!core) return
+    core.syncNow()
   }
 
   function onOnline() {
@@ -194,20 +218,23 @@ export function useWorkbenchSync(options) {
       fullIntervalMs: WORKBENCH_FULL_RECONCILE_INTERVAL_MS,
       highlightMs: NEW_ORDER_HIGHLIGHT_MS,
       onChange: applyState,
+      getIdentity: currentIdentity,
     })
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onFocus)
+    window.addEventListener('pageshow', onPageShow)
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     startAgeTicker()
     core.setOnline(navigator.onLine !== false)
     core.setVisible(document.visibilityState !== 'hidden')
-    core.start()
+    if (options.autoStart !== false) core.start()
   })
 
   onBeforeUnmount(() => {
     document.removeEventListener('visibilitychange', onVisibility)
     window.removeEventListener('focus', onFocus)
+    window.removeEventListener('pageshow', onPageShow)
     window.removeEventListener('online', onOnline)
     window.removeEventListener('offline', onOffline)
     stopAgeTicker()
@@ -217,6 +244,10 @@ export function useWorkbenchSync(options) {
 
   function syncNow() {
     return core ? core.syncNow() : Promise.resolve({ skipped: true, reason: 'not_started' })
+  }
+
+  function startSync() {
+    core?.start()
   }
 
   function enableSound() {
@@ -234,6 +265,7 @@ export function useWorkbenchSync(options) {
     syncFailed,
     networkOnline,
     lastSuccessfulSyncAt,
+    syncFailureCount,
     lastSyncLabel,
     alertEnabled,
     audioNeedsUnlock,
@@ -241,8 +273,10 @@ export function useWorkbenchSync(options) {
     enableSound,
     unlockAudio,
     enableAlert,
+    disableAlert,
     isHighlighted,
     syncNow,
+    startSync,
     pendingCount: computed(() => pendingIdsFromOrders(orders.value).size),
   }
 }

@@ -171,7 +171,7 @@ core.setOnline(true)
 await sleep(0)
 assert.equal(fetchCount, afterOff + 1)
 
-// TEST-06 in-flight overlap skip
+// TEST-06 overlapping Full requests coalesce behind one authoritative barrier
 {
   let calls = 0
   let resolveFetch
@@ -201,9 +201,9 @@ assert.equal(fetchCount, afterOff + 1)
   const r2 = await p2
   const r3 = await p3
   await sleep(0)
-  assert.equal(calls, 1)
-  assert.equal(r2.skipped, true)
-  assert.equal(r3.skipped, true)
+  assert.equal(calls, 2)
+  assert.equal(r2.ok, true)
+  assert.equal(r3.ok, true)
   assert.equal(c.getState().hasBaseline, true)
 }
 
@@ -550,8 +550,9 @@ assert.ok(useSync.includes("addEventListener('online'"), 'online listener')
 assert.ok(useSync.includes('playNewOrderBeep'), 'reuses alert beep')
 assert.ok(alert.includes('playNewOrderBeep'), 'alert exports play')
 assert.ok(alert.includes('isSoundReady'), 'alert exports readiness')
-assert.ok(orderManage.includes('noteNewPendingCount'), 'Owner path kept')
-assert.ok(orderManage.includes('useOrderAlert'), 'Owner still uses useOrderAlert')
+assert.ok(orderManage.includes('ownerActionableIdsFromOrders'), 'Owner alerts use actionable order IDs')
+assert.ok(orderManage.includes('getOwnerOrderChanges'), 'Owner frequent sync uses delta')
+assert.ok(orderManage.includes('useWorkbenchSync'), 'Owner reuses the reliable sync lifecycle')
 assert.ok(!waiter.includes('WebSocket') && !kitchen.includes('EventSource'), 'no WS/SSE')
 assert.ok(!useSync.includes('WebSocket'), 'sync has no WS')
 assert.ok(useSync.includes('fetchChanges') || useSync.includes('getWorkbenchOrderChanges'), 'delta wired')

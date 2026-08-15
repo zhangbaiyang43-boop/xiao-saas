@@ -18,7 +18,7 @@ import base64
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,17 @@ _FRONTDESK_STATUSES = frozenset({"pending", "preparing"})
 _WAITER_STATUSES = frozenset({"done"})
 _KITCHEN_STATUSES = frozenset({"pending", "preparing", "done"})
 _OWNER_STATUSES = frozenset({"pending", "preparing", "done"})
+_OWNER_LIST_ACTIVE_STATUSES = frozenset(
+    {
+        "pending_payment",
+        "pending",
+        "preparing",
+        "done",
+        "refunding",
+        "refund_pending",
+        "refund_requested",
+    }
+)
 
 
 def workbench_visible_statuses_for_role(role: str | None) -> frozenset[str]:
@@ -72,6 +83,19 @@ def is_order_visible_in_workbench(order: Any, role: str | None) -> bool:
         return is_waiting_to_serve(order)
     status = getattr(order, "status", None)
     return status in workbench_visible_statuses_for_role(role)
+
+
+def is_order_visible_in_owner_list(
+    order: Any,
+    day_start_utc: datetime,
+    day_end_utc: datetime,
+) -> bool:
+    """Mirror OrderLifecycleService.list_orders' unfiltered owner dataset."""
+    created_at = _naive_utc(getattr(order, "created_at", None))
+    created_today = bool(
+        created_at is not None and day_start_utc <= created_at < day_end_utc
+    )
+    return created_today or getattr(order, "status", None) in _OWNER_LIST_ACTIVE_STATUSES
 
 
 def _naive_utc(dt: datetime | None) -> datetime | None:
@@ -212,6 +236,24 @@ async def load_workbench_candidate_orders(
     return list(result.scalars().all())
 
 
+async def load_workbench_snapshot_with_cursor(
+    db: AsyncSession,
+    tenant_id: str,
+    *,
+    now_fn: Callable[[], datetime] = datetime.utcnow,
+    candidate_loader: Callable[[AsyncSession, str], Awaitable[list[Order]]] = load_workbench_candidate_orders,
+) -> tuple[list[Order], str]:
+    """Load a Full snapshot with a cursor boundary captured before the query.
+
+    An empty snapshot must not use a timestamp captured after the query: an order
+    committed while the query is running could otherwise fall behind that cursor.
+    The pre-query boundary shares the same application UTC clock as Order.updated_at.
+    """
+    fallback_watermark = _naive_utc(now_fn()) or datetime.utcnow()
+    orders = await candidate_loader(db, tenant_id)
+    return orders, cursor_from_orders(orders, fallback_now=fallback_watermark)
+
+
 async def load_order_items_by_order_ids(
     db: AsyncSession,
     order_ids: list[int],
@@ -230,14 +272,18 @@ def advance_cursor_after_page(
     previous_cursor: str,
     *,
     has_more: bool,
+    committed_watermark: datetime | None = None,
 ) -> str:
     try:
         watermark, _page_u, _page_i = decode_workbench_cursor(previous_cursor)
     except ValueError:
         watermark = datetime.utcnow()
 
+    commit_boundary = _naive_utc(committed_watermark)
     if not page_orders:
-        return committed_cursor_from_watermark(watermark)
+        return committed_cursor_from_watermark(
+            max(watermark, commit_boundary) if commit_boundary is not None else watermark
+        )
 
     last = page_orders[-1]
     last_u = _naive_utc(getattr(last, "updated_at", None)) or watermark
@@ -247,6 +293,8 @@ def advance_cursor_after_page(
         return encode_workbench_cursor(watermark, last_u, last_i)
 
     new_water = last_u if last_u > watermark else watermark
+    if commit_boundary is not None and commit_boundary > new_water:
+        new_water = commit_boundary
     for order in page_orders:
         u = _naive_utc(getattr(order, "updated_at", None))
         if u is not None and u > new_water:
@@ -338,5 +386,68 @@ async def get_workbench_changes(
         "page_orders": page,
         "has_more": has_more,
         "next_cursor": next_cursor,
+        "bootstrap": False,
+    }
+
+
+async def get_owner_order_changes(
+    db: AsyncSession,
+    *,
+    tenant_id: str,
+    cursor: str | None,
+    limit: int = WORKBENCH_CHANGES_LIMIT,
+) -> dict[str, Any]:
+    """Pure-read delta for the owner's complete today/active order list."""
+    limit = max(1, min(int(limit or WORKBENCH_CHANGES_LIMIT), WORKBENCH_CHANGES_LIMIT))
+
+    if cursor is None or str(cursor).strip() == "":
+        return {
+            "orders": [],
+            "removed_ids": [],
+            "next_cursor": committed_cursor_from_watermark(datetime.utcnow()),
+            "has_more": False,
+            "bootstrap": True,
+        }
+
+    watermark, page_u, page_i = decode_workbench_cursor(cursor)
+    scan_boundary = datetime.utcnow()
+    window_start = watermark - timedelta(seconds=WORKBENCH_CURSOR_OVERLAP_SECONDS)
+    query = (
+        select(Order)
+        .where(Order.tenant_id == tenant_id)
+        .where(
+            and_(
+                Order.updated_at >= window_start,
+                or_(
+                    Order.updated_at > page_u,
+                    and_(Order.updated_at == page_u, Order.id > page_i),
+                ),
+            )
+        )
+        .order_by(Order.updated_at.asc(), Order.id.asc())
+        .limit(limit + 1)
+    )
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    day_start_utc, day_end_utc = workbench_day_window_utc()
+    visible_orders = [
+        order
+        for order in page
+        if is_order_visible_in_owner_list(order, day_start_utc, day_end_utc)
+    ]
+    visible_ids = [int(order.id) for order in visible_orders]
+    visible_id_set = set(visible_ids)
+    return {
+        "orders": visible_orders,
+        "removed_ids": [str(order.id) for order in page if int(order.id) not in visible_id_set],
+        "next_cursor": advance_cursor_after_page(
+            page,
+            cursor,
+            has_more=has_more,
+            committed_watermark=scan_boundary,
+        ),
+        "has_more": has_more,
         "bootstrap": False,
     }

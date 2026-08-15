@@ -165,6 +165,14 @@ export const getActiveDiningSessions = () => request.get('/v1/dining-sessions/ac
 export const createPaymentHandoff = (orderId) => request.post(`/v1/payment-handoffs/orders/${orderId}`)
 export const getPaymentHandoff = (orderId, config = {}) => request.get(`/v1/payment-handoffs/orders/${orderId}`, config)
 export const getOrders = (params, config = {}) => request.get('/v1/orders', { ...config, params })
+export const getOrdersWithCursor = (params, config = {}) =>
+  request.get('/v1/orders', {
+    ...config,
+    params,
+    meta: { ...(config.meta || {}), rawResponse: true },
+  })
+export const getOwnerOrderChanges = (params, config = {}) =>
+  request.get('/v1/orders/changes', { ...config, params })
 export const updateOrderStatus = (id, status) => request.patch(`/v1/orders/${id}/status`, { status })
 export const serveOrder = (id) => request.post(`/v1/orders/${id}/serve`)
 export const mockPayOrder = (id) => request.post(`/v1/orders/${id}/mock-pay`)

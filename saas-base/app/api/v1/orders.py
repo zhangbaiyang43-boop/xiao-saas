@@ -5,7 +5,7 @@ import json
 from decimal import Decimal
 from typing import Any, List, Optional, TypeAlias, cast as typing_cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel as PydanticBase
 from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -211,6 +211,54 @@ def serialize_order(
             for i in order_items
         ],
     }
+
+
+async def serialize_owner_order_rows(
+    db: AsyncSession,
+    tenant_id: str,
+    orders: list[Order],
+) -> list[dict]:
+    """Serialize owner Full/Delta rows with the same complete order contract."""
+    from app.models.dining import DiningSession
+    from app.services.dining_session_service import DiningSessionService
+    from app.services.pickup_no_service import load_pickup_settings
+    from app.services.workbench_sync_service import load_order_items_by_order_ids
+
+    order_ids = [int(order.id) for order in orders]
+    items_by_order = await load_order_items_by_order_ids(db, order_ids)
+    session_ids = {
+        order.dining_session_id
+        for order in orders
+        if getattr(order, "dining_session_id", None)
+    }
+    sessions_by_id = {}
+    checkout_requested_by_session = {}
+    if session_ids:
+        sessions_result = await db.execute(
+            select(DiningSession).where(DiningSession.id.in_(session_ids))
+        )
+        for session in sessions_result.scalars().all():
+            sessions_by_id[session.id] = session
+            if session.checkout_requested_at:
+                checkout_requested_by_session[session.id] = session.checkout_requested_at.isoformat()
+
+    participant_ordinals = await DiningSessionService.get_participant_ordinals(
+        db, tenant_id, list(session_ids)
+    )
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+    return [
+        serialize_order(
+            order,
+            items_by_order.get(order.id or 0, []),
+            checkout_requested_at=checkout_requested_by_session.get(
+                getattr(order, "dining_session_id", None)
+            ),
+            participant_no=participant_ordinals.get(getattr(order, "participant_id", None)),
+            pickup_settings=pickup_settings,
+            dining_session=sessions_by_id.get(getattr(order, "dining_session_id", None)),
+        )
+        for order in orders
+    ]
 
 
 def _compute_request_fingerprint(body: OrderCreate) -> str:
@@ -1520,10 +1568,9 @@ async def list_workbench_orders(
     )
     from app.services.workbench_sync_service import (
         WORKBENCH_CURSOR_HEADER,
-        cursor_from_orders,
         is_order_visible_in_workbench,
         load_order_items_by_order_ids,
-        load_workbench_candidate_orders,
+        load_workbench_snapshot_with_cursor,
     )
     from fastapi.responses import JSONResponse
 
@@ -1538,7 +1585,7 @@ async def list_workbench_orders(
 
     tenant_id = principal.tenant_id
     role = principal.role
-    candidates = await load_workbench_candidate_orders(db, tenant_id)
+    candidates, cursor = await load_workbench_snapshot_with_cursor(db, tenant_id)
     pickup_settings = await load_pickup_settings(db, tenant_id)
 
     # Print recovery stays on FULL only (never on /workbench/changes).
@@ -1580,7 +1627,6 @@ async def list_workbench_orders(
             )
         )
 
-    cursor = cursor_from_orders(candidates, fallback_now=datetime.utcnow())
     response = JSONResponse(content=RespVo(code=200, msg="ok", data=rows).to_response())
     response.headers[WORKBENCH_CURSOR_HEADER] = cursor
     return response
@@ -1699,8 +1745,13 @@ async def list_orders(
     page: Optional[int] = None,
     page_size: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
+    response: Response = None,
 ):
     from app.core.merchant_auth import get_request_principal
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CURSOR_HEADER,
+        committed_cursor_from_watermark,
+    )
     from fastapi.responses import JSONResponse
 
     principal = get_request_principal(request)
@@ -1712,9 +1763,10 @@ async def list_orders(
             status_code=403,
             content=RespVo(code=403, msg="当前账号无此权限").to_response(),
         )
+    snapshot_watermark = datetime.utcnow()
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
-    return await service.list_orders(
+    result = await service.list_orders(
         date_str=date_str,
         keyword=keyword,
         order_no=order_no,
@@ -1724,6 +1776,64 @@ async def list_orders(
         status=status,
         page=page,
         page_size=page_size,
+    )
+    if response is not None:
+        response.headers[WORKBENCH_CURSOR_HEADER] = committed_cursor_from_watermark(
+            snapshot_watermark
+        )
+    return result
+
+
+@router.get("/orders/changes")
+async def list_owner_order_changes(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Pure-read delta for the owner's complete today/active order dataset."""
+    from app.core.merchant_auth import get_request_principal
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CHANGES_LIMIT,
+        get_owner_order_changes,
+    )
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="璇峰厛鐧诲綍")
+    if not principal.is_owner:
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="褰撳墠璐﹀彿鏃犳此鏉冮檺").to_response(),
+        )
+
+    try:
+        packed = await get_owner_order_changes(
+            db,
+            tenant_id=principal.tenant_id,
+            cursor=cursor,
+            limit=limit or WORKBENCH_CHANGES_LIMIT,
+        )
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content=RespVo(code=400, msg="INVALID_CURSOR", data=None).to_response(),
+        )
+
+    items = (
+        await serialize_owner_order_rows(db, principal.tenant_id, packed["orders"])
+        if packed["orders"]
+        else []
+    )
+    return success_response(
+        data={
+            "items": items,
+            "removed_ids": packed["removed_ids"],
+            "next_cursor": packed["next_cursor"],
+            "has_more": bool(packed["has_more"]),
+            "bootstrap": bool(packed["bootstrap"]),
+        }
     )
 
 class ReviewCreate(PydanticBase):
