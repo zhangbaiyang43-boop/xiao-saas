@@ -181,7 +181,7 @@ export const updateMerchantNote = (id, note) => request.patch(`/v1/orders/${id}/
 export const updateOrderPickupNo = (id, pickup_no) => request.patch(`/v1/orders/${id}/pickup-no`, { pickup_no })
 export const getPickupNoStatus = (config = {}) => request.get('/v1/pickup-nos/status', config)
 export const reprintOrder = (id, print_type = 'kitchen') => request.post(`/v1/orders/${id}/reprint`, { print_type })
-export const settleTable = (table_no) => request.post('/v1/orders/settle-table', { table_no })
+export const settleTable = (table_no, dining_session_id) => request.post('/v1/orders/settle-table', { table_no, dining_session_id: dining_session_id || undefined })
 export const getReviews = () => request.get('/v1/orders/reviews')
 
 export const getAvailablePlugins = () => request.get('/v1/plugins/available')

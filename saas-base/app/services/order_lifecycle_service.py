@@ -646,25 +646,59 @@ class OrderLifecycleService(BaseService):
             return error_response(code=400, msg="缺少桌号")
         TenantContext.set_tenant_id(tenant_id)
 
-        non_terminal_result = await self.db.execute(
-            select(Order.dining_session_id)
-            .join(DiningSession, DiningSession.id == Order.dining_session_id)
-            .where(
-                DiningSession.tenant_id == tenant_id,
-                DiningSession.table_no == table_no,
-                Order.status.notin_(("settled", "cancelled", "rejected")),
-            )
-            .order_by(DiningSession.created_at.desc())
-            .limit(1)
-        )
-        session_id = non_terminal_result.scalar_one_or_none()
+        requested_session_id_raw = body.get("dining_session_id")
+        requested_session_id = int(requested_session_id_raw) if requested_session_id_raw else None
 
         active_session = None
-        if session_id:
+        if requested_session_id is not None:
+            # P0-10: exact session targeting -- the caller (Admin) identifies the
+            # SPECIFIC session it observed and wants to settle, instead of letting
+            # the server infer "whichever session is currently open at this table."
+            # A stale Admin page holding a since-closed session's id must be denied,
+            # never silently redirected onto a different, later session that has
+            # since opened at the same physical table (P0-10 findings 01/02).
             session_result = await self.db.execute(
-                select(DiningSession).where(DiningSession.id == session_id).with_for_update()
+                select(DiningSession).where(
+                    DiningSession.id == requested_session_id,
+                    DiningSession.tenant_id == tenant_id,
+                    DiningSession.table_no == table_no,
+                    DiningSession.status == "OPEN",
+                ).with_for_update()
             )
             active_session = session_result.scalar_one_or_none()
+            if active_session is None:
+                return error_response(
+                    code=409,
+                    msg="本次结账的会话已变化，请刷新桌台后重试",
+                    data={"code": "SESSION_SETTLE_CONFLICT"},
+                )
+        else:
+            # P0-10 FINAL RECONCILIATION: no dining_session_id supplied. This must
+            # NEVER fall back to "find whichever session is currently open at this
+            # table" -- that is exactly the table-only inference this whole P0-10
+            # effort exists to close (a stale Admin page, or a lost-response retry
+            # of an old settle request, could otherwise settle a DIFFERENT, later
+            # guest generation's bill without ever identifying it). If an OPEN
+            # session exists for this table at all, the caller MUST have supplied
+            # its id -- deny deterministically rather than guess.
+            #
+            # The ONLY orders this path may still settle are true orphans
+            # (dining_session_id IS NULL -- pre-DiningSession-era / demo-seeded
+            # orders, see the orphan_result branch below): those never had a
+            # session identity to begin with, so there is nothing to require.
+            open_session_result = await self.db.execute(
+                select(DiningSession.id).where(
+                    DiningSession.tenant_id == tenant_id,
+                    DiningSession.table_no == table_no,
+                    DiningSession.status == "OPEN",
+                ).limit(1)
+            )
+            if open_session_result.scalar_one_or_none() is not None:
+                return error_response(
+                    code=400,
+                    msg="请指定要结账的会话",
+                    data={"code": "DINING_SESSION_REQUIRED_FOR_SETTLEMENT"},
+                )
 
         if active_session:
             result = await self.db.execute(
@@ -752,12 +786,47 @@ class OrderLifecycleService(BaseService):
         await self.db.commit()
         for o in newly_settled_orders:
             await _record_order_consumption(o, self.db)
+
+        # P0-10-02: the settled-order snapshot the response carries here is the
+        # ONLY authoritative source a receipt should ever be built from -- never
+        # whatever the client had cached locally before clicking settle (which
+        # could describe a different, earlier session at this same table).
+        from app.api.v1.orders import _compose_backward_compatible_item_name
+
+        settled_orders_snapshot = []
+        if newly_settled_orders:
+            items_result = await self.db.execute(
+                select(OrderItem).where(OrderItem.order_id.in_([o.id for o in newly_settled_orders]))
+            )
+            items_by_order: dict[int, list[OrderItem]] = {}
+            for item in items_result.scalars().all():
+                items_by_order.setdefault(item.order_id, []).append(item)
+            settled_orders_snapshot = [
+                {
+                    "id": str(o.id),
+                    "order_no": str(o.id)[-4:],
+                    "total": float(o.total or 0),
+                    "discount_amount": float(o.discount_amount) if getattr(o, "discount_amount", None) else None,
+                    "payment_mode": getattr(o, "payment_mode", "prepay"),
+                    "items": [
+                        {
+                            "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                            "qty": i.qty,
+                            "price": float(i.price or 0),
+                        }
+                        for i in items_by_order.get(o.id, [])
+                    ],
+                }
+                for o in newly_settled_orders
+            ]
+
         return success_response(
             data={
                 "table_no": table_no,
                 "dining_session_id": str(active_session.id) if active_session else None,
                 "settled_count": settled_count,
                 "paid_synced_count": paid_synced_count,
+                "settled_orders": settled_orders_snapshot,
                 "payment_status": "paid",
                 "payment_method": "offline",
                 "closed": True,

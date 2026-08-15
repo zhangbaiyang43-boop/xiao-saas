@@ -723,7 +723,7 @@ export default {
     })
 
     const { saveMyOrders, loadMyOrders, doCancelOrder } = useMyOrdersStore({
-      myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken,
+      myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken, diningSessionId,
       stopStatusPoll: () => stopStatusPoll(),
     })
 
@@ -731,7 +731,7 @@ export default {
     let stopDiningPollsImpl = () => {}
     const {
       persistDiningContext, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders, showTableHint,
-      exitDiningSession, isExitingSession,
+      exitDiningSession, isExitingSession, clearDiningSessionStorage,
     } = useDiningSession({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
       tableSessionClosed, tableSessionStatus, tableSessionTotal, tableSessionClosedNotice,
@@ -1142,6 +1142,7 @@ export default {
       orderSuccessTemplateId, pickupReminderTemplateId,
       wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
       normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+      clearDiningSessionStorage,
     })
 
     const { handleTableContinueOrder, handleTableCheckout } = useTableCheckout({

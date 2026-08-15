@@ -13,18 +13,32 @@ import { reportError } from '@/utils/monitor'
 // 位置比这个组合式函数的调用位置靠后——回调体要等真正取消成功那一刻才会执行，
 // 那时候 stopStatusPoll 早就声明好了，跟 useMemberCard 里 onGoOrder 的道理
 // 一样。
-export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken, stopStatusPoll }) {
-  const storageKey = () => 'my_orders_' + shopId.value + '_' + tableNo.value
+export function useMyOrdersStore({ myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken, diningSessionId, stopStatusPoll }) {
+  // P0-10: keyed by dining_session_id too, not just shop+table -- table_no is a
+  // physical fixture that gets reused by many unrelated guest generations over
+  // time, so a shop+table-only key would let a later generation's device read an
+  // earlier generation's order list. Returns null when there's no valid session
+  // yet, which callers must treat as "nothing to restore" (never fall back to a
+  // shop+table-only key -- see restorePendingPaymentOrder's identical pattern).
+  const storageKey = () => {
+    const sessionId = diningSessionId?.value
+    if (!sessionId) return null
+    return 'my_orders_' + shopId.value + '_' + tableNo.value + '_' + sessionId
+  }
 
   function saveMyOrders() {
-    try { uni.setStorageSync(storageKey(), JSON.stringify(myOrders.value)) } catch (e) {
+    const key = storageKey()
+    if (!key) return
+    try { uni.setStorageSync(key, JSON.stringify(myOrders.value)) } catch (e) {
       reportError('my_orders.save', e)
     }
   }
 
   function loadMyOrders() {
+    const key = storageKey()
+    if (!key) return
     try {
-      const raw = uni.getStorageSync(storageKey())
+      const raw = uni.getStorageSync(key)
       if (raw) myOrders.value = JSON.parse(raw)
     } catch (e) {
       reportError('my_orders.load', e)

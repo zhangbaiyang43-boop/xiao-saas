@@ -132,7 +132,7 @@ class SettleTableOrphanOrdersTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(order)
         await self.db.commit()
 
-        res = await settle_table({"table_no": "B01"}, make_merchant_request(), self.db)
+        res = await settle_table({"table_no": "B01", "dining_session_id": str(session.id)}, make_merchant_request(), self.db)
 
         self.assertEqual(res.code, 200, res.msg)
         self.assertEqual(res.data["dining_session_id"], str(session.id))

@@ -139,7 +139,10 @@ class OrderStateMachineContractsTest(unittest.TestCase):
     def test_merchant_actions_follow_forward_sequence(self):
         self.assertIn("updateOrderStatus(order.id, 'preparing')", ORDER_MANAGE_SOURCE)
         self.assertIn("updateOrderStatus(order.id, 'done')", ORDER_MANAGE_SOURCE)
-        self.assertIn("settleTable(settlingTable.value.tableNo)", ORDER_MANAGE_SOURCE)
+        self.assertIn("settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)", ORDER_MANAGE_SOURCE)
+        # P0-10 FINAL RECONCILIATION: the old table-only call is not a legitimate
+        # contract any more -- settle-table must always be generation-bound.
+        self.assertNotRegex(ORDER_MANAGE_SOURCE, re.compile(r"settleTable\(settlingTable\.value\.tableNo\)"))
         self.assertNotRegex(ORDER_MANAGE_SOURCE, re.compile(r"updateOrderStatus\([^)]*,\s*'pending'\)"))
 
 

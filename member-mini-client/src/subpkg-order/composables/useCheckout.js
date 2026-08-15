@@ -33,6 +33,7 @@ export function useCheckout({
   orderSuccessTemplateId, pickupReminderTemplateId,
   wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
   normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+  clearDiningSessionStorage,
 }) {
   const ensureSubmitRequestId = () => {
     if (!pendingSubmitRequestId.value) {
@@ -56,12 +57,24 @@ export function useCheckout({
     showCheckoutAuth.value = true
   }
 
-  const pendingPaymentStorageKey = () => 'pending_payment_order_' + shopId.value + '_' + tableNo.value
+  // P0-10: keyed by dining_session_id too, not just shop+table -- table_no gets
+  // reused by unrelated guest generations over time, so a shop+table-only key
+  // would let a later generation restore an earlier generation's pending-payment
+  // order id into local state. Returns null when there's no valid session yet;
+  // callers must treat that as "nothing to save/restore," never fall back to a
+  // shop+table-only key.
+  const pendingPaymentStorageKey = () => {
+    const sessionId = diningSessionId?.value
+    if (!sessionId) return null
+    return 'pending_payment_order_' + shopId.value + '_' + tableNo.value + '_' + sessionId
+  }
 
   const savePendingPaymentOrder = () => {
     if (!pendingOrderId.value) return
+    const key = pendingPaymentStorageKey()
+    if (!key) return
     try {
-      uni.setStorageSync(pendingPaymentStorageKey(), JSON.stringify({
+      uni.setStorageSync(key, JSON.stringify({
         orderId: pendingOrderId.value,
         orderNo: orderNo.value,
         payAmount: payAmount.value,
@@ -79,8 +92,10 @@ export function useCheckout({
 
   const restorePendingPaymentOrder = () => {
     if (pendingOrderId.value) return true
+    const key = pendingPaymentStorageKey()
+    if (!key) return false
     try {
-      const raw = uni.getStorageSync(pendingPaymentStorageKey())
+      const raw = uni.getStorageSync(key)
       if (!raw) return false
       const record = JSON.parse(raw)
       if (!record?.orderId) return false
@@ -102,7 +117,7 @@ export function useCheckout({
     // 清不掉一个本地的"待支付"缓存 key 本身不影响这次流程——最多下次冷启动时
     // 多一次没必要的对账，够不上单独报错的门槛，这里是刻意留空，不是漏处理。
     // eslint-disable-next-line no-empty
-    try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
+    try { const key = pendingPaymentStorageKey(); if (key) uni.removeStorageSync(key) } catch (e) {}
     pendingOrderId.value = ''
     paymentFailed.value = false
     if (paymentConfirming) paymentConfirming.value = false
@@ -399,6 +414,17 @@ export function useCheckout({
       if (!isRetry && isDiningIdentityError(err)) {
         const rebuilt = await ensureDiningSession(true)
         if (rebuilt) return performSubmitOrder(true)
+      }
+      // P0-10-05: rebuild-and-retry didn't recover (or this was already a retry) --
+      // the cached dining_session_id/participant_token are genuinely stale (most
+      // likely this table turned over to a new guest generation while this page
+      // sat open) and must not be left behind for the next resume to trust again.
+      // Deliberately NOT markSessionClosed: that also sets tableSessionClosed=true,
+      // which is specifically wrong here (see the comment below) -- this only
+      // invalidates the cache, it doesn't claim "本桌用餐已结束".
+      if (isDiningIdentityError(err) && clearDiningSessionStorage) {
+        clearDiningSessionStorage()
+        diningParticipantToken.value = ''
       }
       if (isCheckoutAuthError(err)) {
         requireCheckoutAuth()

@@ -96,7 +96,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         order = await self._make_order(session, payment_mode="postpay")
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        res = await settle_table({"table_no": "A1"}, request, self.db)
+        res = await settle_table({"table_no": "A1", "dining_session_id": str(session.id)}, request, self.db)
 
         self.assertEqual(res.code, 200)
         await self.db.refresh(order)
@@ -109,7 +109,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         order = await self._make_order(session, payment_mode="table_account")
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        await settle_table({"table_no": "B2"}, request, self.db)
+        await settle_table({"table_no": "B2", "dining_session_id": str(session.id)}, request, self.db)
 
         await self.db.refresh(order)
         self.assertEqual(order.status, "settled")
@@ -124,7 +124,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         order = await self._make_order(session, payment_mode="prepay", payment_status="paid")
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        res = await settle_table({"table_no": "C3"}, request, self.db)
+        res = await settle_table({"table_no": "C3", "dining_session_id": str(session.id)}, request, self.db)
 
         self.assertEqual(res.code, 200)
         self.assertEqual(res.data["settled_count"], 1)
@@ -145,7 +145,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        await settle_table({"table_no": "D4"}, request, self.db)
+        await settle_table({"table_no": "D4", "dining_session_id": str(session.id)}, request, self.db)
 
         result = await self.db.execute(
             sa_select(Consumption).where(Consumption.customer_id == 8888)
@@ -162,7 +162,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        await settle_table({"table_no": "E5"}, request, self.db)
+        await settle_table({"table_no": "E5", "dining_session_id": str(session.id)}, request, self.db)
 
         account_result = await self.db.execute(
             sa_select(MemberAccount).where(
@@ -196,7 +196,7 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         request = FakeRequest(tenant_id=TENANT, token_type="merchant", user_id="u1")
-        await settle_table({"table_no": "F6"}, request, self.db)
+        await settle_table({"table_no": "F6", "dining_session_id": str(session.id)}, request, self.db)
 
         account_result = await self.db.execute(
             sa_select(MemberAccount).where(

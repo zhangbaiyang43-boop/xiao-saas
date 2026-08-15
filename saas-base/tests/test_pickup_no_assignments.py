@@ -189,7 +189,7 @@ class PickupNoAssignmentsP0Test(unittest.IsolatedAsyncioTestCase):
 
         svc = OrderLifecycleService(self.db)
         svc.set_tenant_id(TENANT_A)
-        settle = await svc.settle_table({"table_no": "A01"}, closed_by="staff")
+        settle = await svc.settle_table({"table_no": "A01", "dining_session_id": str(order.dining_session_id)}, closed_by="staff")
         self.assertEqual(settle.code, 200, settle.msg)
 
         rows = (await self.db.execute(select(PickupNoAssignment).where(PickupNoAssignment.tenant_id == TENANT_A))).scalars().all()

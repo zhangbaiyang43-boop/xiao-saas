@@ -349,7 +349,7 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
         svc = OrderLifecycleService(self.db)
         svc.set_tenant_id(TENANT)
-        settle = await svc.settle_table({"table_no": "R4"}, closed_by="staff")
+        settle = await svc.settle_table({"table_no": "R4", "dining_session_id": str(order.dining_session_id)}, closed_by="staff")
         self.assertEqual(settle.code, 200, settle.msg)
         rows = (
             await self.db.execute(select(PickupNoAssignment).where(PickupNoAssignment.tenant_id == TENANT))

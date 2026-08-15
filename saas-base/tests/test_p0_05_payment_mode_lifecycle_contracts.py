@@ -160,7 +160,7 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
         )
 
         response = await settle_table(
-            {"table_no": "W03"}, FakeMerchantRequest(), self.db
+            {"table_no": "W03", "dining_session_id": str(session.id)}, FakeMerchantRequest(), self.db
         )
 
         self.assertEqual(response.code, 409)
@@ -182,7 +182,7 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
         )
 
         response = await settle_table(
-            {"table_no": "R04"}, FakeMerchantRequest(), self.db
+            {"table_no": "R04", "dining_session_id": str(session.id)}, FakeMerchantRequest(), self.db
         )
 
         self.assertEqual(response.code, 200)
@@ -209,7 +209,7 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
         ]
 
         response = await settle_table(
-            {"table_no": "R05"}, FakeMerchantRequest(), self.db
+            {"table_no": "R05", "dining_session_id": str(session.id)}, FakeMerchantRequest(), self.db
         )
 
         self.assertEqual(response.code, 200)
@@ -225,7 +225,11 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.status, "CLOSED")
         self.assertIsNone(session.active_key)
 
-    async def test_r06_second_official_settle_is_deterministic_404_without_mutation(self):
+    async def test_r06_second_official_settle_is_deterministic_conflict_without_mutation(self):
+        # P0-10 FINAL RECONCILIATION: a retry with the SAME (now-closed) session
+        # id is a SESSION_SETTLE_CONFLICT (409), not a generic "no session" 404 --
+        # more precise than before, but the underlying invariant this test exists
+        # to prove is unchanged: the retry must not mutate anything a second time.
         session = await self._make_session("R06")
         order = await self._make_order(
             payment_mode="table_account",
@@ -235,17 +239,18 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
             table_no="R06",
         )
         first = await settle_table(
-            {"table_no": "R06"}, FakeMerchantRequest(), self.db
+            {"table_no": "R06", "dining_session_id": str(session.id)}, FakeMerchantRequest(), self.db
         )
         first_payment_time = order.payment_time
         first_closed_at = session.closed_at
 
         second = await settle_table(
-            {"table_no": "R06"}, FakeMerchantRequest(), self.db
+            {"table_no": "R06", "dining_session_id": str(session.id)}, FakeMerchantRequest(), self.db
         )
 
         self.assertEqual(first.code, 200)
-        self.assertEqual(second.code, 404)
+        self.assertEqual(second.code, 409)
+        self.assertEqual(second.data.get("code"), "SESSION_SETTLE_CONFLICT")
         await self.db.refresh(order)
         await self.db.refresh(session)
         self.assertEqual(order.payment_time, first_payment_time)
@@ -299,7 +304,7 @@ class P005PaymentModeLifecycleContractsTest(unittest.IsolatedAsyncioTestCase):
             table_no="R07",
         )
         settled = await settle_table(
-            {"table_no": "R07"}, FakeMerchantRequest(), self.db
+            {"table_no": "R07", "dining_session_id": str(first_session_id)}, FakeMerchantRequest(), self.db
         )
 
         second_data = await service.resolve_session(

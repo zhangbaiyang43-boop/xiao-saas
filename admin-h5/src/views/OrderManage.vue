@@ -1254,16 +1254,18 @@ async function confirmSettle() {
   if (!settlingTable.value) return
   settling.value = true
   try {
-    const res = await settleTable(settlingTable.value.tableNo)
+    const res = await settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)
     if (res.code !== 200) {
       const statuses = res.data?.blocking_statuses
       const detail = Array.isArray(statuses) && statuses.length ? `（${statuses.map(statusLabel).join('、')}）` : ''
       message.error(`${res.msg || '结账失败'}${detail}`)
       // 结账失败常常是因为这张桌台卡片本身已经过期——比如这一桌已经被结过账了
-      // （另一台设备操作、或者上一次点击其实已经成功但本地没刷新），本地缓存的
-      // orders.value 还停在结账前的快照。不重新拉一次订单的话，商家会对着一张
-      // 服务端早就不认的过期卡片反复点"确认收款"，每次都收到同一个错误，界面上
-      // 却什么都不会变。这里主动关掉弹窗、重新拉取，让桌台视图跟服务端状态对齐。
+      // （另一台设备操作、或者上一次点击其实已经成功但本地没刷新），也可能是 P0-10：
+      // 本地这张卡片对应的会话已经不是服务端当前那一桌了（res.data.code ===
+      // 'SESSION_SETTLE_CONFLICT'）。两种情况本地缓存的 orders.value 都已经过期，
+      // 不重新拉一次订单的话，商家会对着一张服务端早就不认的过期卡片反复点
+      // "确认收款"，每次都收到同一个错误，界面上却什么都不会变。这里主动关掉
+      // 弹窗、重新拉取，让桌台视图跟服务端状态对齐。
       showSettleDialog.value = false
       await reconcileAfterOrderAction()
       return
@@ -1271,11 +1273,15 @@ async function confirmSettle() {
     const table = settlingTable.value
     showSettleDialog.value = false
     const now = new Date()
+    // P0-10-02: the receipt MUST be built from the settle-table response's own
+    // authoritative settled_orders snapshot, never from `table` (captured when
+    // the dialog opened) -- that local snapshot could describe a different,
+    // earlier session at this same physical table if this admin page was stale.
     receiptData.value = {
-      tableNo: table.tableNo,
+      tableNo: res.data.table_no || table.tableNo,
       settledAt: `${now.getFullYear()}/${now.getMonth()+1}/${now.getDate()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,
-      total: table.total.toFixed(2),
-      orders: table.orders.map(o => ({ id: o.id, items: o.items, discount_amount: o.discount_amount })),
+      total: Number(res.data.total || 0).toFixed(2),
+      orders: (res.data.settled_orders || []).map(o => ({ id: o.id, items: o.items, discount_amount: o.discount_amount })),
     }
     showReceiptDialog.value = true
     await reconcileAfterOrderAction()
