@@ -1,0 +1,352 @@
+name: Backend Candidate Certification
+
+# TEST-INFRA-02: parallel migration of the local Gate A + Gate B sweep
+# (~40+ min serial locally) to CI, alongside -- not replacing -- the existing
+# Backend Full Certification workflow (backend-full.yml, unmodified). This
+# workflow gives fast (minutes, not an hour) signal on a P0 candidate's own
+# new/changed tests (Gate A) and the fixed cross-P0 regression profile
+# (Gate B), in parallel with a full serial run, so a candidate can be
+# certified without waiting on Full's ~60-70min authority every time.
+#
+# Same TEST-INFRA-01 identity model: the workflow DEFINITION is dispatched
+# from whatever ref you pick (normally main -- that's WORKFLOW_REF/
+# WORKFLOW_SHA), but the CODE under test is target_ref, checked out
+# explicitly in every job. TARGET_HEAD_SHA is the certification authority,
+# never GITHUB_SHA.
+#
+# CI infrastructure (this file, the Gate B manifest, the path-validation
+# helper) always comes from whatever ref dispatched the workflow -- a P0
+# candidate branch never needs to carry any of it. See the "infra checkout"
+# steps in gate-a/gate-b below.
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Exact branch/tag/40-char commit SHA to certify'
+        required: true
+        default: 'main'
+
+concurrency:
+  group: backend-candidate-${{ inputs.target_ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  REDIS_ENABLED: 'false'
+  # CI-only dummy signing key, unrelated to any real secret -- see
+  # backend-full.yml's identical comment for why this is required at all
+  # (app/config.py's placeholder-value guard has no .env to read from on a
+  # fresh CI checkout).
+  JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
+
+jobs:
+  gate-a:
+    name: Gate A (candidate's own new/changed backend tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout target ref (candidate under test)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+          path: target
+          fetch-depth: 2 # need HEAD^ for the Gate A diff base
+
+      - name: Checkout CI infra ref (manifest + helper script)
+        uses: actions/checkout@v4
+        with:
+          path: infra
+
+      - name: Identity proof
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        working-directory: target/saas-base
+        run: |
+          echo "WORKFLOW_REF=${GITHUB_REF}"
+          echo "WORKFLOW_SHA=${GITHUB_SHA}"
+          echo "TARGET_REF=${TARGET_REF}"
+          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "--- git status --porcelain (must be empty) ---"
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "FAIL: checkout of target_ref is not clean"
+            exit 1
+          fi
+          if ! git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "FAIL: target_ref has no parent commit (root commit) -- Gate A diff base unavailable"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            target/saas-base/requirements.txt
+            target/saas-base/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: target/saas-base
+        run: pip install -r requirements-dev.txt
+
+      - name: Fail closed on deleted backend test files
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # A candidate must never be able to make Gate A/Gate B/Full "pass"
+          # by deleting an inconvenient test rather than fixing the code.
+          # --diff-filter=D isolates deletions specifically (separate from
+          # the ACMR discovery step below, which deliberately excludes D so
+          # a deleted file never gets passed to pytest as a nonexistent
+          # path). Same repo-root-relative-output caveat as the ACMR step.
+          git diff --name-only --diff-filter=D HEAD^ HEAD -- 'tests/*.py' \
+            | sed 's|^saas-base/||' > deleted-tests.txt || true
+          if [ -s deleted-tests.txt ]; then
+            echo "DELETED_BACKEND_TESTS_NOT_ALLOWED"
+            echo "This candidate commit deletes the following saas-base/tests/*.py file(s):"
+            cat deleted-tests.txt
+            exit 1
+          fi
+          echo "No backend test files deleted by this candidate commit."
+
+      - name: Discover changed backend test files
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # Gate A assumes the current P0 candidate contract: exactly one
+          # final commit on top of the previously certified base, so HEAD^ is
+          # always the right diff base (see identity-proof step's root-commit
+          # guard above). If this project ever moves to a multi-commit
+          # candidate model, this diff base needs to become an explicit
+          # base_ref/merge-base input instead -- not assumed here.
+          #
+          # The pathspec below is relative to cwd (target/saas-base), which is
+          # correct as-is. But git diff --name-only always PRINTS paths
+          # relative to the repo ROOT (target/), regardless of cwd or the
+          # pathspec used -- so the output needs "saas-base/" stripped to
+          # match the saas-base-relative "tests/xxx.py" format the
+          # validator/manifest both use. Confirmed by a dry-run against a
+          # real candidate commit; without the strip every path would be
+          # "saas-base/tests/xxx.py" and rejected as not matching ^tests/...
+          git diff --name-only --diff-filter=ACMR HEAD^ HEAD -- 'tests/*.py' \
+            | sed 's|^saas-base/||' > gate-a-files.txt || true
+          echo "GATE_A_CHANGED_FILES="
+          cat gate-a-files.txt
+
+      - name: Validate + run Gate A
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          if [ ! -s gate-a-files.txt ]; then
+            echo "NO_CHANGED_BACKEND_TESTS"
+            echo "Gate A requires this candidate to add/modify at least one saas-base/tests/*.py file."
+            exit 1
+          fi
+          python "${{ github.workspace }}/infra/saas-base/scripts/ci_backend_gate_runner.py" \
+            --repo-root "${{ github.workspace }}/target/saas-base" \
+            --paths-file gate-a-files.txt \
+            run 2>&1 | tee gate-a-output.log
+
+      - name: Upload Gate A logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-gate-a-${{ github.run_id }}
+          path: |
+            target/saas-base/deleted-tests.txt
+            target/saas-base/gate-a-files.txt
+            target/saas-base/gate-a-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  gate-b:
+    name: Gate B (cumulative P0 contracts + static core regression)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout target ref (candidate under test)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+          path: target
+
+      - name: Checkout CI infra ref (manifest + helper script)
+        uses: actions/checkout@v4
+        with:
+          path: infra
+
+      - name: Identity proof
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        working-directory: target/saas-base
+        run: |
+          echo "WORKFLOW_REF=${GITHUB_REF}"
+          echo "WORKFLOW_SHA=${GITHUB_SHA}"
+          echo "TARGET_REF=${TARGET_REF}"
+          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "--- git status --porcelain (must be empty) ---"
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "FAIL: checkout of target_ref is not clean"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            target/saas-base/requirements.txt
+            target/saas-base/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: target/saas-base
+        run: pip install -r requirements-dev.txt
+
+      - name: Discover all P0 test files (tracked-only, cumulative)
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # git ls-files only lists files git itself tracks in THIS checkout
+          # -- no working-tree/untracked-file injection risk, unlike a raw
+          # filesystem glob. Cumulative by design and requiring no manual
+          # manifest upkeep per P0: a P0-14 candidate automatically picks up
+          # every test_p0_*.py already merged into target_ref's history
+          # (P0-01..P0-13), a P0-15 candidate automatically picks up
+          # P0-01..P0-14, and so on. Unlike git diff, ls-files output is
+          # already relative to cwd -- confirmed by a dry-run, no prefix
+          # stripping needed here.
+          git ls-files 'tests/test_p0_*.py' > gate-b-p0-files.txt
+          echo "GATE_B_AUTO_DISCOVERED_P0_FILES="
+          cat gate-b-p0-files.txt
+
+      - name: Combine with static core regression manifest
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          # backend-gate-b.txt (from the infra checkout) is the NON-P0 core
+          # regression profile only -- P0 coverage comes entirely from the
+          # auto-discovery step above. Concatenate + dedupe; comments/blanks
+          # in either source are harmless no-ops for the validator.
+          cat gate-b-p0-files.txt "${{ github.workspace }}/infra/saas-base/ci/backend-gate-b.txt" \
+            | sort -u > gate-b-combined.txt
+          echo "GATE_B_COMBINED_FILES="
+          cat gate-b-combined.txt
+
+      - name: Validate + run Gate B
+        working-directory: target/saas-base
+        run: |
+          set -o pipefail
+          python "${{ github.workspace }}/infra/saas-base/scripts/ci_backend_gate_runner.py" \
+            --repo-root "${{ github.workspace }}/target/saas-base" \
+            --paths-file gate-b-combined.txt \
+            run 2>&1 | tee gate-b-output.log \
+          || { echo "GATE_B_MANIFEST_INVALID_OR_FAILED"; exit 1; }
+
+      - name: Upload Gate B logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-gate-b-${{ github.run_id }}
+          path: |
+            infra/saas-base/ci/backend-gate-b.txt
+            target/saas-base/gate-b-p0-files.txt
+            target/saas-base/gate-b-combined.txt
+            target/saas-base/gate-b-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  full:
+    name: Backend Full (serial, authoritative -- same semantics as backend-full.yml)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_ref }}
+
+      - name: Identity proof
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+        working-directory: saas-base
+        run: |
+          echo "WORKFLOW_REF=${GITHUB_REF}"
+          echo "WORKFLOW_SHA=${GITHUB_SHA}"
+          echo "TARGET_REF=${TARGET_REF}"
+          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "--- git status --porcelain (must be empty) ---"
+          git status --porcelain
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "FAIL: checkout of target_ref is not clean"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: |
+            saas-base/requirements.txt
+            saas-base/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: saas-base
+        run: pip install -r requirements-dev.txt
+
+      - name: Collect (inventory + fail-fast gate)
+        working-directory: saas-base
+        run: |
+          set -o pipefail
+          python -m pytest tests/ --collect-only -q 2>&1 | tee collect-output.log
+
+      - name: Backend authoritative Full
+        working-directory: saas-base
+        run: |
+          set -o pipefail
+          python -m pytest tests/ -q -W error::RuntimeWarning 2>&1 | tee full-output.log
+
+      - name: Upload Full logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-full-${{ github.run_id }}
+          path: |
+            saas-base/collect-output.log
+            saas-base/full-output.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  certification-summary:
+    name: Certification summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [gate-a, gate-b, full]
+    if: always()
+    steps:
+      - name: Report candidate certification status
+        env:
+          TARGET_REF: ${{ inputs.target_ref }}
+          GATE_A_RESULT: ${{ needs.gate-a.result }}
+          GATE_B_RESULT: ${{ needs.gate-b.result }}
+          FULL_RESULT: ${{ needs.full.result }}
+        run: |
+          echo "TARGET_REF=${TARGET_REF}"
+          echo "GATE_A=${GATE_A_RESULT}"
+          echo "GATE_B=${GATE_B_RESULT}"
+          echo "FULL=${FULL_RESULT}"
+          if [ "$GATE_A_RESULT" = "success" ] && [ "$GATE_B_RESULT" = "success" ] && [ "$FULL_RESULT" = "success" ]; then
+            echo "CANDIDATE_CERTIFIED=YES"
+          else
+            echo "CANDIDATE_CERTIFIED=NO"
+            exit 1
+          fi

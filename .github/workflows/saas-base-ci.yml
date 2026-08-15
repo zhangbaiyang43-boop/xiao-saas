@@ -1,6 +1,16 @@
 name: saas-base CI
 
 # Monorepo：只在 saas-base 目录或本 workflow 变更时跑，避免其它子项目改动白烧 CI 分钟。
+#
+# TEST-INFRA-02: this is a lightweight automatic PR smoke, not the authoritative
+# backend regression gate. It only checks that the Python environment installs,
+# the app imports, and pytest can collect the suite — fast signal on a broken
+# environment/import/collection, nothing more.
+#
+# Authoritative P0 candidate certification is performed by:
+#   Backend Candidate Certification (.github/workflows/backend-candidate-certification.yml)
+# Full fallback / serial authoritative run is:
+#   Backend Full Certification (.github/workflows/backend-full.yml)
 on:
   push:
     branches: [main]
@@ -22,11 +32,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # 测试套件自带 aiosqlite 内存库，不依赖真实 MySQL/Redis（本地用无效 DATABASE_URL
-    # + REDIS_ENABLED=false 模拟无服务环境，全量 399 passed / 26 failed 与基线一致）。
-    # 若将来有测试意外连真实库，再在此处加 service container 或 DATABASE_URL 覆盖。
+    # Test suite is self-contained (aiosqlite in-memory DB); no test connects to a
+    # real MySQL/Redis host, so no service containers are needed here.
+    #
+    # JWT_SECRET_KEY: app/config.py's Settings.model_post_init raises RuntimeError
+    # if this is left at its class-default placeholder value. Locally this is
+    # overridden by a real value in saas-base/.env, but .env is gitignored and does
+    # not exist on a CI checkout. The value below is a CI-only dummy signing key
+    # with no relation to any real secret.
     env:
       REDIS_ENABLED: 'false'
+      JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
 
     steps:
       - uses: actions/checkout@v4
@@ -40,14 +56,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run pytest
-        # pytest 在 26 个已知失败时会 exit 1；baseline 门禁负责判定，此处不因此中断 job。
-        run: |
-          pytest tests/ -v --tb=short 2>&1 | tee pytest-output.log
-          exit 0
+      - name: App import smoke
+        run: python -c "import app; print('APP_IMPORT_OK')"
 
-      - name: Verify known baseline (399 passed / 26 frontend contract failures)
-        run: python scripts/check_pytest_baseline.py pytest-output.log
-
-      - name: Run scoped mypy (create_order split)
-        run: mypy
+      - name: Pytest collection smoke
+        run: python -m pytest tests/ --collect-only -q
