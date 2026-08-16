@@ -1109,7 +1109,11 @@ export default {
       // onLoad 里的预拉垫过底了，这里再刷新一次只是保证不过期，不等它。
       // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段。
       const firstAction = startFirstCartAction('open_cart')
-      pendingSubmitRequestId.value = ''
+      // P0-15-01: do NOT reset pendingSubmitRequestId here -- an unresolved
+      // (ambiguous) create-order submit intent must survive ordinary cart
+      // close/reopen navigation. It's only ever cleared once the server
+      // confirms an order identity (see useCheckout.js's
+      // clearCurrentPendingSubmitIntent call sites).
       loadShopSettings().catch(() => {})
       showCart.value = true
       finishFirstCartAction(firstAction)

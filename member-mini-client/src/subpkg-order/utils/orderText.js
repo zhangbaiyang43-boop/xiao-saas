@@ -87,6 +87,9 @@ export const toastText = {
   payCancelled: '已取消支付',
   createOrderFailed: '订单创建失败，请重试',
   submitOrderFailed: '下单失败，请告知服务员',
+  // P0-15-02: network/timeout during submit -- outcome is unknown, not a
+  // definitive failure (the request may have already reached the server).
+  submitOrderUnknown: '网络异常，订单状态待确认，请重新确认',
 
   dishUnavailable: '菜品已下架或售罄',
   specChanged: '规格已变更，请重新选择',
