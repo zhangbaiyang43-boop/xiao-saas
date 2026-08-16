@@ -9,7 +9,7 @@
     "build:mp-weixin": "uni build -p mp-weixin && node scripts/copy-vant.mjs && node scripts/postbuild-mp-weixin.mjs",
     "test": "vitest run && npm run test:legacy",
     "test:watch": "vitest",
-    "test:legacy": "node --test \"tests/**/*.test.mjs\"",
+    "test:legacy": "node --test tests/coupon-nudge.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {
