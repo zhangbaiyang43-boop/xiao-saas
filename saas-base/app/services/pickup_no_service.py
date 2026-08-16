@@ -302,6 +302,20 @@ class PickupNoService:
                     sibling.pickup_no = pickup_no
                 affected_ids = [o.id for o in siblings] or affected_ids
 
+            should_print_after = bool(
+                pickup_no
+                and previous_pickup is None
+                and settings.get("enabled")
+                and settings.get("required_before_print")
+            )
+            if should_print_after:
+                from app.services.order_print_service import mark_initial_print_eligible
+
+                for affected_order in siblings if session is not None else [order]:
+                    mark_initial_print_eligible(
+                        affected_order,
+                        reason="pickup_no_assigned",
+                    )
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
@@ -313,14 +327,6 @@ class PickupNoService:
             return error_response(code=500, msg="分配桌牌失败，请重试")
 
         # 仅「首次分牌」触发正式厨房票；换号不自动重打（走现有补打）
-        if (
-            pickup_no
-            and previous_pickup is None
-            and settings.get("enabled")
-            and settings.get("required_before_print")
-        ):
-            should_print_after = True
-
         return success_response(
             data={
                 "pickup_no": pickup_no,

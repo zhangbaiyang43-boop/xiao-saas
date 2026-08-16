@@ -16,6 +16,7 @@ from app.api.v1.orders import OrderCreate, OrderItemIn, create_order, wxpay_noti
 from app.models.base import Base
 from app.models.customer import Customer
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice  # noqa: F401
@@ -180,6 +181,12 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
                         available=True,
                         category="小吃",
                     ),
+                    # P0-01: this suite is about assisted-payment handoff, not table validity.
+                    EntranceCode(
+                        id=generate_snowflake_id(),
+                        tenant_id=TENANT, name="8", scene="E000000000008",
+                        table_no="8", entry_type="table", status=1,
+                    ),
                 ]
             )
             await db.commit()
@@ -192,7 +199,10 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
             shop=TENANT,
             table="8",
             dining_session_id=self.session_id,
-            items=[OrderItemIn(dish_id=self.dish_id, name="小酥肉", price=0.01, qty=1)],
+            # P0-02: use the dish's real server price (18.00) instead of the old
+            # 0.01 placeholder -- this suite is about assisted payment handoff, not
+            # pricing, so the fixture should reflect a realistic order.
+            items=[OrderItemIn(dish_id=self.dish_id, name="小酥肉", price=18.0, qty=1)],
             total=0.01,
             request_id="handoff-order-1",
         )
@@ -370,6 +380,7 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
             resource = {
                 "out_trade_no": str(order.id),
                 "trade_state": "SUCCESS",
+                "transaction_id": f"wx-handoff-{order.id}",
                 "amount": {"total": 1800, "payer_total": 1800, "currency": "CNY"},
             }
             with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \

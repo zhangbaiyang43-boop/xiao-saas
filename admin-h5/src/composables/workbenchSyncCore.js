@@ -16,6 +16,11 @@ export function pendingIdsFromOrders(orders) {
   return ids
 }
 
+/** Owner alert membership: first transition into the actionable pending state. */
+export function ownerActionableIdsFromOrders(orders) {
+  return pendingIdsFromOrders(orders)
+}
+
 /** Frontdesk alert set: assignable and still missing pickup_no. */
 export function needsPickupIdsFromOrders(orders) {
   const ids = new Set()
@@ -104,6 +109,7 @@ export function formatSyncAge(at, now = Date.now()) {
  * @param {number} [opts.fullIntervalMs]
  * @param {number} [opts.highlightMs]
  * @param {(state: object) => void} [opts.onChange]
+ * @param {() => string} [opts.getIdentity] current tenant/auth session identity
  * @param {(id: string) => void} [opts.setTimeoutFn]
  * @param {(id: any) => void} [opts.clearTimeoutFn]
  */
@@ -122,6 +128,7 @@ export function createWorkbenchSyncCore(opts) {
   const maxDeltaPages = opts.maxDeltaPages ?? WORKBENCH_DELTA_MAX_PAGES
   const deltaFailFallback = opts.deltaFailFallback ?? WORKBENCH_DELTA_FAIL_FALLBACK
   const onChange = opts.onChange || (() => {})
+  const getIdentity = opts.getIdentity || (() => '')
   const setTimeoutFn = opts.setTimeoutFn || ((fn, ms) => setTimeout(fn, ms))
   const clearTimeoutFn = opts.clearTimeoutFn || ((id) => clearTimeout(id))
 
@@ -135,6 +142,7 @@ export function createWorkbenchSyncCore(opts) {
   let inFlight = false
   let fullSyncPending = false
   let consecutiveDeltaFailures = 0
+  let consecutiveFailures = 0
   let syncFailed = false
   let networkOnline = typeof navigator !== 'undefined' ? navigator.onLine !== false : true
   let lastSuccessfulSyncAt = null
@@ -146,6 +154,9 @@ export function createWorkbenchSyncCore(opts) {
   const highlightTimers = new Map()
   let lastNewIds = []
   let lastMode = null
+  let generation = 0
+  let activeIdentity = String(getIdentity() ?? '')
+  let pendingFullWaiters = []
 
   function emit() {
     onChange(getState())
@@ -172,6 +183,9 @@ export function createWorkbenchSyncCore(opts) {
       lastNewIds: lastNewIds.slice(),
       lastMode,
       consecutiveDeltaFailures,
+      consecutiveFailures,
+      generation,
+      activeIdentity,
     }
   }
 
@@ -185,10 +199,47 @@ export function createWorkbenchSyncCore(opts) {
   function scheduleNext() {
     clearSchedule()
     if (!running || authStopped || !pageVisible || !networkOnline) return
+    let delay = intervalMs
+    if (consecutiveFailures === 2) delay = Math.max(intervalMs, 10000)
+    else if (consecutiveFailures === 3) delay = Math.max(intervalMs, 20000)
+    else if (consecutiveFailures >= 4) delay = Math.max(intervalMs, 30000)
     timer = setTimeoutFn(() => {
       timer = null
       sync('auto')
-    }, intervalMs)
+    }, delay)
+  }
+
+  function resetForIdentity(nextIdentity) {
+    generation += 1
+    activeIdentity = String(nextIdentity ?? '')
+    orders = []
+    knownPendingIds = new Set()
+    hasBaseline = false
+    cursor = null
+    lastFullAt = null
+    lastNewIds = []
+    consecutiveDeltaFailures = 0
+    consecutiveFailures = 0
+    authStopped = false
+    clearHighlights()
+  }
+
+  function settleFullWaiters(waiters, result) {
+    for (const resolve of waiters) resolve(result)
+  }
+
+  function drainPendingFullWaiters(result) {
+    const waiters = pendingFullWaiters
+    pendingFullWaiters = []
+    settleFullWaiters(waiters, result)
+  }
+
+  function requestIsCurrent(requestGeneration, requestIdentity) {
+    return (
+      running &&
+      requestGeneration === generation &&
+      String(getIdentity() ?? '') === requestIdentity
+    )
   }
 
   function addHighlights(ids) {
@@ -248,9 +299,12 @@ export function createWorkbenchSyncCore(opts) {
     return status === 401 || status === 403
   }
 
-  async function runFull() {
+  async function runFull(requestGeneration, requestIdentity) {
     lastMode = 'full'
     const raw = await fetchFull()
+    if (!requestIsCurrent(requestGeneration, requestIdentity)) {
+      return { skipped: true, reason: 'stale_generation' }
+    }
     let list
     let nextCursor = null
     if (Array.isArray(raw)) {
@@ -265,15 +319,15 @@ export function createWorkbenchSyncCore(opts) {
     if (nextCursor) cursor = nextCursor
     lastFullAt = now()
     consecutiveDeltaFailures = 0
-    fullSyncPending = false
+    consecutiveFailures = 0
     emit()
     return { ok: true, mode: 'full', newIds, orders }
   }
 
-  async function runDelta() {
+  async function runDelta(requestGeneration, requestIdentity) {
     lastMode = 'delta'
     if (!cursor) {
-      return runFull()
+      return runFull(requestGeneration, requestIdentity)
     }
     let pages = 0
     let workingCursor = cursor
@@ -281,6 +335,9 @@ export function createWorkbenchSyncCore(opts) {
     while (pages < maxDeltaPages) {
       pages += 1
       const page = await fetchChanges(workingCursor)
+      if (!requestIsCurrent(requestGeneration, requestIdentity)) {
+        return { skipped: true, reason: 'stale_generation' }
+      }
       const items = Array.isArray(page?.items) ? page.items : []
       const removed = Array.isArray(page?.removed_ids) ? page.removed_ids : []
       const next = page?.next_cursor != null ? String(page.next_cursor) : workingCursor
@@ -290,7 +347,7 @@ export function createWorkbenchSyncCore(opts) {
       if (pages >= maxDeltaPages && page?.has_more) {
         // Drain safety: fall back to full rather than skip remaining pages.
         cursor = workingCursor
-        return runFull()
+        return runFull(requestGeneration, requestIdentity)
       }
     }
     cursor = workingCursor
@@ -298,6 +355,7 @@ export function createWorkbenchSyncCore(opts) {
     // commitOrders re-filters; keep FIFO from apply
     orders = sortOrdersFifo(filterOrders(workingOrders))
     consecutiveDeltaFailures = 0
+    consecutiveFailures = 0
     emit()
     return { ok: true, mode: 'delta', newIds, orders }
   }
@@ -314,13 +372,24 @@ export function createWorkbenchSyncCore(opts) {
   }
 
   async function sync(mode = 'auto') {
-    if (!running || authStopped) return { skipped: true, reason: 'stopped' }
+    if (!running) return { skipped: true, reason: 'stopped' }
+    const currentIdentity = String(getIdentity() ?? '')
+    if (currentIdentity !== activeIdentity) {
+      resetForIdentity(currentIdentity)
+      emit()
+    }
+    if (authStopped) return { skipped: true, reason: 'stopped' }
     if (inFlight) {
-      if (mode === 'full' || shouldFull(mode)) fullSyncPending = true
+      if (mode === 'full' || shouldFull(mode)) {
+        fullSyncPending = true
+        return new Promise((resolve) => pendingFullWaiters.push(resolve))
+      }
       return { skipped: true, reason: 'in_flight' }
     }
 
     const wantFull = shouldFull(mode)
+    const requestGeneration = generation
+    const requestIdentity = activeIdentity
     inFlight = true
     if (!hasBaseline) initialLoading = true
     else backgroundSyncing = true
@@ -328,44 +397,68 @@ export function createWorkbenchSyncCore(opts) {
 
     try {
       if (wantFull) {
-        return await runFull()
+        return await runFull(requestGeneration, requestIdentity)
       }
       try {
-        return await runDelta()
+        return await runDelta(requestGeneration, requestIdentity)
       } catch (err) {
         if (isAuthError(err)) throw err
         if (isInvalidCursorError(err)) {
           cursor = null
           consecutiveDeltaFailures = 0
-          return await runFull()
+          return await runFull(requestGeneration, requestIdentity)
         }
         consecutiveDeltaFailures += 1
         if (consecutiveDeltaFailures >= deltaFailFallback) {
-          return await runFull()
+          return await runFull(requestGeneration, requestIdentity)
         }
         throw err
       }
     } catch (err) {
+      if (!requestIsCurrent(requestGeneration, requestIdentity)) {
+        return { skipped: true, reason: 'stale_generation' }
+      }
       if (isAuthError(err)) {
         authStopped = true
         clearSchedule()
       }
       syncFailed = true
+      consecutiveFailures += 1
       lastNewIds = []
       emit()
       return { ok: false, error: err }
     } finally {
       inFlight = false
+      const identityAfterRequest = String(getIdentity() ?? '')
+      const staleGeneration = requestGeneration !== generation
+      const staleIdentity = identityAfterRequest !== requestIdentity
+      if (staleGeneration || staleIdentity) {
+        if (!running) return
+        if (staleIdentity) {
+          resetForIdentity(identityAfterRequest)
+          emit()
+        }
+        Promise.resolve()
+          .then(() => sync('full'))
+          .catch(() => {})
+        return
+      }
       initialLoading = false
       backgroundSyncing = false
       emit()
       if (fullSyncPending && running && !authStopped) {
         fullSyncPending = false
+        const waitersForNextFull = pendingFullWaiters
+        pendingFullWaiters = []
         // Priority full after in-flight delta/full finishes.
         Promise.resolve()
           .then(() => sync('full'))
-          .catch(() => {})
+          .then((result) => settleFullWaiters(waitersForNextFull, result))
+          .catch((error) => settleFullWaiters(waitersForNextFull, { ok: false, error }))
       } else {
+        if (pendingFullWaiters.length) {
+          drainPendingFullWaiters({ skipped: true, reason: authStopped ? 'stopped' : 'not_queued' })
+        }
         scheduleNext()
       }
     }
@@ -393,6 +486,7 @@ export function createWorkbenchSyncCore(opts) {
       return
     }
     if (networkOnline) {
+      consecutiveFailures = 0
       emit()
       sync('full')
     } else {
@@ -405,14 +499,20 @@ export function createWorkbenchSyncCore(opts) {
     if (running) return
     running = true
     authStopped = false
+    generation += 1
+    activeIdentity = String(getIdentity() ?? '')
+    consecutiveFailures = 0
     emit()
     sync('full')
   }
 
   function stop() {
     running = false
+    generation += 1
+    fullSyncPending = false
     clearSchedule()
     clearHighlights()
+    drainPendingFullWaiters({ skipped: true, reason: 'stopped' })
     emit()
   }
 

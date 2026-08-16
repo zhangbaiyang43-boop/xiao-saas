@@ -29,20 +29,20 @@ describe('useMemberCard', () => {
     it('还没有 bannerInfo 时按普通会员/LV1 兜底', () => {
       const { card } = setup()
       expect(card.memberLevelLabel.value).toBe('普通会员')
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.png')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.webp')
     })
 
     it('bannerInfo 有等级信息时展示对应文案和徽章', () => {
       const { card } = setup()
       card.bannerInfo.value = { levelLabel: '黄金会员', levelCode: 'LV3' }
       expect(card.memberLevelLabel.value).toBe('黄金会员')
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv3.png')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv3.webp')
     })
 
     it('等级码不在已知映射里时按 LV1 兜底，不留空图', () => {
       const { card } = setup()
       card.bannerInfo.value = { levelLabel: '神秘等级', levelCode: 'LV99' }
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.png')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.webp')
     })
   })
 

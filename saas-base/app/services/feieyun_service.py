@@ -76,6 +76,9 @@ def build_order_ticket(order, order_items) -> str:
 
     for item in order_items or []:
         lines.append(f"{item.name}  x{item.qty}  ¥{float(item.price):.1f}")
+        item_remark = (getattr(item, "item_remark", "") or "").strip()
+        if item_remark:
+            lines.append(f"  菜品备注：{item_remark}")
 
     lines.append("--------------------------------")
     remark = getattr(order, "remark", "") or ""

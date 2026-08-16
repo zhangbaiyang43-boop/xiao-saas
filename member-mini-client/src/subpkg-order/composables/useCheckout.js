@@ -3,6 +3,7 @@ import { joinByEntranceCode } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { isDiningIdentityError } from '@/utils/dining'
 import { reportError } from '@/utils/monitor'
+import { savePendingSubmitIntent, restorePendingSubmitIntent, clearPendingSubmitIntent } from '@/utils/pendingSubmitIntent'
 import { confirmationText, toastText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的下单 + 支付 + 待支付恢复 + 结账授权这一整条链路。这是全部
@@ -33,13 +34,44 @@ export function useCheckout({
   orderSuccessTemplateId, pickupReminderTemplateId,
   wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
   normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+  clearDiningSessionStorage,
 }) {
+  // P0-15-01: keyed the same way as pendingPaymentStorageKey below -- tenant +
+  // table + dining_session_id, never just tenant+table (table_no gets reused
+  // by unrelated guest generations). Returns null when there's no valid
+  // session yet, same contract as pendingPaymentStorageKey.
+  const submitIntentScope = () => {
+    const sessionId = diningSessionId?.value
+    if (!sessionId) return null
+    return { tenantId: shopId.value, tableNo: tableNo.value, sessionId }
+  }
+
+  // Restore is resolved once, up front, in performSubmitOrder (it needs the
+  // whole record, not just the id -- see the payload-drift fix there). This
+  // only mints a fresh id for the case performSubmitOrder has already
+  // determined there's nothing to restore.
   const ensureSubmitRequestId = () => {
     if (!pendingSubmitRequestId.value) {
       pendingSubmitRequestId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     }
     return pendingSubmitRequestId.value
   }
+
+  const clearCurrentPendingSubmitIntent = () => {
+    const scope = submitIntentScope()
+    if (scope) clearPendingSubmitIntent(scope)
+  }
+
+  // A genuine network/timeout failure, as produced by api/request.js's `fail:`
+  // branch, is a bare Error with no statusCode/code/bizCode -- those are only
+  // ever set on a real HTTP response (see request.js: the 401/403 and generic
+  // business-error branches both set error.statusCode/error.code, the fail:
+  // branch never does). This is the one place server response and "the
+  // request never got a response at all" are still distinguishable once the
+  // error has already reached useCheckout.js.
+  const isAmbiguousSubmitError = (err) => (
+    err && err.statusCode === undefined && err.code === undefined && err.bizCode === undefined
+  )
 
   const isCheckoutAuthError = (err) => {
     const code = String(err?.code || '')
@@ -56,12 +88,24 @@ export function useCheckout({
     showCheckoutAuth.value = true
   }
 
-  const pendingPaymentStorageKey = () => 'pending_payment_order_' + shopId.value + '_' + tableNo.value
+  // P0-10: keyed by dining_session_id too, not just shop+table -- table_no gets
+  // reused by unrelated guest generations over time, so a shop+table-only key
+  // would let a later generation restore an earlier generation's pending-payment
+  // order id into local state. Returns null when there's no valid session yet;
+  // callers must treat that as "nothing to save/restore," never fall back to a
+  // shop+table-only key.
+  const pendingPaymentStorageKey = () => {
+    const sessionId = diningSessionId?.value
+    if (!sessionId) return null
+    return 'pending_payment_order_' + shopId.value + '_' + tableNo.value + '_' + sessionId
+  }
 
   const savePendingPaymentOrder = () => {
     if (!pendingOrderId.value) return
+    const key = pendingPaymentStorageKey()
+    if (!key) return
     try {
-      uni.setStorageSync(pendingPaymentStorageKey(), JSON.stringify({
+      uni.setStorageSync(key, JSON.stringify({
         orderId: pendingOrderId.value,
         orderNo: orderNo.value,
         payAmount: payAmount.value,
@@ -79,8 +123,10 @@ export function useCheckout({
 
   const restorePendingPaymentOrder = () => {
     if (pendingOrderId.value) return true
+    const key = pendingPaymentStorageKey()
+    if (!key) return false
     try {
-      const raw = uni.getStorageSync(pendingPaymentStorageKey())
+      const raw = uni.getStorageSync(key)
       if (!raw) return false
       const record = JSON.parse(raw)
       if (!record?.orderId) return false
@@ -102,7 +148,7 @@ export function useCheckout({
     // 清不掉一个本地的"待支付"缓存 key 本身不影响这次流程——最多下次冷启动时
     // 多一次没必要的对账，够不上单独报错的门槛，这里是刻意留空，不是漏处理。
     // eslint-disable-next-line no-empty
-    try { uni.removeStorageSync(pendingPaymentStorageKey()) } catch (e) {}
+    try { const key = pendingPaymentStorageKey(); if (key) uni.removeStorageSync(key) } catch (e) {}
     pendingOrderId.value = ''
     paymentFailed.value = false
     if (paymentConfirming) paymentConfirming.value = false
@@ -123,6 +169,48 @@ export function useCheckout({
     return paymentStatus === 'paid' || ['pending', 'paid', 'accepted', 'preparing', 'done', 'completed', 'settled'].includes(status)
   }
 
+  const reconcileTerminalOrder = async (id, data, { showDetail = false } = {}) => {
+    orderId.value = id
+    orderStatus.value = data.status
+    showSuccess.value = false
+    pendingPaymentIntent.value = null
+    clearPendingPaymentOrder()
+    // The table-session DTO is intentionally narrower than the order status DTO.
+    // Sync first, then re-apply the authoritative late-payment attention so the
+    // narrower snapshot cannot erase refundRequired from the local order card.
+    await syncDiningOrders()
+    const now = new Date()
+    const existing = myOrders.value.find(o => String(o.id) === String(id))
+    const patch = {
+      status: data.status,
+      paymentStatus: data.payment_status || 'unpaid',
+      refundRequired: data.refund_required === true,
+    }
+    if (existing) Object.assign(existing, patch)
+    else {
+      myOrders.value.unshift({
+        id,
+        orderNo: orderNo.value || String(id).slice(-4),
+        ...patch,
+        items: successItems.value,
+        total: successTotal.value || payAmount.value,
+        createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
+        createdTs: now.getTime(),
+        table: tableNo.value,
+        shop: shopId.value,
+      })
+    }
+    saveMyOrders()
+    showOrders.value = showDetail || showOrders.value
+    if (data.refund_required === true) {
+      uni.showToast({
+        title: '订单已取消，付款已成功，请联系商家处理退款',
+        icon: 'none',
+        duration: 2600,
+      })
+    }
+  }
+
   let recoveringPayment = false
   const recoverPendingPaymentResult = async ({ showDetail = false } = {}) => {
     if (recoveringPayment) return false
@@ -133,6 +221,10 @@ export function useCheckout({
     try {
       const res = await getOrderStatus(id, diningParticipantToken.value)
       const data = res?.data || {}
+      if (['cancelled', 'rejected'].includes(data.status)) {
+        await reconcileTerminalOrder(id, data, { showDetail })
+        return false
+      }
       if (isPaidOrSubmittedOrder(data)) {
         orderId.value = id
         orderStatus.value = data.status || 'pending'
@@ -164,9 +256,6 @@ export function useCheckout({
         await syncDiningOrders()
         showOrders.value = showDetail || showOrders.value
         return true
-      }
-      if (['cancelled', 'rejected'].includes(data.status)) {
-        clearPendingPaymentOrder()
       }
       return false
     } catch (e) {
@@ -292,21 +381,102 @@ export function useCheckout({
       }
       // 必须在用户点击提交的手势链里调用，否则微信不会弹授权框。
       await requestOrderSubscribeMessages()
-      const payload = {
-        table: tableNo.value,
-        shop: shopId.value,
-        total: totalPrice.value,
-        remark: remark.value.trim() || undefined,
-        coupon_id: selectedCouponId.value || undefined,
-        dining_session_id: diningSessionId.value || undefined,
-        participant_token: diningParticipantToken.value || undefined,
-        client_id: diningClientId.value || undefined,
-        request_id: ensureSubmitRequestId(),
-        items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined })),
+
+      const submitScope = submitIntentScope()
+      const restoreResult = submitScope ? restorePendingSubmitIntent(submitScope) : { status: 'missing' }
+
+      // P0-15 closure: a record exists for this scope but can't be read back
+      // reliably (corrupt JSON, missing its requestId) -- this must NOT be
+      // treated the same as "nothing pending." A real prior attempt under
+      // this scope may still be genuinely unresolved server-side; minting a
+      // fresh identity and sending under it risks the exact P0-15-01
+      // duplicate-order failure. Fail closed instead.
+      if (restoreResult.status === 'corrupt') {
+        const corruptErr = new Error(toastText.submitIntentUnrecoverable)
+        corruptErr.__corruptIntent = true
+        throw corruptErr
       }
-      const res = await createOrder(payload, { authRedirect: false })
+
+      let payload
+      if (restoreResult.status === 'found') {
+        // P0-15 closure Gap B: an earlier attempt under this exact scope is
+        // still unresolved -- resend its FROZEN canonical payload, never a
+        // payload rebuilt from the live cart (which may have changed since).
+        // Only non-business context (participant_token/client_id) is re-read
+        // fresh; everything the P0-04 server fingerprint actually keys on
+        // (table/dining_session_id/coupon_id/remark/items) comes from the
+        // frozen snapshot untouched.
+        const snap = restoreResult.record.snapshot || {}
+        payload = {
+          ...snap,
+          participant_token: diningParticipantToken.value || undefined,
+          client_id: diningClientId.value || undefined,
+          request_id: restoreResult.record.requestId,
+        }
+        pendingSubmitRequestId.value = restoreResult.record.requestId
+      } else {
+        payload = {
+          table: tableNo.value,
+          shop: shopId.value,
+          total: totalPrice.value,
+          remark: remark.value.trim() || undefined,
+          coupon_id: selectedCouponId.value || undefined,
+          dining_session_id: diningSessionId.value || undefined,
+          participant_token: diningParticipantToken.value || undefined,
+          client_id: diningClientId.value || undefined,
+          request_id: ensureSubmitRequestId(),
+          // P0-04 remark reconciliation: item_remark must come from the cart line's real
+          // itemRemark field (set by useSpecSheet's confirmSpec, spec'd items only) --
+          // never re-derived from orderName/name, which are display-only folded text.
+          // Sent explicitly (even as '') for spec'd items so the server trusts this field
+          // instead of falling back to legacy name-parsing; omitted for simple items,
+          // which have no remark concept at all (no UI path to enter one).
+          items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined, item_remark: item.itemRemark !== undefined ? item.itemRemark : undefined })),
+        }
+        // P0-15-01: persist the submit intent BEFORE the network call, not after --
+        // if the app process dies between the request being sent and the response
+        // arriving, this is the only record that survives to make the next retry
+        // (a fresh page instance) reuse the same request_id instead of minting a
+        // new one. No participant_token/credential is stored -- retries always
+        // re-read that fresh from the current session context (see payload above).
+        //
+        // P0-15 closure Gap A: if this write fails, we have no durable record
+        // of the identity we're about to send under -- do NOT send the
+        // mutation at all. A silently-unrecorded in-flight request is exactly
+        // the P0-15-01 failure mode, just reached via a storage fault instead
+        // of a process kill.
+        if (submitScope) {
+          const persisted = savePendingSubmitIntent({
+            ...submitScope,
+            requestId: payload.request_id,
+            snapshot: { table: payload.table, shop: payload.shop, total: payload.total, remark: payload.remark, coupon_id: payload.coupon_id, dining_session_id: payload.dining_session_id, items: payload.items },
+          })
+          if (!persisted) {
+            const saveErr = new Error(toastText.submitIntentSaveFailed)
+            saveErr.__saveFailed = true
+            throw saveErr
+          }
+        }
+      }
+      let res
+      try {
+        res = await createOrder(payload, { authRedirect: false })
+      } catch (submitErr) {
+        // Tag right here, at the one call site this ambiguity classification
+        // is actually about -- every other throw in this function (session
+        // not ready, empty pendingOrderId after a real response, etc.) is a
+        // definitive, locally-known condition and must keep its own specific
+        // message, even though some of those errors also happen to carry no
+        // statusCode/code (they were never network errors to begin with).
+        if (isAmbiguousSubmitError(submitErr)) submitErr.__ambiguousSubmit = true
+        throw submitErr
+      }
       const data = res?.data || {}
       pendingOrderId.value = String(data.id || data.order_id || '')
+      // Order identity is now server-confirmed -- the submit intent this
+      // request_id was tracking is resolved. Whether payment is still needed is
+      // a separate, later lifecycle (see savePendingPaymentOrder below).
+      clearCurrentPendingSubmitIntent()
       paymentFailed.value = false
       orderNo.value = String(data.order_no || data.id || '').slice(-4)
       successItems.value = cartItems.value.map(i => ({ ...i }))
@@ -322,15 +492,72 @@ export function useCheckout({
       pendingPaymentIntent.value = null
       return true
     } catch (err) {
+      // P0-04: same request_id retried with genuinely different cart content --
+      // server fails closed instead of silently replaying stale content (or,
+      // worse, silently creating a second order). Must be checked BEFORE
+      // isDiningIdentityError below: both use code===409, but they mean
+      // completely different things, and this one must never fall into that
+      // branch's "rebuild identity and blindly retry" behavior -- retrying
+      // blindly here would just hit the exact same conflict again.
+      // Never clears pendingSubmitRequestId or generates a new key: the
+      // existing order this key already produced is what we bind to and
+      // recover, reusing the same paths a normal pending-payment recovery
+      // already uses (never a second order-recovery UI).
+      if (err?.bizCode === 'IDEMPOTENCY_CONFLICT' && err?.data?.existing_order_id) {
+        pendingOrderId.value = String(err.data.existing_order_id)
+        // Same reasoning as the direct-success path above: the server has told
+        // us a real Order identity exists for this request_id, so the submit
+        // intent is resolved regardless of which recovery branch runs next.
+        clearCurrentPendingSubmitIntent()
+        orderNo.value = String(err.data.existing_order_no || err.data.existing_order_id).slice(-4)
+        paymentMode.value = normalizePaymentMode(err.data.payment_mode)
+        if (err.data.need_payment) {
+          return await confirmPay()
+        }
+        const recovered = await recoverPendingPaymentResult({ showDetail: true })
+        if (recovered) return true
+        uni.showToast({ title: toastText.submitOrderFailed, icon: 'none' })
+        return false
+      }
       // 本桌匿名身份失效（后端统一返回 409）不是会员登录问题，静默重建身份后自动重试
       // 一次；仍失败才走下面的兜底提示，不会弹"继续支付/授权"这种会员专属的措辞。
       if (!isRetry && isDiningIdentityError(err)) {
         const rebuilt = await ensureDiningSession(true)
         if (rebuilt) return performSubmitOrder(true)
       }
+      // P0-10-05: rebuild-and-retry didn't recover (or this was already a retry) --
+      // the cached dining_session_id/participant_token are genuinely stale (most
+      // likely this table turned over to a new guest generation while this page
+      // sat open) and must not be left behind for the next resume to trust again.
+      // Deliberately NOT markSessionClosed: that also sets tableSessionClosed=true,
+      // which is specifically wrong here (see the comment below) -- this only
+      // invalidates the cache, it doesn't claim "本桌用餐已结束".
+      if (isDiningIdentityError(err) && clearDiningSessionStorage) {
+        clearDiningSessionStorage()
+        diningParticipantToken.value = ''
+        // The scope (dining_session_id) this pending intent was tracking is
+        // itself being invalidated -- P0-10: never let a resumed page replay
+        // a stale session's request_id into whatever session comes next.
+        clearCurrentPendingSubmitIntent()
+      }
       if (isCheckoutAuthError(err)) {
         requireCheckoutAuth()
         return false
+      }
+      // P0-15 closure: a definitive business rejection (server actually
+      // responded with a real error -- dish unavailable, price stale, store
+      // closed, etc. -- confirmed no order was created) means the frozen
+      // payload this request_id was tracking is now moot. Clear it so the
+      // NEXT attempt is free to send a genuinely corrected cart -- without
+      // this, the payload-freeze fix above (Gap B) would otherwise trap the
+      // user resending the same rejected payload forever. Deliberately
+      // excludes: ambiguous (must stay frozen, that's the whole point of the
+      // freeze), dining-identity (already cleared above, different scope
+      // concern), corrupt-record and save-failure (nothing of this attempt
+      // was ever durably recorded to begin with -- clearing here could wipe
+      // out a genuine still-unresolved EARLIER record instead).
+      if (!isDiningIdentityError(err) && !err?.__ambiguousSubmit && !err?.__corruptIntent && !err?.__saveFailed) {
+        clearCurrentPendingSubmitIntent()
       }
       const rawMsg = err?.message || ''
       // 409 /「本桌身份」可恢复：只提示重新扫码，绝不能标成 tableSessionClosed
@@ -342,9 +569,14 @@ export function useCheckout({
       ) {
         tableSessionClosed.value = true
       }
+      // P0-15-02: a genuine network/timeout failure means the outcome is
+      // UNKNOWN, not FAILED -- the request may well have reached and been
+      // committed by the server. This must take priority over the generic
+      // "submit failed" copy (it does NOT apply to isDiningIdentityError,
+      // which already has its own specific, accurate messaging above).
       const msg = isDiningIdentityError(err)
         ? (rawMsg || toastText.tableSessionUnavailable)
-        : (rawMsg || toastText.submitOrderFailed)
+        : (err?.__ambiguousSubmit ? toastText.submitOrderUnknown : (rawMsg || toastText.submitOrderFailed))
       uni.showToast({ title: String(msg).slice(0, 30), icon: 'none' })
       return false
     }
@@ -426,6 +658,10 @@ export function useCheckout({
       try {
         const res = await getOrderStatus(id, diningParticipantToken.value)
         const d = res?.data || {}
+        if (['cancelled', 'rejected'].includes(d.status)) {
+          await reconcileTerminalOrder(id, d)
+          return
+        }
         if (d.payment_status === 'paid') {
           if (showSuccess.value && orderId.value === id && d.reward_coupon) {
             applyRewardCoupon(d.reward_coupon)
@@ -448,14 +684,14 @@ export function useCheckout({
         try {
           const res = await getOrderStatus(id, diningParticipantToken.value)
           const data = res?.data || {}
+          if (['cancelled', 'rejected'].includes(data.status)) {
+            await reconcileTerminalOrder(id, data)
+            return false
+          }
           if (data.payment_status === 'paid') {
             _handlePaySuccess({ ...data, total: payAmount.value })
             if (paymentResultUnknown) paymentResultUnknown.value = false
             return true
-          }
-          if (['cancelled', 'rejected'].includes(data.status)) {
-            clearPendingPaymentOrder()
-            return false
           }
         } catch (e) {
           reportError('checkout.confirm_backend_payment', e)

@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
@@ -71,6 +72,12 @@ class PickupNoSharedAcrossTableTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(self.tenant)
         self.dish = MenuItem(tenant_id=TENANT_A, name="Kung Pao Chicken", price="28.00", available=True)
         self.db.add(self.dish)
+        # P0-01: this suite is about pickup_no inheritance across add-ons, not table validity.
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A, name="A20", scene="E00000000A20",
+            table_no="A20", entry_type="table", status=1,
+        ))
         await self.db.flush()
         await self.db.commit()
 

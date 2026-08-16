@@ -262,6 +262,7 @@ def install_stubs():
     modules["app.config"].settings = types.SimpleNamespace(DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
+    modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}
@@ -280,6 +281,11 @@ def install_stubs():
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = FakeOrderItem
+    # P0-16 Phase B2: orders.py now imports set_termination_audit_if_unset
+    # from app.models.order -- this legacy stub module must expose the same
+    # name to satisfy the import, even though none of this file's print-
+    # recovery paths ever call it. No-op only; never touched by these tests.
+    modules["app.models.order"].set_termination_audit_if_unset = lambda order, **kwargs: None
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.models.tenant_config"].TenantConfig = FakeTenantConfig
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
@@ -361,7 +367,7 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         KuaimaiStub.reset()
         self.module = load_orders_module()
 
-    def test_offline_failure_keeps_order_paid_and_records_failed_print_task(self):
+    def test_offline_failure_keeps_order_paid_and_records_unknown_print_task(self):
         order = FakeOrder()
         db = FakeDB(order)
         KuaimaiStub.outcomes = [KuaimaiPrintError("printer offline", "KUAIMAI_CONNECTION_ERROR")]
@@ -372,7 +378,7 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(order.status, "pending")
         self.assertEqual(order.payment_status, "paid")
-        self.assertEqual(data["print_status"], "failed")
+        self.assertEqual(data["print_status"], "unknown")
         self.assertEqual(data["print_attempts"], 1)
         self.assertEqual(data["print_error_code"], "KUAIMAI_CONNECTION_ERROR")
         self.assertFalse(data["print_manual_reprint"])
@@ -408,8 +414,13 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
     def test_recovery_retry_prints_once_then_auto_skip_prevents_duplicate(self):
         order = FakeOrder()
         db = FakeDB(order)
-        KuaimaiStub.outcomes = [KuaimaiPrintError("printer offline", "KUAIMAI_CONNECTION_ERROR")]
+        KuaimaiStub.outcomes = [KuaimaiPrintError("rejected", "KUAIMAI_BUSINESS_ERROR")]
         asyncio.run(self.module._print_paid_order_ticket(order, db, reason="payment_success"))
+        note, meta = self.module._split_merchant_note_and_print_meta(order.merchant_note)
+        old_attempt = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        meta["last_attempt_at"] = old_attempt
+        meta["initial_print"]["last_attempt_at"] = old_attempt
+        order.merchant_note = self.module._compose_merchant_note_with_print_meta(note, meta)
 
         KuaimaiStub.outcomes = [{"success": True, "provider_task_id": "task_recovered"}]
         recovered = asyncio.run(self.module._print_paid_order_ticket(order, db, reason="merchant_list_recovery"))
@@ -449,9 +460,9 @@ class PrintFailureRecoveryContractsTest(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(KuaimaiStub.calls, 2)
         self.assertEqual(data["print_status"], "printed")
-        self.assertEqual(data["print_attempts"], 2)
+        self.assertEqual(data["print_attempts"], 1)
         self.assertTrue(data["print_manual_reprint"])
-        self.assertEqual(data["print_provider_task_id"], "task_manual")
+        self.assertEqual(data["print_provider_task_id"], "task_first")
 
     def _feieyun_db(self):
         order = FakeOrder()
@@ -586,7 +597,7 @@ class PrintPhase4BContractsTest(unittest.TestCase):
         note, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
 
         self.assertEqual(note, "少辣加葱")
-        self.assertEqual(meta.get("status"), "failed")
+        self.assertEqual(meta.get("status"), "unknown")
         self.assertIn("last_attempt_at", meta)
         self.assertTrue(order.merchant_note.startswith("少辣加葱"))
 
@@ -692,6 +703,177 @@ class PrintPhase4BContractsTest(unittest.TestCase):
         wait_summary = self.print_mod.build_staff_print_summary(pending, defer_kitchen_print=True)
         self.assertEqual(wait_summary["print_issue"], "waiting_pickup")
         self.assertEqual(wait_summary["print_status_label"], "等待桌牌后打印")
+
+    def test_a50_exactly_fifty_eligible_orders_print_once_each(self):
+        modes = ["prepay"] * 15 + ["postpay"] * 15 + ["table_account"] * 20
+        successes = 0
+        intents = 0
+        for index, mode in enumerate(modes, start=1):
+            order = FakeOrder()
+            order.id = 20000 + index
+            order.payment_mode = mode
+            order.payment_status = "paid" if mode == "prepay" else "unpaid"
+            db = FakeDB(order)
+            result = asyncio.run(
+                self.print_mod._print_paid_order_ticket(order, db, reason="a50_all_success")
+            )
+            _, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
+            intents += int(bool(meta.get("initial_print")))
+            successes += int(result.get("success") is True)
+
+        self.assertEqual(len(modes), 50)
+        self.assertEqual(intents, 50)
+        self.assertEqual(KuaimaiStub.calls, 50)
+        self.assertEqual(successes, 50)
+
+    def test_provider_success_result_is_committed_after_sending_claim(self):
+        order = FakeOrder()
+        db = FakeDB(order)
+
+        result = asyncio.run(
+            self.print_mod._print_paid_order_ticket(order, db, reason="durability_contract")
+        )
+
+        self.assertTrue(result["success"])
+        self.assertGreaterEqual(db.commit_count, 2)
+        self.assertEqual(order.print_status, "SUCCESS")
+
+    def test_stale_sending_becomes_unknown_without_provider_call(self):
+        order = FakeOrder()
+        old_attempt = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+        order.print_status = "SENDING"
+        order.merchant_note = self.print_mod._compose_merchant_note_with_print_meta(
+            None,
+            {
+                "version": 2,
+                "initial_print": {
+                    "status": "SENDING",
+                    "attempts": 1,
+                    "last_attempt_at": old_attempt,
+                    "route": {"provider": "kuaimai", "printer_identifier": "KM001"},
+                },
+            },
+        )
+        db = FakeDB(order)
+
+        changed = asyncio.run(
+            self.print_mod._quarantine_stale_sending(
+                db,
+                order_id=order.id,
+                tenant_id=order.tenant_id,
+                allow_provider_call=False,
+            )
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(order.print_status, "UNKNOWN")
+        self.assertEqual(KuaimaiStub.calls, 0)
+
+    def test_manual_failure_preserves_initial_success_fact(self):
+        order = FakeOrder()
+        db = FakeDB(order)
+        KuaimaiStub.outcomes = [{"success": True, "provider_task_id": "initial-task"}]
+        asyncio.run(self.print_mod._print_paid_order_ticket(order, db, reason="initial"))
+        initial_printed_at = order.printed_at
+
+        KuaimaiStub.outcomes = [KuaimaiPrintError("rejected", "KUAIMAI_BUSINESS_ERROR")]
+        result = asyncio.run(
+            self.print_mod._print_paid_order_ticket(
+                order,
+                db,
+                manual=True,
+                reason="manual_reprint",
+                operator="42",
+                operator_role="kitchen",
+            )
+        )
+        _, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(order.print_status, "SUCCESS")
+        self.assertEqual(order.printed_at, initial_printed_at)
+        self.assertEqual(meta["initial_print"]["status"], "SUCCESS")
+        self.assertEqual(meta["initial_print"]["attempts"], 1)
+        self.assertEqual(meta["initial_print"]["provider_task_id"], "initial-task")
+        self.assertEqual(meta["manual_reprints"][-1]["status"], "FAILED")
+
+    def test_frozen_route_never_falls_back_to_new_printer(self):
+        order = FakeOrder()
+        db = FakeDB(order)
+        asyncio.run(
+            self.print_mod.ensure_initial_print_intent(
+                order,
+                db,
+                eligible=True,
+                reason="order_created",
+            )
+        )
+        db.config.business_info["kuaimai_printer"]["sn"] = "KM999"
+
+        result = asyncio.run(
+            self.print_mod._print_paid_order_ticket(order, db, reason="route_contract")
+        )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["code"], "PRINT_ROUTE_UNAVAILABLE")
+        self.assertEqual(KuaimaiStub.calls, 0)
+
+    def test_option_a_capacity_guard_preserves_note_without_truncation(self):
+        note = chr(0x10FFFF) * self.print_mod.MERCHANT_NOTE_MAX_CHARS
+        composed = self.print_mod._compose_merchant_note_with_print_meta(
+            note,
+            {"version": 2, "initial_print": {"status": "PENDING"}},
+        )
+        parsed_note, _ = self.print_mod._split_merchant_note_and_print_meta(composed)
+        self.assertEqual(parsed_note, note)
+
+        with self.assertRaisesRegex(ValueError, "MERCHANT_NOTE_TOO_LONG"):
+            self.print_mod._compose_merchant_note_with_print_meta(note + "x", {"version": 2})
+        with self.assertRaisesRegex(ValueError, "PRINT_META_CAPACITY_EXCEEDED"):
+            self.print_mod._compose_merchant_note_with_print_meta(
+                "note",
+                {"oversized": chr(0x10FFFF) * 20000},
+            )
+
+    def test_route_snapshot_contains_no_credentials(self):
+        order = FakeOrder()
+        db = FakeDB(order)
+
+        asyncio.run(
+            self.print_mod.ensure_initial_print_intent(
+                order,
+                db,
+                eligible=True,
+                reason="route_secret_contract",
+            )
+        )
+
+        self.assertNotIn("secret_1", order.merchant_note)
+        self.assertNotIn("app_secret", order.merchant_note)
+        _, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
+        self.assertEqual(meta["initial_print"]["route"]["printer_identifier"], "KM001")
+
+    def test_manual_history_retains_five_and_keeps_cumulative_count(self):
+        order = FakeOrder()
+        db = FakeDB(order)
+        asyncio.run(self.print_mod._print_paid_order_ticket(order, db, reason="initial"))
+
+        for index in range(10):
+            asyncio.run(
+                self.print_mod._print_paid_order_ticket(
+                    order,
+                    db,
+                    manual=True,
+                    reason=f"manual_{index}",
+                    operator=str(index),
+                    operator_role="kitchen",
+                )
+            )
+        _, meta = self.print_mod._split_merchant_note_and_print_meta(order.merchant_note)
+
+        self.assertEqual(meta["initial_print"]["attempts"], 1)
+        self.assertEqual(meta["manual_reprint_count"], 10)
+        self.assertEqual(len(meta["manual_reprints"]), 5)
 
 
 if __name__ == "__main__":

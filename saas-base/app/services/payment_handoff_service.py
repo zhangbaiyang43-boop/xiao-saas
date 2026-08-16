@@ -198,11 +198,14 @@ class PaymentHandoffService(BaseService):
         token: str | None,
         order: Order,
     ) -> dict[str, Any]:
+        from app.api.v1.orders import _compose_backward_compatible_item_name
+
         items_result = await self.db.execute(select(OrderItem).where(OrderItem.order_id == int(order.id)))
         items = [
             {
                 "dish_id": str(item.dish_id) if item.dish_id else None,
-                "name": item.name,
+                "name": _compose_backward_compatible_item_name(item.name, getattr(item, "item_remark", None)),
+                "item_remark": getattr(item, "item_remark", None),
                 "price": float(item.price),
                 "qty": int(item.qty),
             }

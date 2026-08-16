@@ -188,7 +188,12 @@ import { showFailToast } from 'vant'
 import { getMenuItems, createOrder, createWxPayOrder, getShopInfo } from '../api'
 
 const route = useRoute()
-const tableNo = computed(() => route.query.table || 'A01')
+// P0-01C: an empty table is a real "no table context" state, not an error to
+// paper over with a fake table number -- 'A01' looked like a real scanned table
+// to submitOrder() and would silently submit a dine-in order under a table
+// nobody actually pointed at. Browsing/menu display still work with an empty
+// tableNo; submitOrder() below explicitly blocks and fails closed instead.
+const tableNo = computed(() => route.query.table || '')
 const shopId = computed(() => route.query.shop || '')
 
 const shopName = ref('小碗菜')
@@ -321,6 +326,15 @@ async function payOrder(orderId) {
 }
 
 async function submitOrder() {
+  // P0-01C: table is empty (no fake 'A01' anymore) -- fail closed client-side.
+  // The backend's table-authority check (P0-01B) only rejects a *non-empty*
+  // table_no that doesn't resolve to a real registered table; an empty table_no
+  // is treated as a legitimate non-table order and would be accepted, which is
+  // wrong for this page (OrderPage.vue has no non-table flow of its own).
+  if (!tableNo.value) {
+    showFailToast('桌台信息缺失，请重新扫码')
+    return
+  }
   ordering.value = true
   try {
     const payload = {
@@ -350,8 +364,13 @@ async function submitOrder() {
       : null
     showPhoneSheet.value = false
     showSuccess.value = true
-  } catch {
-    showFailToast('下单失败，请告知服务员')
+  } catch (err) {
+    // Minimal mapping only: surface the backend's own table-authority rejection
+    // message (P0-01B) if that's what actually happened, instead of a generic
+    // "下单失败" that gives no clue a rescan is needed. Anything else keeps the
+    // existing generic message unchanged.
+    const backendMsg = err?.response?.data?.msg || ''
+    showFailToast(backendMsg.includes('重新扫码') ? backendMsg : '下单失败，请告知服务员')
   } finally {
     ordering.value = false
   }

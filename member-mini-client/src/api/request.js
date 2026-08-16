@@ -1,25 +1,87 @@
 import { config } from '../config'
-import { recordSample } from '../utils/perf'
+import {
+  capturePerformanceContext,
+  markEvent,
+  recordInvalidMeasurement,
+  recordSample,
+  validatePerformanceContext,
+} from '../utils/perf'
 import { reportError } from '../utils/monitor'
 
-// 第0批性能埋点：只认这两个 URL，命中就顺手记一笔耗时，不用改任何调用方。
-// 后端已经在响应头里带了 X-Process-Time-Ms（服务端处理耗时），一并存进 meta 里，
-// 跟客户端整体耗时（含网络往返）对比，能看出慢是慢在网络还是慢在后端处理。
+// Only fixed, low-cardinality ordering endpoints are measured. Dynamic IDs and the performance
+// upload endpoint are deliberately excluded. X-Process-Time-Ms is server processing time;
+// client minus server is only a NETWORK_APPROX diagnostic, never true network-layer timing.
 const METRIC_URL_MATCHERS = [
-  { metric: 'menu_api', test: (url, method) => url === '/v1/menu/items' && method === 'GET' },
-  { metric: 'submit_order', test: (url, method) => url === '/v1/orders' && method === 'POST' },
+  { metric: 'menu_api', apiName: 'menu_items', eventBase: 'menu_api', test: (url, method) => url === '/v1/menu/items' && method === 'GET' },
+  { metric: 'shop_info_api', apiName: 'shop_info', eventBase: 'shop_info', test: (url, method) => url === '/v1/shop/info' && method === 'GET' },
+  { metric: 'submit_order', apiName: 'submit_order', eventBase: 'submit_order', test: (url, method) => url === '/v1/orders' && method === 'POST' },
 ]
 
-function matchMetric(url, method) {
-  const hit = METRIC_URL_MATCHERS.find((m) => m.test(url, method))
-  return hit ? hit.metric : null
+export function matchApiMetric(url, method) {
+  const normalizedUrl = String(url || '').split('?')[0]
+  if (normalizedUrl === '/api/v1/perf/report' || normalizedUrl === '/v1/perf/report') return null
+  return METRIC_URL_MATCHERS.find((matcher) => matcher.test(normalizedUrl, String(method || 'GET').toUpperCase())) || null
 }
 
-function readProcessTimeMs(header) {
-  if (!header) return undefined
+export function readProcessTimeMs(header) {
+  if (!header) return null
   const raw = header['X-Process-Time-Ms'] ?? header['x-process-time-ms']
-  const n = Number(raw)
-  return Number.isFinite(n) ? n : undefined
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null
+  const normalized = typeof raw === 'string' ? raw.trim() : raw
+  if (normalized === '' || (typeof normalized === 'string' && !/^\d+(\.\d+)?$/.test(normalized))) return null
+  const n = Number(normalized)
+  return Number.isFinite(n) && n >= 0 ? n : null
+}
+
+// P0-16 Phase B1: pairs a customer-reported error with the backend's own
+// correlation identifiers -- requestId (server-minted, from the X-Request-ID
+// response header) and clientRequestId (the P0-04 idempotency key this
+// request itself carried) -- so a support screenshot can be matched against
+// backend logs. requestId is null (not an error) when there was no response
+// at all, e.g. a genuine network failure.
+export function extractCorrelationIds(options, header) {
+  const clientRequestId = (options && options.data && options.data.request_id) || null
+  const requestId = header ? (header['X-Request-ID'] ?? header['x-request-id'] ?? null) : null
+  return { requestId, clientRequestId }
+}
+
+export function classifyRequestFailure(errMsg) {
+  const message = String(errMsg || '').toLowerCase()
+  if (message.includes('timeout')) return { status: 'timeout', errorType: 'timeout' }
+  if (message.includes('abort')) return { status: 'abort', errorType: 'abort' }
+  return { status: 'failure', errorType: message ? 'network' : 'unknown' }
+}
+
+function recordApiTelemetry(matcher, method, startedAt, perfContext, { status, httpStatus = null, errorType = null, header } = {}) {
+  if (!matcher) return
+  try {
+    const endedAt = Date.now()
+    const validity = validatePerformanceContext(perfContext, endedAt)
+    if (validity !== 'valid') {
+      recordInvalidMeasurement(matcher.metric, validity, {
+        api_name: matcher.apiName,
+        status,
+      }, endedAt)
+      return
+    }
+    const clientMs = Math.max(endedAt - startedAt, 0)
+    const serverMs = readProcessTimeMs(header)
+    const networkApproxMs = serverMs === null ? null : Math.max(clientMs - serverMs, 0)
+    const meta = {
+      api_name: matcher.apiName,
+      method,
+      client_ms: clientMs,
+      server_ms: serverMs,
+      network_approx_ms: networkApproxMs,
+      status,
+      http_status: httpStatus,
+      error_type: errorType,
+    }
+    recordSample(matcher.metric, clientMs, meta)
+    markEvent(`${matcher.eventBase}_${status === 'success' ? 'success' : 'failure'}`, meta)
+  } catch {
+    // Performance telemetry is a sidecar and must never change request resolution/rejection.
+  }
 }
 
 const technicalPatterns = [
@@ -84,8 +146,21 @@ const request = (options) => {
     header.Authorization = `Bearer ${token}`
   }
 
-  const metric = matchMetric(options.url, (options.method || 'GET').toUpperCase())
+  const method = (options.method || 'GET').toUpperCase()
+  const metric = matchApiMetric(options.url, method)
   const startedAt = Date.now()
+  let perfContext = metric ? capturePerformanceContext(startedAt) : null
+  if (metric) {
+    try {
+      const startValidity = perfContext ? validatePerformanceContext(perfContext, startedAt) : 'missing_session'
+      // A request that starts after foreground idle expiry begins a fresh diagnostic session.
+      // A request started while suspended must stay invalid and must not reactivate telemetry.
+      if (startValidity !== 'background_interrupted') {
+        markEvent(`${metric.eventBase}_start`, { api_name: metric.apiName, method }, startedAt)
+        perfContext = capturePerformanceContext(startedAt)
+      }
+    } catch { /* sidecar only */ }
+  }
 
   return new Promise((resolve, reject) => {
     uni.request({
@@ -97,15 +172,22 @@ const request = (options) => {
         const statusCode = res.statusCode || 0
 
         if (statusCode >= 200 && statusCode < 300 && body.code === 200) {
-          if (metric) {
-            recordSample(metric, Date.now() - startedAt, {
-              url: options.url,
-              serverMs: readProcessTimeMs(res.header),
-            })
-          }
+          recordApiTelemetry(metric, method, startedAt, perfContext, {
+            status: 'success',
+            httpStatus: statusCode,
+            errorType: null,
+            header: res.header,
+          })
           resolve(body)
           return
         }
+
+        recordApiTelemetry(metric, method, startedAt, perfContext, {
+          status: 'failure',
+          httpStatus: statusCode || null,
+          errorType: statusCode >= 200 && statusCode < 300 ? 'unknown' : 'http',
+          header: res.header,
+        })
 
         if (body.code === 401 || statusCode === 401 || body.code === 403 || statusCode === 403) {
           // authRedirect:false（如员工 bind preview）用服务端业务文案，避免误显示「登录已过期」。
@@ -116,10 +198,11 @@ const request = (options) => {
           error.statusCode = statusCode || body.code
           error.code = body.code || statusCode
           error.bizCode = body?.data?.code
+          error.data = body?.data
           // 401/403 大多是"登录态过期"这种预期内的正常事件，不是代码 bug，
           // 单独用 auth_error 这个 scene 报，方便以后在后台把它跟真正的接口
           // 故障分开看，不要混在一起互相掩盖。
-          reportError('api.auth_error', error, { url: options.url })
+          reportError('api.auth_error', error, { url: options.url, ...extractCorrelationIds(options, res.header) })
           if (authRedirect) redirectToGuest()
           reject(error)
           return
@@ -129,12 +212,18 @@ const request = (options) => {
         error.statusCode = statusCode
         error.code = body.code
         error.bizCode = body?.data?.code
-        reportError('api.error', error, { url: options.url, statusCode, code: body.code })
+        reportError('api.error', error, { url: options.url, statusCode, code: body.code, ...extractCorrelationIds(options, res.header) })
         reject(error)
       },
       fail: (err) => {
+        const classification = classifyRequestFailure(err?.errMsg)
+        recordApiTelemetry(metric, method, startedAt, perfContext, {
+          status: classification.status,
+          httpStatus: null,
+          errorType: classification.errorType,
+        })
         const error = new Error(toFriendlyMessage(err.errMsg))
-        reportError('api.network_fail', error, { url: options.url, errMsg: err.errMsg })
+        reportError('api.network_fail', error, { url: options.url, errMsg: err.errMsg, ...extractCorrelationIds(options, undefined) })
         reject(error)
       }
     })

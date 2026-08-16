@@ -64,9 +64,10 @@ class MemberAssetIdempotencyContractsTest(unittest.TestCase):
         # retried/duplicate WeChat callback for an order that's already been processed (paid,
         # or reconciled via the cancelled/rejected auto-refund path below) never mutates
         # assets a second time.
-        self.assertIn('if order.status == "pending_payment":', notify_source)
+        guard = 'if order.status == "pending_payment" and order.payment_mode == "prepay":'
+        self.assertIn(guard, notify_source)
         self.assertLess(
-            notify_source.index('if order.status == "pending_payment":'),
+            notify_source.index(guard),
             notify_source.index("_on_payment_success"),
         )
 

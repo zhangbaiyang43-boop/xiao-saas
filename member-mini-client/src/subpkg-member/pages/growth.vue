@@ -71,7 +71,7 @@ export default {
     const nextLevel = computed(() => data.value.next_level)
     const benefits = computed(() => data.value.benefits || [])
 
-    const LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
+    const LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.webp', LV2: '/static/member-levels/level-lv2.webp', LV3: '/static/member-levels/level-lv3.webp' }
     const levelBadgeSrc = computed(() => LEVEL_BADGES[data.value.level_code] || LEVEL_BADGES.LV1)
 
     // 三张底图本身偏浅色(尤其银色几乎纯白)，直接铺上去白色文字会看不清，

@@ -217,6 +217,12 @@ export function useDiningSession({
     syncDiningOrders,
     showTableHint,
     markSessionClosed,
+    // P0-10-05: exported so callers with a NARROWER "identity invalid, not
+    // necessarily table closed" signal (e.g. useCheckout's unrecovered 409
+    // path) can invalidate the stale cache without markSessionClosed's
+    // tableSessionClosed=true side effect, which is specifically wrong for a
+    // plain identity mismatch (see useCheckout.js's own comment on this).
+    clearDiningSessionStorage,
     exitDiningSession,
     isExitingSession,
   }

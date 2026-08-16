@@ -3,7 +3,7 @@ from enum import Enum
 
 from sqlalchemy.future import select
 
-from app.core.logger import logger
+from app.core.logger import logger, mask_phone, mask_wechat_identity
 from app.models.customer import Customer
 from app.models.customer_identity import CustomerIdentity
 from app.services.base_service import BaseService
@@ -168,7 +168,11 @@ class CustomerIdentityService(BaseService):
                     f"current_customer_id: {existing_customer.id}, openid_customer_id: {openid_customer.id}"
                 )
         if update_data:
-            logger.info(f"更新会员信息 - customer_id: {existing_customer.id}, update_data: {update_data}")
+            masked_update_data = {
+                k: (mask_phone(v) if k == "phone" else mask_wechat_identity(v) if k == "openid" else v)
+                for k, v in update_data.items()
+            }
+            logger.info(f"更新会员信息 - customer_id: {existing_customer.id}, update_data: {masked_update_data}")
             return await customer_service.update_customer(existing_customer.id, **update_data)
         return existing_customer
 
@@ -198,9 +202,9 @@ class CustomerIdentityService(BaseService):
             await customer_service.get_customer_by_phone_any_status(phone, tenant_id) if phone else None
         )
         logger.info(
-            f"phone lookup result - phone: {phone}, found: {bool(phone_customer)}, "
+            f"phone lookup result - phone: {mask_phone(phone)}, found: {bool(phone_customer)}, "
             f"customer_id: {getattr(phone_customer, 'id', None)}, "
-            f"customer_phone: {getattr(phone_customer, 'phone', None)}"
+            f"customer_phone: {mask_phone(getattr(phone_customer, 'phone', None))}"
         )
 
         identity = await self.get_by_identity(CHANNEL_MINIAPP, openid)
@@ -217,7 +221,7 @@ class CustomerIdentityService(BaseService):
             if not phone_verified and not already_owns:
                 logger.warning(
                     f"未验证手机号匹配到已有会员，拒绝自动绑定 - "
-                    f"phone_customer_id: {phone_customer.id}, openid: {openid}, phone: {phone}"
+                    f"phone_customer_id: {phone_customer.id}, openid: {mask_wechat_identity(openid)}, phone: {mask_phone(phone)}"
                 )
                 return JoinCustomerResolution(
                     outcome=JoinResolutionOutcome.UNVERIFIED_PHONE_BLOCKED,
@@ -232,12 +236,12 @@ class CustomerIdentityService(BaseService):
                     matched_by="phone",
                 )
 
-            logger.info(f"手机号找到会员 - customer_id: {customer.id}, phone: {phone}")
+            logger.info(f"手机号找到会员 - customer_id: {customer.id}, phone: {mask_phone(phone)}")
             if identity_customer_id and identity_customer_id != customer.id:
                 phone_switch_old_customer_id = identity_customer_id
                 logger.info(
                     f"手机号已切换会员，openid 从旧会员迁移到当前手机号会员 - "
-                    f"old_customer_id: {identity_customer_id}, new_customer_id: {customer.id}, phone: {phone}"
+                    f"old_customer_id: {identity_customer_id}, new_customer_id: {customer.id}, phone: {mask_phone(phone)}"
                 )
 
             await self.rebind_identity(
@@ -247,7 +251,7 @@ class CustomerIdentityService(BaseService):
                 phone=phone,
                 unionid=unionid,
             )
-            logger.info(f"重绑 identity（已有会员）- customer_id: {customer.id}, openid: {openid}")
+            logger.info(f"重绑 identity（已有会员）- customer_id: {customer.id}, openid: {mask_wechat_identity(openid)}")
             customer = await self._update_join_customer_info(
                 customer_service,
                 customer,
@@ -270,7 +274,7 @@ class CustomerIdentityService(BaseService):
                 phone_changed_old_phone = existing_customer.phone
                 logger.info(
                     f"identity 找到已有会员（手机号已更换）- customer_id: {existing_customer.id}, "
-                    f"old_phone: {existing_customer.phone}, new_phone: {phone}"
+                    f"old_phone: {mask_phone(existing_customer.phone)}, new_phone: {mask_phone(phone)}"
                 )
                 customer = await self._update_join_customer_info(
                     customer_service,
@@ -290,7 +294,7 @@ class CustomerIdentityService(BaseService):
                 openid_conflict_existing_id = openid_customer.id
                 logger.info(
                     f"openid 已绑定到其他会员，当前用手机号注册新会员 - "
-                    f"openid_customer_id: {openid_customer.id}, phone: {phone}"
+                    f"openid_customer_id: {openid_customer.id}, phone: {mask_phone(phone)}"
                 )
 
             customer = await customer_service.create_customer(
@@ -303,7 +307,7 @@ class CustomerIdentityService(BaseService):
             if phone and customer.phone != phone:
                 logger.warning(
                     f"create_customer returned mismatched phone - "
-                    f"customer_id: {customer.id}, customer_phone: {customer.phone}, request_phone: {phone}"
+                    f"customer_id: {customer.id}, customer_phone: {mask_phone(customer.phone)}, request_phone: {mask_phone(phone)}"
                 )
                 matched_phone_customer = await customer_service.get_customer_by_phone_any_status(phone, tenant_id)
                 if matched_phone_customer and matched_phone_customer.id != customer.id:
@@ -327,7 +331,7 @@ class CustomerIdentityService(BaseService):
                 phone=phone,
                 unionid=unionid,
             )
-            logger.info(f"重绑 identity（新会员）- customer_id: {customer.id}, openid: {openid}")
+            logger.info(f"重绑 identity（新会员）- customer_id: {customer.id}, openid: {mask_wechat_identity(openid)}")
 
         return JoinCustomerResolution(
             outcome=JoinResolutionOutcome.SUCCESS,

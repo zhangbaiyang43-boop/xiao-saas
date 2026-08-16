@@ -1,10 +1,11 @@
 # mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, check-untyped-defs=False
 from datetime import date, datetime, timezone
+import hashlib
 import json
 from decimal import Decimal
 from typing import Any, List, Optional, TypeAlias, cast as typing_cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel as PydanticBase
 from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -13,11 +14,11 @@ from sqlalchemy.future import select
 
 from app.config import settings
 from app.core.database import get_db
-from app.core.logger import logger
+from app.core.logger import logger, safe_log
 from app.core.platform_rules import cap_discount_amount
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, set_termination_audit_if_unset
 from app.models.tenant import Tenant
 from app.services.consumption_service import _record_order_consumption
 from app.services.coupon_service import (
@@ -39,10 +40,11 @@ from app.services.order_print_service import (
     build_staff_print_summary,
     can_reprint_order,
     reconcile_print_orders,
+    supports_independent_print_session,
 )
 from app.services.order_stock_service import _restore_order_stock
 
-OrderItemRow: TypeAlias = tuple[int, str, float, int]
+OrderItemRow: TypeAlias = tuple[int, str, float, int, Optional[str]]
 ApiResponse: TypeAlias = RespVo[Any]
 PrepareTenantReplayResult: TypeAlias = tuple[ApiResponse | None, Tenant | None, str | None]
 PaymentModeFlags: TypeAlias = tuple[str, bool, bool, bool]
@@ -87,6 +89,24 @@ ORDER_NEXT_ACTIONS = {
 }
 
 
+def build_order_financial_capabilities(order) -> dict[str, bool]:
+    """Return server-authoritative cancel/reject and manual-refund attention flags.
+
+    Phase P0-09 deliberately treats every paid terminal order as requiring attention.
+    The legacy ``refund_status=success`` value only meant that a provider request was
+    accepted; it is not provider-confirmed refund truth and therefore cannot clear the
+    warning.
+    """
+    status = str(getattr(order, "status", "") or "")
+    is_paid = str(getattr(order, "payment_status", "") or "") == "paid"
+    is_unpaid_actionable = not is_paid and status in {"pending_payment", "pending"}
+    return {
+        "can_cancel": is_unpaid_actionable,
+        "can_reject": not is_paid and status == "pending",
+        "refund_required": is_paid and status in {"cancelled", "rejected"},
+    }
+
+
 def build_order_next_action(payment_mode: str) -> str:
     if payment_mode not in ORDER_NEXT_ACTIONS:
         raise ValueError("unsupported payment mode")
@@ -105,6 +125,12 @@ class OrderItemIn(PydanticBase):
     qty: int = 1
     specifications: Optional[List[OrderItemSpecIn]] = None  # 单选规格（如辣度/份量），按商家配置的 price_delta 计费
     extras: Optional[List[str]] = None  # 多选附加项（如加料），按商家配置的 price_delta 计费
+    # P0-02: user free-text per-item note (e.g. "不要香菜"). Never part of the
+    # commerce-fact snapshot -- see _validate_create_order_items_and_compute_total.
+    # Optional[str] with no default sentinel other than None: presence is checked
+    # via item_in.model_fields_set, not via truthiness, so an explicit empty
+    # string ("no remark") is distinguishable from "field omitted" (legacy client).
+    item_remark: Optional[str] = None
 
 
 class OrderCreate(PydanticBase):
@@ -126,6 +152,22 @@ class OrderCreate(PydanticBase):
 
 class MockPayBody(PydanticBase):
     participant_token: Optional[str] = None
+
+
+def _compose_backward_compatible_item_name(canonical_name: str, item_remark: Optional[str]) -> str:
+    """P0-02: OrderItem.name is stored as a pure canonical dish+spec+addon
+    description (no remark folded in -- see _validate_create_order_items_and_
+    compute_total). Every existing JSON consumer (Admin, current Mini, staff
+    workbenches) has only ever read a single `name` field that used to
+    include the customer's remark text inline, though -- compose it back at
+    serialize time so none of them silently stop showing remarks without
+    needing their own code changes. Reproduces the exact old wire format.
+    """
+    if not item_remark:
+        return canonical_name
+    if canonical_name.endswith(")"):
+        return canonical_name[:-1] + "、" + item_remark + ")"
+    return canonical_name + "(" + item_remark + ")"
 
 
 def serialize_order(
@@ -155,6 +197,7 @@ def serialize_order(
         "payment_status": getattr(order, "payment_status", "paid"),
         "payment_mode": getattr(order, "payment_mode", "prepay"),
         "payment_method": getattr(order, "payment_method", None),
+        **build_order_financial_capabilities(order),
         "checkout_requested_at": checkout_requested_at,
         "dining_session_id": str(order.dining_session_id) if getattr(order, "dining_session_id", None) else None,
         "participant_id": str(order.participant_id) if getattr(order, "participant_id", None) else None,
@@ -179,7 +222,8 @@ def serialize_order(
         "items": [
             {
                 "dish_id": str(i.dish_id) if i.dish_id else None,
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "price": float(i.price),
                 "qty": i.qty,
             }
@@ -188,10 +232,142 @@ def serialize_order(
     }
 
 
+async def serialize_owner_order_rows(
+    db: AsyncSession,
+    tenant_id: str,
+    orders: list[Order],
+) -> list[dict]:
+    """Serialize owner Full/Delta rows with the same complete order contract."""
+    from app.models.dining import DiningSession
+    from app.services.dining_session_service import DiningSessionService
+    from app.services.pickup_no_service import load_pickup_settings
+    from app.services.workbench_sync_service import load_order_items_by_order_ids
+
+    order_ids = [int(order.id) for order in orders]
+    items_by_order = await load_order_items_by_order_ids(db, order_ids)
+    session_ids = {
+        order.dining_session_id
+        for order in orders
+        if getattr(order, "dining_session_id", None)
+    }
+    sessions_by_id = {}
+    checkout_requested_by_session = {}
+    if session_ids:
+        sessions_result = await db.execute(
+            select(DiningSession).where(DiningSession.id.in_(session_ids))
+        )
+        for session in sessions_result.scalars().all():
+            sessions_by_id[session.id] = session
+            if session.checkout_requested_at:
+                checkout_requested_by_session[session.id] = session.checkout_requested_at.isoformat()
+
+    participant_ordinals = await DiningSessionService.get_participant_ordinals(
+        db, tenant_id, list(session_ids)
+    )
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+    return [
+        serialize_order(
+            order,
+            items_by_order.get(order.id or 0, []),
+            checkout_requested_at=checkout_requested_by_session.get(
+                getattr(order, "dining_session_id", None)
+            ),
+            participant_no=participant_ordinals.get(getattr(order, "participant_id", None)),
+            pickup_settings=pickup_settings,
+            dining_session=sessions_by_id.get(getattr(order, "dining_session_id", None)),
+        )
+        for order in orders
+    ]
+
+
+def _compute_request_fingerprint(body: OrderCreate) -> str:
+    """P0-04: deterministic digest of the *business intent* a create_order request
+    carries, used only to detect a client_request_id being reused with a genuinely
+    different submission -- never as the idempotency identity itself (that remains
+    (tenant_id, client_request_id)). Computed purely from the raw request body, with
+    NO database/menu lookups, so a later dish/spec/addon rename or price change can
+    never flip an original request from MATCH to MISMATCH (P0-04 audit requirement).
+
+    Deliberately excludes: client-displayed price/total (decorative, never
+    authoritative -- see P0-02), item display name (varies with legacy-vs-new naming
+    conventions, not business intent), request_id itself, and any other non-content
+    field. specifications/extras are sorted so P0-03's established "click order
+    doesn't change identity" principle also holds here; the items list itself is
+    sorted too, since cart/array display order is not business intent either.
+    """
+    items_repr = []
+    for item in body.items:
+        specs_repr = sorted((spec.group, spec.value) for spec in (item.specifications or []))
+        extras_repr = sorted(item.extras or [])
+        items_repr.append({
+            "dish_id": item.dish_id,
+            "qty": item.qty,
+            "specifications": specs_repr,
+            "extras": extras_repr,
+            "item_remark": (item.item_remark or "").strip() or None,
+        })
+    items_repr.sort(key=lambda entry: json.dumps(entry, sort_keys=True, ensure_ascii=True))
+
+    canonical = {
+        "table": (body.table or "").strip(),
+        "dining_session_id": body.dining_session_id,
+        "coupon_id": body.coupon_id,
+        "remark": (body.remark or "").strip(),
+        "items": items_repr,
+    }
+    canonical_bytes = json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(canonical_bytes).hexdigest()
+
+
+async def _verify_replay_owner(
+    db: AsyncSession,
+    tenant_id: str,
+    replay_order: Order,
+    customer_id: int | None,
+    participant_token: str | None,
+) -> bool:
+    """P0-11: an idempotency-key hit must only ever be replayed back to the same
+    principal that created it. tenant_id + client_request_id alone is not enough
+    scope -- two different diners sharing one table/dining_session can otherwise
+    (accidentally or adversarially) submit under the same client_request_id, and
+    without this check the second caller would receive the first caller's order
+    as their own "replay". Returns True iff the current caller is verified to be
+    that same principal, or the order predates per-order ownership tracking
+    (e.g. a staff-created order with no customer_id/participant_id at all), in
+    which case there is no personal identity boundary to enforce.
+    """
+    if replay_order.customer_id is not None:
+        return customer_id is not None and int(customer_id) == int(replay_order.customer_id)
+    if replay_order.participant_id is not None:
+        if not participant_token:
+            return False
+        from app.models.dining import DiningParticipant
+        from app.services.dining_session_service import hash_participant_token
+
+        owner_result = await db.execute(
+            select(DiningParticipant).where(
+                DiningParticipant.id == replay_order.participant_id,
+                DiningParticipant.tenant_id == tenant_id,
+                DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
+            )
+        )
+        return owner_result.scalar_one_or_none() is not None
+    return True
+
+
 async def _replay_order_response(
-    db: AsyncSession, tenant_id: str, request_id: str | None
+    db: AsyncSession,
+    tenant_id: str,
+    request_id: str | None,
+    body: OrderCreate,
+    *,
+    customer_id: int | None,
+    participant_token: str | None,
 ) -> ApiResponse | None:
-    """Look up an existing order by client_request_id and build the create_order replay response."""
+    """Look up an existing order by client_request_id and build the create_order replay
+    response -- or, if its fingerprint disagrees with the current request's, an
+    IDEMPOTENCY_CONFLICT response instead of silently replaying stale content.
+    """
     if not request_id:
         return None
     replay_result = await db.execute(
@@ -200,10 +376,52 @@ async def _replay_order_response(
     replay_order = replay_result.scalar_one_or_none()
     if not replay_order:
         return None
+
+    # P0-11: owner check comes before the fingerprint check and is decisive on its
+    # own -- a different principal reusing this request_id must fail closed even
+    # if the payload happens to match byte-for-byte, and must never see the
+    # original order's id/no/amount/items/payment data (minimal disclosure).
+    if not await _verify_replay_owner(db, tenant_id, replay_order, customer_id, participant_token):
+        return error_response(
+            code=409,
+            msg="请重新提交订单",
+            data={"code": "IDEMPOTENCY_CONFLICT"},
+        )
+
+    # P0-04: NULL fingerprint means this order predates the fingerprint column
+    # (legacy pre-migration order, LEGACY_REPLAY_COMPAT) -- keep the original
+    # unconditional-replay contract for it rather than retroactively enforcing a
+    # check it was never subject to.
+    if replay_order.request_fingerprint is not None:
+        if _compute_request_fingerprint(body) != replay_order.request_fingerprint:
+            conflict_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+            safe_log(
+                logger.warning,
+                "ORDER_FINGERPRINT_CONFLICT tenant_id=%s client_request_id=%s existing_order_id=%s",
+                tenant_id, request_id, replay_order.id,
+            )
+            return error_response(
+                code=409,
+                msg="订单信息已变化，请重新确认后再提交",
+                data={
+                    "code": "IDEMPOTENCY_CONFLICT",
+                    "existing_order_id": str(replay_order.id),
+                    "existing_order_no": str(replay_order.id)[-4:],
+                    "payment_mode": conflict_payment_mode,
+                    "payment_status": getattr(replay_order, "payment_status", "unpaid"),
+                    "need_payment": conflict_payment_mode == "prepay" and replay_order.payment_status != "paid",
+                },
+            )
+
     replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
     replay_items = list(replay_items_result.scalars().all())
     replay_data = serialize_order(replay_order, replay_items)
     replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+    safe_log(
+        logger.info,
+        "ORDER_IDEMPOTENT_REPLAY tenant_id=%s client_request_id=%s order_id=%s dining_session_id=%s table_no=%s",
+        tenant_id, request_id, replay_order.id, replay_order.dining_session_id, replay_order.table_no,
+    )
     return success_response(
         data={
             **replay_data,
@@ -218,7 +436,7 @@ async def _replay_order_response(
 
 
 async def _prepare_create_order_tenant_and_replay(
-    body: OrderCreate, db: AsyncSession
+    body: OrderCreate, request: Request, db: AsyncSession
 ) -> PrepareTenantReplayResult:
     """Validate tenant/business hours and replay idempotent create_order requests.
 
@@ -234,8 +452,42 @@ async def _prepare_create_order_tenant_and_replay(
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         return error_response(code=404, msg="商户不存在"), None, tenant_id
+    # Platform-level suspension (Tenant.status) is a different authority than the
+    # merchant's own temporary open/close toggle checked further below
+    # (TenantConfig.business_info["is_open"]) -- see P0-12. A platform-suspended
+    # tenant is denied even on an exact idempotent retry; it is never replayed.
     if not tenant.status:
         return error_response(code=403, msg="商户已停业，暂不接受点餐"), None, tenant_id
+
+    request_id = (body.request_id or "").strip() or None
+    if request_id and len(request_id) > 64:
+        return error_response(code=400, msg="request_id 过长"), None, tenant_id
+    if request_id:
+        # P0-12: an exact idempotent retry of an ALREADY-CREATED order must win
+        # over the merchant's current temporary-close admission config checked
+        # below -- a store that closes between the original success and a
+        # lost-response retry must not strand that legitimate order by rejecting
+        # the retry outright. This replay lookup still goes through P0-11's owner
+        # check and P0-04's fingerprint check, so it can neither leak/misreplay to
+        # the wrong caller nor silently accept a genuinely different submission
+        # reusing the same key. If no order was ever created under this
+        # request_id (e.g. the original attempt itself failed the is_open check
+        # below), this returns None and the key is not "burned" -- a later retry
+        # after the store reopens falls through to a normal fresh admission check.
+        early_customer_id = getattr(request.state, "customer_id", None)
+        if early_customer_id:
+            early_customer_id = int(early_customer_id)
+        replay_response = await _replay_order_response(
+            db,
+            tenant_id,
+            request_id,
+            body,
+            customer_id=early_customer_id,
+            participant_token=body.participant_token,
+        )
+        if replay_response is not None:
+            return replay_response, None, tenant_id
+
     from app.models.tenant_config import TenantConfig
 
     config_result = await db.execute(select(TenantConfig).where(TenantConfig.tenant_id == tenant_id))
@@ -243,12 +495,6 @@ async def _prepare_create_order_tenant_and_replay(
     business_info: dict[str, Any] = (tenant_config.business_info or {}) if tenant_config else {}
     if not business_info.get("is_open", True):
         return error_response(code=400, msg="门店休息中，暂不接受点餐"), None, tenant_id
-
-    request_id = (body.request_id or "").strip() or None
-    if request_id:
-        replay_response = await _replay_order_response(db, tenant_id, request_id)
-        if replay_response is not None:
-            return replay_response, None, tenant_id
 
     return None, tenant, tenant_id
 
@@ -484,13 +730,31 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
     stale_orders = stale_result.scalars().all()
     payment_svc = OrderPaymentService(db)
     for stale in stale_orders:
-        recovered = await payment_svc._recover_wxpay_order_if_paid(stale)
+        recovered = await payment_svc._recover_wxpay_order_if_paid(stale, source="synchronous_stale_cleanup")
         if recovered:
             continue
-        await _restore_order_stock(stale, db)
-        stale.status = "cancelled"
-        if stale.coupon_id:
-            stale_coupon = await db.get(Coupon, stale.coupon_id)
+        # Provider I/O above may commit/rollback and invalidate the discovery
+        # snapshot.  The mutation authority is a fresh tenant-scoped row lock.
+        locked_result = await db.execute(
+            select(Order)
+            .where(
+                Order.id == stale.id,
+                Order.tenant_id == tenant_id,
+                Order.status == "pending_payment",
+            )
+            .with_for_update()
+        )
+        locked = locked_result.scalar_one_or_none()
+        if not locked or getattr(locked, "payment_status", None) == "paid":
+            continue
+        await _restore_order_stock(locked, db)
+        locked.status = "cancelled"
+        set_termination_audit_if_unset(
+            locked, actor_type="system", actor_id=None, actor_role=None,
+            source="synchronous_stale_cleanup",
+        )
+        if locked.coupon_id:
+            stale_coupon = await db.get(Coupon, locked.coupon_id)
             if stale_coupon and stale_coupon.status == "LOCKED":
                 stale_coupon.status = "UNUSED"
     if stale_orders:
@@ -498,7 +762,7 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
 
 
 async def _validate_create_order_items_and_compute_total(
-    body: OrderCreate, db: AsyncSession, tenant_id: str
+    body: OrderCreate, db: AsyncSession, tenant_id: str, is_staff_order: bool = False
 ) -> ValidateItemsResult:
     """Validate menu items, deduct stock per line, and compute order total.
 
@@ -513,6 +777,40 @@ async def _validate_create_order_items_and_compute_total(
         return error_response(code=400, msg="订单商品不能为空"), None, None
 
     specs_map = await load_menu_specs(db, tenant_id)
+
+    ITEM_NAME_MAX_LEN = 255  # matches order_items.name / order_items.item_remark column width
+
+    def _extract_legacy_item_remark(base_name: str, canonical_labels: list[str], submitted_name: str) -> Optional[str]:
+        """Best-effort recovery of a pre-item_remark Mini client's folded-in
+        remark text, for clients that only ever sent the merged display name
+        (dish + spec/addon labels + free-text remark, all joined with '、').
+
+        Never used to determine spec/addon selection or price -- those are
+        already fully resolved from the validated `specifications`/`extras`
+        fields by this point. This only ever produces an opaque trailing
+        remark string, or None if the client's name doesn't agree with the
+        server's own canonical prefix (forged/stale text is discarded, not
+        misread as a remark).
+        """
+        submitted_name = submitted_name.strip()
+        if not submitted_name:
+            return None
+        if not canonical_labels:
+            prefix = base_name + "("
+            if submitted_name == base_name:
+                return None
+            if submitted_name.startswith(prefix) and submitted_name.endswith(")"):
+                residual = submitted_name[len(prefix):-1]
+                return residual or None
+            return None
+        prefix = base_name + "(" + "、".join(canonical_labels)
+        if submitted_name == prefix + ")":
+            return None
+        prefix_with_sep = prefix + "、"
+        if submitted_name.startswith(prefix_with_sep) and submitted_name.endswith(")"):
+            residual = submitted_name[len(prefix_with_sep):-1]
+            return residual or None
+        return None
 
     def _resolve_spec_delta(dish: MenuItem, item_in: OrderItemIn) -> float:
         """Recompute the spec/extra surcharge from the merchant-configured spec_groups
@@ -571,17 +869,54 @@ async def _validate_create_order_items_and_compute_total(
             if not dish.available:
                 return error_response(code=400, msg=f"菜品已下架:{dish.name}"), None, None
             if dish.stock is not None and dish.stock <= 0:
-                return error_response(code=400, msg=f"dish sold out: {dish.name}"), None, None
+                return error_response(code=400, msg=f"菜品已售罄:{dish.name}"), None, None
             if dish.stock is not None and dish.stock < item_in.qty:
-                return error_response(code=400, msg=f"dish stock not enough: {dish.name}, left {dish.stock}"), None, None
+                return error_response(code=400, msg=f"菜品库存不足:{dish.name}，剩余{dish.stock}份"), None, None
             try:
                 spec_delta = _resolve_spec_delta(dish, item_in)
             except ValueError as exc:
                 return error_response(code=400, msg=str(exc)), None, None
             unit_price = _numeric_float(dish.price) + spec_delta
+            # P0-02: item_in.price is the client's *displayed* unit price (base +
+            # spec/extra deltas, same basis useSpecSheet.js computes as
+            # specUnitPrice) -- never used as the financial authority, only as a
+            # staleness hint. If the server's freshly-recomputed unit_price
+            # disagrees with what the customer's page showed by more than float-
+            # noise, reject rather than silently charging the new price: the
+            # customer would otherwise pay an amount they never saw and never
+            # confirmed. 0.005 tolerance absorbs JS float representation dust
+            # without masking a genuine 1-fen-or-more price change.
+            # Staff-assisted orders (frontdesk/waiter, merchant-authenticated) are
+            # exempt: this guard exists for customers looking at a possibly-stale
+            # menu page, not for trusted staff tooling, and test_r3_price_from_backend
+            # already pins the pre-existing contract that staff-submitted price is
+            # purely decorative -- the backend price always wins, silently.
+            if not is_staff_order and abs(unit_price - item_in.price) > 0.005:
+                return error_response(code=400, msg=f"价格已更新，请重新确认:{item_in.name}"), None, None
             base_name = str(dish.name or "")
-            submitted_name = str(item_in.name or "").strip()
-            name = submitted_name[:64] if submitted_name and submitted_name.startswith(base_name) else base_name
+            # P0-02 snapshot closure: OrderItem.name is a pure server-canonical
+            # dish+spec+addon description -- never the client's free-text name.
+            # spec_sel.value / extra_name have already survived exact-match
+            # validation against the server's own canonical option labels
+            # above (_resolve_spec_delta), so they *are* canonical, not a
+            # client guess reused verbatim.
+            canonical_labels = [spec_sel.value for spec_sel in (item_in.specifications or [])] + list(item_in.extras or [])
+            name = base_name if not canonical_labels else base_name + "(" + "、".join(canonical_labels) + ")"
+            if len(name) > ITEM_NAME_MAX_LEN:
+                return error_response(code=400, msg=f"商品名称过长:{item_in.name}"), None, None
+
+            item_fields_set = getattr(item_in, "model_fields_set", getattr(item_in, "__fields_set__", set()))
+            if "item_remark" in item_fields_set:
+                # New client explicitly supplied item_remark (even "" for "no
+                # remark") -- trust it outright, never fall back to parsing
+                # item_in.name for a legacy residual.
+                item_remark = (item_in.item_remark or "").strip() or None
+            else:
+                # Legacy client -- item_in.name may still carry a folded-in
+                # remark from before this field existed.
+                item_remark = _extract_legacy_item_remark(base_name, canonical_labels, str(item_in.name or ""))
+            if item_remark is not None and len(item_remark) > ITEM_NAME_MAX_LEN:
+                return error_response(code=400, msg=f"备注过长，请精简后重试:{item_in.name}"), None, None
             # 同一道菜在这一单里可能拆成好几行（比如同一道菜点了不同辣度），库存扣减必须
             # 在这一行处理完就立刻生效，而不是等所有行都校验完再统一扣——SQLAlchemy 对
             # 同一个 dish_id 的重复查询会拿到同一个已加锁的对象，如果扣减延后到循环外，
@@ -592,7 +927,7 @@ async def _validate_create_order_items_and_compute_total(
         else:
             return error_response(code=400, msg=f"缺少菜品ID:{item_in.name}"), None, None
         real_total += unit_price * item_in.qty
-        order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty))
+        order_items_data.append((item_in.dish_id, name, unit_price, item_in.qty, item_remark))
 
     return None, real_total, order_items_data
 
@@ -637,7 +972,14 @@ async def _apply_create_order_coupon(
             return error_response(code=400, msg="优惠券不可用或已失效"), applied_coupon_id, coupon_discount
 
         tpl = await db.get(CouponTemplate, coupon.template_id)
-        if not tpl:
+        # P0-13-02: defense-in-depth -- Coupon.tenant_id is already the authority that
+        # gates redemption (checked above), so this can't currently be reached by a
+        # real cross-tenant coupon given how issuance always sets both consistently.
+        # Re-verifying the template's own tenant here means a future issuance bug (or
+        # a hand-crafted coupon_id whose Coupon row was somehow mis-tenanted) can't
+        # silently apply another tenant's discount rule. Same generic message as the
+        # "template missing" case -- never disclose which tenant the template belongs to.
+        if not tpl or str(tpl.tenant_id) != str(tenant_id):
             return error_response(code=400, msg="优惠券规则不存在"), applied_coupon_id, coupon_discount
 
         min_amount = float(tpl.min_amount or 0)
@@ -686,6 +1028,18 @@ async def _persist_create_order_and_build_response(
     from app.services.pickup_no_service import PickupNoService, load_pickup_settings
 
     pickup_settings = await load_pickup_settings(db, tenant_id)
+    # P0-12: pickup_no_enabled is the merchant's server-side authority over whether
+    # a CUSTOMER-supplied pickup number can create/claim an active table-pager
+    # lease -- an ordinary customer request must never be able to force an
+    # assignment the merchant has turned off just by including this field.
+    # Staff-assisted orders (is_staff_order is derived server-side from the
+    # authenticated merchant token, never from a client-spoofable field) may
+    # still carry a physical tag number even when the toggle is off, since that's
+    # a separate staff business need, independent of the customer-facing digital
+    # pickup feature. Ignored, not an error -- identical to a client that never
+    # sent this field at all.
+    if explicit_pickup_no and not is_staff_order and not pickup_settings.get("enabled"):
+        explicit_pickup_no = None
     # prepay + 启用桌牌：创建时未支付不能新占号（仍可继承会话已有牌号）
     if (
         explicit_pickup_no
@@ -748,6 +1102,7 @@ async def _persist_create_order_and_build_response(
         staff_note=(body.staff_note or "").strip()[:64] or None if is_staff_order else None,
         pickup_no=resolved_pickup_no,
         client_request_id=request_id,
+        request_fingerprint=_compute_request_fingerprint(body) if request_id else None,
     )
     db.add(order)
     try:
@@ -755,36 +1110,76 @@ async def _persist_create_order_and_build_response(
     except IntegrityError:
         # 前面查重的那一刻还没有这张订单，但几乎同一时间的第二个请求已经抢先建好了
         # （真正意义上的并发重复提交）——这里接住唯一索引冲突，直接把已建好的那张
-        # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。
+        # 订单返回，而不是让这次请求报错或者绕过约束硬插入第二张。P0-04：如果两个
+        # 并发请求带着同一个 request_id 却是不同的 payload，这里的 fingerprint 比对
+        # 会让它变成 IDEMPOTENCY_CONFLICT，而不是把 loser 的内容悄悄丢弃、静默返回
+        # winner 的订单。
         await db.rollback()
-        replay_response = await _replay_order_response(db, tenant_id, request_id)
+        replay_response = await _replay_order_response(
+            db,
+            tenant_id,
+            request_id,
+            body,
+            customer_id=customer_id,
+            participant_token=body.participant_token,
+        )
         if replay_response is not None:
             return replay_response
         return error_response(code=409, msg="订单提交冲突，请重试")
 
     order_items = []
     assert order.id is not None
-    for dish_id, name, unit_price, qty in order_items_data:
+    for dish_id, name, unit_price, qty, item_remark in order_items_data:
         oi = OrderItem(
             order_id=order.id,
             dish_id=dish_id,
             name=name,
             price=typing_cast(Any, unit_price),
             qty=qty,
+            item_remark=item_remark,
         )
         db.add(oi)
         order_items.append(oi)
 
     await db.flush()
+    if pay_later_mode:
+        from app.services.order_print_service import ensure_initial_print_intent
+
+        defer_initial_print = bool(
+            pickup_settings.get("enabled")
+            and pickup_settings.get("required_before_print")
+            and not resolved_pickup_no
+        )
+        await ensure_initial_print_intent(
+            order,
+            db,
+            eligible=not defer_initial_print,
+            reason="order_created_pay_later",
+        )
     await db.commit()
     await db.refresh(order)
+    safe_log(
+        logger.info,
+        "ORDER_CREATED tenant_id=%s order_id=%s client_request_id=%s dining_session_id=%s table_no=%s",
+        tenant_id, order.id, request_id, dining_session_id, body.table,
+    )
     # 出票挪到 commit 之后、且不 await——顾客提交订单不该等一次第三方打印机 API。
     # 必须在 commit 之后才调度：后台任务用的是独立 session，提前调度会因为这笔订单
     # 在别的 session 里还看不见（还没提交）而被 _print_paid_order_ticket 误判成
     # "订单不存在/还没付款"，直接跳过打印。
-    if pay_later_mode:
+    if pay_later_mode and supports_independent_print_session(db):
         _spawn_background_print_task(
-            _print_paid_order_ticket_background(int(order.id), str(order.tenant_id), reason="order_created_pay_later")
+            _print_paid_order_ticket_background(
+                int(order.id),
+                str(order.tenant_id),
+                reason="order_created_pay_later",
+                bind=getattr(db, "bind", None),
+            )
+        )
+    elif pay_later_mode:
+        logger.warning(
+            "[PRINT_BACKGROUND_DEFERRED_TO_RECOVERY] order_id=%s dialect=sqlite",
+            order.id,
         )
 
     order_data = serialize_order(
@@ -810,7 +1205,7 @@ async def _persist_create_order_and_build_response(
 async def create_order(
     body: OrderCreate, request: Request, db: AsyncSession = Depends(get_db)
 ) -> ApiResponse:
-    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, db)
+    early_response, tenant, tenant_id = await _prepare_create_order_tenant_and_replay(body, request, db)
     if early_response is not None:
         return early_response
 
@@ -818,6 +1213,25 @@ async def create_order(
         return error_response(code=500, msg="tenant missing after validation")
 
     assert tenant_id is not None
+
+    # P0-01: server-side table ownership authority. This runs before every other
+    # table/session-specific branch below (staff order, client-supplied
+    # dining_session_id, or neither) so it protects all of them uniformly --
+    # in particular the anonymous prepay/postpay path that can omit
+    # dining_session_id entirely, which previously persisted body.table with no
+    # validation at all. Empty table (takeaway/pickup/poster/douyin/staff_share,
+    # none of which populate `table`) is explicitly exempt, not validated here.
+    # Deliberately separate from _resolve_create_order_payment_mode's zone_type
+    # lookup just below: that query treats "no match" as "no zone configured,
+    # keep tenant default payment_mode" (a lenient fallback, unchanged by this
+    # fix); this check treats "no match" as "not a real table" and rejects.
+    # These are different questions and must not be conflated into one query.
+    table_no_for_authority = (body.table or "").strip()
+    if table_no_for_authority:
+        from app.services.entrance_code_service import EntranceCodeService
+
+        if not await EntranceCodeService(db).table_registry_active(tenant_id, table_no_for_authority):
+            return error_response(code=400, msg="桌台无效或已停用，请重新扫码")
 
     payment_mode, is_postpay, is_table_account, pay_later_mode = await _resolve_create_order_payment_mode(
         tenant, tenant_id, body, db
@@ -857,7 +1271,7 @@ async def create_order(
     await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
     early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
-        body, db, tenant_id
+        body, db, tenant_id, is_staff_order
     )
     if early_response is not None:
         return early_response
@@ -955,7 +1369,9 @@ async def update_order_status(
         )
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
-    return await service.update_order_status(int(order_id), body)
+    return await service.update_order_status(
+        int(order_id), body, account_id=principal.account_id, role=principal.role,
+    )
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
 TABLE_CLOSE_DONE_STATUSES = {"done", "settled", "cancelled", "rejected"}
@@ -984,7 +1400,9 @@ async def settle_table(
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
     closed_by = str(getattr(request.state, "user_id", "") or "merchant")
-    return await service.settle_table(body, closed_by=closed_by)
+    return await service.settle_table(
+        body, closed_by=closed_by, account_id=principal.account_id, role=principal.role,
+    )
 
 
 class MerchantNoteUpdate(PydanticBase):
@@ -1123,13 +1541,16 @@ async def reprint_order_ticket(
     if not principal:
         return error_response(code=401, msg="请先登录")
     print_type = (body.print_type if body else "kitchen") or "kitchen"
-    # Staff may only reprint kitchen tickets; owners keep full reprint capability.
+    # Authorize the requested ticket type before reporting renderer support. This keeps
+    # non-kitchen ticket types owner-only and prevents staff from probing unsupported types.
     if not principal.is_owner:
         if print_type != "kitchen" or not principal.can(PERM_KITCHEN_PRINT_REPRINT):
             return JSONResponse(
                 status_code=403,
                 content=RespVo(code=403, msg="当前账号无此权限").to_response(),
             )
+    if print_type != "kitchen":
+        return error_response(code=400, msg="receipt reprint is not supported")
     result = await db.execute(
         select(Order).where(Order.id == int(order_id), Order.tenant_id == principal.tenant_id)
     )
@@ -1214,7 +1635,8 @@ def serialize_fulfillment_order(
         "can_assign_pickup_no": bool(can_assign_pickup),
         "items": [
             {
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "qty": i.qty,
             }
             for i in order_items
@@ -1234,7 +1656,8 @@ def serialize_recent_served_order(order, order_items) -> dict:
         "served_by_role": getattr(order, "served_by_role", None) or "",
         "items": [
             {
-                "name": i.name,
+                "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                "item_remark": getattr(i, "item_remark", None),
                 "qty": i.qty,
             }
             for i in order_items
@@ -1306,10 +1729,9 @@ async def list_workbench_orders(
     )
     from app.services.workbench_sync_service import (
         WORKBENCH_CURSOR_HEADER,
-        cursor_from_orders,
         is_order_visible_in_workbench,
         load_order_items_by_order_ids,
-        load_workbench_candidate_orders,
+        load_workbench_snapshot_with_cursor,
     )
     from fastapi.responses import JSONResponse
 
@@ -1324,7 +1746,7 @@ async def list_workbench_orders(
 
     tenant_id = principal.tenant_id
     role = principal.role
-    candidates = await load_workbench_candidate_orders(db, tenant_id)
+    candidates, cursor = await load_workbench_snapshot_with_cursor(db, tenant_id)
     pickup_settings = await load_pickup_settings(db, tenant_id)
 
     # Print recovery stays on FULL only (never on /workbench/changes).
@@ -1366,7 +1788,6 @@ async def list_workbench_orders(
             )
         )
 
-    cursor = cursor_from_orders(candidates, fallback_now=datetime.utcnow())
     response = JSONResponse(content=RespVo(code=200, msg="ok", data=rows).to_response())
     response.headers[WORKBENCH_CURSOR_HEADER] = cursor
     return response
@@ -1485,8 +1906,13 @@ async def list_orders(
     page: Optional[int] = None,
     page_size: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
+    response: Response = None,
 ):
     from app.core.merchant_auth import get_request_principal
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CURSOR_HEADER,
+        committed_cursor_from_watermark,
+    )
     from fastapi.responses import JSONResponse
 
     principal = get_request_principal(request)
@@ -1498,9 +1924,10 @@ async def list_orders(
             status_code=403,
             content=RespVo(code=403, msg="当前账号无此权限").to_response(),
         )
+    snapshot_watermark = datetime.utcnow()
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
-    return await service.list_orders(
+    result = await service.list_orders(
         date_str=date_str,
         keyword=keyword,
         order_no=order_no,
@@ -1510,6 +1937,64 @@ async def list_orders(
         status=status,
         page=page,
         page_size=page_size,
+    )
+    if response is not None:
+        response.headers[WORKBENCH_CURSOR_HEADER] = committed_cursor_from_watermark(
+            snapshot_watermark
+        )
+    return result
+
+
+@router.get("/orders/changes")
+async def list_owner_order_changes(
+    request: Request,
+    cursor: Optional[str] = None,
+    limit: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Pure-read delta for the owner's complete today/active order dataset."""
+    from app.core.merchant_auth import get_request_principal
+    from app.services.workbench_sync_service import (
+        WORKBENCH_CHANGES_LIMIT,
+        get_owner_order_changes,
+    )
+    from fastapi.responses import JSONResponse
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="璇峰厛鐧诲綍")
+    if not principal.is_owner:
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="褰撳墠璐﹀彿鏃犳此鏉冮檺").to_response(),
+        )
+
+    try:
+        packed = await get_owner_order_changes(
+            db,
+            tenant_id=principal.tenant_id,
+            cursor=cursor,
+            limit=limit or WORKBENCH_CHANGES_LIMIT,
+        )
+    except ValueError:
+        return JSONResponse(
+            status_code=400,
+            content=RespVo(code=400, msg="INVALID_CURSOR", data=None).to_response(),
+        )
+
+    items = (
+        await serialize_owner_order_rows(db, principal.tenant_id, packed["orders"])
+        if packed["orders"]
+        else []
+    )
+    return success_response(
+        data={
+            "items": items,
+            "removed_ids": packed["removed_ids"],
+            "next_cursor": packed["next_cursor"],
+            "has_more": bool(packed["has_more"]),
+            "bootstrap": bool(packed["bootstrap"]),
+        }
     )
 
 class ReviewCreate(PydanticBase):

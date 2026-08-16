@@ -19,6 +19,15 @@ ALLOWED_METRICS = {
     "menu_api",
     "cart_open",
     "submit_order",
+    "launch_to_entry",
+    "entry_resolve",
+    "entry_to_menu",
+    "menu_onload_to_first_content",
+    "menu_onload_to_interactive",
+    "shop_info_api",
+    "menu_processing",
+    "first_content_to_interactive",
+    "first_cart_response",
 }
 
 MAX_BATCH_SIZE = 50

@@ -131,6 +131,33 @@ class EntranceCodeService(BaseService):
         )
         return int(result.scalar() or 0)
 
+    async def table_registry_active(self, tenant_id: str, table_no: str) -> bool:
+        """P0-01: server-side authority check for "does this (tenant_id, table_no)
+        correspond to a real, currently-usable table" -- the canonical source of
+        truth is an EntranceCode row with entry_type='table' and status==1. Explicit
+        tenant_id param (not self.require_tenant_id()) because callers here resolve
+        tenant_id from an unauthenticated request body, same as get_by_scene above.
+
+        Uses EXISTS/limit(1), not scalar_one_or_none(): production has confirmed
+        cases of more than one active table EntranceCode for the same (tenant_id,
+        table_no) pair (re-generated codes), which is a data-hygiene concern, not
+        an authority violation -- this check must not raise on that shape.
+        """
+        normalized_table_no = (table_no or "").strip()
+        if not tenant_id or not normalized_table_no:
+            return False
+        result = await self.db.execute(
+            select(EntranceCode.id)
+            .where(
+                EntranceCode.tenant_id == tenant_id,
+                func.trim(EntranceCode.table_no) == normalized_table_no,
+                EntranceCode.entry_type == "table",
+                EntranceCode.status == 1,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_by_scene(self, scene: str) -> EntranceCode | None:
         normalized_scene = (scene or "").strip()
         result = await self.db.execute(select(EntranceCode).filter(EntranceCode.scene == normalized_scene))

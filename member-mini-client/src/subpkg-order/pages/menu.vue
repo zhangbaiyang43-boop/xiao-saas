@@ -52,6 +52,7 @@
     </view>
 
     <DishList
+      ref="dishList"
       v-show="activeTab === 'order'"
       @scroll-position="onDishScrollPosition"
       :categories="categories"
@@ -59,7 +60,7 @@
       :category-scroll-top="categoryScrollTop"
       :scroll-target="scrollTarget"
       :last-order-items="lastOrderItems"
-      :loading="loading"
+      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
       :load-error="loadError"
       :all-dishes="allDishes"
       :image-load-failed="imageLoadFailed"
@@ -86,7 +87,7 @@
       @active-category-change="handleActiveCategoryChange"
       @reorder-item="reorderItem"
       @reorder-all="reorderAll"
-      @retry-load="loadMenu"
+      @retry-load="retryMenuInitialization"
       @open-cart="openCart"
       @open-spec-sheet="openSpecSheet"
       @image-error="markDishImageFailed"
@@ -399,8 +400,8 @@
 
     <LoadingStates
       :load-error="loadError"
-      :loading="loading"
-      @retry-load="loadMenu"
+      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
+      @retry-load="retryMenuInitialization"
     />
 
 
@@ -412,7 +413,15 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { getMenuItems, getShopInfo } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
-import { consumeStart, flushPending, recordSample } from '@/utils/perf'
+import {
+  discardStart,
+  flushPending,
+  markEvent,
+  markEventOnce,
+  markStart,
+  recordDurationFromStart,
+  recordSample,
+} from '@/utils/perf'
 import { reportError } from '@/utils/monitor'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
@@ -448,10 +457,44 @@ import { useTableCheckout } from '../composables/useTableCheckout.js'
 import { useOrderStatusPoll } from '../composables/useOrderStatusPoll.js'
 import { useCheckout } from '../composables/useCheckout.js'
 import { useDiningSession } from '../composables/useDiningSession.js'
+import { createMenuInitialization } from '../composables/useMenuInitialization.js'
+import { saveCartSnapshot, restoreCartSnapshot } from '@/utils/cartContextCache.js'
+import { incrementSimpleCart, decrementSimpleCart } from '@/utils/simpleCartMath.js'
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
 import { orderModeText, confirmationText, successText, specText, authSheetText, toastText, modalText } from '../utils/orderText.js'
+
+const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
+  try {
+    nextTick(() => {
+      if (!page?.menuInitializationActive || !page?.$refs?.dishList) return resolve(false)
+      const query = uni.createSelectorQuery().in(page.$refs?.dishList)
+      query.select('.cat-item').boundingClientRect()
+      query.select('.dish-item').boundingClientRect()
+      query.exec((nodes) => {
+        if (!page?.menuInitializationActive || !nodes?.[0] || !nodes?.[1]) return resolve(false)
+        const firstContentAt = Date.now()
+        if (markEventOnce('first_content', `${pagePerfKey}:first_content`, { view_observed: true }, firstContentAt)) {
+          recordDurationFromStart('menu_onload_to_first_content', 'menu_onload_to_first_content', {
+            definition: 'category_and_dish_nodes_observed',
+          }, firstContentAt)
+          markStart('first_content_to_interactive', firstContentAt)
+        }
+        if (markEventOnce('interactive', `${pagePerfKey}:interactive`, { basic_ordering_actions_ready: true }, firstContentAt)) {
+          recordDurationFromStart('menu_onload_to_interactive', 'menu_onload_to_interactive', {
+            definition: 'category_and_dish_actions_available',
+          }, firstContentAt)
+          recordDurationFromStart('first_content_to_interactive', 'first_content_to_interactive', undefined, firstContentAt)
+        }
+        resolve(true)
+      })
+    })
+  } catch {
+    // Selector telemetry is best effort and never changes page rendering.
+    resolve(false)
+  }
+})
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -487,6 +530,10 @@ export default {
     const todayActivity = ref('')
     const loading = ref(false)
     const loadError = ref(false)
+    const orderingContextReady = ref(false)
+    const orderingContextFailed = ref(false)
+    const criticalInitializationRetry = ref(null)
+    const retryMenuInitialization = () => criticalInitializationRetry.value?.()
     const ordering = ref(false)
     // 提交订单的幂等键：开开购物车时生成一次，
     // 同一次结算内的重试（弱网超时后重新提交）都带同一个值，
@@ -622,17 +669,41 @@ export default {
     const { cleanedText: itemRemarkExtra, toggleChip: toggleItemRemarkChip } = useRemarkChips(itemRemark, remarkChips)
     const { failed: imageLoadFailed, markFailed: markDishImageFailed } = useFailedImageMap()
 
+    let firstCartActionRecorded = false
+    const startFirstCartAction = (action) => {
+      if (firstCartActionRecorded) return null
+      firstCartActionRecorded = true
+      const startedAt = Date.now()
+      markEvent('first_cart_action', { action }, startedAt)
+      return { action, startedAt }
+    }
+    const finishFirstCartAction = (action) => {
+      if (!action) return
+      recordSample('first_cart_response', Date.now() - action.startedAt, { action: action.action })
+    }
+
     const specCartItems = ref([])
     const {
       showSpecSheet, specDish, specQty, specStep, selectedSpecs, selectedExtras, detailImageFailed,
       specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, specBasePrice, specTotalPrice,
       selectedSpecSummary, selectedSpecFullSummary, specDishDesc, canGoNextSpec, specPrimaryText, isSpecSelected, toggleSpec,
-      toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet, openProductDetail,
+      toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, openSpecSheet: openSpecSheetRaw, openProductDetail,
     } = useSpecSheet({
       itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
-      specCartItems, isSoldOut, hasSpecs, formatPrice,
+      specCartItems, isSoldOut, hasSpecs, formatPrice, ordering,
       triggerCartSuccessFeedback: (key) => triggerCartSuccessFeedback(key),
     })
+    const openSpecSheet = (dish) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
+      if (!orderingContextReady.value) {
+        uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+        return
+      }
+      const firstAction = startFirstCartAction('open_spec_sheet')
+      const result = openSpecSheetRaw(dish)
+      finishFirstCartAction(firstAction)
+      return result
+    }
 
     const {
       normalizeOrderStatus, currentTableOrder, historyTableOrders,
@@ -652,7 +723,7 @@ export default {
     })
 
     const { saveMyOrders, loadMyOrders, doCancelOrder } = useMyOrdersStore({
-      myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken,
+      myOrders, shopId, tableNo, orderId, orderStatus, showSuccess, diningParticipantToken, diningSessionId,
       stopStatusPoll: () => stopStatusPoll(),
     })
 
@@ -660,7 +731,7 @@ export default {
     let stopDiningPollsImpl = () => {}
     const {
       persistDiningContext, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders, showTableHint,
-      exitDiningSession, isExitingSession,
+      exitDiningSession, isExitingSession, clearDiningSessionStorage,
     } = useDiningSession({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
       tableSessionClosed, tableSessionStatus, tableSessionTotal, tableSessionClosedNotice,
@@ -789,7 +860,7 @@ export default {
       return wechatPayAmount.value > 0 ? confirmationText.wechatPay : confirmationText.payable
     })
     const authAmountLabel = computed(() => isPrepayMode.value ? authSheetText.amount : confirmationText.goodsAmount)
-    const canSubmitOrder = computed(() => totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
+    const canSubmitOrder = computed(() => orderingContextReady.value && totalCount.value > 0 && !!tableNo.value && !storeClosed.value && !tableSessionClosed.value)
     const payButtonText = computed(() => {
       if (ordering.value) return confirmationText.confirming
       if (paymentConfirming.value) return confirmationText.paymentConfirming
@@ -827,6 +898,51 @@ export default {
     const scrollTarget = ref('')
     const allDishes = ref([])
     const cart = ref({}) // { dishId: qty }
+
+    // P0-03-03: same-context route re-entry must not lose the cart (menu ->
+    // 首页/其他页 -> menu, same tenant/table/session), but a different
+    // context must never see the old cart. Snapshotting on every cart
+    // change (rather than only on page-leave) means we don't need a new
+    // onUnload/onHide hook to catch every possible navigation path away.
+    //
+    // cartHydrated guards a real race: diningSessionId is one of this watch's
+    // sources, and ensureDiningSession() sets it *before* restoreCartIfSame
+    // Context() gets a chance to run -- that ref change alone fires this
+    // watcher, with cart.value still {} at that instant (confirmed empirically:
+    // an un-guarded version saves an empty snapshot right then, clobbering
+    // whatever a previous instance had saved, and the restore call a moment
+    // later reads back the now-empty cache instead of the real cart). Saves
+    // stay suppressed until restoreCartIfSameContext has had its turn.
+    const cartHydrated = ref(false)
+    watch([cart, specCartItems, diningSessionId], () => {
+      if (!cartHydrated.value) return
+      saveCartSnapshot(
+        { tenant_id: shopId.value, table_no: tableNo.value, dining_session_id: diningSessionId.value },
+        cart.value,
+        specCartItems.value,
+      )
+    }, { deep: true })
+
+    // Called from onLoad once ensureDiningSession has resolved. Only defined
+    // here (not inlined in onLoad) because diningSessionId is a setup()-local
+    // ref, not exposed on `this` -- this keeps the this-based Options API
+    // lifecycle hooks working the same way every other cross-cutting call
+    // here does (this.ensureDiningSession, this.syncDiningOrders, etc.).
+    const restoreCartIfSameContext = () => {
+      if (Object.keys(cart.value).length || specCartItems.value.length) {
+        cartHydrated.value = true
+        return
+      }
+      const restored = restoreCartSnapshot({
+        tenant_id: shopId.value, table_no: tableNo.value, dining_session_id: diningSessionId.value,
+      })
+      if (restored) {
+        cart.value = restored.cart
+        specCartItems.value = restored.specCartItems
+      }
+      cartHydrated.value = true
+    }
+
     const {
       addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       triggerAddPress, triggerCartSuccessFeedback, triggerCartValueFeedback,
@@ -846,15 +962,28 @@ export default {
     const cartCount = (id) => cart.value[id] || 0
 
     const addToCart = (dish) => {
+      // P0-04-02: once a submit's payload has been captured and sent, the cart
+      // must not change until that request resolves -- otherwise a later item
+      // added here could be silently discarded by the success handler's cart
+      // clear without ever having been part of the order that was actually
+      // created. This is a request-in-flight lock, not a permanent one: it
+      // clears in submitOrder's `finally`, same as `ordering` itself.
+      if (ordering.value) return
+      if (!orderingContextReady.value) {
+        uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+        return
+      }
       if (isSoldOut(dish)) return
       if (hasSpecs(dish)) {
         openSpecSheet(dish)
         return
       }
+      const firstAction = startFirstCartAction('add_normal_dish')
       triggerAddPress(dish.id)
-      cart.value = { ...cart.value, [dish.id]: (cart.value[dish.id] || 0) + 1 }
+      cart.value = incrementSimpleCart(cart.value, dish.id)
       triggerCartSuccessFeedback(dish.id)
       uni.vibrateShort({ type: 'light' })
+      finishFirstCartAction(firstAction)
     }
 
     const {
@@ -867,6 +996,7 @@ export default {
     })
 
     const removeFromCart = (dish) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (dish.specKey) {
         const item = specCartItems.value.find(i => i.specKey === dish.specKey)
         if (!item) return
@@ -875,18 +1005,12 @@ export default {
         triggerCartValueFeedback(dish.specKey)
         return
       }
-      const cur = cart.value[dish.id] || 0
-      if (cur <= 1) {
-        const next = { ...cart.value }
-        delete next[dish.id]
-        cart.value = next
-      } else {
-        cart.value = { ...cart.value, [dish.id]: cur - 1 }
-      }
-    triggerCartValueFeedback(dish.id)
+      cart.value = decrementSimpleCart(cart.value, dish.id)
+      triggerCartValueFeedback(dish.id)
     }
 
     const increaseCartItem = (item) => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (item.specKey) {
         const target = specCartItems.value.find(i => i.specKey === item.specKey)
         if (target) {
@@ -899,6 +1023,7 @@ export default {
     }
 
     const clearCart = () => {
+      if (ordering.value) return  // P0-04-02: see addToCart's comment
       if (!totalCount.value) return
       uni.showModal({
         title: modalText.clearCartTitle,
@@ -983,11 +1108,15 @@ export default {
       // 这里只是顺手刷新，不该让购物车面板等它才显示；优惠券同理，正常情况下已经被
       // onLoad 里的预拉垫过底了，这里再刷新一次只是保证不过期，不等它。
       // 第0批性能埋点：量的是"点开购物车图标"到"购物车面板真的显示出来"这一段。
-      const _openCartStartedAt = Date.now()
-      pendingSubmitRequestId.value = ''
+      const firstAction = startFirstCartAction('open_cart')
+      // P0-15-01: do NOT reset pendingSubmitRequestId here -- an unresolved
+      // (ambiguous) create-order submit intent must survive ordinary cart
+      // close/reopen navigation. It's only ever cleared once the server
+      // confirms an order identity (see useCheckout.js's
+      // clearCurrentPendingSubmitIntent call sites).
       loadShopSettings().catch(() => {})
       showCart.value = true
-      recordSample('cart_open', Date.now() - _openCartStartedAt)
+      finishFirstCartAction(firstAction)
       itemsExpanded.value = totalCount.value <= 1
       refreshAvailableCoupons()
     }
@@ -1017,6 +1146,7 @@ export default {
       orderSuccessTemplateId, pickupReminderTemplateId,
       wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
       normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+      clearDiningSessionStorage,
     })
 
     const { handleTableContinueOrder, handleTableCheckout } = useTableCheckout({
@@ -1094,7 +1224,7 @@ export default {
     }
 
     const loadShopSettings = async () => {
-      if (!shopId.value) return
+      if (!shopId.value) return false
       const cachedData = readShopInfoCache()
       if (cachedData) applyShopInfoState(cachedData)
       try {
@@ -1117,10 +1247,12 @@ export default {
             })
           }
           if (d.lat && d.lng) loadDistance(d.lat, d.lng)
+          return true
         }
       } catch (e) {
         console.warn('[loadShopSettings] failed', e)
       }
+      return false
     }
 
     // 第2批：菜单按 tenant_id 存本地缓存，带一个 version（后端用这批菜品自己的 updated_at
@@ -1155,19 +1287,27 @@ export default {
         const res = await getMenuItems(shopId.value)
         if (res?.code !== 200) {
           if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
-          return
+          return hadCacheHit
         }
         const payload = res?.data || {}
         const rawItems = Array.isArray(payload) ? payload : (payload.items || [])
         const version = Array.isArray(payload) ? '' : (payload.version || '')
+        const processingStartedAt = Date.now()
         const mapped = Array.isArray(rawItems) ? rawItems.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
         if (!hadCacheHit || version !== cached.version) {
           allDishes.value = mapped
           if (categories.value.length) activeCategory.value = categories.value[0]
         }
+        markEvent('menu_data_processed', { item_count: mapped.length, cache_hit: hadCacheHit })
+        recordSample('menu_processing', Date.now() - processingStartedAt, {
+          item_count: mapped.length,
+          cache_hit: hadCacheHit,
+        })
         if (version) writeMenuCache(mapped, version)
+        return true
       } catch {
         if (!hadCacheHit) { loadError.value = true; allDishes.value = [] }
+        return hadCacheHit
       } finally {
         loading.value = false
         if (categories.value.length) activeCategory.value = categories.value[0]
@@ -1183,7 +1323,7 @@ export default {
 
     return {
       tableNo, shopId, shopName, shopLogo, memberSinceText, tableDisplayText, orderModeDisplayText, showTableHint, todayActivity, orderMode, orderModeText, confirmationText, confirmPaymentLabel, authAmountLabel, successText, specText,
-      loading, loadError, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
+      loading, loadError, orderingContextReady, orderingContextFailed, retryMenuInitialization, criticalInitializationRetry, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
       couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
@@ -1209,7 +1349,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tablePickupNo, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
-      saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders,
+      saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders, restoreCartIfSameContext,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,
       successDiscount, wechatPayAmount, expectedOrderPoints, checkoutMemberSummaryText, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
@@ -1230,62 +1370,90 @@ export default {
 
   onLoad: function (options) {
     return (async () => {
-      // 第1批：把"扫码到首屏可交互"这一个总耗时拆成三段，才知道 6-7 秒具体花在
-      // 冷启动、等接口、还是渲染上——只有一个总数没法对症下药。scanStartedAt 在这里
-      // 就读走（consumeStart 读到即删），后面 menuReady.then 里不能再读一次，
-      // 所以先存进局部变量传下去。
-      const onLoadStartedAt = Date.now()
-      const scanStartedAt = consumeStart('scan_to_interactive')
-      if (scanStartedAt) recordSample('stage_cold_start_to_onload', onLoadStartedAt - scanStartedAt)
+      const pagePerfKey = `menu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      // A direct share/deep-link to menu must not leave a cold-launch mark for a later entry page.
+      discardStart('launch_to_entry')
+      markEvent('menu_onload')
+      recordDurationFromStart('entry_to_menu', 'entry_to_menu')
+      markStart('menu_onload_to_first_content')
+      markStart('menu_onload_to_interactive')
 
-      this.tableNo = options.table || 'A01'
+      // P0-01C: an empty table_no is a legitimate "no table context" state, not an
+      // error to paper over with a fake table number -- 'A01' looked like a real
+      // scanned table to every downstream consumer (ensureDiningSession, order
+      // submission), silently misrouting orders. Browsing the menu still works
+      // with an empty tableNo (loadMenu only needs shopId); resolveDiningIdentity
+      // already returns { ok:false, reason:'missing_context' } for an empty table,
+      // which correctly fails ensureDiningSession and blocks checkout with the
+      // existing "本桌点餐会话不可用，请重新扫码" toast -- no new UI needed.
+      this.tableNo = options.table || ''
       this.shopId = options.shop || uni.getStorageSync('tenant_id') || ''
       if (options.activity) this.todayActivity = decodeURIComponent(options.activity)
       uni.setNavigationBarTitle({ title: this.shopName + ' \u70b9\u9910' })
       this.loadMyOrders()
       this.restorePendingPaymentOrder()
       this.refreshCustomerAuthState()
-      this.loadMemberStatus({ authRedirect: false })
 
-      // \u83dc\u5355\u80fd\u4e0d\u80fd\u663e\u793a\u53ea\u53d6\u51b3\u4e8e shopId\uff08\u4e0a\u9762\u5df2\u7ecf\u540c\u6b65\u8bbe\u597d\uff09\uff0c\u8ddf\u672c\u684c\u8eab\u4efd/\u684c\u53f0\u8ba2\u5355/
-      // \u5f85\u652f\u4ed8\u6062\u590d\u5b8c\u5168\u65e0\u5173\u2014\u2014\u8fd9\u6761\u94fe\u548c\u4e0b\u9762\u90a3\u6761"\u8eab\u4efd\u2192\u684c\u53f0\u540c\u6b65\u2192\u5f85\u652f\u4ed8\u6062\u590d"\u7684\u94fe\u8def
-      // \u5e76\u884c\u8dd1\uff0c\u4e0d\u518d\u8ba9\u83dc\u5355\u7b49\u4e00\u4e2a\u8ddf\u5b83\u65e0\u5173\u7684\u94fe\u8def\u3002
-      // loadShopSettings（门店信息/分类顺序）和 loadMenu（菜品列表）互不依赖对方的返回
-      // 数据，之前写成先后 await 纯粹是顺序问题——两者互相独立就应该并行发起，少等一次
-      // 网络往返。
-      const menuReady = Promise.all([this.loadShopSettings(), this.loadMenu()])
-      // 第0批性能埋点："扫码到首屏可交互"到这里就算数——菜单数据齐了、顾客能开始点菜了，
-      // 不用等 sessionReady（本桌身份/历史订单同步）一起完成，那些不影响首屏能不能点餐。
-      // 非扫码进来的场景（比如从"我的"页正常打开）consumeStart 拿不到起点，直接跳过。
-      menuReady.then(() => {
-        const menuReadyAt = Date.now()
-        recordSample('stage_onload_to_menu_ready', menuReadyAt - onLoadStartedAt)
-        if (scanStartedAt) recordSample('scan_to_interactive', menuReadyAt - scanStartedAt)
-        // nextTick 之后才是"数据已经写进真实 DOM"的时机，用它来近似"渲染完成"，
-        // 比 menuReady resolve 那一刻（数据到手但可能还没画出来）更贴近顾客真实感知。
-        nextTick(() => {
-          recordSample('stage_menu_ready_to_render', Date.now() - menuReadyAt)
-        })
+      // Only menu data and authoritative shop payment/open-state context block
+      // ordering. Member, coupon, dining/history and payment recovery start
+      // after critical readiness and retain their existing business guards.
+      const startMemberAndCoupon = () => {
+        const memberPromise = this.loadMemberStatus({ authRedirect: false })
         // 第1批：优惠券预拉，别等顾客点开购物车才现拉。故意错开一点延迟，把带宽/CPU
         // 优先让给刚刚渲染出来的菜单，不跟首屏抢；顾客通常也要选几件商品才会点开购物车，
         // 这点延迟基本感觉不到。
-        setTimeout(() => { this.refreshAvailableCoupons() }, 800)
-      })
+        this.menuCouponPrefetchTimer = setTimeout(() => {
+          if (this.menuInitializationActive) this.refreshAvailableCoupons()
+        }, 800)
+        return memberPromise
+      }
 
-      const sessionReady = (async () => {
+      const initializeDiningState = async () => {
         // entry \u9875\u626b\u7801\u8fdb\u6765\u65f6\u5df2\u7ecf\u5f3a\u5236\u5237\u65b0\u8fc7\u4e00\u6b21\u8eab\u4efd\u5e76\u5199\u8fdb\u672c\u5730\u7f13\u5b58\uff08resolveTableSession
         // \u91cc\u7684 force:true\uff09\uff0c\u8fd9\u91cc\u4e0d\u518d\u4f20 force\u2014\u2014ensureDiningSession \u5185\u90e8\u7684
         // resolveDiningIdentity \u4f1a\u81ea\u5df1\u5224\u65ad\u7f13\u5b58\u662f\u5426\u53ef\u4fe1\uff08\u684c\u53f7\u5bf9\u4e0d\u5bf9\u5f97\u4e0a\u3001\u6709\u6ca1\u6709
         // session/token\uff09\uff0c\u7f13\u5b58\u4e0d\u53ef\u4fe1\u65f6\u4f9d\u7136\u4f1a\u81ea\u52a8\u53d1\u771f\u5b9e\u8bf7\u6c42\uff0c\u4e0d\u4f1a\u5e26\u7740\u8fc7\u671f\u8eab\u4efd"\u88f8\u5954"\uff0c
         // \u4f46\u53ef\u4fe1\u65f6\u5c31\u7701\u6389\u4e00\u6b21\u53c2\u6570\u5b8c\u5168\u76f8\u540c\u7684\u91cd\u590d\u7f51\u7edc\u5f80\u8fd4\u3002
         await this.ensureDiningSession(false)
+        // P0-03-03: only applies if this fresh instance's own cart is still
+        // empty (never clobbers anything already added during the brief
+        // async window before the session resolved) and only if the
+        // restored snapshot's tenant+table+session matches exactly.
+        this.restoreCartIfSameContext()
         await this.syncDiningOrders()
         this.startTablePresencePollIfActive()
         await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
         if (options.openOrders === '1') this.showOrders = true
-      })()
+        return true
+      }
 
-      await Promise.all([menuReady, sessionReady])
+      const runCriticalInitialization = () => {
+        if (this.menuInitializationController) this.menuInitializationController.dispose()
+        if (this.menuCouponPrefetchTimer) clearTimeout(this.menuCouponPrefetchTimer)
+        this.menuInitializationActive = true
+        this.orderingContextReady = false
+        this.orderingContextFailed = false
+        const initialization = createMenuInitialization({
+          loadMenu: () => this.loadMenu(),
+          loadCriticalContext: () => this.loadShopSettings(),
+          onCriticalReady: async () => {
+            this.orderingContextReady = true
+            return observeMenuContent(this, pagePerfKey)
+          },
+          onCriticalFailure: (error) => {
+            this.orderingContextFailed = true
+            uni.showToast({ title: confirmationText.unavailable, icon: 'none' })
+            reportError('menu.critical_context', error)
+          },
+          onDeferredError: (error) => reportError('menu.deferred_initialization', error),
+        })
+        this.menuInitializationController = initialization
+        return initialization.run({
+          secondaryTasks: [startMemberAndCoupon, initializeDiningState],
+        })
+      }
+      this.criticalInitializationRetry = runCriticalInitialization
+      await runCriticalInitialization()
     })()
   },
   onShow() {
@@ -1295,15 +1463,15 @@ export default {
       uni.removeStorageSync('menu_focus_tab')
     }
     if (this.refreshCustomerAuthState) this.refreshCustomerAuthState()
-    if (this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
-    if (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone')) {
+    if (this.orderingContextReady && this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
+    if (this.orderingContextReady && (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))) {
       this.loadMemberStatus({ authRedirect: false })
     }
     if (this.orderId && !['settled', 'cancelled', 'rejected'].includes(this.orderStatus)) {
       this.startStatusPoll(this.orderId)
     }
     // CLOSED / 退出中 / 无 active session：禁止重启旧桌轮询（死循环根因之一）
-    this.startTablePresencePollIfActive()
+    if (this.orderingContextReady) this.startTablePresencePollIfActive()
   },
   onHide: function () {
     this.stopStatusPoll()
@@ -1313,6 +1481,9 @@ export default {
   onUnload: function () {
     this.stopStatusPoll()
     this.stopTablePresencePoll()
+    this.menuInitializationActive = false
+    if (this.menuCouponPrefetchTimer) clearTimeout(this.menuCouponPrefetchTimer)
+    if (this.menuInitializationController) this.menuInitializationController.dispose()
   },
 }
 </script>

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 
 from app.models.base import Base, BaseModel
@@ -22,6 +24,7 @@ class Order(BaseModel):
     payment_status = Column(String(16), nullable=False, default="unpaid")  # unpaid | paid
     payment_mode = Column(String(32), nullable=False, default="prepay")  # prepay | postpay | table_account
     payment_method = Column(String(16), nullable=True)   # mock | wxpay | balance
+    wx_transaction_id = Column(String(64), nullable=True)
     payment_time = Column(String(32), nullable=True)     # ISO string，避免加列类型迁移
     print_status = Column(String(16), nullable=False, default="PENDING")  # PENDING | SUCCESS | FAILED | UNKNOWN
     printed_at = Column(DateTime, nullable=True)
@@ -54,6 +57,34 @@ class Order(BaseModel):
     # NULL 不受这个唯一约束限制（MySQL/SQLite 的唯一索引都把 NULL 视为互不相同），
     # 老订单和没传这个字段的调用方完全不受影响。
     client_request_id = Column(String(64), nullable=True)
+    # P0-04: SHA-256 hex digest of the canonical, normalized submission semantics
+    # (see _compute_request_fingerprint in app/api/v1/orders.py). NOT the idempotency
+    # identity -- (tenant_id, client_request_id) above remains that. This only
+    # detects when a client_request_id retry carries a genuinely different business
+    # intent than the original submission, so the server can fail closed instead of
+    # silently replaying stale content. NULL on legacy (pre-migration) orders --
+    # those keep the existing unconditional-replay behavior.
+    request_fingerprint = Column(String(64), nullable=True)
+    # P0-16 Phase B2: durable WHO/WHEN/HOW lifecycle-audit facts -- distinct
+    # from Order.status (current business state). Written exactly once, at
+    # the same transaction as the status mutation that first makes an order
+    # cancelled/rejected; never overwritten afterward (first-writer-wins --
+    # see set_termination_audit_if_unset below). actor_type is one of
+    # account | customer | participant | system; actor_id/actor_role follow
+    # the same "NULL id + role=owner" convention already shipped for
+    # served_by_account_id/served_by_role (no FK, matches merchant_account_id
+    # style elsewhere -- see 20260809_0001_add_order_serve_audit.py).
+    terminated_at = Column(DateTime, nullable=True)
+    terminated_actor_type = Column(String(32), nullable=True)
+    terminated_actor_id = Column(BigInteger, nullable=True)
+    terminated_actor_role = Column(String(32), nullable=True)
+    termination_source = Column(String(32), nullable=True)
+    # Settlement is merchant/staff-account-only in every currently reachable
+    # path (Order.completed_at remains the sole settlement TIME field -- see
+    # order_lifecycle_service.py), so this mirrors served_by_* directly
+    # rather than the polymorphic terminated_actor_* shape above.
+    settled_by_account_id = Column(BigInteger, nullable=True)
+    settled_by_role = Column(String(32), nullable=True)
 
     __table_args__ = (
         Index("idx_orders_tenant_session", "tenant_id", "dining_session_id"),
@@ -61,7 +92,29 @@ class Order(BaseModel):
         Index("idx_orders_tenant_session_status", "tenant_id", "dining_session_id", "status"),
         Index("idx_orders_parent_order", "parent_order_id"),
         Index("ux_orders_tenant_client_request_id", "tenant_id", "client_request_id", unique=True),
+        Index("ux_orders_wx_transaction_id", "wx_transaction_id", unique=True),
     )
+
+def set_termination_audit_if_unset(order: "Order", *, actor_type: str, actor_id, actor_role, source: str) -> None:
+    """Write the durable termination audit facts exactly once, at the same
+    call site (and therefore the same DB transaction/commit) as the status
+    mutation that first makes ``order`` cancelled/rejected.
+
+    First-writer-wins: every real cancel/reject path already blocks a second
+    attempt on an already-terminal order via its own status-transition guard
+    before it ever reaches this call (see P0-16 B2 Schema Contract Gate
+    Report Section 12), but this defends the invariant directly rather than
+    relying solely on those callers staying correct. Does not touch status,
+    commit/flush, payment, coupon, or print -- callers own all of that.
+    """
+    if order.terminated_at is not None:
+        return
+    order.terminated_at = datetime.utcnow()
+    order.terminated_actor_type = actor_type
+    order.terminated_actor_id = actor_id
+    order.terminated_actor_role = actor_role
+    order.termination_source = source
+
 
 class OrderItem(Base):
     __tablename__ = "order_items"
@@ -69,9 +122,10 @@ class OrderItem(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     order_id = Column(BigInteger, ForeignKey("orders.id"), nullable=False, index=True)
     dish_id = Column(BigInteger, nullable=True)
-    name = Column(String(64), nullable=False)
+    name = Column(String(255), nullable=False)
     price = Column(Numeric(10, 2), nullable=False)
     qty = Column(Integer, nullable=False, default=1)
+    item_remark = Column(String(255), nullable=True)
 
 
 

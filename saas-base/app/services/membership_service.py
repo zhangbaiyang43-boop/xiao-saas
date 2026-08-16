@@ -127,6 +127,7 @@ class MembershipService(BaseService):
         source_channel: str = "STORE",
         ref_id: str = None,
         remark: str = None,
+        auto_commit: bool = True,
     ) -> PointLedger:
         tenant_id = self.require_tenant_id()
         balance_before = int(account.points_balance or 0)
@@ -152,7 +153,10 @@ class MembershipService(BaseService):
             remark=remark,
         )
         self.db.add(ledger)
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(account)
         await self.db.refresh(ledger)
 
@@ -160,10 +164,19 @@ class MembershipService(BaseService):
         # 换一张券。放在 add_points 里而不是 apply_consumption 里，是因为 add_points
         # 是所有加积分场景（消费、签到、分享……）共用的唯一入口，不管以后从哪个渠道
         # 加的积分，都会经过这里，不用每个加积分的地方都单独补一遍判断。
-        await self._maybe_reward_points_milestone(account, balance_before)
+        await self._maybe_reward_points_milestone(
+            account,
+            balance_before,
+            auto_commit=auto_commit,
+        )
         return ledger
 
-    async def _maybe_reward_points_milestone(self, account: MemberAccount, balance_before: int) -> dict | None:
+    async def _maybe_reward_points_milestone(
+        self,
+        account: MemberAccount,
+        balance_before: int,
+        auto_commit: bool = True,
+    ) -> dict | None:
         """攒够 POINTS_REWARD_THRESHOLD 积分自动换一张券——复用 CouponService 现成的
         自动发券引擎（去重、模板、cap_discount_amount 安全上限全部照用），不新建
         一套独立的积分商城。
@@ -190,7 +203,11 @@ class MembershipService(BaseService):
             coupon_svc = CouponService(self.db)
             coupon_svc.set_tenant_id(self.require_tenant_id())
             for _ in range(crossed):
-                issue_result = await coupon_svc.issue_auto_coupon(account.customer_id, "points_reward_coupon")
+                issue_result = await coupon_svc.issue_auto_coupon(
+                    account.customer_id,
+                    "points_reward_coupon",
+                    auto_commit=auto_commit,
+                )
                 if not (issue_result and issue_result.get("success_count", 0) > 0):
                     break
                 issued_count += 1
@@ -205,15 +222,26 @@ class MembershipService(BaseService):
                 }
         except Exception:
             logger.exception(f"积分兑换券发放异常 customer_id={account.customer_id}")
+            if not auto_commit:
+                raise
 
         if issued_count > 0:
             account.points_balance = MemberAccount.points_balance - issued_count * POINTS_REWARD_THRESHOLD
-            await self.db.commit()
+            if auto_commit:
+                await self.db.commit()
+            else:
+                await self.db.flush()
             await self.db.refresh(account)
 
         return coupon_data
 
-    async def apply_consumption(self, customer: Customer, amount: float, consumption_id: int = None) -> MemberAccount:
+    async def apply_consumption(
+        self,
+        customer: Customer,
+        amount: float,
+        consumption_id: int = None,
+        auto_commit: bool = True,
+    ) -> MemberAccount:
         tenant_id = self.require_tenant_id()
         
         # 使用 SELECT FOR UPDATE 加行锁，防止并发消费导致的积分计算错误
@@ -260,11 +288,22 @@ class MembershipService(BaseService):
         # 积分计算：消费积分基于当前（消费后）等级的计算倍率
         points = int(consume_amount * Decimal(str(new_level["point_multiplier"])))
         
-        await self.db.commit()
+        if auto_commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
         await self.db.refresh(account)
         
         if points > 0:
-            await self.add_points(account, "consumption", points, "STORE", ref_id=str(consumption_id or ""), remark="消费积分")
+            await self.add_points(
+                account,
+                "consumption",
+                points,
+                "STORE",
+                ref_id=str(consumption_id or ""),
+                remark="消费积分",
+                auto_commit=auto_commit,
+            )
         return account
 
     async def reverse_consumption(self, customer_id: int, amount: float, consumption_id: int) -> MemberAccount | None:

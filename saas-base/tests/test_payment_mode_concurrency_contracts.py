@@ -77,7 +77,9 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
     def test_free_or_zero_amount_payment_path_locks_before_marking_paid(self):
         pay_source = function_source(PAYMENT_SERVICE_SOURCE, "create_wxpay_order")
         self.assertIn('if pay_amount <= 0:', pay_source)
-        self.assertIn('select(Order).where(Order.id == int(order_id)).with_for_update()', pay_source)
+        self.assertIn('Order.id == int(order_id)', pay_source)
+        self.assertIn('Order.tenant_id == str(order.tenant_id)', pay_source)
+        self.assertIn('.with_for_update()', pay_source)
         self.assertIn('self._on_payment_success(order, payment_method="free")', pay_source)
         self.assertIn('await self.db.commit()', pay_source)
 
@@ -109,7 +111,8 @@ class PaymentModeConcurrencyContractsTest(unittest.TestCase):
         self.assertIn('operator_role=principal.role', reprint_source)
         self.assertNotIn('payment_status = "paid"', reprint_source)
         self.assertNotIn('payment_method =', reprint_source)
-        self.assertIn('select(Order).where(Order.id == order.id).with_for_update()', print_source)
+        self.assertIn('Order.id == order.id, Order.tenant_id == tenant_id', print_source)
+        self.assertIn('.with_for_update()', print_source)
 
 
 if __name__ == "__main__":

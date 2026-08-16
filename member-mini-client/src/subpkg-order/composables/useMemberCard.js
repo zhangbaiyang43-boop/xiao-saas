@@ -30,7 +30,7 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
   })
 
   const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '普通会员')
-  const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
+  const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.webp', LV2: '/static/member-levels/level-lv2.webp', LV3: '/static/member-levels/level-lv3.webp' }
   const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
   const memberProgressPercent = computed(() => {
     const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)

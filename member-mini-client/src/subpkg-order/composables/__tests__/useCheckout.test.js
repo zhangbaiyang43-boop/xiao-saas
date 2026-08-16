@@ -164,7 +164,9 @@ describe('useCheckout', () => {
       createOrder.mockResolvedValue({
         data: { id: 'order_1', order_no: 'ON20260806001', pay_amount: 20, need_payment: true },
       })
-      getOrderStatus.mockResolvedValue({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} }) // recoverPendingPaymentResult: 尚未支付，放行
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -379,7 +381,9 @@ describe('useCheckout', () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       state.payAmount.value = 20
-      getOrderStatus.mockResolvedValue({ data: {} })
+      getOrderStatus
+        .mockResolvedValueOnce({ data: {} })
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -466,7 +470,7 @@ describe('useCheckout', () => {
     it('订单已支付/已提交时，把本地状态跟服务端对齐并停止占用"待支付"标记', async () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
-      getOrderStatus.mockResolvedValue({ data: { status: 'preparing' } })
+      getOrderStatus.mockResolvedValue({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
 
       const ok = await checkout.recoverPendingPaymentResult()
 
@@ -486,6 +490,40 @@ describe('useCheckout', () => {
 
       expect(ok).toBe(false)
       expect(state.pendingOrderId.value).toBe('')
+    })
+
+    it('取消后晚到支付只提示人工退款，不展示正常支付成功或继续履约', async () => {
+      const myOrders = ref([])
+      const syncDiningOrders = vi.fn(async () => {
+        myOrders.value = [{ id: 'order_late_paid', status: 'cancelled' }]
+        return true
+      })
+      const { state, checkout, callbacks } = setup({ myOrders, syncDiningOrders })
+      state.pendingOrderId.value = 'order_late_paid'
+      getOrderStatus.mockResolvedValue({
+        data: {
+          status: 'cancelled',
+          payment_status: 'paid',
+          refund_required: true,
+        },
+      })
+
+      const ok = await checkout.recoverPendingPaymentResult()
+
+      expect(ok).toBe(false)
+      expect(state.pendingOrderId.value).toBe('')
+      expect(state.orderStatus.value).toBe('cancelled')
+      expect(state.showSuccess.value).toBe(false)
+      expect(callbacks.startStatusPoll).not.toHaveBeenCalled()
+      expect(uni.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: '订单已取消，付款已成功，请联系商家处理退款' }),
+      )
+      expect(myOrders.value[0]).toEqual(expect.objectContaining({
+        id: 'order_late_paid',
+        status: 'cancelled',
+        paymentStatus: 'paid',
+        refundRequired: true,
+      }))
     })
 
     it('查询状态时网络异常，保留待支付标记以便下次再核对，不误清空', async () => {
@@ -508,7 +546,7 @@ describe('useCheckout', () => {
       const first = checkout.recoverPendingPaymentResult()
       const second = checkout.recoverPendingPaymentResult()
 
-      resolveStatus({ data: { status: 'preparing' } })
+      resolveStatus({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
       const [firstResult, secondResult] = await Promise.all([first, second])
 
       expect(getOrderStatus).toHaveBeenCalledTimes(1)

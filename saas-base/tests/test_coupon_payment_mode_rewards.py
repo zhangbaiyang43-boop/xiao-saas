@@ -104,7 +104,7 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 0)
         session, order = await self._make_table_account_order(self.customer.id)
 
-        result = await settle_table({"table_no": "A1"}, make_merchant_request(), db=self.db)
+        result = await settle_table({"table_no": "A1", "dining_session_id": str(session.id)}, make_merchant_request(), db=self.db)
         self.assertEqual(result.code, 200)
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 1)
 
@@ -112,7 +112,7 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         # First visit: settle once, use up the resulting UNUSED coupon so the dedup check
         # on the second visit doesn't just skip because "still holding one unused".
         session1, order1 = await self._make_table_account_order(self.customer.id)
-        await settle_table({"table_no": "A1"}, make_merchant_request(), db=self.db)
+        await settle_table({"table_no": "A1", "dining_session_id": str(session1.id)}, make_merchant_request(), db=self.db)
         first_coupon_result = await self.db.execute(
             select(Coupon).where(Coupon.tenant_id == TENANT_A, Coupon.customer_id == self.customer.id)
         )
@@ -121,7 +121,7 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         session2, order2 = await self._make_table_account_order(self.customer.id)
-        result = await settle_table({"table_no": "A1"}, make_merchant_request(), db=self.db)
+        result = await settle_table({"table_no": "A1", "dining_session_id": str(session2.id)}, make_merchant_request(), db=self.db)
         self.assertEqual(result.code, 200)
 
         templates_result = await self.db.execute(select(Coupon).where(Coupon.customer_id == self.customer.id))
@@ -130,7 +130,7 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_anonymous_table_account_order_does_not_crash_and_issues_nothing(self):
         session, order = await self._make_table_account_order(None)
-        result = await settle_table({"table_no": "A1"}, make_merchant_request(), db=self.db)
+        result = await settle_table({"table_no": "A1", "dining_session_id": str(session.id)}, make_merchant_request(), db=self.db)
         self.assertEqual(result.code, 200)
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 0)
 

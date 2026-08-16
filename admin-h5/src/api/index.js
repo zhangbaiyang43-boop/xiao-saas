@@ -165,6 +165,14 @@ export const getActiveDiningSessions = () => request.get('/v1/dining-sessions/ac
 export const createPaymentHandoff = (orderId) => request.post(`/v1/payment-handoffs/orders/${orderId}`)
 export const getPaymentHandoff = (orderId, config = {}) => request.get(`/v1/payment-handoffs/orders/${orderId}`, config)
 export const getOrders = (params, config = {}) => request.get('/v1/orders', { ...config, params })
+export const getOrdersWithCursor = (params, config = {}) =>
+  request.get('/v1/orders', {
+    ...config,
+    params,
+    meta: { ...(config.meta || {}), rawResponse: true },
+  })
+export const getOwnerOrderChanges = (params, config = {}) =>
+  request.get('/v1/orders/changes', { ...config, params })
 export const updateOrderStatus = (id, status) => request.patch(`/v1/orders/${id}/status`, { status })
 export const serveOrder = (id) => request.post(`/v1/orders/${id}/serve`)
 export const mockPayOrder = (id) => request.post(`/v1/orders/${id}/mock-pay`)
@@ -173,7 +181,7 @@ export const updateMerchantNote = (id, note) => request.patch(`/v1/orders/${id}/
 export const updateOrderPickupNo = (id, pickup_no) => request.patch(`/v1/orders/${id}/pickup-no`, { pickup_no })
 export const getPickupNoStatus = (config = {}) => request.get('/v1/pickup-nos/status', config)
 export const reprintOrder = (id, print_type = 'kitchen') => request.post(`/v1/orders/${id}/reprint`, { print_type })
-export const settleTable = (table_no) => request.post('/v1/orders/settle-table', { table_no })
+export const settleTable = (table_no, dining_session_id) => request.post('/v1/orders/settle-table', { table_no, dining_session_id: dining_session_id || undefined })
 export const getReviews = () => request.get('/v1/orders/reviews')
 
 export const getAvailablePlugins = () => request.get('/v1/plugins/available')

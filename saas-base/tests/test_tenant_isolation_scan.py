@@ -38,17 +38,17 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     ): "Coupon locked by order.coupon_id where order is an already-loaded, tenant-bound Order instance passed into this helper.",
     (
         "app/services/order_lifecycle_service.py",
-        95,
+        98,
         "cancel_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before any mutation.",
     (
         "app/services/order_lifecycle_service.py",
-        156,
+        219,
         "get_my_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before returning data.",
     (
         "app/services/order_lifecycle_service.py",
-        366,
+        434,
         "create_review",
     ): "Order loaded by primary key then customer_id must match caller before review is created.",
     (
@@ -100,7 +100,7 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     "order.tenant_id != tenant_id check in _load_order_for_staff_handoff()).",
     (
         "app/services/order_print_service.py",
-        588,
+        962,
         "recover_pending_print_orders_once",
     ): "Intentionally cross-tenant: a startup/interval background recovery job (see _print_recovery_loop in "
     "main.py), same trust model as _pending_payment_reconcile_once and _marketing_recall_loop. Each recovered "

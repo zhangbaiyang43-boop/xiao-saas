@@ -1,9 +1,13 @@
+import ast
 import pathlib
 import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
+ORDER_LIFECYCLE_SOURCE = (ROOT / "app" / "services" / "order_lifecycle_service.py").read_text(
+    encoding="utf-8-sig"
+)
 DINING_SOURCE = (ROOT / "app" / "services" / "dining_session_service.py").read_text(encoding="utf-8-sig")
 DINING_API_SOURCE = (ROOT / "app" / "api" / "v1" / "dining_sessions.py").read_text(encoding="utf-8-sig")
 MENU_SOURCE = (
@@ -11,6 +15,14 @@ MENU_SOURCE = (
 ).read_text(encoding="utf-8-sig")
 DINING_UTIL_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "utils" / "dining.js"
+).read_text(encoding="utf-8-sig")
+DINING_COMPOSABLE_SOURCE = (
+    ROOT.parent
+    / "member-mini-client"
+    / "src"
+    / "subpkg-order"
+    / "composables"
+    / "useDiningSession.js"
 ).read_text(encoding="utf-8-sig")
 ORDER_MODEL_SOURCE = (ROOT / "app" / "models" / "order.py").read_text(encoding="utf-8-sig")
 DINING_MODEL_SOURCE = (ROOT / "app" / "models" / "dining.py").read_text(encoding="utf-8-sig")
@@ -36,6 +48,16 @@ def can_close_table_session(statuses):
     return len(blocking) == 0, blocking
 
 
+def function_source(source, name):
+    tree = ast.parse(source)
+    node = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) and node.name == name
+    )
+    return ast.get_source_segment(source, node)
+
+
 class TableCloseContractsTest(unittest.TestCase):
     def test_models_already_support_session_close_without_migration(self):
         self.assertIn("dining_session_id", ORDER_MODEL_SOURCE)
@@ -45,13 +67,21 @@ class TableCloseContractsTest(unittest.TestCase):
         self.assertIn("closed_by", DINING_MODEL_SOURCE)
 
     def test_settle_table_locks_and_closes_current_open_session_only(self):
-        self.assertIn("TABLE_CLOSE_BLOCKING_STATUSES", ORDERS_SOURCE)
-        self.assertIn("TABLE_CLOSE_DONE_STATUSES", ORDERS_SOURCE)
-        self.assertIn('DiningSession.status == "OPEN"', ORDERS_SOURCE)
-        self.assertIn(".with_for_update()", ORDERS_SOURCE)
-        self.assertIn("Order.dining_session_id == active_session.id", ORDERS_SOURCE)
-        self.assertIn('active_session.status = "CLOSED"', ORDERS_SOURCE)
-        self.assertIn("active_session.active_key = None", ORDERS_SOURCE)
+        handler = function_source(ORDERS_SOURCE, "settle_table")
+        service = function_source(ORDER_LIFECYCLE_SOURCE, "settle_table")
+
+        self.assertIn("OrderLifecycleService", handler)
+        self.assertRegex(handler, r"await\s+\w+\.settle_table\(")
+
+        self.assertIn("TABLE_CLOSE_BLOCKING_STATUSES", service)
+        self.assertIn("TABLE_CLOSE_DONE_STATUSES", service)
+        self.assertIn("DiningSession.tenant_id == tenant_id", service)
+        self.assertIn("DiningSession.table_no == table_no", service)
+        self.assertIn(".with_for_update()", service)
+        self.assertRegex(service, r"Order\.dining_session_id\s*==\s*\w+\.id")
+        self.assertRegex(service, r"\w+\.status\s*=\s*[\"']CLOSED[\"']")
+        self.assertRegex(service, r"\w+\.active_key\s*=\s*None")
+        self.assertRegex(service, r"\w+\.status\s*=\s*[\"']settled[\"']")
 
     def test_closed_session_cannot_receive_add_on_order(self):
         self.assertIn('DiningSession.status == "OPEN"', ORDERS_SOURCE)
@@ -66,12 +96,14 @@ class TableCloseContractsTest(unittest.TestCase):
 
     def test_consumer_page_blocks_add_on_after_session_closed(self):
         self.assertIn("const tableSessionClosed = ref(false)", MENU_SOURCE)
-        self.assertIn("res.data?.closed === true", MENU_SOURCE)
-        self.assertIn("['CLOSED', 'EXPIRED'].includes(sessionStatus)", MENU_SOURCE)
+        self.assertIn("useDiningSession", MENU_SOURCE)
+        self.assertIn("tableSessionClosed, tableSessionStatus", MENU_SOURCE)
+        self.assertIn("res.data?.closed === true", DINING_COMPOSABLE_SOURCE)
+        self.assertIn("['CLOSED', 'EXPIRED'].includes(sessionStatus)", DINING_COMPOSABLE_SOURCE)
         self.assertIn("!storeClosed.value && !tableSessionClosed.value", MENU_SOURCE)
-        self.assertIn("if (tableSessionClosed.value && !force) return false", MENU_SOURCE)
-        self.assertIn("if (!sessionReady || tableSessionClosed.value)", MENU_SOURCE)
-        self.assertIn("tableSessionClosed ?", MENU_SOURCE)
+        self.assertIn("if (tableSessionClosed.value || isExitingSession.value) return false", DINING_COMPOSABLE_SOURCE)
+        self.assertIn("if (tableSessionClosed.value) return false", DINING_COMPOSABLE_SOURCE)
+        self.assertIn("if (tableSessionClosed.value) return", MENU_SOURCE)
         self.assertIn("\\u91cd\\u65b0\\u626b\\u7801", MENU_SOURCE)
 
     def test_next_table_scan_forces_new_session_after_closed_page_state(self):
@@ -84,13 +116,14 @@ class TableCloseContractsTest(unittest.TestCase):
         # 重新扫一张不同的桌码时之所以还能正确建立新会话，靠的不是这个 force 参数，
         # 是 resolveDiningIdentity 里的 staleForOtherTable 判断：缓存记录的桌号跟
         # 当前桌号对不上就自动判定缓存不可信、发起真实请求，这条判断在上面已经断言过。
-        self.assertIn("const ensureDiningSession = async (force = false)", MENU_SOURCE)
-        self.assertIn("resolveDiningIdentity", MENU_SOURCE)
+        self.assertIn("useDiningSession", MENU_SOURCE)
+        self.assertIn("const ensureDiningSession = async (force = false)", DINING_COMPOSABLE_SOURCE)
+        self.assertIn("resolveDiningIdentity", DINING_COMPOSABLE_SOURCE)
         self.assertIn(
             "if (!force && !staleForOtherTable && cachedSessionId && cachedToken)",
             DINING_UTIL_SOURCE,
         )
-        self.assertIn("tableSessionClosed.value = false", MENU_SOURCE)
+        self.assertIn("tableSessionClosed.value = false", DINING_COMPOSABLE_SOURCE)
         self.assertIn("await this.ensureDiningSession(false)", MENU_SOURCE)
         self.assertNotIn("if (!tableSessionClosed.value && sessionStatus === 'OPEN') tableSessionClosedNotice", MENU_SOURCE)
 

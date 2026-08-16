@@ -16,7 +16,7 @@ import { specText, confirmationText } from '../utils/orderText.js'
 //   组合式函数是分开调用的两个composable，这里只是复用其中一个触发函数。
 export function useSpecSheet({
   itemRemark, showItemRemarkExtra, itemRemarkExtra, remarkChips,
-  specCartItems, isSoldOut, formatPrice, triggerCartSuccessFeedback,
+  specCartItems, isSoldOut, formatPrice, triggerCartSuccessFeedback, ordering,
 }) {
   const showSpecSheet = ref(false)
   const specDish = ref({})
@@ -25,6 +25,13 @@ export function useSpecSheet({
   const selectedSpecs = ref({})
   const selectedExtras = ref([])
   const detailImageFailed = ref(false)
+  // P0-03-01: guards against one sheet-opening producing two cart commits
+  // (e.g. a double-tap on the confirm button before the sheet visually
+  // closes). Reset on every openSpecSheet so a genuinely new sheet opening
+  // can always confirm again -- this is a per-opening lock, not a permanent
+  // one. Must be set before the mutation, not after, or a same-tick
+  // re-entrant call could still slip through.
+  const specConfirmCommitted = ref(false)
 
   const specSteps = [
     { no: 1, label: '选规格' },
@@ -127,14 +134,29 @@ export function useSpecSheet({
   const toggleExtra = (extra) => {
     selectedExtras.value = selectedExtras.value.includes(extra) ? selectedExtras.value.filter(x => x !== extra) : [...selectedExtras.value, extra]
   }
-  const buildSpecKey = () => JSON.stringify({ id: specDish.value.id, specifications: selectedSpecRows.value, extras: selectedExtras.value, itemRemark: itemRemark.value.trim() })
+  // P0-03-02: identity must not depend on the order the customer happened to
+  // tap addons in -- ["鸡蛋","豆腐"] and ["豆腐","鸡蛋"] are the same logical
+  // addon set and must produce the same key. Canonicalize using the
+  // merchant-configured option order (specExtraOptions, already flattened
+  // in config order) -- this ONLY feeds the identity key, never the
+  // display/payload `extras` array built in confirmSpec, which keeps the
+  // customer's actual click order.
+  const canonicalExtrasForKey = () => specExtraOptions.value.map(o => o.name).filter(name => selectedExtras.value.includes(name))
+  const buildSpecKey = () => JSON.stringify({ id: specDish.value.id, specifications: selectedSpecRows.value, extras: canonicalExtrasForKey(), itemRemark: itemRemark.value.trim() })
   function cancelSpec() { showSpecSheet.value = false }
   function handleSpecPrimary() {
     if (!canGoNextSpec.value) return
     confirmSpec()
   }
   function confirmSpec() {
+    // P0-04-02: a submit already in flight must not accept a new cart commit
+    // (see menu.vue's addToCart comment for why) -- ordering is undefined for
+    // callers that don't pass it (e.g. isolated composable tests), so this
+    // never throws when it's absent.
+    if (ordering?.value) return
     if (isSoldOut(specDish.value)) return
+    if (specConfirmCommitted.value) return
+    specConfirmCommitted.value = true
     const specKey = buildSpecKey()
     const specifications = selectedSpecRows.value.map(i => ({ group: i.group, value: i.value }))
     const extras = [...selectedExtras.value]
@@ -178,6 +200,7 @@ export function useSpecSheet({
     selectedExtras.value = existingItem?.extras ? [...existingItem.extras] : []
     itemRemark.value = existingItem?.itemRemark || ''
     showItemRemarkExtra.value = Boolean(itemRemarkExtra.value)
+    specConfirmCommitted.value = false
     showSpecSheet.value = true
   }
 

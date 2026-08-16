@@ -7,7 +7,7 @@ vi.mock('@/api/order', () => ({
   cancelOrder: vi.fn(),
 }))
 
-function setup() {
+function setup(overrides = {}) {
   const state = {
     myOrders: ref([]),
     shopId: ref('shop_1'),
@@ -16,6 +16,8 @@ function setup() {
     orderStatus: ref('pending'),
     showSuccess: ref(false),
     diningParticipantToken: ref('tok_1'),
+    diningSessionId: ref('SA'),
+    ...overrides,
   }
   const stopStatusPoll = vi.fn()
   const store = useMyOrdersStore({ ...state, stopStatusPoll })
@@ -51,6 +53,31 @@ describe('useMyOrdersStore', () => {
       expect(state.myOrders.value).toEqual([])
     })
 
+    it('P0-10: 同一店铺+桌号，不同 dining_session_id（上一代顾客 vs 当前这一代）互不可见', () => {
+      const { state, store } = setup({ diningSessionId: ref('SA') })
+      state.myOrders.value = [{ id: 'a1' }, { id: 'a2' }]
+      store.saveMyOrders()
+
+      // same shop, same table_no, but a NEW dining session (next guest generation)
+      state.diningSessionId.value = 'SB'
+      state.myOrders.value = []
+      store.loadMyOrders()
+
+      expect(state.myOrders.value).toEqual([])
+    })
+
+    it('P0-10: 没有有效 dining_session_id 时不恢复本地缓存（避免把任意一代的历史当成当前桌账单）', () => {
+      const { state, store } = setup({ diningSessionId: ref('SA') })
+      state.myOrders.value = [{ id: 'a1' }]
+      store.saveMyOrders()
+
+      state.diningSessionId.value = ''
+      state.myOrders.value = [{ id: 'existing-in-memory' }]
+      store.loadMyOrders()
+
+      expect(state.myOrders.value).toEqual([{ id: 'existing-in-memory' }])
+    })
+
     it('本地没有存过时不报错，也不覆盖当前内存里的数据', () => {
       const { state, store } = setup()
       state.myOrders.value = [{ id: 'existing' }]
@@ -62,7 +89,7 @@ describe('useMyOrdersStore', () => {
 
     it('本地存储损坏（不是合法 JSON）时不抛出，静默保留原状态', () => {
       const { state, store } = setup()
-      uni.setStorageSync('my_orders_shop_1_A01', '{not valid json')
+      uni.setStorageSync('my_orders_shop_1_A01_SA', '{not valid json')
 
       expect(() => store.loadMyOrders()).not.toThrow()
       expect(state.myOrders.value).toEqual([])
@@ -90,7 +117,7 @@ describe('useMyOrdersStore', () => {
       await vi.waitFor(() => expect(order.status).toBe('cancelled'))
 
       expect(cancelOrder).toHaveBeenCalledWith('o1', 'tok_1')
-      const saved = JSON.parse(uni.getStorageSync('my_orders_shop_1_A01'))
+      const saved = JSON.parse(uni.getStorageSync('my_orders_shop_1_A01_SA'))
       expect(saved[0].status).toBe('cancelled')
       expect(uni.showToast).toHaveBeenCalledWith(
         expect.objectContaining({ title: '订单已取消' })

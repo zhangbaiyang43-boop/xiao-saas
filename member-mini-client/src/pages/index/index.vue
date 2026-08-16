@@ -14,6 +14,7 @@
 import { ref } from 'vue'
 import '@/utils/route'
 import { scanStoreCode } from '@/utils/scan'
+import { markEventOnce, markStart, recordDurationFromStart } from '@/utils/perf'
 
 const TABLE_TTL = 4 * 60 * 60 * 1000
 
@@ -61,6 +62,7 @@ export default {
         return
       }
       redirecting.value = true
+      markStart('entry_to_menu')
       setTimeout(() => {
         uni.reLaunch({
           url,
@@ -78,6 +80,7 @@ export default {
         scanStoreCode()
         return
       }
+      markStart('entry_to_menu')
       uni.reLaunch({ url: menuUrl })
     }
 
@@ -98,6 +101,9 @@ export default {
     if (entryUrl) {
       uni.reLaunch({ url: entryUrl })
       return
+    }
+    if (markEventOnce('entry_onload', 'entry_onload')) {
+      recordDurationFromStart('launch_to_entry', 'launch_to_entry')
     }
     this.redirect()
   },

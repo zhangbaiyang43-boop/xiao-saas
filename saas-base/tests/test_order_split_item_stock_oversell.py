@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.models.base import Base
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
@@ -63,6 +64,12 @@ class SplitLineItemStockOversellTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(self.tenant)
         self.dish = MenuItem(tenant_id=TENANT_A, name="牛肉汤", price="18.00", available=True, stock=5)
         self.db.add(self.dish)
+        # P0-01: this suite is about oversell/stock-line safety, not table validity.
+        self.db.add(EntranceCode(
+            id=generate_snowflake_id(),
+            tenant_id=TENANT_A, name="A1", scene="E00000000A1",
+            table_no="A1", entry_type="table", status=1,
+        ))
         await self.db.flush()
         await self.db.commit()
 
@@ -87,7 +94,9 @@ class SplitLineItemStockOversellTest(unittest.IsolatedAsyncioTestCase):
         result = await create_order(body, make_request(), db=self.db)
 
         self.assertEqual(result.code, 400)
-        self.assertIn("stock not enough", result.msg)
+        # P0-02: insufficient-stock message was translated to Chinese for user-facing
+        # consistency (was English "stock not enough").
+        self.assertIn("库存不足", result.msg)
         # create_order never called db.commit() on this path -- in the real request
         # lifecycle, FastAPI's get_db() closes the session at the end of the request, which
         # implicitly rolls back anything only flushed-not-committed. Do the same here before

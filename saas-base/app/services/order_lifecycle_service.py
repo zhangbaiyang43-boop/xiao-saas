@@ -8,13 +8,24 @@ from sqlalchemy.future import select
 
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, set_termination_audit_if_unset
 from app.services.base_service import BaseService
 
 if TYPE_CHECKING:
     from app.api.v1.orders import OrderStatusUpdate
 
 ApiResponse = RespVo[Any]
+
+PAID_ORDER_CANCEL_ERROR = "PAID_ORDER_CANCEL_REQUIRES_REFUND"
+PAID_ORDER_CANCEL_MESSAGE = "该订单已付款，不能直接取消，请先处理退款"
+
+
+def _paid_order_cancel_response() -> ApiResponse:
+    return error_response(
+        code=409,
+        msg=PAID_ORDER_CANCEL_MESSAGE,
+        data={"code": PAID_ORDER_CANCEL_ERROR},
+    )
 
 
 def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> bool:
@@ -74,7 +85,10 @@ class OrderLifecycleService(BaseService):
         if not order:
             return error_response(code=404, msg="order not found")
         _, meta = _split_merchant_note_and_print_meta(order.merchant_note)
-        order.merchant_note = _compose_merchant_note_with_print_meta(note.strip() or None, meta)
+        try:
+            order.merchant_note = _compose_merchant_note_with_print_meta(note.strip() or None, meta)
+        except ValueError as exc:
+            return error_response(code=422, msg=str(exc))
         await self.db.commit()
         display_note, _ = _split_merchant_note_and_print_meta(order.merchant_note)
         return success_response(data={"id": str(order.id), "merchant_note": display_note}, msg="merchant note updated")
@@ -92,41 +106,90 @@ class OrderLifecycleService(BaseService):
         from app.services.order_stock_service import _restore_order_stock
 
         payment_svc = OrderPaymentService(self.db)
-        result = await self.db.execute(select(Order).where(Order.id == order_id).with_for_update())
+
+        def owned_order_stmt(*, tenant_id: str | None = None, for_update: bool = False):
+            filters = [Order.id == order_id]
+            if tenant_id is not None:
+                filters.append(Order.tenant_id == tenant_id)
+            stmt = select(Order)
+            if customer_id is not None:
+                filters.append(Order.customer_id == int(customer_id))
+            elif participant_token:
+                from app.models.dining import DiningParticipant
+                from app.services.dining_session_service import hash_participant_token
+
+                stmt = stmt.join(
+                    DiningParticipant,
+                    and_(
+                        DiningParticipant.id == Order.participant_id,
+                        DiningParticipant.tenant_id == Order.tenant_id,
+                    ),
+                )
+                filters.append(
+                    DiningParticipant.guest_token_hash
+                    == hash_participant_token(participant_token)
+                )
+            if for_update:
+                stmt = stmt.with_for_update()
+            return stmt.where(*filters)
+
+        # Discovery derives the immutable tenant authority; keep the established
+        # 403 distinction for an existing order owned by somebody else.  The final
+        # mutation query below is identity + tenant constrained and row locked.
+        result = await self.db.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if not order:
             return error_response(code=404, msg="order not found")
+        derived_tenant_id = str(order.tenant_id)
         if order.customer_id:
-            if not customer_id or int(customer_id) != int(order.customer_id):
+            if customer_id is None or int(customer_id) != int(order.customer_id):
                 return error_response(code=403, msg="forbidden")
         elif order.participant_id:
+            if not participant_token:
+                return error_response(code=403, msg="forbidden")
             from app.models.dining import DiningParticipant
             from app.services.dining_session_service import hash_participant_token
 
-            owns_order = False
-            if participant_token:
-                participant_result = await self.db.execute(
-                    select(DiningParticipant).where(
-                        DiningParticipant.id == order.participant_id,
-                        DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
-                    )
+            participant_result = await self.db.execute(
+                select(DiningParticipant).where(
+                    DiningParticipant.id == order.participant_id,
+                    DiningParticipant.tenant_id == derived_tenant_id,
+                    DiningParticipant.guest_token_hash
+                    == hash_participant_token(participant_token),
                 )
-                owns_order = participant_result.scalar_one_or_none() is not None
-            if not owns_order:
+            )
+            if participant_result.scalar_one_or_none() is None:
                 return error_response(code=403, msg="forbidden")
-        if order.status == "pending_payment" and getattr(order, "payment_mode", "prepay") == "prepay":
-            if await payment_svc._recover_wxpay_order_if_paid(order):
-                await self.db.commit()
-                return error_response(code=400, msg="订单已支付，请刷新查看最新状态")
+        if (
+            order.status == "pending_payment"
+            and getattr(order, "payment_mode", "prepay") == "prepay"
+            and getattr(order, "payment_status", None) != "paid"
+        ):
+            # Never hold the cancellation mutation lock across provider I/O.
+            await payment_svc._recover_wxpay_order_if_paid(order, source="cancel_precheck")
+
+        locked_result = await self.db.execute(
+            owned_order_stmt(tenant_id=derived_tenant_id, for_update=True)
+        )
+        order = locked_result.scalar_one_or_none()
+        if not order:
+            return error_response(code=404, msg="order not found")
+        if getattr(order, "payment_status", None) == "paid":
+            return _paid_order_cancel_response()
         if order.status not in ("pending_payment", "pending"):
             return error_response(code=400, msg="订单已支付或已完成，无法取消")
-        if getattr(order, "payment_status", None) == "paid":
-            refund_result = await payment_svc._refund_order_payment(order, reason="customer_cancel")
-            if not refund_result["success"]:
-                await self.db.rollback()
-                return error_response(code=502, msg=f"取消失败，退款处理异常，请稍后重试或联系客服：{refund_result['error']}")
         await _restore_order_stock(order, self.db)
         order.status = "cancelled"
+        if order.customer_id:
+            set_termination_audit_if_unset(
+                order, actor_type="customer", actor_id=order.customer_id,
+                actor_role=None, source="customer_cancel",
+            )
+        else:
+            set_termination_audit_if_unset(
+                order, actor_type="participant", actor_id=order.participant_id,
+                actor_role=None, source="participant_cancel",
+            )
         if order.coupon_id:
             coupon = await self.db.get(_Coupon, order.coupon_id)
             if coupon and coupon.status == "LOCKED":
@@ -177,7 +240,9 @@ class OrderLifecycleService(BaseService):
             if not owns_order:
                 return error_response(code=403, msg="forbidden")
 
-        recovered = await payment_svc._recover_wxpay_order_if_paid(order)
+        recovered = False
+        if getattr(order, "payment_status", None) != "paid":
+            recovered = await payment_svc._recover_wxpay_order_if_paid(order, source="client_order_query")
         if recovered:
             await self.db.commit()
             await self.db.refresh(order)
@@ -189,6 +254,8 @@ class OrderLifecycleService(BaseService):
             except Exception:
                 reward_coupon = None
 
+        from app.api.v1.orders import build_order_financial_capabilities
+
         return success_response(data={
             "id": str(order.id),
             "status": order.status,
@@ -197,6 +264,7 @@ class OrderLifecycleService(BaseService):
             "reward_coupon": reward_coupon,
             "pickup_no": getattr(order, "pickup_no", None),
             "table_no": getattr(order, "table_no", None),
+            **build_order_financial_capabilities(order),
         })
 
     async def list_orders(
@@ -291,7 +359,7 @@ class OrderLifecycleService(BaseService):
         payment_svc = OrderPaymentService(self.db)
         for order in orders:
             if order.status == "pending_payment":
-                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order)) or recovered_any
+                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order, source="merchant_order_query")) or recovered_any
         print_recovered = await reconcile_print_orders(
             self.db, orders, trigger="merchant_list_recovery"
         )
@@ -410,7 +478,14 @@ class OrderLifecycleService(BaseService):
             for r in reviews
         ])
 
-    async def update_order_status(self, order_id: int, body: "OrderStatusUpdate") -> ApiResponse:
+    async def update_order_status(
+        self,
+        order_id: int,
+        body: "OrderStatusUpdate",
+        *,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
         from app.api.v1.orders import (
             ORDER_ALLOWED_TRANSITIONS,
             ORDER_MERCHANT_TARGET_STATUSES,
@@ -428,6 +503,23 @@ class OrderLifecycleService(BaseService):
             return error_response(code=400, msg="invalid status")
         TenantContext.set_tenant_id(tenant_id)
         payment_svc = OrderPaymentService(self.db)
+        discovery_result = await self.db.execute(
+            select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+        )
+        discovered_order = discovery_result.scalar_one_or_none()
+        if not discovered_order:
+            return error_response(code=404, msg="order not found")
+
+        if (
+            body.status in ("rejected", "cancelled")
+            and discovered_order.status == "pending_payment"
+            and getattr(discovered_order, "payment_mode", "prepay") == "prepay"
+            and getattr(discovered_order, "payment_status", None) != "paid"
+        ):
+            # Payment query is external I/O; final mutation authority is the fresh
+            # tenant-scoped lock acquired immediately below.
+            await payment_svc._recover_wxpay_order_if_paid(discovered_order, source="status_update_precheck")
+
         result = await self.db.execute(
             select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
         )
@@ -441,34 +533,35 @@ class OrderLifecycleService(BaseService):
                 data={"id": str(order.id), "status": order.status, "idempotent": True},
                 msg="状态未变化",
             )
+        payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
+        requires_table_settlement = payment_mode == "table_account" or (
+            payment_mode == "postpay" and getattr(order, "dining_session_id", None) is not None
+        )
+        if body.status == "settled" and requires_table_settlement:
+            return error_response(code=409, msg="后付/桌台账单请通过整桌结账完成")
         if body.status not in ORDER_ALLOWED_TRANSITIONS.get(current_status, set()):
             return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
         entered_done = body.status == "done"
 
-        if (
-            body.status in ("rejected", "cancelled")
-            and current_status == "pending_payment"
-            and getattr(order, "payment_mode", "prepay") == "prepay"
-        ):
-            if await payment_svc._recover_wxpay_order_if_paid(order):
-                await self.db.commit()
-                return error_response(code=409, msg="订单已支付，请刷新查看最新状态")
-
         if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) == "paid":
-            refund_result = await payment_svc._refund_order_payment(order, reason=f"merchant_{body.status}")
-            if not refund_result["success"]:
-                await self.db.rollback()
-                return error_response(code=502, msg=f"操作失败，退款处理异常，请稍后重试：{refund_result['error']}")
+            return _paid_order_cancel_response()
         if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) != "paid":
             await _unlock_order_coupon_if_locked(order, self.db)
         if body.status in ("rejected", "cancelled"):
             await _restore_order_stock(order, self.db)
 
         order.status = body.status
+        if body.status in ("rejected", "cancelled"):
+            set_termination_audit_if_unset(
+                order, actor_type="account", actor_id=account_id, actor_role=role,
+                source="merchant_reject" if body.status == "rejected" else "merchant_cancel",
+            )
         # Phase R2: kitchen complete must NOT auto-serve. Waiter/Owner call serve_order.
         just_settled = body.status == "settled" and not getattr(order, "completed_at", None)
         if just_settled:
             order.completed_at = datetime.utcnow()
+            order.settled_by_account_id = account_id
+            order.settled_by_role = role
             marked_offline_paid = False
             if getattr(order, "payment_mode", "prepay") == "postpay":
                 marked_offline_paid = _mark_order_offline_paid(order)
@@ -561,7 +654,14 @@ class OrderLifecycleService(BaseService):
             msg="已确认上菜",
         )
 
-    async def settle_table(self, body: dict[str, Any], *, closed_by: str) -> ApiResponse:
+    async def settle_table(
+        self,
+        body: dict[str, Any],
+        *,
+        closed_by: str,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
         from app.api.v1.orders import (
             TABLE_CLOSE_BLOCKING_STATUSES,
             TABLE_CLOSE_DONE_STATUSES,
@@ -577,25 +677,59 @@ class OrderLifecycleService(BaseService):
             return error_response(code=400, msg="缺少桌号")
         TenantContext.set_tenant_id(tenant_id)
 
-        non_terminal_result = await self.db.execute(
-            select(Order.dining_session_id)
-            .join(DiningSession, DiningSession.id == Order.dining_session_id)
-            .where(
-                DiningSession.tenant_id == tenant_id,
-                DiningSession.table_no == table_no,
-                Order.status.notin_(("settled", "cancelled", "rejected")),
-            )
-            .order_by(DiningSession.created_at.desc())
-            .limit(1)
-        )
-        session_id = non_terminal_result.scalar_one_or_none()
+        requested_session_id_raw = body.get("dining_session_id")
+        requested_session_id = int(requested_session_id_raw) if requested_session_id_raw else None
 
         active_session = None
-        if session_id:
+        if requested_session_id is not None:
+            # P0-10: exact session targeting -- the caller (Admin) identifies the
+            # SPECIFIC session it observed and wants to settle, instead of letting
+            # the server infer "whichever session is currently open at this table."
+            # A stale Admin page holding a since-closed session's id must be denied,
+            # never silently redirected onto a different, later session that has
+            # since opened at the same physical table (P0-10 findings 01/02).
             session_result = await self.db.execute(
-                select(DiningSession).where(DiningSession.id == session_id).with_for_update()
+                select(DiningSession).where(
+                    DiningSession.id == requested_session_id,
+                    DiningSession.tenant_id == tenant_id,
+                    DiningSession.table_no == table_no,
+                    DiningSession.status == "OPEN",
+                ).with_for_update()
             )
             active_session = session_result.scalar_one_or_none()
+            if active_session is None:
+                return error_response(
+                    code=409,
+                    msg="本次结账的会话已变化，请刷新桌台后重试",
+                    data={"code": "SESSION_SETTLE_CONFLICT"},
+                )
+        else:
+            # P0-10 FINAL RECONCILIATION: no dining_session_id supplied. This must
+            # NEVER fall back to "find whichever session is currently open at this
+            # table" -- that is exactly the table-only inference this whole P0-10
+            # effort exists to close (a stale Admin page, or a lost-response retry
+            # of an old settle request, could otherwise settle a DIFFERENT, later
+            # guest generation's bill without ever identifying it). If an OPEN
+            # session exists for this table at all, the caller MUST have supplied
+            # its id -- deny deterministically rather than guess.
+            #
+            # The ONLY orders this path may still settle are true orphans
+            # (dining_session_id IS NULL -- pre-DiningSession-era / demo-seeded
+            # orders, see the orphan_result branch below): those never had a
+            # session identity to begin with, so there is nothing to require.
+            open_session_result = await self.db.execute(
+                select(DiningSession.id).where(
+                    DiningSession.tenant_id == tenant_id,
+                    DiningSession.table_no == table_no,
+                    DiningSession.status == "OPEN",
+                ).limit(1)
+            )
+            if open_session_result.scalar_one_or_none() is not None:
+                return error_response(
+                    code=400,
+                    msg="请指定要结账的会话",
+                    data={"code": "DINING_SESSION_REQUIRED_FOR_SETTLEMENT"},
+                )
 
         if active_session:
             result = await self.db.execute(
@@ -671,6 +805,8 @@ class OrderLifecycleService(BaseService):
             newly_settled_orders.append(o)
             if not getattr(o, "completed_at", None):
                 o.completed_at = datetime.utcnow()
+                o.settled_by_account_id = account_id
+                o.settled_by_role = role
             # 桌台视图的"结账"是餐后付款和桌台账单共用的唯一批量结账入口（小程序下单时不分模式都会建
             # dining_session，两种模式的订单都会被这里的桌台分组捞到），所以线下已付款的标记不能只认
             # table_account——postpay 订单结账时同样要在这里补上，否则会留下"已结账却仍显示未支付"的订单。
@@ -683,12 +819,47 @@ class OrderLifecycleService(BaseService):
         await self.db.commit()
         for o in newly_settled_orders:
             await _record_order_consumption(o, self.db)
+
+        # P0-10-02: the settled-order snapshot the response carries here is the
+        # ONLY authoritative source a receipt should ever be built from -- never
+        # whatever the client had cached locally before clicking settle (which
+        # could describe a different, earlier session at this same table).
+        from app.api.v1.orders import _compose_backward_compatible_item_name
+
+        settled_orders_snapshot = []
+        if newly_settled_orders:
+            items_result = await self.db.execute(
+                select(OrderItem).where(OrderItem.order_id.in_([o.id for o in newly_settled_orders]))
+            )
+            items_by_order: dict[int, list[OrderItem]] = {}
+            for item in items_result.scalars().all():
+                items_by_order.setdefault(item.order_id, []).append(item)
+            settled_orders_snapshot = [
+                {
+                    "id": str(o.id),
+                    "order_no": str(o.id)[-4:],
+                    "total": float(o.total or 0),
+                    "discount_amount": float(o.discount_amount) if getattr(o, "discount_amount", None) else None,
+                    "payment_mode": getattr(o, "payment_mode", "prepay"),
+                    "items": [
+                        {
+                            "name": _compose_backward_compatible_item_name(i.name, getattr(i, "item_remark", None)),
+                            "qty": i.qty,
+                            "price": float(i.price or 0),
+                        }
+                        for i in items_by_order.get(o.id, [])
+                    ],
+                }
+                for o in newly_settled_orders
+            ]
+
         return success_response(
             data={
                 "table_no": table_no,
                 "dining_session_id": str(active_session.id) if active_session else None,
                 "settled_count": settled_count,
                 "paid_synced_count": paid_synced_count,
+                "settled_orders": settled_orders_snapshot,
                 "payment_status": "paid",
                 "payment_method": "offline",
                 "closed": True,

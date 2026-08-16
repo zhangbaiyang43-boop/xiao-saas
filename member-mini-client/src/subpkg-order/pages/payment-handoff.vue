@@ -101,6 +101,19 @@ export default {
       const data = res?.data || res
       saveCustomerSession(data)
     },
+    async waitForServerPaymentConfirmation(attempts = 8, intervalMs = 500) {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const res = await resolvePaymentHandoff(this.token)
+        const data = res?.data || res
+        this.handoff = data
+        if (data?.status === 'PAID' || data?.payment_status === 'paid') return true
+        if (data?.status === 'EXPIRED') throw new Error('付款码已过期，请联系服务员重新生成')
+        if (attempt < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, intervalMs))
+        }
+      }
+      throw new Error('支付结果确认中，请稍后重试')
+    },
     async handlePay() {
       if (this.busy || this.paid || !this.handoff) return
       this.busy = true
@@ -124,9 +137,14 @@ export default {
           signType: p.signType || 'RSA',
           paySign: p.paySign,
         })
-        this.paid = true
+        const confirmed = await this.waitForServerPaymentConfirmation()
+        this.paid = confirmed
       } catch (err) {
-        this.error = err?.errMsg?.includes('cancel') ? '已取消支付，可重新发起' : (err.message || '支付失败，请重试')
+        if (err?.errMsg?.includes('cancel')) {
+          this.error = '已取消支付，可重新发起'
+          return { paid: false, reason: 'cancelled' }
+        }
+        this.error = err.message || '支付失败，请重试'
       } finally {
         this.busy = false
       }

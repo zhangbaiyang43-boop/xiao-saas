@@ -17,6 +17,7 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TENANT_A = "tenant-a"
+TENANT_B = "tenant-b"
 
 
 def make_notify_request(tenant_id=TENANT_A):
@@ -70,6 +71,7 @@ class WxpayAmountReconciliationTest(unittest.IsolatedAsyncioTestCase):
         return {
             "out_trade_no": str(self.order.id),
             "trade_state": "SUCCESS",
+            "transaction_id": f"wx-security-{self.order.id}",
             "amount": {"total": paid_fen, "payer_total": paid_fen, "currency": "CNY"},
         }
 
@@ -92,6 +94,43 @@ class WxpayAmountReconciliationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.get("code"), "SUCCESS")
         await self.db.refresh(self.order)
         self.assertEqual(self.order.payment_status, "paid")
+
+    async def test_verified_tenant_callback_cannot_load_another_tenant_order(self):
+        tenant_b = Tenant(
+            tenant_id=TENANT_B,
+            name="Other Restaurant",
+            password_hash="x",
+            status=True,
+            is_open=True,
+            payment_mode="prepay",
+            wx_pay_enabled=True,
+            wx_mchid="1900000110",
+        )
+        order_b = Order(
+            tenant_id=TENANT_B,
+            total="28.00",
+            status="pending_payment",
+            payment_status="unpaid",
+            payment_mode="prepay",
+        )
+        self.db.add_all([tenant_b, order_b])
+        await self.db.commit()
+        resource = {
+            "out_trade_no": str(order_b.id),
+            "trade_state": "SUCCESS",
+            "transaction_id": f"wx-security-{order_b.id}",
+            "amount": {"total": 2800, "payer_total": 2800, "currency": "CNY"},
+        }
+
+        with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \
+             patch.object(WxPayService, "verify_notify", return_value=resource):
+            result = await wxpay_notify(make_notify_request(TENANT_A), db=self.db)
+
+        self.assertEqual(result, {"code": "SUCCESS", "message": "ok"})
+        await self.db.refresh(order_b)
+        self.assertEqual(order_b.payment_status, "unpaid")
+        self.assertEqual(order_b.status, "pending_payment")
+        self.assertIsNone(order_b.wx_transaction_id)
 
 
 if __name__ == "__main__":

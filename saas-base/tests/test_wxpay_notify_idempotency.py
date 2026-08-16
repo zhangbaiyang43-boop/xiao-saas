@@ -30,6 +30,7 @@ class FakeTenant:
 
 class FakeOrder:
     id = FakeColumn()
+    tenant_id = FakeColumn()
 
     def __init__(self):
         self.id = 10001
@@ -37,6 +38,9 @@ class FakeOrder:
         self.status = "pending_payment"
         self.payment_status = "unpaid"
         self.payment_method = None
+        self.payment_mode = "prepay"
+        self.total = 28
+        self.wx_transaction_id = None
 
 
 class FakeQuery:
@@ -97,6 +101,9 @@ class FakeDB:
     async def commit(self):
         self.commit_count += 1
 
+    async def rollback(self):
+        return None
+
 
 class FakeRequest:
     headers = {"wechatpay-signature": "valid"}
@@ -117,6 +124,7 @@ class FakeWxPayService:
             "out_trade_no": "10001",
             "transaction_id": "4200000000000000001",
             "trade_state": "SUCCESS",
+            "amount": {"total": 2800, "currency": "CNY"},
         }
 
 
@@ -138,6 +146,9 @@ def install_stubs():
 
     async def _noop_async(*args, **kwargs):
         return None
+
+    async def _zero_async(*args, **kwargs):
+        return 0
 
     modules = {
         "app": types.ModuleType("app"),
@@ -170,6 +181,7 @@ def install_stubs():
     modules["app.config"].settings = types.SimpleNamespace(H5_ORDER_BASE_URL="https://example.com", DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
+    modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
     import importlib.util
 
     response_spec = importlib.util.spec_from_file_location(
@@ -184,6 +196,12 @@ def install_stubs():
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = type("FakeOrderItem", (), {})
+    # P0-16 Phase B2: orders.py now imports set_termination_audit_if_unset
+    # from app.models.order -- this legacy stub module must expose the same
+    # name to satisfy the import, even though the wxpay-notify idempotency
+    # path this file tests never calls it (only orders.py's create-order/
+    # cancel paths do). No-op only; never touched by this test.
+    modules["app.models.order"].set_termination_audit_if_unset = lambda order, **kwargs: None
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
     modules["app.services.coupon_service"]._mark_order_coupon_used_if_locked = _noop_async
@@ -214,7 +232,16 @@ def install_stubs():
     modules["app.services.order_print_service"]._serialize_print_meta = lambda order: {}
     modules["app.services.order_print_service"]._spawn_background_print_task = lambda *args, **kwargs: None
     modules["app.services.order_print_service"]._split_merchant_note_and_print_meta = lambda note: (note, {})
+    modules["app.services.order_print_service"].build_staff_print_summary = lambda order, defer_kitchen_print=False: {
+        "print_status": None,
+        "print_status_label": "",
+        "print_attempts": 0,
+        "print_issue": None,
+        "can_reprint": True,
+    }
     modules["app.services.order_print_service"].can_reprint_order = lambda order, print_type="kitchen": (True, None)
+    modules["app.services.order_print_service"].reconcile_print_orders = _zero_async
+    modules["app.services.order_print_service"].supports_independent_print_session = lambda db: False
     modules["app.services.wxpay_service"].WxPayService = FakeWxPayService
 
 
@@ -260,7 +287,6 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
             side_effects["payment_updates"] += 1
             side_effects["coupon_writeoffs"] += 1
             side_effects["points_changes"] += 1
-            side_effects["print_jobs"] += 1
             order_obj.payment_status = "paid"
             order_obj.payment_method = payment_method
             order_obj.status = "pending"
@@ -268,6 +294,18 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
 
         payment_module = sys.modules["app.services.order_payment_service"]
         payment_module.OrderPaymentService._on_payment_success = fake_on_payment_success
+
+        async def fake_claim(self, order_obj, transaction_id):
+            if order_obj.wx_transaction_id == transaction_id:
+                return "duplicate"
+            order_obj.wx_transaction_id = transaction_id
+            return "bound"
+
+        async def fake_post_commit(self, order_obj):
+            side_effects["print_jobs"] += 1
+
+        payment_module.OrderPaymentService._claim_wx_transaction = fake_claim
+        payment_module.OrderPaymentService._run_post_commit_payment_effects = fake_post_commit
 
         results = [
             asyncio.run(module.wxpay_notify(FakeRequest(), db))

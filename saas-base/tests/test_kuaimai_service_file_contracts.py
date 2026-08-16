@@ -96,7 +96,7 @@ class KuaimaiServiceFileContractsTest(unittest.TestCase):
         self.assertEqual(row["sku_text"], "")
         self.assertEqual(row["option_text"], "")
         self.assertEqual(row["addons"], "")
-        self.assertEqual(row["item_remark"], "")
+        self.assertNotIn("item_remark", row)
 
     def test_template_payload_render_data_contains_items_and_goods_arrays(self):
         render_data = {
@@ -170,6 +170,8 @@ class KuaimaiServiceFileContractsTest(unittest.TestCase):
         self.assertEqual(render_data["pay_amount"], "15.50")
         self.assertIn("大份 / 微辣", row["display_name"])
         self.assertIn("备注：不要花生", row["display_name"])
+        self.assertNotIn("item_remark", row)
+        self.assertEqual(json.dumps(render_data, ensure_ascii=False).count("不要花生"), 1)
 
     def test_order_template_validation_rejects_empty_items(self):
         render_data = {

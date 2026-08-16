@@ -80,7 +80,11 @@ class PointsRewardContractsTest(unittest.TestCase):
         with patch("app.services.coupon_service.CouponService", return_value=fake_coupon_svc):
             result = asyncio.run(service._maybe_reward_points_milestone(account, balance_before=950))
 
-        fake_coupon_svc.issue_auto_coupon.assert_awaited_once_with(1, "points_reward_coupon")
+        fake_coupon_svc.issue_auto_coupon.assert_awaited_once_with(
+            1,
+            "points_reward_coupon",
+            auto_commit=True,
+        )
         self.assertEqual(account.points_balance, 1050 - POINTS_REWARD_THRESHOLD)
         self.assertEqual(result["id"], "coupon-1")
         self.assertEqual(result["amount"], 5)

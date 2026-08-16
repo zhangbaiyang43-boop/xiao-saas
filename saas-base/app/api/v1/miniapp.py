@@ -8,7 +8,7 @@ from app.core.response import RespVo, error_response, success_response
 from app.core.security import create_customer_access_token
 from app.core.tenant_context import TenantContext
 from app.core.time_utils import to_utc_iso
-from app.core.logger import logger
+from app.core.logger import logger, mask_phone, mask_wechat_identity
 from app.config import settings
 from app.schemas.miniapp import EntryJoinRequest
 from app.services.anti_fraud_service import AntiFraudService
@@ -112,7 +112,7 @@ def build_auto_member_name(phone: str | None) -> str:
 @join_limit()
 async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession = Depends(get_db)):
     try:
-        logger.info(f"entry_join 请求 - scene: {data.scene}, phone: {data.phone}")
+        logger.info(f"entry_join 请求 - scene: {data.scene}, phone: {mask_phone(data.phone)}")
         if not data.agreement_accepted:
             return error_response(code=400, msg="请先阅读并同意注册协议")
         
@@ -144,7 +144,7 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
         wechat_result = await wechat_service.code2session(data.code)
         openid = wechat_result.get("openid")
         unionid = wechat_result.get("unionid")
-        logger.info(f"微信 code2session 结果 - openid: {openid}, unionid: {unionid}")
+        logger.info(f"微信 code2session 结果 - openid: {mask_wechat_identity(openid)}, unionid: {mask_wechat_identity(unionid)}")
 
         if not openid:
             logger.error("微信登录失败，未获取到 openid")
@@ -351,7 +351,7 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
         }, msg="入会成功")
 
     except Exception as e:
-        logger.exception(f"entry_join 顶层异常 - scene: {data.scene}, phone: {data.phone}, error: {str(e)}")
+        logger.exception(f"entry_join 顶层异常 - scene: {data.scene}, phone: {mask_phone(data.phone)}, error: {str(e)}")
         return error_response(code=500, msg="入会失败，请稍后重试")
 
 

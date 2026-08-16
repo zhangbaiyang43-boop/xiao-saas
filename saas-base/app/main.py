@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 
 from fastapi import FastAPI, Request
@@ -46,6 +48,7 @@ from app.core.exceptions import (
     general_exception_handler,
     validation_exception_handler,
 )
+from app.core.logger import logger
 from app.core.rate_limiter import RateLimitExceeded, limiter, tenant_limiter
 from app.core.response import RespVo, success_response
 from app.core.schema_compat import ensure_bigint_ids, ensure_coupon_template_description, ensure_distribution_schema, ensure_queue_ticket_schema, ensure_tenant_schema
@@ -55,6 +58,7 @@ from app.middleware.tenant_middleware import TenantMiddleware
 from app.models import Base
 from app.plugins.plugin_manager import plugin_manager
 from app.services.consumption_event_handlers import handle_consumption_membership
+from app.services.order_print_service import print_recovery_loop
 
 os.makedirs("logs", exist_ok=True)
 os.makedirs("static", exist_ok=True)
@@ -64,6 +68,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.state.limiter = limiter
 app.state.tenant_limiter = tenant_limiter
+
+_print_recovery_task: asyncio.Task[None] | None = None
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(TenantMiddleware)
@@ -142,7 +148,7 @@ async def _stale_order_cleanup_once():
     directly callable from tests instead of having to drive the infinite loop's sleeps."""
     from datetime import datetime as _dt, timedelta
     from app.core.database import AsyncSessionLocal
-    from app.models.order import Order
+    from app.models.order import Order, set_termination_audit_if_unset
     from app.models.coupon import Coupon as _Coupon
     from sqlalchemy.future import select as _select
 
@@ -161,13 +167,32 @@ async def _stale_order_cleanup_once():
 
             payment_svc = OrderPaymentService(db)
         for o in stale:
-            recovered = await payment_svc._recover_wxpay_order_if_paid(o)
+            recovered = await payment_svc._recover_wxpay_order_if_paid(o, source="stale_order_background")
             if recovered:
                 continue
-            await _restore_order_stock(o, db)
-            o.status = "cancelled"
-            if o.coupon_id:
-                coupon = await db.get(_Coupon, o.coupon_id)
+            # Discovery is intentionally unlocked.  After the external payment
+            # query, reacquire a fresh row lock and recheck both lifecycle and
+            # money truth before applying the cancellation mutation.
+            locked_result = await db.execute(
+                _select(Order)
+                .where(
+                    Order.id == o.id,
+                    Order.tenant_id == o.tenant_id,
+                    Order.status == "pending_payment",
+                )
+                .with_for_update()
+            )
+            locked = locked_result.scalar_one_or_none()
+            if not locked or getattr(locked, "payment_status", None) == "paid":
+                continue
+            await _restore_order_stock(locked, db)
+            locked.status = "cancelled"
+            set_termination_audit_if_unset(
+                locked, actor_type="system", actor_id=None, actor_role=None,
+                source="stale_order_cleanup",
+            )
+            if locked.coupon_id:
+                coupon = await db.get(_Coupon, locked.coupon_id)
                 if coupon and coupon.status == "LOCKED":
                     coupon.status = "UNUSED"
         if stale:
@@ -209,7 +234,7 @@ async def _pending_payment_reconcile_once():
         payment_svc = OrderPaymentService(db)
         recovered_any = False
         for o in pending:
-            if await payment_svc._recover_wxpay_order_if_paid(o):
+            if await payment_svc._recover_wxpay_order_if_paid(o, source="pending_payment_background"):
                 recovered_any = True
         if recovered_any:
             await db.commit()
@@ -223,7 +248,7 @@ async def _pending_payment_reconcile_loop():
         try:
             await _pending_payment_reconcile_once()
         except Exception:
-            pass
+            logger.exception("[pending_payment_reconcile] loop iteration failed")
         await asyncio.sleep(PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS)
 
 
@@ -237,7 +262,7 @@ async def _stale_order_cleanup_loop():
         try:
             await _stale_order_cleanup_once()
         except Exception:
-            pass
+            logger.exception("[stale_order_cleanup] loop iteration failed")
         await asyncio.sleep(INTERVAL)
 
 
@@ -364,7 +389,7 @@ async def _coupon_expiry_reminder_loop():
 
 @app.on_event("startup")
 async def startup():
-    import asyncio
+    global _print_recovery_task
     # 排队票 openid/customer_id 等补列：生产常关 AUTO_CREATE_TABLES，但仍需幂等补齐，
     # 否则顾客自助取号 INSERT 会因 Unknown column 连续失败。
     async with async_engine.begin() as conn:
@@ -390,6 +415,20 @@ async def startup():
 
     # 启动优惠券到期提醒任务（订阅消息未配置模板 ID 时循环内部会直接跳过）
     asyncio.create_task(_coupon_expiry_reminder_loop())
+
+    # Printing has its own retained task so shutdown can cancel it deterministically.
+    _print_recovery_task = asyncio.create_task(print_recovery_loop())
+
+
+@app.on_event("shutdown")
+async def shutdown_print_recovery():
+    global _print_recovery_task
+    if _print_recovery_task is None:
+        return
+    _print_recovery_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _print_recovery_task
+    _print_recovery_task = None
 
 
 @app.get("/")

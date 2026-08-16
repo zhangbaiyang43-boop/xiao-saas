@@ -12,6 +12,7 @@ from app.models.base import Base
 from app.models.coupon import Coupon
 from app.models.coupon_template import CouponTemplate
 from app.models.customer import Customer
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import OrderItem
 from app.models.tenant import Tenant
@@ -67,6 +68,12 @@ class CouponTenantSecurityTest(unittest.IsolatedAsyncioTestCase):
         self.dish_a = MenuItem(tenant_id=TENANT_A, name="Dish A", price="50.00", available=True)
         self.dish_b = MenuItem(tenant_id=TENANT_B, name="Dish B", price="50.00", available=True)
         self.db.add_all([self.dish_a, self.dish_b])
+        # P0-01: this suite is about cross-tenant coupon isolation, not table
+        # validity -- both tenants' orders use table="A1", so register it for both.
+        self.db.add_all([
+            EntranceCode(id=generate_snowflake_id(), tenant_id=TENANT_A, name="A1", scene="E0000A1TA", table_no="A1", entry_type="table", status=1),
+            EntranceCode(id=generate_snowflake_id(), tenant_id=TENANT_B, name="A1", scene="E0000A1TB", table_no="A1", entry_type="table", status=1),
+        ])
         await self.db.flush()
 
         self.customer_a1 = Customer(tenant_id=TENANT_A, openid="a1")

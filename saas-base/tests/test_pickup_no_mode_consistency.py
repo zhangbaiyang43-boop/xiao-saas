@@ -19,6 +19,7 @@ from app.api.v1.orders import (
 from app.api.v1.tenant import serialize_settings
 from app.models.base import Base
 from app.models.dining import DiningSession
+from app.models.entrance_code import EntranceCode
 from app.models.menu_item import MenuItem
 from app.models.order import Order, OrderItem
 from app.models.pickup_no_assignment import PickupNoAssignment
@@ -37,6 +38,10 @@ if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 TENANT = "tenant-mode"
+
+
+def close_background_print_coroutine(coroutine):
+    coroutine.close()
 
 
 @event.listens_for(OrderItem, "before_insert")
@@ -91,6 +96,15 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
         )
         self.dish = MenuItem(tenant_id=TENANT, name="Soup", price="25.00", available=True)
         self.db.add(self.dish)
+        # P0-01: this suite is about pickup-number mode consistency, not table
+        # validity -- register every table_no value used across its tests
+        # (R01 default plus R1-R5 overrides in individual tests).
+        for table_no in ("R01", "R1", "R2", "R3", "R4", "R5"):
+            self.db.add(EntranceCode(
+                id=generate_snowflake_id(),
+                tenant_id=TENANT, name=table_no, scene=f"E0000000{table_no}",
+                table_no=table_no, entry_type="table", status=1,
+            ))
         await self.db.commit()
 
     async def asyncTearDown(self):
@@ -255,7 +269,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             total=25,
             pickup_no=pickup_no,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res = await create_order(body, make_merchant_request(), self.db)
         self.assertEqual(res.code, 200, res.msg)
         return await self.db.get(Order, int(res.data["id"]))
@@ -281,7 +298,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             items=[OrderItemIn(dish_id=self.dish.id, name=self.dish.name, price=25, qty=1)],
             total=25,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res_b = await create_order(body, make_merchant_request(), self.db)
         self.assertEqual(res_b.code, 200, res_b.msg)
         order_b = await self.db.get(Order, int(res_b.data["id"]))
@@ -306,7 +326,10 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
             items=[OrderItemIn(dish_id=self.dish.id, name=self.dish.name, price=25, qty=1)],
             total=25,
         )
-        with patch("app.api.v1.orders._spawn_background_print_task", lambda *a, **k: None):
+        with patch(
+            "app.api.v1.orders._spawn_background_print_task",
+            side_effect=close_background_print_coroutine,
+        ):
             res_b = await create_order(body, make_merchant_request(), self.db)
         order_b = await self.db.get(Order, int(res_b.data["id"]))
 
@@ -326,7 +349,7 @@ class PickupNoModeConsistencyTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
         svc = OrderLifecycleService(self.db)
         svc.set_tenant_id(TENANT)
-        settle = await svc.settle_table({"table_no": "R4"}, closed_by="staff")
+        settle = await svc.settle_table({"table_no": "R4", "dining_session_id": str(order.dining_session_id)}, closed_by="staff")
         self.assertEqual(settle.code, 200, settle.msg)
         rows = (
             await self.db.execute(select(PickupNoAssignment).where(PickupNoAssignment.tenant_id == TENANT))
