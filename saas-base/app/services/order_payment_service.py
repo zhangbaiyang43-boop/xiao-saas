@@ -11,7 +11,7 @@ from sqlalchemy.future import select
 from starlette.requests import Request
 
 from app.config import settings
-from app.core.logger import logger
+from app.core.logger import logger, safe_log
 from app.core.response import RespVo, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order
@@ -80,7 +80,18 @@ class OrderPaymentService(BaseService):
         except (TypeError, ValueError) as exc:
             raise PaymentFactError("invalid amount") from exc
         if paid_fen != expected_fen:
+            safe_log(
+                logger.warning,
+                "PAYMENT_VALIDATION_FAILED order_id=%s out_trade_no=%s wx_transaction_id=%s "
+                "expected_amount_fen=%s provider_amount_fen=%s reason=amount_mismatch",
+                order.id, resource.get("out_trade_no"), transaction_id, expected_fen, paid_fen,
+            )
             raise PaymentFactError("amount mismatch")
+        safe_log(
+            logger.info,
+            "PAYMENT_VALIDATED order_id=%s out_trade_no=%s wx_transaction_id=%s amount_fen=%s",
+            order.id, resource.get("out_trade_no"), transaction_id, paid_fen,
+        )
         return transaction_id
 
     async def _claim_wx_transaction(self, order: Order, transaction_id: str) -> str:
@@ -161,7 +172,7 @@ class OrderPaymentService(BaseService):
         except Exception as exc:
             logger.warning(f"post-payment order success subscribe failed: {exc}")
 
-    async def _recover_wxpay_order_if_paid(self, order: Order) -> bool:
+    async def _recover_wxpay_order_if_paid(self, order: Order, source: str = "unspecified") -> bool:
         """Recover paid orders when WeChat callback is delayed or lost."""
         if not order or order.payment_mode != "prepay":
             return False
@@ -211,16 +222,22 @@ class OrderPaymentService(BaseService):
                 await self.db.rollback()
             if transitioned and not terminal_reconciliation:
                 await self._run_post_commit_payment_effects(locked_order)
-            logger.warning(
-                "[WXPAY_ORDER_RECOVERED] order_id=%s transaction_id=%s out_trade_no=%s",
+            safe_log(
+                logger.warning,
+                "[WXPAY_ORDER_RECOVERED] order_id=%s transaction_id=%s out_trade_no=%s source=%s",
                 order_id,
                 pay_resource.get("transaction_id") or "",
                 pay_resource.get("out_trade_no") or str(order_id),
+                source,
             )
             return True
         except Exception as exc:
             await self.db.rollback()
-            logger.warning("[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s", order_id, exc)
+            safe_log(
+                logger.warning,
+                "[WXPAY_ORDER_RECOVERY_FAILED] order_id=%s error=%s source=%s",
+                order_id, exc, source,
+            )
             return False
 
 
@@ -781,6 +798,11 @@ class OrderPaymentService(BaseService):
                 if not openid:
                     raise HTTPException(status_code=400, detail={"success": False, "code": "NEED_WECHAT_CODE", "message": "缺少微信支付身份，请重新发起支付"})
                 amount_fen = max(1, round(pay_amount * 100))
+                safe_log(
+                    logger.info,
+                    "PAYMENT_REQUESTED order_id=%s tenant_id=%s amount_fen=%s client_request_id=%s",
+                    order.id, order.tenant_id, amount_fen, getattr(order, "client_request_id", None),
+                )
                 notify_url = f"{settings.H5_ORDER_BASE_URL}/api/v1/orders/wxpay-notify"
                 pay_params = await svc.create_jsapi_order(
                     openid=openid,
@@ -872,6 +894,11 @@ class OrderPaymentService(BaseService):
 
             out_trade_no = resource.get("out_trade_no", "")
             trade_state = resource.get("trade_state", "")
+            safe_log(
+                logger.info,
+                "WXPAY_CALLBACK_RECEIVED tenant_id=%s out_trade_no=%s trade_state=%s",
+                getattr(matched_tenant, "tenant_id", None), out_trade_no, trade_state,
+            )
             if trade_state != "SUCCESS":
                 return {"code": "SUCCESS", "message": "ok"}
 

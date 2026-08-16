@@ -48,6 +48,15 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         cost_ms = round((time.time() - start_time) * 1000, 2)
         log_level = logger.warning if cost_ms > settings.SLOW_REQUEST_MS else logger.info
         response.headers["X-Process-Time-Ms"] = str(cost_ms)
+        # P0-16 Phase B1: the request_id already minted above never left the
+        # server before this -- a customer's error screenshot had nothing to
+        # correlate against backend logs. Covers success, business-error (200
+        # with an error code in the body), and any exception response that
+        # FastAPI's own registered handlers turned into a Response before
+        # reaching this point (the only path that can't get the header is a
+        # raw exception escaping call_next entirely, handled in the except
+        # block above -- there is no Response object to attach it to there).
+        response.headers["X-Request-ID"] = request_id
 
         menu_diagnostics = getattr(request.state, "menu_diagnostics", None)
         if menu_diagnostics is not None:

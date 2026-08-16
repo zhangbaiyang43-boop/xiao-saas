@@ -181,6 +181,7 @@ def install_stubs():
     modules["app.config"].settings = types.SimpleNamespace(H5_ORDER_BASE_URL="https://example.com", DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
+    modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
     import importlib.util
 
     response_spec = importlib.util.spec_from_file_location(

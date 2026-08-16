@@ -75,7 +75,7 @@ class MerchantOrderDeliveryContractsTest(unittest.TestCase):
         source = lifecycle_method_source("list_orders")
         self.assertIn("Order.tenant_id == tenant_id", source)
         self.assertIn("date_str == \"today\"", source)
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", source)
         self.assertIn("serialize_order(", source)
         self.assertIn("items_by_order.get(o.id or 0, [])", source)
         self.assertIn("checkout_requested_at=checkout_requested_by_session.get(", source)

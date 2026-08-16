@@ -166,7 +166,7 @@ class OrderLifecycleService(BaseService):
             and getattr(order, "payment_status", None) != "paid"
         ):
             # Never hold the cancellation mutation lock across provider I/O.
-            await payment_svc._recover_wxpay_order_if_paid(order)
+            await payment_svc._recover_wxpay_order_if_paid(order, source="cancel_precheck")
 
         locked_result = await self.db.execute(
             owned_order_stmt(tenant_id=derived_tenant_id, for_update=True)
@@ -232,7 +232,7 @@ class OrderLifecycleService(BaseService):
 
         recovered = False
         if getattr(order, "payment_status", None) != "paid":
-            recovered = await payment_svc._recover_wxpay_order_if_paid(order)
+            recovered = await payment_svc._recover_wxpay_order_if_paid(order, source="client_order_query")
         if recovered:
             await self.db.commit()
             await self.db.refresh(order)
@@ -349,7 +349,7 @@ class OrderLifecycleService(BaseService):
         payment_svc = OrderPaymentService(self.db)
         for order in orders:
             if order.status == "pending_payment":
-                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order)) or recovered_any
+                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order, source="merchant_order_query")) or recovered_any
         print_recovered = await reconcile_print_orders(
             self.db, orders, trigger="merchant_list_recovery"
         )
@@ -501,7 +501,7 @@ class OrderLifecycleService(BaseService):
         ):
             # Payment query is external I/O; final mutation authority is the fresh
             # tenant-scoped lock acquired immediately below.
-            await payment_svc._recover_wxpay_order_if_paid(discovered_order)
+            await payment_svc._recover_wxpay_order_if_paid(discovered_order, source="status_update_precheck")
 
         result = await self.db.execute(
             select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()

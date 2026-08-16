@@ -76,13 +76,13 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
 
     def test_consumer_order_query_recovers_paid_pending_payment_order(self):
         get_my_order_source = class_method_source("get_my_order")
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", get_my_order_source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", get_my_order_source)
         self.assertIn('"payment_status": order.payment_status', get_my_order_source)
 
     def test_merchant_order_query_recovers_paid_pending_payment_orders(self):
         list_orders_source = class_method_source("list_orders")
         self.assertIn('if order.status == "pending_payment"', list_orders_source)
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order)", list_orders_source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", list_orders_source)
         self.assertIn("await self.db.commit()", list_orders_source)
 
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):

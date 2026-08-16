@@ -33,6 +33,18 @@ export function readProcessTimeMs(header) {
   return Number.isFinite(n) && n >= 0 ? n : null
 }
 
+// P0-16 Phase B1: pairs a customer-reported error with the backend's own
+// correlation identifiers -- requestId (server-minted, from the X-Request-ID
+// response header) and clientRequestId (the P0-04 idempotency key this
+// request itself carried) -- so a support screenshot can be matched against
+// backend logs. requestId is null (not an error) when there was no response
+// at all, e.g. a genuine network failure.
+export function extractCorrelationIds(options, header) {
+  const clientRequestId = (options && options.data && options.data.request_id) || null
+  const requestId = header ? (header['X-Request-ID'] ?? header['x-request-id'] ?? null) : null
+  return { requestId, clientRequestId }
+}
+
 export function classifyRequestFailure(errMsg) {
   const message = String(errMsg || '').toLowerCase()
   if (message.includes('timeout')) return { status: 'timeout', errorType: 'timeout' }
@@ -190,7 +202,7 @@ const request = (options) => {
           // 401/403 大多是"登录态过期"这种预期内的正常事件，不是代码 bug，
           // 单独用 auth_error 这个 scene 报，方便以后在后台把它跟真正的接口
           // 故障分开看，不要混在一起互相掩盖。
-          reportError('api.auth_error', error, { url: options.url })
+          reportError('api.auth_error', error, { url: options.url, ...extractCorrelationIds(options, res.header) })
           if (authRedirect) redirectToGuest()
           reject(error)
           return
@@ -200,7 +212,7 @@ const request = (options) => {
         error.statusCode = statusCode
         error.code = body.code
         error.bizCode = body?.data?.code
-        reportError('api.error', error, { url: options.url, statusCode, code: body.code })
+        reportError('api.error', error, { url: options.url, statusCode, code: body.code, ...extractCorrelationIds(options, res.header) })
         reject(error)
       },
       fail: (err) => {
@@ -211,7 +223,7 @@ const request = (options) => {
           errorType: classification.errorType,
         })
         const error = new Error(toFriendlyMessage(err.errMsg))
-        reportError('api.network_fail', error, { url: options.url, errMsg: err.errMsg })
+        reportError('api.network_fail', error, { url: options.url, errMsg: err.errMsg, ...extractCorrelationIds(options, undefined) })
         reject(error)
       }
     })

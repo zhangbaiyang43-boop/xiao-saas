@@ -120,7 +120,7 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
     async def test_cancel_order_refuses_when_wechat_already_paid(self):
         order = await self._make_order()
 
-        async def recover(order_obj):
+        async def recover(order_obj, *args, **kwargs):
             order_obj.payment_status = "paid"
             order_obj.status = "pending"
             await self.db.flush()

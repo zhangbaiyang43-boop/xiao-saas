@@ -262,6 +262,7 @@ def install_stubs():
     modules["app.config"].settings = types.SimpleNamespace(DEBUG=False)
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
+    modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}

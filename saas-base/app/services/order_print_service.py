@@ -800,8 +800,18 @@ async def _print_paid_order_ticket(
     if not claimed_order:
         return claim
     initial = _initial_print_meta(_get_print_meta(claimed_order))
+    attempt_no = initial.get("attempts")
+    printer_identifier = (initial.get("route") or {}).get("printer_id") if isinstance(initial.get("route"), dict) else None
+    logger.info(
+        "PRINT_TRIGGERED order_id=%s printer_id=%s attempt=%s reason=%s",
+        order.id, printer_identifier, attempt_no, reason,
+    )
     try:
         task_id = await _execute_provider_with_frozen_route(claimed_order, db, initial)
+        logger.info(
+            "PRINT_SUCCEEDED order_id=%s printer_id=%s attempt=%s provider_task_id=%s",
+            order.id, printer_identifier, attempt_no, task_id,
+        )
         return await _persist_initial_print_result(
             db,
             order_id=int(order.id),
@@ -812,6 +822,10 @@ async def _print_paid_order_ticket(
     except Exception as exc:
         status = "UNKNOWN" if _is_unknown_print_exception(exc) else "FAILED"
         error_code = str(getattr(exc, "code", None) or str(exc) or type(exc).__name__)
+        logger.warning(
+            "PRINT_FAILED order_id=%s printer_id=%s attempt=%s result=%s error_category=%s",
+            order.id, printer_identifier, attempt_no, status, error_code,
+        )
         return await _persist_initial_print_result(
             db,
             order_id=int(order.id),
@@ -967,6 +981,10 @@ async def recover_pending_print_orders_once(db: AsyncSession | None = None) -> i
     handled = 0
     for order in candidates:
         status = str(getattr(order, "print_status", "") or "").upper()
+        logger.info(
+            "PRINT_RECOVERY_ATTEMPT order_id=%s printer_id=%s attempt=%s reason=startup_recovery prior_status=%s",
+            order.id, None, None, status,
+        )
         if status == "SENDING":
             # STALE_SENDING: SENDING becomes UNKNOWN; provider is deliberately not called.
             if await _quarantine_stale_sending(

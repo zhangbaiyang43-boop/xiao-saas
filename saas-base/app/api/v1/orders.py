@@ -14,7 +14,7 @@ from sqlalchemy.future import select
 
 from app.config import settings
 from app.core.database import get_db
-from app.core.logger import logger
+from app.core.logger import logger, safe_log
 from app.core.platform_rules import cap_discount_amount
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
@@ -395,6 +395,11 @@ async def _replay_order_response(
     if replay_order.request_fingerprint is not None:
         if _compute_request_fingerprint(body) != replay_order.request_fingerprint:
             conflict_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+            safe_log(
+                logger.warning,
+                "ORDER_FINGERPRINT_CONFLICT tenant_id=%s client_request_id=%s existing_order_id=%s",
+                tenant_id, request_id, replay_order.id,
+            )
             return error_response(
                 code=409,
                 msg="订单信息已变化，请重新确认后再提交",
@@ -412,6 +417,11 @@ async def _replay_order_response(
     replay_items = list(replay_items_result.scalars().all())
     replay_data = serialize_order(replay_order, replay_items)
     replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
+    safe_log(
+        logger.info,
+        "ORDER_IDEMPOTENT_REPLAY tenant_id=%s client_request_id=%s order_id=%s dining_session_id=%s table_no=%s",
+        tenant_id, request_id, replay_order.id, replay_order.dining_session_id, replay_order.table_no,
+    )
     return success_response(
         data={
             **replay_data,
@@ -720,7 +730,7 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
     stale_orders = stale_result.scalars().all()
     payment_svc = OrderPaymentService(db)
     for stale in stale_orders:
-        recovered = await payment_svc._recover_wxpay_order_if_paid(stale)
+        recovered = await payment_svc._recover_wxpay_order_if_paid(stale, source="synchronous_stale_cleanup")
         if recovered:
             continue
         # Provider I/O above may commit/rollback and invalidate the discovery
@@ -1144,6 +1154,11 @@ async def _persist_create_order_and_build_response(
         )
     await db.commit()
     await db.refresh(order)
+    safe_log(
+        logger.info,
+        "ORDER_CREATED tenant_id=%s order_id=%s client_request_id=%s dining_session_id=%s table_no=%s",
+        tenant_id, order.id, request_id, dining_session_id, body.table,
+    )
     # 出票挪到 commit 之后、且不 await——顾客提交订单不该等一次第三方打印机 API。
     # 必须在 commit 之后才调度：后台任务用的是独立 session，提前调度会因为这笔订单
     # 在别的 session 里还看不见（还没提交）而被 _print_paid_order_ticket 误判成

@@ -48,6 +48,7 @@ from app.core.exceptions import (
     general_exception_handler,
     validation_exception_handler,
 )
+from app.core.logger import logger
 from app.core.rate_limiter import RateLimitExceeded, limiter, tenant_limiter
 from app.core.response import RespVo, success_response
 from app.core.schema_compat import ensure_bigint_ids, ensure_coupon_template_description, ensure_distribution_schema, ensure_queue_ticket_schema, ensure_tenant_schema
@@ -166,7 +167,7 @@ async def _stale_order_cleanup_once():
 
             payment_svc = OrderPaymentService(db)
         for o in stale:
-            recovered = await payment_svc._recover_wxpay_order_if_paid(o)
+            recovered = await payment_svc._recover_wxpay_order_if_paid(o, source="stale_order_background")
             if recovered:
                 continue
             # Discovery is intentionally unlocked.  After the external payment
@@ -229,7 +230,7 @@ async def _pending_payment_reconcile_once():
         payment_svc = OrderPaymentService(db)
         recovered_any = False
         for o in pending:
-            if await payment_svc._recover_wxpay_order_if_paid(o):
+            if await payment_svc._recover_wxpay_order_if_paid(o, source="pending_payment_background"):
                 recovered_any = True
         if recovered_any:
             await db.commit()
@@ -243,7 +244,7 @@ async def _pending_payment_reconcile_loop():
         try:
             await _pending_payment_reconcile_once()
         except Exception:
-            pass
+            logger.exception("[pending_payment_reconcile] loop iteration failed")
         await asyncio.sleep(PENDING_PAYMENT_RECONCILE_INTERVAL_SECONDS)
 
 
@@ -257,7 +258,7 @@ async def _stale_order_cleanup_loop():
         try:
             await _stale_order_cleanup_once()
         except Exception:
-            pass
+            logger.exception("[stale_order_cleanup] loop iteration failed")
         await asyncio.sleep(INTERVAL)
 
 
