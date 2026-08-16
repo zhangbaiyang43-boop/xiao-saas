@@ -9,22 +9,36 @@
 // (tenant_id, client_request_id) idempotency (P0-04) has no way to recognize
 // it as the same business intent: it creates a genuine duplicate Order.
 //
-// This module persists the request_id (plus scope and a non-sensitive payload
-// snapshot) to uni storage BEFORE the create-order request is sent, keyed by
-// tenant+table+dining_session_id -- the same scoping discipline already used
-// by the pending-payment cache (see useCheckout.js's pendingPaymentStorageKey,
-// P0-10). It deliberately does NOT persist participant_token or any other
-// credential: those must always be re-read fresh from the current session
-// context at retry time, never replayed from a stale local copy.
+// This module persists the request_id AND the frozen, canonical create-order
+// business payload (never a credential) to uni storage BEFORE the request is
+// sent, keyed by tenant+table+dining_session_id -- the same scoping
+// discipline already used by the pending-payment cache (see useCheckout.js's
+// pendingPaymentStorageKey, P0-10).
+//
+// P0-15 FINAL CLOSURE, two properties this module exists to guarantee:
+//
+// 1. FAIL CLOSED ON UNRECORDABLE INTENT: savePendingSubmitIntent() returns
+//    false on a storage write failure. Callers MUST check this and refuse to
+//    send the create-order request at all when it fails -- sending a mutation
+//    the client cannot durably identify is exactly the P0-15-01 failure mode,
+//    just reached via a storage fault instead of a process kill. Likewise,
+//    restorePendingSubmitIntent() distinguishes "no record" from "a record
+//    exists for this scope but can't be read back reliably" (corrupt JSON,
+//    missing requestId) -- corrupt must NOT be treated as "nothing pending":
+//    that would let a caller assume a fresh identity and resend under it
+//    while the real prior attempt's outcome is still genuinely unknown.
+//
+// 2. ONE request_id = ONE IMMUTABLE BUSINESS PAYLOAD: the frozen snapshot,
+//    once saved, is what every retry under that request_id must resend --
+//    never a payload rebuilt from a (possibly since-mutated) live cart. This
+//    is deliberately NOT sufficient on its own for correctness: the server's
+//    existing P0-04 fingerprint-conflict recovery remains the second line of
+//    defense (see useCheckout.p0-04-idempotency.test.js) for any case this
+//    client-side freeze doesn't cover.
 //
 // This is NOT a general offline-order queue: nothing here ever auto-fires a
 // create-order request. Restoring only makes the NEXT explicit, user-triggered
-// retry reuse the same identity. If the rebuilt payload doesn't exactly match
-// what the server actually received under that id, the server's existing
-// P0-04 fingerprint-conflict recovery (already proven safe, see
-// useCheckout.p0-04-idempotency.test.js) takes over and binds to the real
-// existing order instead -- so this module's snapshot only needs to be good
-// enough for traceability, not perfect reconstruction, for safety to hold.
+// retry reuse the same identity + payload -- never on app launch.
 
 const STORAGE_PREFIX = 'pending_order_submit_'
 
@@ -49,18 +63,30 @@ export function savePendingSubmitIntent({ tenantId, tableNo, sessionId, requestI
   }
 }
 
+// Returns one of:
+//   { status: 'missing' }                    -- no record for this scope
+//   { status: 'found', record: {...} }        -- a valid, readable record
+//   { status: 'corrupt' }                     -- a record exists but cannot
+//                                                 be relied on (bad JSON, or
+//                                                 missing its requestId)
 export function restorePendingSubmitIntent({ tenantId, tableNo, sessionId }) {
   const key = storageKey(tenantId, tableNo, sessionId)
-  if (!key) return null
+  if (!key) return { status: 'missing' }
+  let raw
   try {
-    const raw = uni.getStorageSync(key)
-    if (!raw) return null
-    const record = JSON.parse(raw)
-    if (!record?.requestId) return null
-    return record
+    raw = uni.getStorageSync(key)
   } catch (e) {
-    return null
+    return { status: 'corrupt' }
   }
+  if (!raw) return { status: 'missing' }
+  let record
+  try {
+    record = JSON.parse(raw)
+  } catch (e) {
+    return { status: 'corrupt' }
+  }
+  if (!record?.requestId) return { status: 'corrupt' }
+  return { status: 'found', record }
 }
 
 export function clearPendingSubmitIntent({ tenantId, tableNo, sessionId }) {

@@ -46,12 +46,13 @@ export function useCheckout({
     return { tenantId: shopId.value, tableNo: tableNo.value, sessionId }
   }
 
+  // Restore is resolved once, up front, in performSubmitOrder (it needs the
+  // whole record, not just the id -- see the payload-drift fix there). This
+  // only mints a fresh id for the case performSubmitOrder has already
+  // determined there's nothing to restore.
   const ensureSubmitRequestId = () => {
     if (!pendingSubmitRequestId.value) {
-      const scope = submitIntentScope()
-      const restored = scope ? restorePendingSubmitIntent(scope) : null
-      pendingSubmitRequestId.value = restored?.requestId
-        || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      pendingSubmitRequestId.value = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     }
     return pendingSubmitRequestId.value
   }
@@ -380,37 +381,82 @@ export function useCheckout({
       }
       // 必须在用户点击提交的手势链里调用，否则微信不会弹授权框。
       await requestOrderSubscribeMessages()
-      const payload = {
-        table: tableNo.value,
-        shop: shopId.value,
-        total: totalPrice.value,
-        remark: remark.value.trim() || undefined,
-        coupon_id: selectedCouponId.value || undefined,
-        dining_session_id: diningSessionId.value || undefined,
-        participant_token: diningParticipantToken.value || undefined,
-        client_id: diningClientId.value || undefined,
-        request_id: ensureSubmitRequestId(),
-        // P0-04 remark reconciliation: item_remark must come from the cart line's real
-        // itemRemark field (set by useSpecSheet's confirmSpec, spec'd items only) --
-        // never re-derived from orderName/name, which are display-only folded text.
-        // Sent explicitly (even as '') for spec'd items so the server trusts this field
-        // instead of falling back to legacy name-parsing; omitted for simple items,
-        // which have no remark concept at all (no UI path to enter one).
-        items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined, item_remark: item.itemRemark !== undefined ? item.itemRemark : undefined })),
-      }
-      // P0-15-01: persist the submit intent BEFORE the network call, not after --
-      // if the app process dies between the request being sent and the response
-      // arriving, this is the only record that survives to make the next retry
-      // (a fresh page instance) reuse the same request_id instead of minting a
-      // new one. No participant_token/credential is stored -- retries always
-      // re-read that fresh from the current session context (see payload above).
+
       const submitScope = submitIntentScope()
-      if (submitScope) {
-        savePendingSubmitIntent({
-          ...submitScope,
-          requestId: payload.request_id,
-          snapshot: { table: payload.table, shop: payload.shop, total: payload.total, remark: payload.remark, coupon_id: payload.coupon_id, items: payload.items },
-        })
+      const restoreResult = submitScope ? restorePendingSubmitIntent(submitScope) : { status: 'missing' }
+
+      // P0-15 closure: a record exists for this scope but can't be read back
+      // reliably (corrupt JSON, missing its requestId) -- this must NOT be
+      // treated the same as "nothing pending." A real prior attempt under
+      // this scope may still be genuinely unresolved server-side; minting a
+      // fresh identity and sending under it risks the exact P0-15-01
+      // duplicate-order failure. Fail closed instead.
+      if (restoreResult.status === 'corrupt') {
+        const corruptErr = new Error(toastText.submitIntentUnrecoverable)
+        corruptErr.__corruptIntent = true
+        throw corruptErr
+      }
+
+      let payload
+      if (restoreResult.status === 'found') {
+        // P0-15 closure Gap B: an earlier attempt under this exact scope is
+        // still unresolved -- resend its FROZEN canonical payload, never a
+        // payload rebuilt from the live cart (which may have changed since).
+        // Only non-business context (participant_token/client_id) is re-read
+        // fresh; everything the P0-04 server fingerprint actually keys on
+        // (table/dining_session_id/coupon_id/remark/items) comes from the
+        // frozen snapshot untouched.
+        const snap = restoreResult.record.snapshot || {}
+        payload = {
+          ...snap,
+          participant_token: diningParticipantToken.value || undefined,
+          client_id: diningClientId.value || undefined,
+          request_id: restoreResult.record.requestId,
+        }
+        pendingSubmitRequestId.value = restoreResult.record.requestId
+      } else {
+        payload = {
+          table: tableNo.value,
+          shop: shopId.value,
+          total: totalPrice.value,
+          remark: remark.value.trim() || undefined,
+          coupon_id: selectedCouponId.value || undefined,
+          dining_session_id: diningSessionId.value || undefined,
+          participant_token: diningParticipantToken.value || undefined,
+          client_id: diningClientId.value || undefined,
+          request_id: ensureSubmitRequestId(),
+          // P0-04 remark reconciliation: item_remark must come from the cart line's real
+          // itemRemark field (set by useSpecSheet's confirmSpec, spec'd items only) --
+          // never re-derived from orderName/name, which are display-only folded text.
+          // Sent explicitly (even as '') for spec'd items so the server trusts this field
+          // instead of falling back to legacy name-parsing; omitted for simple items,
+          // which have no remark concept at all (no UI path to enter one).
+          items: cartItems.value.map((item) => ({ dish_id: item.id, name: item.orderName || item.name, price: item.price, qty: item.qty, specifications: item.specifications && item.specifications.length ? item.specifications : undefined, extras: item.extras && item.extras.length ? item.extras : undefined, item_remark: item.itemRemark !== undefined ? item.itemRemark : undefined })),
+        }
+        // P0-15-01: persist the submit intent BEFORE the network call, not after --
+        // if the app process dies between the request being sent and the response
+        // arriving, this is the only record that survives to make the next retry
+        // (a fresh page instance) reuse the same request_id instead of minting a
+        // new one. No participant_token/credential is stored -- retries always
+        // re-read that fresh from the current session context (see payload above).
+        //
+        // P0-15 closure Gap A: if this write fails, we have no durable record
+        // of the identity we're about to send under -- do NOT send the
+        // mutation at all. A silently-unrecorded in-flight request is exactly
+        // the P0-15-01 failure mode, just reached via a storage fault instead
+        // of a process kill.
+        if (submitScope) {
+          const persisted = savePendingSubmitIntent({
+            ...submitScope,
+            requestId: payload.request_id,
+            snapshot: { table: payload.table, shop: payload.shop, total: payload.total, remark: payload.remark, coupon_id: payload.coupon_id, dining_session_id: payload.dining_session_id, items: payload.items },
+          })
+          if (!persisted) {
+            const saveErr = new Error(toastText.submitIntentSaveFailed)
+            saveErr.__saveFailed = true
+            throw saveErr
+          }
+        }
       }
       let res
       try {
@@ -497,6 +543,21 @@ export function useCheckout({
       if (isCheckoutAuthError(err)) {
         requireCheckoutAuth()
         return false
+      }
+      // P0-15 closure: a definitive business rejection (server actually
+      // responded with a real error -- dish unavailable, price stale, store
+      // closed, etc. -- confirmed no order was created) means the frozen
+      // payload this request_id was tracking is now moot. Clear it so the
+      // NEXT attempt is free to send a genuinely corrected cart -- without
+      // this, the payload-freeze fix above (Gap B) would otherwise trap the
+      // user resending the same rejected payload forever. Deliberately
+      // excludes: ambiguous (must stay frozen, that's the whole point of the
+      // freeze), dining-identity (already cleared above, different scope
+      // concern), corrupt-record and save-failure (nothing of this attempt
+      // was ever durably recorded to begin with -- clearing here could wipe
+      // out a genuine still-unresolved EARLIER record instead).
+      if (!isDiningIdentityError(err) && !err?.__ambiguousSubmit && !err?.__corruptIntent && !err?.__saveFailed) {
+        clearCurrentPendingSubmitIntent()
       }
       const rawMsg = err?.message || ''
       // 409 /「本桌身份」可恢复：只提示重新扫码，绝不能标成 tableSessionClosed

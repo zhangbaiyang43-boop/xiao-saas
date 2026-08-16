@@ -117,15 +117,18 @@ describe('P0-04 IDEMPOTENCY_CONFLICT client recovery', () => {
     expect(createOrder).toHaveBeenCalledTimes(1)
   })
 
-  it('P0-04 remark reconciliation §12: ambiguous first attempt + remark edit on retry recovers the existing order, never posts K2', async () => {
+  it('P0-04 remark reconciliation §12 / P0-15 closure Gap B: ambiguous first attempt + remark edit on retry resends the FROZEN original payload, never the live edit', async () => {
     // Real-world shape of this scenario: attempt 1's response is LOST in transit
-    // (network drop) -- the order (O1) is actually created server-side, but the
-    // client never sees the response, so it falls through the generic error
+    // (network drop) -- the order (O1) may or may not actually have been created
+    // server-side; the client can't tell, so it falls through the generic error
     // path (not IDEMPOTENCY_CONFLICT) and does NOT clear its submission key.
-    // The customer edits the remark and retries with the SAME key; only THIS
-    // second attempt gets a real response from the server -- a 409 conflict,
-    // since O1's fingerprint (remark "不要香菜") no longer matches the retried
-    // payload (remark "多放香菜").
+    // The customer edits the remark before retrying. Before the P0-15 closure
+    // (Gap B) this drifted payload would go out under the SAME key and rely on
+    // the server's fingerprint-conflict recovery to catch it; now the client
+    // itself freezes attempt 1's payload and resends exactly that, byte for
+    // byte, regardless of what the live cart looks like by the time of the
+    // retry -- so both attempts are indistinguishable to the server, and a
+    // plain replay/creation succeeds instead of ever hitting a conflict.
     const specItem = {
       id: 'dish_1', name: '宫保鸡丁', price: 40, qty: 1,
       orderName: '宫保鸡丁(大份、鸡蛋、不要香菜)',
@@ -136,14 +139,7 @@ describe('P0-04 IDEMPOTENCY_CONFLICT client recovery', () => {
     state.pendingSubmitRequestId.value = 'K1'
     const networkError = new Error('request:fail')
     createOrder.mockRejectedValueOnce(networkError)
-    createOrder.mockRejectedValueOnce(conflictError({ need_payment: true, payment_mode: 'prepay' }))
-    createWxPayOrder.mockResolvedValue({ data: { free: true, status: 'paid' } })
-    // Prepay recovery must not short-circuit as "already submitted" before
-    // actually paying -- explicit here (not relying on a prior test's mock
-    // default) since prepay's isPaidOrSubmittedOrder only trusts payment_status.
-    // Once-scoped so it doesn't leak into later tests in this file (they don't
-    // mock getOrderStatus themselves and rely on vi.fn()'s default undefined).
-    getOrderStatus.mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'unpaid', payment_mode: 'prepay' } })
+    createOrder.mockResolvedValueOnce({ data: { id: 'order_1', need_payment: false, status: 'pending' } })
 
     await checkout.performSubmitOrder() // attempt 1: remark "不要香菜", response lost
     expect(state.pendingSubmitRequestId.value).toBe('K1') // ambiguous failure never clears the key
@@ -151,17 +147,18 @@ describe('P0-04 IDEMPOTENCY_CONFLICT client recovery', () => {
     // customer edits the remark, then retries -- still the same K1
     specItem.itemRemark = '多放香菜'
     specItem.orderName = '宫保鸡丁(大份、鸡蛋、多放香菜)'
-    await checkout.performSubmitOrder() // attempt 2: hits the real conflict, recovers O1
+    await checkout.performSubmitOrder() // attempt 2: resends the FROZEN attempt-1 payload
 
-    // both submissions carried the real structured remark, never re-parsed from name
-    expect(createOrder.mock.calls[0][0].items[0].item_remark).toBe('不要香菜')
-    expect(createOrder.mock.calls[1][0].items[0].item_remark).toBe('多放香菜')
     expect(createOrder).toHaveBeenCalledTimes(2) // both retried with the SAME key K1, no new key minted
     expect(createOrder.mock.calls[0][0].request_id).toBe('K1')
     expect(createOrder.mock.calls[1][0].request_id).toBe('K1')
-    // recovery targets the EXISTING order -- never a second (K2) order
-    expect(createWxPayOrder).toHaveBeenCalledTimes(1)
-    expect(createWxPayOrder).toHaveBeenCalledWith('order_existing_1', expect.anything(), expect.anything())
+    // Gap B: attempt 2 must carry the FROZEN remark from attempt 1, never the
+    // live edit -- specifications/extras/item_remark all come from the frozen
+    // snapshot, not from the (since-mutated) live cart.
+    expect(createOrder.mock.calls[0][0].items[0].item_remark).toBe('不要香菜')
+    expect(createOrder.mock.calls[1][0].items[0].item_remark).toBe('不要香菜')
+    expect(createOrder.mock.calls[1][0].items[0].specifications).toEqual([{ group: '份量', value: '大份' }])
+    expect(createOrder.mock.calls[1][0].items[0].extras).toEqual(['鸡蛋'])
   })
 
   it('conflict recovery never generates a new pendingSubmitRequestId', async () => {
