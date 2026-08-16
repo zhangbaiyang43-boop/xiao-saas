@@ -18,7 +18,7 @@ from app.core.logger import logger, safe_log
 from app.core.platform_rules import cap_discount_amount
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, set_termination_audit_if_unset
 from app.models.tenant import Tenant
 from app.services.consumption_service import _record_order_consumption
 from app.services.coupon_service import (
@@ -749,6 +749,10 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
             continue
         await _restore_order_stock(locked, db)
         locked.status = "cancelled"
+        set_termination_audit_if_unset(
+            locked, actor_type="system", actor_id=None, actor_role=None,
+            source="synchronous_stale_cleanup",
+        )
         if locked.coupon_id:
             stale_coupon = await db.get(Coupon, locked.coupon_id)
             if stale_coupon and stale_coupon.status == "LOCKED":
@@ -1365,7 +1369,9 @@ async def update_order_status(
         )
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
-    return await service.update_order_status(int(order_id), body)
+    return await service.update_order_status(
+        int(order_id), body, account_id=principal.account_id, role=principal.role,
+    )
 
 TABLE_CLOSE_BLOCKING_STATUSES = {"pending_payment", "pending", "preparing", "refunding", "refund_pending", "refund_requested"}
 TABLE_CLOSE_DONE_STATUSES = {"done", "settled", "cancelled", "rejected"}
@@ -1394,7 +1400,9 @@ async def settle_table(
     service = OrderLifecycleService(db)
     service.set_tenant_id(principal.tenant_id)
     closed_by = str(getattr(request.state, "user_id", "") or "merchant")
-    return await service.settle_table(body, closed_by=closed_by)
+    return await service.settle_table(
+        body, closed_by=closed_by, account_id=principal.account_id, role=principal.role,
+    )
 
 
 class MerchantNoteUpdate(PydanticBase):

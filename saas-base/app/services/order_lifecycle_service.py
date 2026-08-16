@@ -8,7 +8,7 @@ from sqlalchemy.future import select
 
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
-from app.models.order import Order, OrderItem
+from app.models.order import Order, OrderItem, set_termination_audit_if_unset
 from app.services.base_service import BaseService
 
 if TYPE_CHECKING:
@@ -180,6 +180,16 @@ class OrderLifecycleService(BaseService):
             return error_response(code=400, msg="订单已支付或已完成，无法取消")
         await _restore_order_stock(order, self.db)
         order.status = "cancelled"
+        if order.customer_id:
+            set_termination_audit_if_unset(
+                order, actor_type="customer", actor_id=order.customer_id,
+                actor_role=None, source="customer_cancel",
+            )
+        else:
+            set_termination_audit_if_unset(
+                order, actor_type="participant", actor_id=order.participant_id,
+                actor_role=None, source="participant_cancel",
+            )
         if order.coupon_id:
             coupon = await self.db.get(_Coupon, order.coupon_id)
             if coupon and coupon.status == "LOCKED":
@@ -468,7 +478,14 @@ class OrderLifecycleService(BaseService):
             for r in reviews
         ])
 
-    async def update_order_status(self, order_id: int, body: "OrderStatusUpdate") -> ApiResponse:
+    async def update_order_status(
+        self,
+        order_id: int,
+        body: "OrderStatusUpdate",
+        *,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
         from app.api.v1.orders import (
             ORDER_ALLOWED_TRANSITIONS,
             ORDER_MERCHANT_TARGET_STATUSES,
@@ -534,10 +551,17 @@ class OrderLifecycleService(BaseService):
             await _restore_order_stock(order, self.db)
 
         order.status = body.status
+        if body.status in ("rejected", "cancelled"):
+            set_termination_audit_if_unset(
+                order, actor_type="account", actor_id=account_id, actor_role=role,
+                source="merchant_reject" if body.status == "rejected" else "merchant_cancel",
+            )
         # Phase R2: kitchen complete must NOT auto-serve. Waiter/Owner call serve_order.
         just_settled = body.status == "settled" and not getattr(order, "completed_at", None)
         if just_settled:
             order.completed_at = datetime.utcnow()
+            order.settled_by_account_id = account_id
+            order.settled_by_role = role
             marked_offline_paid = False
             if getattr(order, "payment_mode", "prepay") == "postpay":
                 marked_offline_paid = _mark_order_offline_paid(order)
@@ -630,7 +654,14 @@ class OrderLifecycleService(BaseService):
             msg="已确认上菜",
         )
 
-    async def settle_table(self, body: dict[str, Any], *, closed_by: str) -> ApiResponse:
+    async def settle_table(
+        self,
+        body: dict[str, Any],
+        *,
+        closed_by: str,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
         from app.api.v1.orders import (
             TABLE_CLOSE_BLOCKING_STATUSES,
             TABLE_CLOSE_DONE_STATUSES,
@@ -774,6 +805,8 @@ class OrderLifecycleService(BaseService):
             newly_settled_orders.append(o)
             if not getattr(o, "completed_at", None):
                 o.completed_at = datetime.utcnow()
+                o.settled_by_account_id = account_id
+                o.settled_by_role = role
             # 桌台视图的"结账"是餐后付款和桌台账单共用的唯一批量结账入口（小程序下单时不分模式都会建
             # dining_session，两种模式的订单都会被这里的桌台分组捞到），所以线下已付款的标记不能只认
             # table_account——postpay 订单结账时同样要在这里补上，否则会留下"已结账却仍显示未支付"的订单。

@@ -148,7 +148,7 @@ async def _stale_order_cleanup_once():
     directly callable from tests instead of having to drive the infinite loop's sleeps."""
     from datetime import datetime as _dt, timedelta
     from app.core.database import AsyncSessionLocal
-    from app.models.order import Order
+    from app.models.order import Order, set_termination_audit_if_unset
     from app.models.coupon import Coupon as _Coupon
     from sqlalchemy.future import select as _select
 
@@ -187,6 +187,10 @@ async def _stale_order_cleanup_once():
                 continue
             await _restore_order_stock(locked, db)
             locked.status = "cancelled"
+            set_termination_audit_if_unset(
+                locked, actor_type="system", actor_id=None, actor_role=None,
+                source="stale_order_cleanup",
+            )
             if locked.coupon_id:
                 coupon = await db.get(_Coupon, locked.coupon_id)
                 if coupon and coupon.status == "LOCKED":
