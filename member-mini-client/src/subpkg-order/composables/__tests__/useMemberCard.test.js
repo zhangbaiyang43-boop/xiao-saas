@@ -46,6 +46,42 @@ describe('useMemberCard', () => {
     })
   })
 
+  describe('memberIdentityCardStyle', () => {
+    it('返回对象里存在 memberIdentityCardStyle', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardStyle).toBeDefined()
+    })
+
+    it('LV1 会员卡背景引用 card-bg-lv1.jpg', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV1' }
+      expect(card.memberIdentityCardStyle.value).toContain('card-bg-lv1.jpg')
+    })
+
+    it('LV2 会员卡背景引用 card-bg-lv2.jpg', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV2' }
+      expect(card.memberIdentityCardStyle.value).toContain('card-bg-lv2.jpg')
+    })
+
+    it('LV3 会员卡背景引用 card-bg-lv3.jpg', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV3' }
+      expect(card.memberIdentityCardStyle.value).toContain('card-bg-lv3.jpg')
+    })
+
+    it('还没有 bannerInfo 时按 LV1 兜底', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardStyle.value).toContain('card-bg-lv1.jpg')
+    })
+
+    it('等级码不在已知映射里时按 LV1 兜底，不留空背景', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV99' }
+      expect(card.memberIdentityCardStyle.value).toContain('card-bg-lv1.jpg')
+    })
+  })
+
   describe('memberProgressPercent', () => {
     it('没有下一级门槛时进度为 0，不做除以 0 的运算', () => {
       const { card } = setup()

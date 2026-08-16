@@ -6,6 +6,8 @@ const sourcePath = (path) => fileURLToPath(new URL(path, import.meta.url))
 const pagesConfig = JSON.parse(readFileSync(sourcePath('../../pages.json'), 'utf8'))
 const growthSource = readFileSync(sourcePath('../../subpkg-member/pages/growth.vue'), 'utf8')
 const memberCardSource = readFileSync(sourcePath('../../subpkg-order/composables/useMemberCard.js'), 'utf8')
+const memberCardComponentSource = readFileSync(sourcePath('../../subpkg-order/components/MemberCard.vue'), 'utf8')
+const menuSource = readFileSync(sourcePath('../../subpkg-order/pages/menu.vue'), 'utf8')
 
 describe('ordering startup package contracts', () => {
   it('preloads only the ordering package from entry and home', () => {
@@ -30,8 +32,17 @@ describe('ordering startup package contracts', () => {
       expect(growthSource).toContain(webp)
       expect(memberCardSource).toContain(webp)
       expect(growthSource).toContain(`card-bg-${level}.jpg`)
+      expect(memberCardSource).toContain(`card-bg-${level}.jpg`)
     }
     expect(growthSource).not.toMatch(/level-lv[123]\.png/)
     expect(memberCardSource).not.toMatch(/level-lv[123]\.png/)
+  })
+
+  it('会员身份卡背景 style 从 menu.vue 经 composable 完整传到 MemberCard.vue', () => {
+    // 防止再次出现：父组件传了 prop、composable 没产生值、子组件也没消费的断链。
+    expect(memberCardSource).toContain('memberIdentityCardStyle')
+    expect(memberCardComponentSource).toContain('memberIdentityCardStyle: { type: String')
+    expect(memberCardComponentSource).toContain(':style="memberIdentityCardStyle"')
+    expect(menuSource).toContain(':member-identity-card-style="memberIdentityCardStyle"')
   })
 })

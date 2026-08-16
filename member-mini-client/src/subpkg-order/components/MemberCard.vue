@@ -1,7 +1,7 @@
 <template>
   <scroll-view class="tab-scroll" scroll-y>
     <view v-if="bannerInfo" class="card-tab member-center">
-      <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
+      <view class="member-identity-card tap-shrink" :style="memberIdentityCardStyle" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
         <view class="mic-glow"></view>
         <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
         <view class="mic-body">
@@ -111,6 +111,7 @@ export default {
     bannerInfo: { type: Object, default: null },
     shopName: { type: String, default: '' },
     memberLevelBadgeSrc: { type: String, default: '' },
+    memberIdentityCardStyle: { type: String, default: '' },
     memberLevelLabel: { type: String, default: '' },
     memberUpgradeText: { type: String, default: '' },
     memberProgressPercent: { type: Number, default: 0 },

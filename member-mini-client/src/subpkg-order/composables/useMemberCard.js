@@ -32,6 +32,17 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
   const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '普通会员')
   const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.webp', LV2: '/static/member-levels/level-lv2.webp', LV3: '/static/member-levels/level-lv3.webp' }
   const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
+  // 跟 growth.vue 的 LEVEL_CARD_META 保持同一份数值（背景图路径 + 色调 tint），
+  // 那边是已验证的权威来源，这里照抄，不重新设计。
+  const MEMBER_LEVEL_CARD_META = {
+    LV1: { bg: '/static/member-levels/card-bg-lv1.jpg', tint: '6,163,94' },
+    LV2: { bg: '/static/member-levels/card-bg-lv2.jpg', tint: '100,112,128' },
+    LV3: { bg: '/static/member-levels/card-bg-lv3.jpg', tint: '176,130,32' },
+  }
+  const memberIdentityCardStyle = computed(() => {
+    const meta = MEMBER_LEVEL_CARD_META[bannerInfo.value?.levelCode] || MEMBER_LEVEL_CARD_META.LV1
+    return `background-image: linear-gradient(135deg, rgba(${meta.tint},0.68), rgba(${meta.tint},0.42)), url('${meta.bg}'); background-size: cover; background-position: center;`
+  })
   const memberProgressPercent = computed(() => {
     const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)
     const target = Number(bannerInfo.value?.nextGrowth || 0)
@@ -58,6 +69,7 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
     memberSinceText,
     memberLevelLabel,
     memberLevelBadgeSrc,
+    memberIdentityCardStyle,
     memberProgressPercent,
     memberUpgradeText,
     usableMemberCoupons,
