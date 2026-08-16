@@ -41,10 +41,42 @@
 // retry reuse the same identity + payload -- never on app launch.
 
 const STORAGE_PREFIX = 'pending_order_submit_'
+const SUPPORTED_VERSION = 1
 
 function storageKey(tenantId, tableNo, sessionId) {
   if (!tenantId || !sessionId) return null
   return STORAGE_PREFIX + tenantId + '_' + (tableNo || '') + '_' + sessionId
+}
+
+// A single order item is only reliably resendable if it carries what the
+// backend's create-order path actually requires to accept it:
+// dish_id (rejected with "缺少菜品ID" if absent) and qty > 0 (rejected with
+// "商品数量必须大于0" if not) -- see saas-base/app/api/v1/orders.py's
+// _validate_create_order_items_and_compute_total. specifications/extras/
+// item_remark are optional per OrderItemIn and not required for validity.
+function isValidSnapshotItem(item) {
+  return Boolean(item) && typeof item === 'object'
+    && item.dish_id !== undefined && item.dish_id !== null && item.dish_id !== ''
+    && Number(item.qty) > 0
+}
+
+// A record is only "found" (safe to resend) if its frozen snapshot can
+// reliably reconstruct the exact create-order business intent the backend's
+// P0-04 fingerprint (_compute_request_fingerprint: table, dining_session_id,
+// coupon_id, remark, items) will key on, AND that snapshot genuinely belongs
+// to the scope being restored into -- table/dining_session_id/tenant must
+// match, not just the storage key (a defense-in-depth check against a key
+// collision from tenant/table values containing the '_' separator).
+// coupon_id and remark are allowed to be empty per OrderCreate (both
+// Optional); participant_token/client_id are deliberately never validated
+// here -- they are context, not frozen business intent (see module header).
+function isCanonicalSnapshotValid(snapshot, { tenantId, tableNo, sessionId }) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return false
+  if (String(snapshot.table ?? '') !== String(tableNo ?? '')) return false
+  if (String(snapshot.dining_session_id ?? '') !== String(sessionId ?? '')) return false
+  if (String(snapshot.shop ?? '') !== String(tenantId ?? '')) return false
+  if (!Array.isArray(snapshot.items) || snapshot.items.length === 0) return false
+  return snapshot.items.every(isValidSnapshotItem)
 }
 
 export function savePendingSubmitIntent({ tenantId, tableNo, sessionId, requestId, snapshot }) {
@@ -65,10 +97,17 @@ export function savePendingSubmitIntent({ tenantId, tableNo, sessionId, requestI
 
 // Returns one of:
 //   { status: 'missing' }                    -- no record for this scope
-//   { status: 'found', record: {...} }        -- a valid, readable record
-//   { status: 'corrupt' }                     -- a record exists but cannot
-//                                                 be relied on (bad JSON, or
-//                                                 missing its requestId)
+//   { status: 'found', record: {...} }        -- requestId + supported version
+//                                                 + a complete, scope-consistent
+//                                                 canonical business snapshot
+//   { status: 'corrupt' }                     -- a record exists for this scope
+//                                                 but cannot be relied on (bad
+//                                                 JSON, missing requestId,
+//                                                 unsupported version, or an
+//                                                 incomplete/scope-mismatched
+//                                                 snapshot) -- MUST be treated
+//                                                 as "cannot safely resend",
+//                                                 never as "nothing pending".
 export function restorePendingSubmitIntent({ tenantId, tableNo, sessionId }) {
   const key = storageKey(tenantId, tableNo, sessionId)
   if (!key) return { status: 'missing' }
@@ -86,6 +125,8 @@ export function restorePendingSubmitIntent({ tenantId, tableNo, sessionId }) {
     return { status: 'corrupt' }
   }
   if (!record?.requestId) return { status: 'corrupt' }
+  if (record.version !== SUPPORTED_VERSION) return { status: 'corrupt' }
+  if (!isCanonicalSnapshotValid(record.snapshot, { tenantId, tableNo, sessionId })) return { status: 'corrupt' }
   return { status: 'found', record }
 }
 

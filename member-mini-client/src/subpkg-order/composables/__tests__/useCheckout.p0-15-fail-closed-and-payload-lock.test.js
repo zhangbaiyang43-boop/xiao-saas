@@ -231,4 +231,97 @@ describe('P0-15 closure Gap B: request_id always carries the SAME frozen busines
     expect(result).toBe(false)
     expect(createOrder).not.toHaveBeenCalled()
   })
+
+  // A valid, complete record for a single spec'd item -- the baseline every
+  // F09* mutation below starts from and breaks exactly one way.
+  function completeRecord(overrides = {}) {
+    return {
+      version: 1,
+      requestId: 'R1',
+      createdAt: Date.now(),
+      snapshot: {
+        table: TABLE,
+        shop: TENANT,
+        dining_session_id: SESSION,
+        total: 28,
+        remark: undefined,
+        coupon_id: undefined,
+        items: [{ dish_id: 'dish_1', name: '宫保鸡丁', price: 28, qty: 1 }],
+        ...overrides,
+      },
+    }
+  }
+
+  async function expectFailClosed(record) {
+    uni.setStorageSync(STORAGE_KEY, JSON.stringify(record))
+    const { checkout } = newState()
+    const result = await checkout.performSubmitOrder()
+    expect(result).toBe(false)
+    expect(createOrder).not.toHaveBeenCalled()
+  }
+
+  it('F09 sanity: a genuinely complete, scope-consistent record IS accepted (resent, not rejected)', async () => {
+    uni.setStorageSync(STORAGE_KEY, JSON.stringify(completeRecord()))
+    createOrder.mockResolvedValueOnce({ data: { id: 'order_1', need_payment: false, status: 'pending' } })
+    const { checkout } = newState()
+
+    const result = await checkout.performSubmitOrder()
+
+    expect(result).toBe(true)
+    expect(createOrder).toHaveBeenCalledTimes(1)
+    expect(createOrder.mock.calls[0][0].request_id).toBe('R1')
+  })
+
+  it('F09b: requestId present but snapshot is null -> fail closed', async () => {
+    await expectFailClosed({ version: 1, requestId: 'R1', snapshot: null, createdAt: Date.now() })
+  })
+
+  it('F09c: requestId present but snapshot is an empty object -> fail closed', async () => {
+    await expectFailClosed({ version: 1, requestId: 'R1', snapshot: {}, createdAt: Date.now() })
+  })
+
+  it('F09d: snapshot has table/session but items is missing entirely -> fail closed', async () => {
+    const record = completeRecord()
+    delete record.snapshot.items
+    await expectFailClosed(record)
+  })
+
+  it('F09e: snapshot.items is an empty array (server rejects empty items: "订单商品不能为空") -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ items: [] }))
+  })
+
+  it('F09e2: snapshot has an item missing dish_id (server requires it: "缺少菜品ID") -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ items: [{ name: '宫保鸡丁', price: 28, qty: 1 }] }))
+  })
+
+  it('F09e3: snapshot has an item with qty <= 0 (server rejects: "商品数量必须大于0") -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ items: [{ dish_id: 'dish_1', name: '宫保鸡丁', price: 28, qty: 0 }] }))
+  })
+
+  it('F09f: snapshot.dining_session_id does not match the current storage scope session -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ dining_session_id: 'sess_OTHER' }))
+  })
+
+  it('F09g: snapshot.table does not match the current storage scope table -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ table: 'B99' }))
+  })
+
+  it('F09h: snapshot.shop (tenant) does not match the current storage scope tenant -> fail closed', async () => {
+    await expectFailClosed(completeRecord({ shop: 'shop_OTHER' }))
+  })
+
+  it('F09i: unknown/unsupported record version -> fail closed', async () => {
+    const record = completeRecord()
+    record.version = 2
+    await expectFailClosed(record)
+  })
+
+  it('F09j: corrupt/incomplete record is NOT auto-cleared -- it stays in storage for the operator/next honest check', async () => {
+    uni.setStorageSync(STORAGE_KEY, JSON.stringify({ version: 1, requestId: 'R1', snapshot: null }))
+    const { checkout } = newState()
+
+    await checkout.performSubmitOrder()
+
+    expect(uni.getStorageSync(STORAGE_KEY)).toBeTruthy()
+  })
 })
