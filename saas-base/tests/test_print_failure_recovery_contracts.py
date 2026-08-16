@@ -281,6 +281,11 @@ def install_stubs():
     modules["app.core.tenant_context"].TenantContext = types.SimpleNamespace(set_tenant_id=lambda tenant_id: None)
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = FakeOrderItem
+    # P0-16 Phase B2: orders.py now imports set_termination_audit_if_unset
+    # from app.models.order -- this legacy stub module must expose the same
+    # name to satisfy the import, even though none of this file's print-
+    # recovery paths ever call it. No-op only; never touched by these tests.
+    modules["app.models.order"].set_termination_audit_if_unset = lambda order, **kwargs: None
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.models.tenant_config"].TenantConfig = FakeTenantConfig
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})

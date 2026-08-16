@@ -196,6 +196,12 @@ def install_stubs():
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.models.order"].Order = FakeOrder
     modules["app.models.order"].OrderItem = type("FakeOrderItem", (), {})
+    # P0-16 Phase B2: orders.py now imports set_termination_audit_if_unset
+    # from app.models.order -- this legacy stub module must expose the same
+    # name to satisfy the import, even though the wxpay-notify idempotency
+    # path this file tests never calls it (only orders.py's create-order/
+    # cancel paths do). No-op only; never touched by this test.
+    modules["app.models.order"].set_termination_audit_if_unset = lambda order, **kwargs: None
     modules["app.models.tenant"].Tenant = FakeTenant
     modules["app.services.coupon_service"].CouponService = type("CouponService", (), {})
     modules["app.services.coupon_service"]._mark_order_coupon_used_if_locked = _noop_async

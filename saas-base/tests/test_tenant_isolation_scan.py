@@ -43,12 +43,12 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     ): "Order loaded by primary key then customer/participant ownership is verified before any mutation.",
     (
         "app/services/order_lifecycle_service.py",
-        209,
+        219,
         "get_my_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before returning data.",
     (
         "app/services/order_lifecycle_service.py",
-        424,
+        434,
         "create_review",
     ): "Order loaded by primary key then customer_id must match caller before review is created.",
     (
