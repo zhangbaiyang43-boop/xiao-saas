@@ -203,6 +203,13 @@ export default {
 
     watch(() => props.visible, (val, oldVal) => {
       if (val && !oldVal && !uni.getStorageSync(HINT_STORAGE_KEY)) {
+        if (showChangeCallout.value) {
+          // 状态变化提示条已经在讲"点这里"了（比如冷启动时订单状态同步成"已送达"，
+          // 跟气泡首次出现同时发生），首次引导没必要再重复提示一遍——两条提示会
+          // 在左下角同一块地方打架。直接记成"已经提示过"，不再重复弹这条通用引导。
+          uni.setStorageSync(HINT_STORAGE_KEY, '1')
+          return
+        }
         showHint.value = true
         uni.setStorageSync(HINT_STORAGE_KEY, '1')
         hintTimer = setTimeout(dismissHint, 4000)
@@ -233,6 +240,10 @@ export default {
       justChanged.value = true
       pulseTimer = setTimeout(() => { justChanged.value = false }, 700)
       if (props.actionText) {
+        // 反过来的顺序：首次引导提示先一步显示出来了，状态提示条紧接着也要弹——
+        // 状态提示条信息量更大、跟当前具体状态相关，优先收起首次引导，不要两条
+        // 一起挤在左下角。HINT_STORAGE_KEY 在首次引导弹出时已经写过，这里不用重写。
+        if (showHint.value) dismissHint()
         showChangeCallout.value = true
         calloutTimer = setTimeout(() => { showChangeCallout.value = false }, 2200)
       }
