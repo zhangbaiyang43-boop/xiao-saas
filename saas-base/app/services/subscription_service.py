@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -39,6 +40,28 @@ DEFAULT_TRIAL_DAYS = 30
 BILLING_PERIOD_MONTH = "MONTH"
 BILLING_PERIOD_YEAR = "YEAR"
 _VALID_BILLING_PERIODS = (BILLING_PERIOD_MONTH, BILLING_PERIOD_YEAR)
+_CALENDAR_MONTHS_PER_PERIOD = {
+    BILLING_PERIOD_MONTH: 1,
+    BILLING_PERIOD_YEAR: 12,
+}
+
+
+def _add_calendar_months_clamped(dt: datetime, months: int) -> datetime:
+    """Add `months` calendar months to `dt`, clamping the day-of-month to the
+    target month's last valid day (Jan 31 + 1 month = Feb 28/29, never
+    rolling over into March). hour/minute/second/microsecond pass through
+    unchanged via datetime.replace(); naive-UTC convention is untouched.
+
+    Deliberately stdlib-only (calendar.monthrange), not
+    timedelta(days=30)/timedelta(days=365), which drift against real
+    calendar-month/year billing periods (Phase F1B,
+    docs/saas-subscription-audit.md)."""
+    total_months = dt.month - 1 + months
+    year = dt.year + total_months // 12
+    month = total_months % 12 + 1
+    last_day_of_month = calendar.monthrange(year, month)[1]
+    day = min(dt.day, last_day_of_month)
+    return dt.replace(year=year, month=month, day=day)
 
 # Plan price resolution errors (Phase F1A). Plain ValueError subclasses,
 # following the existing repo convention (see PaymentFactError in
@@ -66,6 +89,18 @@ class SubscriptionPurchaseNotAllowedError(PlanResolutionError):
     pass
 
 
+class CrossPlanChangeNotAllowedError(PlanResolutionError):
+    """Raised when a tenant with an active, unexpired paid subscription tries
+    to purchase a *different* plan. V1 has no proration/credit/pending-switch
+    -- the tenant must let the current plan run out (or cancel) first."""
+
+    pass
+
+
+class TenantNotFoundError(ValueError):
+    pass
+
+
 class SubscriptionService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -74,7 +109,7 @@ class SubscriptionService:
         result = await self.db.execute(
             select(Subscription)
             .where(Subscription.tenant_id == tenant_id)
-            .order_by(Subscription.created_at.desc())
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
         )
         return result.scalars().first()
 
@@ -230,6 +265,116 @@ class SubscriptionService:
             status=STATUS_TRIAL,
             trial_started_at=trial_started_at,
             trial_ends_at=trial_ends_at,
+        )
+        self.db.add(subscription)
+        if commit:
+            await self.db.commit()
+        else:
+            await self.db.flush()
+        await self.db.refresh(subscription)
+        return subscription
+
+    async def apply_paid_purchase(
+        self,
+        tenant_id: str,
+        plan_code: str,
+        billing_period: str,
+        paid_at: datetime,
+        *,
+        commit: bool = True,
+    ) -> Subscription:
+        """Apply a verified paid purchase (Phase F1B, docs/saas-subscription-audit.md).
+
+        The caller (future F1C BillingService) is solely responsible for
+        confirming the purchase actually succeeded and for exactly-once
+        delivery via BillingInvoice.success_processed_at -- this method does
+        zero idempotency bookkeeping of its own (no billing_invoice FK, no
+        processed-purchase table: a second "was this already applied"
+        authority would fight the one F1C already owns). Every call here is
+        trusted to represent a genuinely new, not-yet-applied paid event.
+
+        Always INSERTs a new Subscription row -- never mutates the tenant's
+        existing TRIAL/ACTIVE row, which is kept as unmodified history.
+
+        FREE->PAID, TRIAL->PAID, and same-plan renewal all extend from
+        whichever is later of (a) the tenant's current unexpired entitlement
+        end and (b) paid_at, so early renewal never shortens what was already
+        paid for and a lapsed/cancelled entitlement never grants free
+        backdated time. A still-active, unexpired paid plan blocks switching
+        to any *other* plan (no proration/credit/pending-switch in V1) --
+        this is the last-resort domain invariant; the future F1D API/Invoice
+        layer is expected to reject the same case earlier, but this must not
+        rely on that alone.
+
+        commit=False lets a future caller (F1C's BillingService, inside its
+        own open transaction) fold this insert into that same transaction
+        instead of committing here -- see ensure_plan()/create_trial()'s own
+        commit=False handling for the same pattern in this file.
+        """
+        if billing_period not in _VALID_BILLING_PERIODS:
+            raise InvalidBillingPeriodError(f"invalid billing_period: {billing_period!r}")
+        if paid_at is None:
+            raise ValueError("paid_at is required")
+
+        plan = await self.get_plan_by_code(plan_code)
+        if plan is None:
+            raise PlanNotFoundError(f"plan not found: {plan_code!r}")
+        if not plan.is_active:
+            raise PlanInactiveError(f"plan inactive: {plan_code!r}")
+        if plan.code == PLAN_CODE_FREE:
+            raise SubscriptionPurchaseNotAllowedError("FREE plan is not payable")
+
+        # Serialize concurrent purchases for the SAME tenant on the tenant row
+        # itself -- same per-tenant lock pattern as create_trial_for_tenant().
+        # The second of two near-simultaneous paid purchases must block until
+        # the first commits, then its own get_current_subscription() re-read
+        # (below) sees the first purchase's new ends_at as the base to extend
+        # from. Without this, both transactions could read the same stale
+        # current subscription and one paid period would be silently lost.
+        tenant_result = await self.db.execute(
+            select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update()
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant is None:
+            raise TenantNotFoundError(f"tenant not found: {tenant_id}")
+
+        current = await self.get_current_subscription(tenant_id)
+        base_time = paid_at
+        if current is not None:
+            if current.status == STATUS_TRIAL:
+                if current.trial_ends_at is not None and current.trial_ends_at > paid_at:
+                    base_time = current.trial_ends_at
+                # else: trial already lapsed -- nothing left to preserve,
+                # base_time stays paid_at.
+            elif current.status == STATUS_ACTIVE:
+                if current.ends_at is not None and current.ends_at > paid_at:
+                    # Still-active paid entitlement: only a same-plan renewal
+                    # is allowed. Compared by plan_id rather than re-fetching
+                    # current's Plan row -- equivalent given Plan.code's
+                    # DB-level uniqueness (ux_plan_code, Phase 02).
+                    if current.plan_id != plan.id:
+                        raise CrossPlanChangeNotAllowedError(
+                            f"tenant {tenant_id!r} has an active paid subscription for a "
+                            f"different plan; cannot switch to {plan_code!r} while active"
+                        )
+                    base_time = current.ends_at
+                # else: ACTIVE but ends_at already passed -- treated as
+                # expired, base_time stays paid_at, no cross-plan block.
+            # STATUS_CANCELLED, STATUS_EXPIRED, or any other stored status:
+            # no current entitlement to extend or protect -- base_time stays
+            # paid_at, any paid plan may be purchased.
+
+        months = _CALENDAR_MONTHS_PER_PERIOD[billing_period]
+        new_ends_at = _add_calendar_months_clamped(base_time, months)
+
+        subscription = Subscription(
+            tenant_id=tenant_id,
+            plan_id=plan.id,
+            status=STATUS_ACTIVE,
+            started_at=paid_at,
+            ends_at=new_ends_at,
+            trial_started_at=None,
+            trial_ends_at=None,
         )
         self.db.add(subscription)
         if commit:
