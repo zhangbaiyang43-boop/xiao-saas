@@ -9,7 +9,7 @@
           mode="aspectFill"
         />
         <view class="member-identity-card-tint" :style="memberIdentityCardTintStyle"></view>
-        <view class="member-identity-card-content">
+        <view class="member-identity-card-content" :style="memberIdentityCardForegroundStyle">
           <view class="mic-glow"></view>
           <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
           <view class="mic-body">
@@ -122,6 +122,7 @@ export default {
     memberLevelBadgeSrc: { type: String, default: '' },
     memberIdentityCardBgSrc: { type: String, default: '' },
     memberIdentityCardTintStyle: { type: String, default: '' },
+    memberIdentityCardForegroundStyle: { type: String, default: '' },
     memberLevelLabel: { type: String, default: '' },
     memberUpgradeText: { type: String, default: '' },
     memberProgressPercent: { type: Number, default: 0 },
@@ -170,13 +171,21 @@ export default {
 .member-identity-card-tint { position: absolute; inset: 0; z-index: 1; }
 
 
-.member-identity-card-content { position: relative; z-index: 2; }
+.member-identity-card-content {
+  position: relative;
+  z-index: 2;
+  // LV1 兜底值：memberIdentityCardForegroundStyle 意外为空时，行内 style 不会
+  // 覆盖这三个变量，靠这里的默认值保证至少 LV1 底色下文字仍然可读。
+  --member-text-primary: #123B2A;
+  --member-text-secondary: #35634F;
+  --member-text-tertiary: #527563;
+}
 
 
 .mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }
 
 
-.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: rgba(232,202,160,.5); text-transform: uppercase; }
+.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: var(--member-text-secondary); text-transform: uppercase; }
 
 
 .mic-body { position: relative; z-index: 1; margin-top: 20rpx; display: flex; align-items: center; gap: 22rpx; }
@@ -200,13 +209,13 @@ export default {
 .mic-crest-row { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
 
 
-.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #f3e6cf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: var(--member-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
-.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: rgba(232,202,160,.55); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
+.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: var(--member-text-secondary); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
 
 
-.mic-chevron { position: relative; z-index: 1; color: rgba(232,202,160,.55); font-size: 28rpx; flex-shrink: 0; }
+.mic-chevron { position: relative; z-index: 1; color: var(--member-text-tertiary); font-size: 28rpx; flex-shrink: 0; }
 
 
 .member-progress-wrap { position: relative; z-index: 1; margin-top: 22rpx; }
@@ -218,16 +227,16 @@ export default {
 .member-progress-fill { height: 100%; border-radius: 999rpx; background: linear-gradient(90deg,#c9a668,#f3e6cf); }
 
 
-.member-upgrade-text { display: block; margin-top: 10rpx; color: rgba(232,202,160,.7); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
+.member-upgrade-text { display: block; margin-top: 10rpx; color: var(--member-text-secondary); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
 
 
 .mic-footer { position: relative; z-index: 1; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid rgba(232,202,160,.16); display: flex; align-items: center; justify-content: space-between; }
 
 
-.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: rgba(232,202,160,.65); }
+.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: var(--member-text-tertiary); }
 
 
-.mic-since { font-size: 20rpx; color: rgba(232,202,160,.4); font-weight: 700; }
+.mic-since { font-size: 20rpx; color: var(--member-text-tertiary); font-weight: 700; }
 
 
 .member-assets-card { min-height: 168rpx; background: #fff; border-radius: 32rpx; display: flex; align-items: stretch; padding: 28rpx 0; box-sizing: border-box; }

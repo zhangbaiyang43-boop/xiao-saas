@@ -92,6 +92,34 @@ describe('ordering startup package contracts', () => {
     expect(memberCardComponentSource).toContain(':src="memberLevelBadgeSrc"')
   })
 
+  it('会员身份卡前景色 CSS 变量从 menu.vue 经 composable 完整传到 MemberCard.vue', () => {
+    expect(memberCardSource).toContain('memberIdentityCardForegroundStyle')
+    expect(memberCardComponentSource).toContain('memberIdentityCardForegroundStyle: { type: String')
+    expect(memberCardComponentSource).toContain('class="member-identity-card-content" :style="memberIdentityCardForegroundStyle"')
+    expect(menuSource).toContain(':member-identity-card-foreground-style="memberIdentityCardForegroundStyle"')
+  })
+
+  it('MemberCard 提供 --member-text-* 的 LV1 兜底默认值，防止 style 意外为空时文字看不清', () => {
+    expect(memberCardComponentSource).toMatch(
+      /\.member-identity-card-content\s*\{[\s\S]*?--member-text-primary:\s*#123B2A;[\s\S]*?--member-text-secondary:\s*#35634F;[\s\S]*?--member-text-tertiary:\s*#527563;[\s\S]*?\}/
+    )
+  })
+
+  it('会员身份区文字选择器改用 --member-text-* 变量，不再硬编码浅金色（真机验证 LV1 亮绿底上对比度不足）', () => {
+    const memberIdentityTextSelectors = ['.mic-issuer', '.member-level', '.mic-sub', '.mic-chevron', '.member-upgrade-text', '.mic-number', '.mic-since']
+    for (const selector of memberIdentityTextSelectors) {
+      const escaped = selector.replace('.', '\\.')
+      const match = memberCardComponentSource.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+      expect(match, `selector ${selector} should exist in MemberCard.vue`).toBeTruthy()
+      const body = match[1]
+      expect(body).toMatch(/color:\s*var\(--member-text-(primary|secondary|tertiary)\)/)
+      expect(body).not.toContain('#f3e6cf')
+      expect(body).not.toContain('232,202,160')
+    }
+    // 进度条填充色是这张"金属会员卡"的识别点，明确保留金色，不跟随文字变色。
+    expect(memberCardComponentSource).toContain('.member-progress-fill { height: 100%; border-radius: 999rpx; background: linear-gradient(90deg,#c9a668,#f3e6cf); }')
+  })
+
   it('WebP 404 排查用的临时 A/B 诊断代码已经清理干净，不带进正式版本', () => {
     expect(memberCardComponentSource).not.toContain('DEBUG_USE_JPG_BADGE_FOR_LOAD_TEST')
     expect(memberCardComponentSource).not.toContain('debugMemberBadgeSrc')
