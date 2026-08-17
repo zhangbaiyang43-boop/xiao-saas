@@ -46,6 +46,18 @@ PAYMENT_PROVIDERS = {"FAKE", "WXPAY"}
 DUPLICATE_INVOICE_PAYMENT = "DUPLICATE_INVOICE_PAYMENT"
 
 
+class SubscriptionSnapshotIntegrityError(ValueError):
+    """Raised when a SAAS_SUBSCRIPTION invoice has exactly one of
+    plan_code/billing_period set (Phase F1C) -- a malformed purchase
+    snapshot, not a legacy pre-F1A invoice (which has BOTH null). Raising
+    here aborts _on_billing_payment_success before invoice.success_processed_at
+    is assigned, so the caller's local transaction never durably commits a
+    "success" that didn't actually apply an entitlement; the invoice is left
+    for authoritative recovery rather than guessed at."""
+
+    pass
+
+
 def _iso(value: Any) -> str | None:
     return value.isoformat() if value else None
 
@@ -299,12 +311,71 @@ class BillingService(BaseService):
         from app.services.channel_commission_service import ChannelCommissionService
 
         await ChannelCommissionService(self.db).handle_billing_payment_success(invoice, payment)
+        if invoice.charge_type == "SAAS_SUBSCRIPTION":
+            await self._apply_saas_subscription_purchase(invoice, payment)
         invoice.success_processed_at = payment.paid_at or datetime.utcnow()
         logger.info(
             "[BILLING_PAYMENT_SUCCESS] invoice_id=%s payment_id=%s amount_cents=%s",
             invoice.id,
             payment.id,
             payment.amount_cents,
+        )
+
+    async def _apply_saas_subscription_purchase(self, invoice: BillingInvoice, payment: BillingPayment) -> None:
+        """Bridge a verified SAAS_SUBSCRIPTION invoice into Subscription
+        entitlement (Phase F1C, docs/saas-subscription-audit.md). Called only
+        from _on_billing_payment_success(), inside the SAME local transaction
+        and gated by the SAME invoice.success_processed_at authority that
+        guards commission bookkeeping -- SubscriptionService.apply_paid_purchase()
+        performs zero idempotency bookkeeping of its own by design (see its
+        own docstring): this IS the one authority, not a second one.
+
+        F1A's plan_code/billing_period columns are additive-nullable, so
+        pre-F1A SAAS_SUBSCRIPTION invoices exist with BOTH null: legacy, no
+        purchase snapshot survives to reconstruct from, so nothing is
+        applied -- guessing a plan from amount_cents would fabricate a money
+        contract that was never actually agreed. Exactly ONE of the two
+        being set is a data integrity error, not a legacy case, and must
+        not be guessed at either; see SubscriptionSnapshotIntegrityError.
+
+        Deliberately does not pass amount -- Payment/Invoice amount
+        verification already happened in process_provider_notification()
+        before this is ever reached (_validate_success_notice); Subscription
+        only consumes the already-verified purchase fact, never re-resolves
+        price."""
+        plan_code = invoice.plan_code
+        billing_period = invoice.billing_period
+
+        if plan_code is None and billing_period is None:
+            logger.warning(
+                "[BILLING_LEGACY_SUBSCRIPTION_INVOICE] invoice_id=%s tenant_id=%s",
+                invoice.id,
+                invoice.tenant_id,
+            )
+            return
+
+        if plan_code is None or billing_period is None:
+            logger.error(
+                "[BILLING_SUBSCRIPTION_SNAPSHOT_MALFORMED] invoice_id=%s tenant_id=%s "
+                "plan_code=%s billing_period=%s",
+                invoice.id,
+                invoice.tenant_id,
+                plan_code,
+                billing_period,
+            )
+            raise SubscriptionSnapshotIntegrityError(
+                f"invoice {invoice.id} has a malformed SAAS_SUBSCRIPTION snapshot: "
+                f"plan_code={plan_code!r} billing_period={billing_period!r}"
+            )
+
+        from app.services.subscription_service import SubscriptionService
+
+        await SubscriptionService(self.db).apply_paid_purchase(
+            tenant_id=invoice.tenant_id,
+            plan_code=plan_code,
+            billing_period=billing_period,
+            paid_at=invoice.paid_at,
+            commit=False,
         )
 
     @staticmethod
