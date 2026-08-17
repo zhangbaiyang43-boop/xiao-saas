@@ -10,6 +10,11 @@ class BillingInvoice(BaseModel):
     charge_type = Column(String(32), nullable=False)
     description = Column(String(255), nullable=False, default="")
     amount_cents = Column(Integer, nullable=False)
+    # Plan snapshot at purchase time. Nullable: not every invoice is a
+    # SAAS_SUBSCRIPTION charge, so not every invoice corresponds to a plan
+    # (Phase F1A — schema only, no writer populates these yet).
+    plan_code = Column(String(32), nullable=True)
+    billing_period = Column(String(8), nullable=True)
     currency = Column(String(8), nullable=False, default="CNY")
     status = Column(String(32), nullable=False, default="PENDING")
     metadata_json = Column(JSON, nullable=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -32,8 +32,38 @@ STATUS_EXPIRED = "EXPIRED"
 STATUS_CANCELLED = "CANCELLED"
 
 PLAN_CODE_FREE = "FREE"
+PLAN_CODE_STANDARD = "STANDARD"
 PLAN_CODE_PRO = "PRO"
 DEFAULT_TRIAL_DAYS = 30
+
+BILLING_PERIOD_MONTH = "MONTH"
+BILLING_PERIOD_YEAR = "YEAR"
+_VALID_BILLING_PERIODS = (BILLING_PERIOD_MONTH, BILLING_PERIOD_YEAR)
+
+# Plan price resolution errors (Phase F1A). Plain ValueError subclasses,
+# following the existing repo convention (see PaymentFactError in
+# app/services/order_payment_service.py) rather than a bespoke exception
+# framework for just four cases.
+
+
+class PlanResolutionError(ValueError):
+    pass
+
+
+class PlanNotFoundError(PlanResolutionError):
+    pass
+
+
+class PlanInactiveError(PlanResolutionError):
+    pass
+
+
+class InvalidBillingPeriodError(PlanResolutionError):
+    pass
+
+
+class SubscriptionPurchaseNotAllowedError(PlanResolutionError):
+    pass
 
 
 class SubscriptionService:
@@ -51,6 +81,38 @@ class SubscriptionService:
     async def get_plan_by_code(self, code: str) -> Optional[Plan]:
         result = await self.db.execute(select(Plan).where(Plan.code == code))
         return result.scalar_one_or_none()
+
+    async def get_active_plans(self) -> List[Plan]:
+        """Plan catalog, is_active=true only, sort_order ASC then id ASC as a
+        stable secondary order (two plans never share a sort_order in the
+        frozen commercial contract, but this keeps the ordering deterministic
+        even if that ever changes)."""
+        result = await self.db.execute(
+            select(Plan)
+            .where(Plan.is_active.is_(True))
+            .order_by(Plan.sort_order.asc(), Plan.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def resolve_plan_price(self, plan_code: str, billing_period: str) -> int:
+        """Fixed final price in integer cents, read directly from the Plan row
+        this DB is the sole price authority. Never ×12×0.86, never float,
+        never a client-supplied amount (docs/saas-subscription-audit.md Phase
+        F1A). FREE is never payable."""
+        if billing_period not in _VALID_BILLING_PERIODS:
+            raise InvalidBillingPeriodError(f"invalid billing_period: {billing_period!r}")
+
+        plan = await self.get_plan_by_code(plan_code)
+        if plan is None:
+            raise PlanNotFoundError(f"plan not found: {plan_code!r}")
+        if not plan.is_active:
+            raise PlanInactiveError(f"plan inactive: {plan_code!r}")
+        if plan.code == PLAN_CODE_FREE:
+            raise SubscriptionPurchaseNotAllowedError("FREE plan is not payable")
+
+        if billing_period == BILLING_PERIOD_MONTH:
+            return plan.price_month_cents
+        return plan.price_year_cents
 
     async def ensure_plan(self, code: str, name: str, *, commit: bool = True) -> Plan:
         """get-or-create, idempotent under concurrent callers.
