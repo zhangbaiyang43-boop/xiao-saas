@@ -69,6 +69,8 @@ def serialize_invoice(invoice: BillingInvoice) -> dict[str, Any]:
         "invoice_no": invoice.invoice_no,
         "charge_type": invoice.charge_type,
         "description": invoice.description,
+        "plan_code": invoice.plan_code,
+        "billing_period": invoice.billing_period,
         "amount_cents": invoice.amount_cents,
         "currency": invoice.currency,
         "status": invoice.status,
@@ -117,6 +119,8 @@ class BillingService(BaseService):
         currency: str = "CNY",
         expired_at: datetime | None = None,
         metadata: dict[str, Any] | None = None,
+        plan_code: str | None = None,
+        billing_period: str | None = None,
     ) -> BillingInvoice:
         tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
         tenant = tenant_result.scalar_one_or_none()
@@ -134,6 +138,8 @@ class BillingService(BaseService):
             invoice_no=f"BINV{invoice_id}",
             charge_type=charge_type,
             description=(description or "").strip()[:255],
+            plan_code=plan_code,
+            billing_period=billing_period,
             amount_cents=int(amount_cents),
             currency=(currency or "CNY").upper(),
             status=INVOICE_STATUS_PENDING,

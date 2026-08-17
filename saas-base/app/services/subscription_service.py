@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import calendar
+import math
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -32,6 +34,12 @@ STATUS_ACTIVE = "ACTIVE"
 STATUS_EXPIRED = "EXPIRED"
 STATUS_CANCELLED = "CANCELLED"
 
+# API-facing subscription_status value for "no Subscription row at all"
+# (Phase F1D, GET /api/v1/subscription/current). Deliberately a separate
+# constant from PLAN_CODE_FREE below even though the string value matches --
+# one names a Plan.code, the other a subscription_status a merchant sees.
+SUBSCRIPTION_STATUS_FREE = "FREE"
+
 PLAN_CODE_FREE = "FREE"
 PLAN_CODE_STANDARD = "STANDARD"
 PLAN_CODE_PRO = "PRO"
@@ -62,6 +70,21 @@ def _add_calendar_months_clamped(dt: datetime, months: int) -> datetime:
     last_day_of_month = calendar.monthrange(year, month)[1]
     day = min(dt.day, last_day_of_month)
     return dt.replace(year=year, month=month, day=day)
+
+
+def resolve_days_remaining(effective_end: Optional[datetime], *, now: Optional[datetime] = None) -> int:
+    """Frozen ceil-days display algorithm (Phase F1D): 0 if there's no
+    effective_end or it's already passed; otherwise ceil(remaining_seconds /
+    86400) -- 3h remaining is "1 day", exactly 24h remaining is "1 day",
+    24h+1s remaining is "2 days". Public (no leading underscore): the F1D API
+    layer calls this directly to render GET /current's days_remaining."""
+    if effective_end is None:
+        return 0
+    now = now or datetime.utcnow()
+    remaining_seconds = (effective_end - now).total_seconds()
+    if remaining_seconds <= 0:
+        return 0
+    return math.ceil(remaining_seconds / 86400)
 
 # Plan price resolution errors (Phase F1A). Plain ValueError subclasses,
 # following the existing repo convention (see PaymentFactError in
@@ -101,6 +124,34 @@ class TenantNotFoundError(ValueError):
     pass
 
 
+class PlanDataIntegrityError(RuntimeError):
+    """Raised when the plan catalog is missing data the frozen commercial
+    contract guarantees should exist -- e.g. no FREE row, or a Subscription
+    referencing a plan_id that no longer exists in `plans`. This is a
+    server-side data problem, not a client input error (hence RuntimeError,
+    not a PlanResolutionError/ValueError): never silently fabricate a
+    placeholder Plan to paper over it (Phase F1D)."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class EffectiveSubscriptionView:
+    """Merchant-facing read model for GET /api/v1/subscription/current
+    (Phase F1D). Deliberately not an entitlement object -- nothing outside
+    this file reads Subscription state to authorize behavior (see the module
+    docstring above); this only answers what the merchant should see."""
+
+    effective_plan: Plan
+    subscription_status: str
+    is_trial: bool
+    trial_ends_at: Optional[datetime]
+    paid_started_at: Optional[datetime]
+    paid_ends_at: Optional[datetime]
+    days_remaining: int
+    can_renew: bool
+
+
 class SubscriptionService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -128,6 +179,124 @@ class SubscriptionService:
             .order_by(Plan.sort_order.asc(), Plan.id.asc())
         )
         return list(result.scalars().all())
+
+    async def _require_plan_by_id(self, plan_id: int) -> Plan:
+        result = await self.db.execute(select(Plan).where(Plan.id == plan_id))
+        plan = result.scalar_one_or_none()
+        if plan is None:
+            raise PlanDataIntegrityError(f"subscription references missing plan_id={plan_id}")
+        return plan
+
+    async def _require_free_plan(self) -> Plan:
+        plan = await self.get_plan_by_code(PLAN_CODE_FREE)
+        if plan is None:
+            raise PlanDataIntegrityError("FREE plan is missing from the plan catalog")
+        return plan
+
+    async def get_effective_subscription_view(
+        self, tenant_id: str, *, now: Optional[datetime] = None
+    ) -> EffectiveSubscriptionView:
+        """Read-only resolution for GET /api/v1/subscription/current (Phase
+        F1D). Reuses is_active()/is_trial() (Phase 02) rather than
+        re-deriving expiry logic, so this always agrees with the judgments
+        those two already make elsewhere.
+
+        can_renew is unconditionally True here: AuthMiddleware already blocks
+        banned/inactive tenants before a request reaches this far (see
+        _is_tenant_active in app/middleware/auth_middleware.py), and every
+        remaining status (FREE/TRIAL/ACTIVE/EXPIRED/CANCELLED) permits at
+        least a STANDARD/PRO purchase per the frozen commercial contract --
+        so there is no second tenant-eligibility judgment to make here.
+        """
+        now = now or datetime.utcnow()
+        current = await self.get_current_subscription(tenant_id)
+        unexpired = self.is_active(current, now=now)
+
+        if current is not None and unexpired and current.status == STATUS_ACTIVE:
+            plan = await self._require_plan_by_id(current.plan_id)
+            return EffectiveSubscriptionView(
+                effective_plan=plan,
+                subscription_status=STATUS_ACTIVE,
+                is_trial=False,
+                trial_ends_at=None,
+                paid_started_at=current.started_at,
+                paid_ends_at=current.ends_at,
+                days_remaining=resolve_days_remaining(current.ends_at, now=now),
+                can_renew=True,
+            )
+
+        if current is not None and unexpired and self.is_trial(current):
+            plan = await self._require_plan_by_id(current.plan_id)
+            return EffectiveSubscriptionView(
+                effective_plan=plan,
+                subscription_status=STATUS_TRIAL,
+                is_trial=True,
+                trial_ends_at=current.trial_ends_at,
+                paid_started_at=None,
+                paid_ends_at=None,
+                days_remaining=resolve_days_remaining(current.trial_ends_at, now=now),
+                can_renew=True,
+            )
+
+        free_plan = await self._require_free_plan()
+        if current is None:
+            status = SUBSCRIPTION_STATUS_FREE
+        elif current.status == STATUS_CANCELLED:
+            status = STATUS_CANCELLED
+        else:
+            # ACTIVE or TRIAL, but expired (unexpired was False above) -- or
+            # any other/future stored status: no current entitlement.
+            status = STATUS_EXPIRED
+        return EffectiveSubscriptionView(
+            effective_plan=free_plan,
+            subscription_status=status,
+            is_trial=False,
+            trial_ends_at=None,
+            paid_started_at=None,
+            paid_ends_at=None,
+            days_remaining=0,
+            can_renew=True,
+        )
+
+    async def validate_renewal_purchase(
+        self, tenant_id: str, plan_code: str, billing_period: str, *, now: Optional[datetime] = None
+    ) -> tuple[Plan, int]:
+        """Pre-payment validation for POST /api/v1/subscription/renewal-orders
+        (Phase F1D). Reuses resolve_plan_price() for the plan/period/price
+        checks (plan exists, is_active, not FREE, billing_period valid) and
+        adds the cross-plan-purchase gate on top, evaluated at invoice-
+        creation time (`now`).
+
+        This is a fail-fast convenience check, NOT the authoritative one:
+        apply_paid_purchase() (Phase F1C/F1B) re-checks for real at actual
+        payment time, since state can change between order creation and
+        payment (e.g. the blocking subscription expires, or another renewal
+        completes first) -- SubscriptionService remains the last-resort
+        domain invariant regardless of what this endpoint already rejected.
+
+        Deliberately duplicates apply_paid_purchase()'s small cross-plan
+        predicate rather than refactoring that already-tested method to share
+        it -- the two are evaluated at different reference times (`now` here
+        vs. actual `paid_at` there) and this phase's instructions are to
+        touch existing, frozen F1B/F1C logic only if truly necessary.
+        """
+        now = now or datetime.utcnow()
+        amount_cents = await self.resolve_plan_price(plan_code, billing_period)
+        plan = await self.get_plan_by_code(plan_code)
+
+        current = await self.get_current_subscription(tenant_id)
+        if (
+            current is not None
+            and current.status == STATUS_ACTIVE
+            and current.ends_at is not None
+            and current.ends_at > now
+            and current.plan_id != plan.id
+        ):
+            raise CrossPlanChangeNotAllowedError(
+                f"tenant {tenant_id!r} has an active paid subscription for a "
+                f"different plan; cannot switch to {plan_code!r} while active"
+            )
+        return plan, amount_cents
 
     async def resolve_plan_price(self, plan_code: str, billing_period: str) -> int:
         """Fixed final price in integer cents, read directly from the Plan row
