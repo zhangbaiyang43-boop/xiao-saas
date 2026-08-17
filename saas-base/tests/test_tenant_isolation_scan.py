@@ -28,7 +28,7 @@ SENSITIVE_MODELS = frozenset(
 ALLOWLIST: dict[tuple[str, int, str], str] = {
     (
         "app/api/v1/customers.py",
-        165,
+        170,
         "list_customers",
     ): "MemberAccount rows loaded by customer_ids from CustomerService.list_customers(tenant_id=...); customers are already tenant-scoped.",
     (

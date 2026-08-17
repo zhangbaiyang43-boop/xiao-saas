@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_helper import cache_result
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
+from app.core.plan_capabilities import CAP_MARKETING_AUTOMATION
 from app.core.rate_limiter import tenant_limit
 from app.core.response import RespVo, error_response, success_response
 from app.services.statistics_service import StatisticsService
@@ -42,6 +44,10 @@ async def table_coupon_activity(request: Request, date: str | None = None, db: A
 @tenant_limit()
 @cache_result("stats:marketing_effectiveness", ttl=60)
 async def marketing_effectiveness(request: Request, days: int = 30, db: AsyncSession = Depends(get_db)):
+    tenant_id = getattr(request.state, "tenant_id", None)
+    denial = await require_capability_response(db, tenant_id, CAP_MARKETING_AUTOMATION)
+    if denial is not None:
+        return denial
     end = datetime.utcnow()
     start = end - timedelta(days=days)
     data = await StatisticsService(db).marketing_effectiveness(start, end)

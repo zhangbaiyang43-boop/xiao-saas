@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.events import CONSUMPTION_CREATED, DomainEvent, event_bus
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_CUSTOMER_CONSUMPTION
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.schemas.consumption import CreateConsumptionRequest
@@ -37,6 +39,9 @@ async def list_consumptions(
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     skip, limit = normalize_pagination(skip, limit)
     service = ConsumptionService(db)
     consumptions = await service.list_consumptions(customer_id=customer_id, skip=skip, limit=limit)
@@ -49,6 +54,10 @@ async def create_consumption(data: CreateConsumptionRequest, request: Request, d
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
         return error_response(code=401, msg="请先登录")
+
+    denial = await require_capability_response(db, tenant_id, CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
 
     # 越权校验：客户端传的 customer_id 必须属于当前登录商家，否则能给别的商家的
     # 客户记一笔消费/发一张券，数据挂到自己名下却污染了别的租户的客户记录。

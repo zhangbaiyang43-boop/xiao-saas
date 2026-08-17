@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_CUSTOMER_CONSUMPTION
 from app.core.response import RespVo, error_response, success_response
+from app.core.tenant_context import TenantContext
 from app.schemas.customer import (
     CreateCustomerRequest,
     MergeCustomerRequest,
@@ -139,11 +142,13 @@ async def list_customers(
     page_size: int = None,
     db: AsyncSession = Depends(get_db),
 ):
-    from app.core.tenant_context import TenantContext
     from app.models.member_account import MemberAccount
     from sqlalchemy.future import select
 
     tenant_id = TenantContext.get_tenant_id()
+    denial = await require_capability_response(db, tenant_id, CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     if page and page_size:
         skip = (page - 1) * page_size
         limit = page_size
@@ -334,6 +339,9 @@ async def delete_customer(customer_id: int, request: Request, db: AsyncSession =
 
 @router.get("/{customer_id}", response_model=RespVo)
 async def get_customer(customer_id: int, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     customer = await service.get_customer_any_status(customer_id)
     if not customer:
@@ -357,6 +365,9 @@ async def get_customer_operation_logs(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     customer = await service.get_customer_any_status(customer_id)
     if not customer:
@@ -378,6 +389,9 @@ async def get_customer_identities(customer_id: int, db: AsyncSession = Depends(g
 
 @router.get("/{customer_id}/timeline", response_model=RespVo)
 async def get_customer_timeline(customer_id: int, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     # P0 安全修复：跟其它 /customers/{id}/* 接口一样，先确认这个客户属于当前商家，
     # 否则随便猜一个客户 ID 就能拉到别的商家客户的完整消费记录。

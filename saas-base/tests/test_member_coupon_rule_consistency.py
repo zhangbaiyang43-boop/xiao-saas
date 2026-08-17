@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -14,10 +14,12 @@ from app.models.base import Base
 from app.models.consumption import Consumption
 from app.models.customer import Customer
 from app.models.order import Order
+from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 from app.schemas.consumption import CreateConsumptionRequest
 from app.services.coupon_service import CouponService
 from app.services.order_payment_service import OrderPaymentService
+from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -65,6 +67,26 @@ class MemberCouponRuleConsistencyTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(self.tenant)
         self.customer = Customer(tenant_id=TENANT_A, openid="openid-1", status=1)
         self.db.add(self.customer)
+        # Phase F1F-C: manual consumption creation (POST /api/v1/consumptions/)
+        # is now gated behind CUSTOMER_CONSUMPTION (PRO). This file predates
+        # subscription-awareness and tests coupon auto-issue rule selection,
+        # unrelated to plan tier -- give TENANT_A a real PRO baseline so the
+        # manual-consumption call under test keeps succeeding.
+        self.db.add_all(
+            [
+                Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
+                Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200, sort_order=2),
+            ]
+        )
+        await self.db.commit()
+
+        pro_plan = await SubscriptionService(self.db).get_plan_by_code("PRO")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=TENANT_A, plan_id=pro_plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
         await self.db.commit()
 
         self.captured_rule_types: list[str] = []

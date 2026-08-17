@@ -5,9 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache_helper import cache_result, clear_cache_pattern
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_COUPONS
 from app.core.rate_limiter import tenant_limit
 from app.core.response import RespVo, error_response, success_response
+from app.core.tenant_context import TenantContext
 from app.schemas.coupon import CreateCouponTemplateRequest, UpdateCouponTemplateRequest
 from app.services.coupon_service import CouponService
 
@@ -56,6 +59,9 @@ async def get_template(request: Request, template_id: int, db: AsyncSession = De
 @router.post("/", response_model=RespVo)
 @tenant_limit()
 async def create_template(request: Request, data: CreateCouponTemplateRequest, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_COUPONS)
+    if denial is not None:
+        return denial
     service = CouponService(db)
     template = await service.create_template(
         name=data.name,
@@ -80,6 +86,9 @@ async def update_template(
     data: UpdateCouponTemplateRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_COUPONS)
+    if denial is not None:
+        return denial
     service = CouponService(db)
     payload = data.model_dump(exclude_unset=True)
     if "start_time" in payload and payload["start_time"]:
@@ -97,6 +106,9 @@ async def update_template(
 @router.delete("/{template_id}", response_model=RespVo)
 @tenant_limit()
 async def delete_template(request: Request, template_id: int, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_COUPONS)
+    if denial is not None:
+        return denial
     service = CouponService(db)
     success = await service.delete_template(template_id)
     if not success:

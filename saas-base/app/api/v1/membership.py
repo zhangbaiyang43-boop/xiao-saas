@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
+from app.core.plan_capabilities import CAP_MEMBERSHIP
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.services.customer_service import CustomerService
@@ -66,6 +68,10 @@ def serialize_benefit(item):
 
 @router.get("/config", response_model=RespVo)
 async def get_membership_config(db: AsyncSession = Depends(get_db)):
+    tenant_id = TenantContext.get_tenant_id()
+    denial = await require_capability_response(db, tenant_id, CAP_MEMBERSHIP)
+    if denial is not None:
+        return denial
     service = MembershipService(db)
     benefits = await service.list_benefits()
     data = service.get_config()
@@ -78,6 +84,10 @@ async def get_customer_membership(request: Request, customer_id: int, db: AsyncS
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id:
         return error_response(code=401, msg="未授权")
+
+    denial = await require_capability_response(db, tenant_id, CAP_MEMBERSHIP)
+    if denial is not None:
+        return denial
 
     TenantContext.set_tenant_id(tenant_id)
 
