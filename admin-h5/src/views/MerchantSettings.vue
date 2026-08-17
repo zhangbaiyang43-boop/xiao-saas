@@ -43,6 +43,10 @@
           <div><strong>通知提醒</strong><span>核销提醒、新会员提醒</span></div>
           <RightOutlined />
         </div>
+        <div class="menu-item" @click="router.push('/subscription')">
+          <div><strong>我的套餐</strong><span>{{ subscriptionPlanName }}</span></div>
+          <RightOutlined />
+        </div>
       </section>
 
       <!-- 补充入口：只放"更多"页没有专门入口的功能，避免跟"更多"页重复。
@@ -68,13 +72,15 @@ import {
   LinkOutlined, RightOutlined, ShopOutlined, WechatOutlined,
 } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
-import { getPrinterConfig, getTenantProfile, logoutTenant } from '../api'
+import { getPrinterConfig, getTenantProfile, logoutTenant, getCurrentSubscription } from '../api'
 import { clearSession } from '../utils/session'
+import { planDisplayName } from '../utils/subscriptionUi'
 
 const router = useRouter()
 const merchant = ref({})
 const printerConfig = ref({ configured: false })
 const opSettings = ref({ is_open: true, business_hours: '', dine_in_enabled: true, pickup_enabled: false, delivery_enabled: false })
+const subscriptionPlanName = ref('免费版')
 
 const wxpayStatusMap = { unconfigured: '未配置', pending: '待验证', verified: '已验证', paused: '暂停' }
 const wxpayStatusText = computed(() => wxpayStatusMap[merchant.value.payment_status] || '未配置')
@@ -95,7 +101,9 @@ const businessItems = [
 
 async function loadData() {
   try {
-    const [profileRes, printerRes] = await Promise.allSettled([getTenantProfile(), getPrinterConfig()])
+    const [profileRes, printerRes, subscriptionRes] = await Promise.allSettled([
+      getTenantProfile(), getPrinterConfig(), getCurrentSubscription(),
+    ])
     if (profileRes.status === 'fulfilled' && profileRes.value.code === 200) {
       const data = profileRes.value.data || {}
       merchant.value = data
@@ -108,6 +116,10 @@ async function loadData() {
       }
     }
     if (printerRes.status === 'fulfilled' && printerRes.value.code === 200) printerConfig.value = printerRes.value.data || { configured: false }
+    // 套餐名只是辅助信息，加载失败就保留默认的"免费版"，不影响这个页面其它内容。
+    if (subscriptionRes.status === 'fulfilled' && subscriptionRes.value.code === 200) {
+      subscriptionPlanName.value = planDisplayName(subscriptionRes.value.data?.effective_plan_code) || '免费版'
+    }
   } catch {
     message.error('设置加载失败')
   }

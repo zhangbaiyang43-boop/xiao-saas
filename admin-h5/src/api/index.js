@@ -203,4 +203,14 @@ export const getQueueStatus = (params, config = {}) => request.get('/queue/statu
 export const getQueueTicketStatusByToken = (token, config = {}) => request.get('/queue/status', { ...config, params: { token } })
 export const printTestQueueTicket = () => request.post('/queue/print-test')
 
+// Phase F1E-B — 商家套餐（Backend: F1D subscription API + F1E-A billing
+// payment-readiness）。price/discount 权威只在 getSubscriptionPlans() 的
+// 返回值里，前端不 hardcode 任何金额。
+export const getCurrentSubscription = () => request.get('/v1/subscription/current')
+export const getSubscriptionPlans = () => request.get('/v1/subscription/plans')
+export const getPaymentReadiness = (config = {}) => request.get('/v1/billing/payment-readiness', config)
+export const createRenewalOrder = (data) => request.post('/v1/subscription/renewal-orders', data)
+export const createBillingPayment = (invoiceId, data = {}) => request.post(`/v1/billing/invoices/${invoiceId}/payments`, data)
+export const getBillingPayment = (paymentId, config = {}) => request.get(`/v1/billing/payments/${paymentId}`, config)
+
 
