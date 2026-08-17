@@ -456,11 +456,12 @@ class StaffLoginGateTest(BaseEntitlementEnforcementTest):
         self.assertNotIn("密码", resp.msg)
         self.assertNotIn("账号或密码", resp.msg)
 
-    async def test_missing_plan_catalog_fails_open_not_login_outage(self):
-        """Same fail-open rule as the middleware: a genuine data-integrity
-        error (no FREE plan row -- the exact gap pre-existing,
-        subscription-unaware test fixtures have) must not turn into a login
-        outage for an otherwise-valid staff credential."""
+    async def test_missing_plan_catalog_fails_closed_not_login_grant(self):
+        """PHASE F1F-BH: a genuine data-integrity error (no FREE plan row --
+        the exact gap pre-existing, subscription-unaware test fixtures have)
+        must NOT be treated as an implicit capability grant. An otherwise-
+        valid staff credential must still be denied a JWT when entitlement
+        resolution itself is broken -- PAID_FEATURE_FAILS_CLOSED."""
         result = await self.db.execute(select(Plan).where(Plan.code == "FREE"))
         free_plan = result.scalar_one()
         await self.db.delete(free_plan)
@@ -479,7 +480,10 @@ class StaffLoginGateTest(BaseEntitlementEnforcementTest):
             StaffLoginRequest(shop_phone="13800000003", username="staff-noplan", password="correct-password-3"),
             db=self.db,
         )
-        self.assertEqual(resp.code, 200)
+        self.assertNotEqual(resp.code, 200, "a data-integrity error must never itself issue a staff JWT")
+        self.assertEqual(resp.code, 500)
+        self.assertEqual(resp.data["error_code"], "INTERNAL_ERROR")
+        self.assertIsNone(resp.data.get("token"))
 
     async def test_standard_allows_login(self):
         result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == TENANT_STANDARD))
@@ -618,14 +622,15 @@ class AuthMiddlewareStaffDowngradeTest(BaseEntitlementEnforcementTest):
             response = await self.middleware.dispatch(make_raw_request(), dummy_call_next)
         self.assertEqual(response.status_code, 200)
 
-    async def test_entitlement_system_error_fails_open_not_platform_outage(self):
-        """If entitlement resolution itself errors (e.g. a missing Plan
-        catalog row -- a system/data problem, not a legitimate "lacks
-        capability" outcome), the middleware must fail OPEN rather than
-        turning an unrelated data problem into a total staff lockout
-        platform-wide. This is exactly the failure mode that broke
-        pre-existing, subscription-unaware tests (which don't seed a FREE
-        Plan row) before this fix."""
+    async def test_entitlement_system_error_fails_closed_not_implicit_grant(self):
+        """PHASE F1F-BH: if entitlement resolution itself errors (e.g. a
+        missing Plan catalog row -- a system/data problem, not a legitimate
+        "lacks capability" outcome), the middleware must fail CLOSED
+        (503) rather than letting an unrelated data problem silently grant
+        staff access platform-wide. PAID_FEATURE_FAILS_CLOSED: the request
+        must not proceed as staff, and must not be misreported as
+        PLAN_CAPABILITY_REQUIRED (that would misrepresent a data-integrity
+        bug as a legitimate plan-tier denial)."""
         # Delete the FREE plan row to force a genuine data-integrity error
         # inside SubscriptionService, unrelated to this tenant's own state.
         result = await self.db.execute(select(Plan).where(Plan.code == "FREE"))
@@ -636,7 +641,11 @@ class AuthMiddlewareStaffDowngradeTest(BaseEntitlementEnforcementTest):
         account = await self._make_staff_account(TENANT_FREE)
         with patch("app.middleware.auth_middleware.verify_token", return_value=self._staff_payload(TENANT_FREE, account.id)):
             response = await self.middleware.dispatch(make_raw_request(), dummy_call_next)
-        self.assertEqual(response.status_code, 200, "a system error resolving entitlement must not lock out staff platform-wide")
+        self.assertEqual(response.status_code, 503, "a system error resolving entitlement must fail closed, not proceed as staff")
+        import json
+        body = json.loads(response.body)
+        self.assertEqual(body["data"]["error_code"], "INTERNAL_ERROR")
+        self.assertNotEqual(body["data"].get("error_code"), "PLAN_CAPABILITY_REQUIRED")
 
     async def test_tenant_isolation_free_vs_standard(self):
         free_account = await self._make_staff_account(TENANT_FREE)
@@ -649,6 +658,152 @@ class AuthMiddlewareStaffDowngradeTest(BaseEntitlementEnforcementTest):
 
         self.assertEqual(free_resp.status_code, 403)
         self.assertEqual(standard_resp.status_code, 200)
+
+
+# ---------------------------------------------------------------------------
+# Phase F1F-BH -- entitlement failure semantics: PAID_FEATURE_FAILS_CLOSED.
+# A system/data error resolving entitlement must never be treated as an
+# implicit capability grant, and must never be misreported as
+# PLAN_CAPABILITY_REQUIRED (that would misrepresent a data-integrity bug as
+# a legitimate plan-tier denial).
+# ---------------------------------------------------------------------------
+
+class MissingFreePlanFailsClosedTest(BaseEntitlementEnforcementTest):
+    async def test_missing_free_plan_fails_closed_not_2xx_no_side_effect(self):
+        """TENANT_FREE has no Subscription row (BaseEntitlementEnforcementTest
+        never activates it) -- resolving its effective plan falls through to
+        the FREE-plan-catalog lookup. Deleting that FREE Plan row turns this
+        into a genuine data-integrity error, not a legitimate "lacks
+        capability" outcome. A STANDARD-only interactive endpoint must
+        neither return 2xx nor run its paid side effect, and must not be
+        misreported as PLAN_CAPABILITY_REQUIRED."""
+        result = await self.db.execute(select(Plan).where(Plan.code == "FREE"))
+        free_plan = result.scalar_one()
+        await self.db.delete(free_plan)
+        await self.db.commit()
+
+        with patch("app.services.ai_menu_service.generate_dish_description", new=AsyncMock(return_value="x")) as mock_ai:
+            resp = await generate_dish_desc(
+                DishDescRequest(name="宫保鸡丁"), make_request(tenant_id=TENANT_FREE), db=self.db,
+            )
+        self.assertNotIn(resp.code, (200, 201, 204), "a data-integrity error must never resolve to success")
+        self.assertEqual(resp.code, 500)
+        self.assertEqual(resp.data["error_code"], "INTERNAL_ERROR")
+        self.assertNotEqual(resp.data["error_code"], "PLAN_CAPABILITY_REQUIRED")
+        mock_ai.assert_not_awaited()
+
+
+class UnknownEffectivePlanFailsClosedTest(BaseEntitlementEnforcementTest):
+    async def test_unknown_plan_code_fails_closed_not_defaulted(self):
+        """An effective_plan.code outside FREE/STANDARD/PRO is a data/policy
+        integrity error (app/services/entitlement_service.py's
+        UnknownEffectivePlanCodeError) -- must never be silently treated as
+        FREE (denied) or as an unrecognized-but-granted tier (allowed).
+        Either would hide the underlying inconsistency; the only correct
+        outcome is a fail-closed system error with no paid side effect."""
+        tenant_id = "tenant-f1fb-unknown-plan"
+        self.db.add(Tenant(tenant_id=tenant_id, name="Unknown Plan Tenant", password_hash="x", status=True))
+        self.db.add(Plan(code="ENTERPRISE", name="未知档位", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=9))
+        await self.db.commit()
+        plan = await self.subscription_service.get_plan_by_code("ENTERPRISE")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=tenant_id, plan_id=plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
+        await self.db.commit()
+
+        with patch("app.services.ai_menu_service.generate_dish_description", new=AsyncMock(return_value="x")) as mock_ai:
+            resp = await generate_dish_desc(
+                DishDescRequest(name="宫保鸡丁"), make_request(tenant_id=tenant_id), db=self.db,
+            )
+        self.assertNotIn(resp.code, (200, 201, 204))
+        self.assertEqual(resp.code, 500)
+        self.assertEqual(resp.data["error_code"], "INTERNAL_ERROR")
+        mock_ai.assert_not_awaited()
+
+
+class StaffExistingTokenDataErrorFailsClosedTest(BaseEntitlementEnforcementTest):
+    """AuthMiddleware, real dispatch -- an existing, otherwise-valid staff
+    JWT must be denied (not proceed to the business route) when entitlement
+    resolution raises for a reason other than a clean plan-tier denial."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self._original_redis_enabled = settings.REDIS_ENABLED
+        settings.REDIS_ENABLED = False
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.SessionLocal)
+        self._session_patch.start()
+        self.middleware = AuthMiddleware(app=None)
+
+    async def asyncTearDown(self):
+        self._session_patch.stop()
+        settings.REDIS_ENABLED = self._original_redis_enabled
+        await super().asyncTearDown()
+
+    async def test_staff_token_denied_when_entitlement_resolution_raises(self):
+        account = MerchantAccount(
+            tenant_id=TENANT_STANDARD, name="前台", username="staff-dataerr",
+            password_hash=get_password_hash("irrelevant"), role="frontdesk", status="active",
+        )
+        self.db.add(account)
+        await self.db.commit()
+        await self.db.refresh(account)
+        payload = {"tenant_id": TENANT_STANDARD, "type": "merchant", "account_id": str(account.id), "sub": str(account.id)}
+
+        route_called = {"value": False}
+
+        async def call_next(request):
+            route_called["value"] = True
+            return Response(status_code=200)
+
+        from app.services.entitlement_service import EntitlementService
+
+        with patch("app.middleware.auth_middleware.verify_token", return_value=payload), \
+             patch.object(EntitlementService, "require_capability", new=AsyncMock(side_effect=RuntimeError("entitlement resolution exploded"))):
+            response = await self.middleware.dispatch(make_raw_request(), call_next)
+
+        self.assertEqual(response.status_code, 503, "entitlement resolution errors must deny, not proceed as staff")
+        self.assertFalse(route_called["value"], "business route must never execute when entitlement resolution fails")
+        import json
+        body = json.loads(response.body)
+        self.assertEqual(body["data"]["error_code"], "INTERNAL_ERROR")
+
+
+class OwnerStructuralExemptionUnderEntitlementFailureTest(BaseEntitlementEnforcementTest):
+    """Even if EntitlementService itself is broken for STAFF_MANAGEMENT,
+    a FREE owner's own request must never reach that resolution at all --
+    the owner branch is structurally exempt (role != ROLE_OWNER gates the
+    entire staff entitlement block), not merely a check that happens to
+    pass. The entitlement engine must not become a new dependency for
+    owner-core requests."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self._original_redis_enabled = settings.REDIS_ENABLED
+        settings.REDIS_ENABLED = False
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.SessionLocal)
+        self._session_patch.start()
+        self.middleware = AuthMiddleware(app=None)
+
+    async def asyncTearDown(self):
+        self._session_patch.stop()
+        settings.REDIS_ENABLED = self._original_redis_enabled
+        await super().asyncTearDown()
+
+    async def test_owner_request_never_calls_broken_entitlement_engine(self):
+        payload = {"tenant_id": TENANT_FREE, "type": "merchant", "sub": TENANT_FREE}
+
+        from app.services.entitlement_service import EntitlementService
+
+        with patch("app.middleware.auth_middleware.verify_token", return_value=payload), \
+             patch.object(EntitlementService, "require_capability", new=AsyncMock(side_effect=RuntimeError("entitlement resolution exploded"))) as mock_require:
+            response = await self.middleware.dispatch(
+                make_raw_request(path="/api/v1/orders/workbench", method="GET"), dummy_call_next,
+            )
+
+        self.assertEqual(response.status_code, 200, "owner must remain structurally exempt from the staff entitlement gate")
+        mock_require.assert_not_awaited()
 
 
 if __name__ == "__main__":

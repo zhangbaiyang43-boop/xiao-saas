@@ -25,19 +25,17 @@ from app.services.entitlement_service import EntitlementRequiredError, Entitleme
 
 
 async def require_capability_response(db: AsyncSession, tenant_id: str, capability: str) -> Optional[RespVo]:
-    """None if the tenant has `capability`; otherwise the 403 RespVo the
-    caller should `return` immediately. Never leaks the Python exception
-    class/message to the client -- only the frozen PLAN_CAPABILITY_REQUIRED
-    contract fields.
+    """None if the tenant has `capability`; otherwise the RespVo the caller
+    should `return` immediately. Never leaks the Python exception
+    class/message to the client -- only frozen contract fields.
 
     A genuine system/data error resolving entitlement (e.g. a missing Plan
     catalog row) is not the same outcome as "this tenant's plan lacks the
-    capability" -- unlike a clean EntitlementRequiredError, it fails OPEN
-    (returns None, action proceeds) rather than denying an otherwise-valid
-    request over an unrelated data problem. Logged loudly so it gets fixed.
-    Mirrors the same fail-open rule AuthMiddleware's staff gate uses, for
-    the same reason: a data-integrity error must never itself become the
-    thing that blocks a real user.
+    capability" -- but it must not be treated as an implicit grant either.
+    PAID_FEATURE_FAILS_CLOSED: an unexpected exception here denies the
+    request with a system-error response, same as a real data-integrity
+    problem should never silently become "request allowed." Logged loudly
+    so it gets fixed.
     """
     try:
         await EntitlementService(db).require_capability(tenant_id, capability)
@@ -53,6 +51,10 @@ async def require_capability_response(db: AsyncSession, tenant_id: str, capabili
             },
         )
     except Exception as exc:
-        logger.error("[ENTITLEMENT_CHECK_FAILED] tenant_id=%s capability=%s error=%s", tenant_id, capability, exc)
-        return None
+        logger.exception("[ENTITLEMENT_CHECK_FAILED] tenant_id=%s capability=%s error=%s", tenant_id, capability, exc)
+        return error_response(
+            code=500,
+            msg="系统繁忙，请稍后重试",
+            data={"error_code": "INTERNAL_ERROR"},
+        )
     return None

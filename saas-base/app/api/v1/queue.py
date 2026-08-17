@@ -257,10 +257,19 @@ async def print_test_queue_ticket(request: Request, db: AsyncSession = Depends(g
             },
         )
     except Exception as exc:
-        # Same fail-open rule as app/core/entitlement_guard.py: a system/data
-        # error resolving entitlement must not itself block an otherwise-valid
-        # test-print request.
-        logger.error("[ENTITLEMENT_CHECK_FAILED] tenant_id=%s capability=KITCHEN_PRINT error=%s", tenant_id, exc)
+        # Phase F1F-BH: a system/data error resolving entitlement is not the
+        # same outcome as "plan lacks capability" -- but it must not be
+        # treated as an implicit grant either. Fail closed, same contract as
+        # app/core/entitlement_guard.py's require_capability_response.
+        logger.exception("[ENTITLEMENT_CHECK_FAILED] tenant_id=%s capability=KITCHEN_PRINT error=%s", tenant_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "code": "INTERNAL_ERROR",
+                "message": "系统繁忙，请稍后重试",
+            },
+        )
 
     try:
         logger.warning("[PRINT_TEST_CALL_SERVICE] about to call print_queue_test_ticket")
