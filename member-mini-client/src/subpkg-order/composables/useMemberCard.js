@@ -30,7 +30,10 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
   })
 
   const memberLevelLabel = computed(() => bannerInfo.value?.levelLabel || '普通会员')
-  const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.webp', LV2: '/static/member-levels/level-lv2.webp', LV3: '/static/member-levels/level-lv3.webp' }
+  // 用 PNG 而不是 WebP：WebP 版本在真机微信运行时被证实 404（Runtime 排查见
+  // git 历史），PNG 是 WebP 性能优化之前最后一版已验证能正常显示的版本，
+  // 且带 alpha 透明通道（当前 WebP 已丢失透明通道，改成纯黑底）。V1 稳定性优先。
+  const MEMBER_LEVEL_BADGES = { LV1: '/static/member-levels/level-lv1.png', LV2: '/static/member-levels/level-lv2.png', LV3: '/static/member-levels/level-lv3.png' }
   const memberLevelBadgeSrc = computed(() => MEMBER_LEVEL_BADGES[bannerInfo.value?.levelCode] || MEMBER_LEVEL_BADGES.LV1)
   // 跟 growth.vue 的 LEVEL_CARD_META 保持同一份数值（背景图路径 + 色调 tint），
   // 那边是已验证的权威来源，这里照抄，不重新设计。
