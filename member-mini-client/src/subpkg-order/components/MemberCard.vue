@@ -1,29 +1,38 @@
 <template>
   <scroll-view class="tab-scroll" scroll-y>
     <view v-if="bannerInfo" class="card-tab member-center">
-      <view class="member-identity-card tap-shrink" :style="memberIdentityCardStyle" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
-        <view class="mic-glow"></view>
-        <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
-        <view class="mic-body">
-          <view class="member-avatar">
-            <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
-            <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
-          </view>
-          <view class="member-identity-main">
-            <view class="mic-crest-row">
-              <text class="member-level">{{ memberLevelLabel }}</text>
+      <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
+        <image
+          v-if="memberIdentityCardBgSrc"
+          class="member-identity-card-bg"
+          :src="memberIdentityCardBgSrc"
+          mode="aspectFill"
+        />
+        <view class="member-identity-card-tint" :style="memberIdentityCardTintStyle"></view>
+        <view class="member-identity-card-content">
+          <view class="mic-glow"></view>
+          <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
+          <view class="mic-body">
+            <view class="member-avatar">
+              <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
+              <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
             </view>
-            <text class="mic-sub">MEMBER</text>
+            <view class="member-identity-main">
+              <view class="mic-crest-row">
+                <text class="member-level">{{ memberLevelLabel }}</text>
+              </view>
+              <text class="mic-sub">MEMBER</text>
+            </view>
+            <text class="mic-chevron iconfont icon-roundright"></text>
           </view>
-          <text class="mic-chevron iconfont icon-roundright"></text>
-        </view>
-        <view v-if="memberUpgradeText" class="member-progress-wrap">
-          <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
-          <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
-        </view>
-        <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
-          <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
-          <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
+          <view v-if="memberUpgradeText" class="member-progress-wrap">
+            <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
+            <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
+          </view>
+          <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
+            <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
+            <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
+          </view>
         </view>
       </view>
 
@@ -111,7 +120,8 @@ export default {
     bannerInfo: { type: Object, default: null },
     shopName: { type: String, default: '' },
     memberLevelBadgeSrc: { type: String, default: '' },
-    memberIdentityCardStyle: { type: String, default: '' },
+    memberIdentityCardBgSrc: { type: String, default: '' },
+    memberIdentityCardTintStyle: { type: String, default: '' },
     memberLevelLabel: { type: String, default: '' },
     memberUpgradeText: { type: String, default: '' },
     memberProgressPercent: { type: Number, default: 0 },
@@ -147,6 +157,20 @@ export default {
 
 
 .member-identity-card::before { content:''; position: absolute; inset: 0; opacity: .5; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); pointer-events: none; }
+
+
+// 会员等级背景改成真正的 <image>，而不是 inline style 里的 background-image: url(...)：
+// 真机微信运行时证实本地 /static jpg 用 CSS background-image 加载不出来，同一张图
+// 用 <image :src> 在同一环境能正常显示。背景图（z0）+ 色调叠加层（z1）+ 原有内容
+// （z2，包在 member-identity-card-content 里）三层叠加；.member-identity-card 自己
+// 的 background（上面那行）留着不动，图片加载失败时兜底，不会让卡片空白。
+.member-identity-card-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+
+
+.member-identity-card-tint { position: absolute; inset: 0; z-index: 1; }
+
+
+.member-identity-card-content { position: relative; z-index: 2; }
 
 
 .mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }

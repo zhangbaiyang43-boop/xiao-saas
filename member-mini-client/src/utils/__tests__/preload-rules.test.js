@@ -61,12 +61,24 @@ describe('ordering startup package contracts', () => {
     }
   })
 
-  it('会员身份卡背景 style 从 menu.vue 经 composable 完整传到 MemberCard.vue', () => {
+  it('会员身份卡背景 image + tint style 从 menu.vue 经 composable 完整传到 MemberCard.vue', () => {
     // 防止再次出现：父组件传了 prop、composable 没产生值、子组件也没消费的断链。
-    expect(memberCardSource).toContain('memberIdentityCardStyle')
-    expect(memberCardComponentSource).toContain('memberIdentityCardStyle: { type: String')
-    expect(memberCardComponentSource).toContain(':style="memberIdentityCardStyle"')
-    expect(menuSource).toContain(':member-identity-card-style="memberIdentityCardStyle"')
+    expect(memberCardSource).toContain('memberIdentityCardBgSrc')
+    expect(memberCardSource).toContain('memberIdentityCardTintStyle')
+    expect(memberCardComponentSource).toContain('memberIdentityCardBgSrc: { type: String')
+    expect(memberCardComponentSource).toContain('memberIdentityCardTintStyle: { type: String')
+    expect(memberCardComponentSource).toMatch(/class="member-identity-card-bg"[\s\S]*?:src="memberIdentityCardBgSrc"[\s\S]*?mode="aspectFill"/)
+    expect(memberCardComponentSource).toContain('class="member-identity-card-tint" :style="memberIdentityCardTintStyle"')
+    expect(menuSource).toContain(':member-identity-card-bg-src="memberIdentityCardBgSrc"')
+    expect(menuSource).toContain(':member-identity-card-tint-style="memberIdentityCardTintStyle"')
+  })
+
+  it('会员卡背景不得再用 CSS background-image: url(本地静态图) —— 真机微信运行时已证实本地 jpg 这样加载不出来', () => {
+    expect(memberCardSource).not.toContain('memberIdentityCardStyle')
+    expect(memberCardComponentSource).not.toContain('memberIdentityCardStyle')
+    expect(menuSource).not.toContain('memberIdentityCardStyle')
+    expect(memberCardSource).not.toMatch(/background-image[^;]*url\(/)
+    expect(memberCardComponentSource).not.toMatch(/background-image[^;]*url\(['"]\/static/)
   })
 
   it('member-avatar-badge 用固定 rpx 尺寸，不用百分比（微信运行时曾在 flex 交叉轴上把百分比高度塌成 0）', () => {

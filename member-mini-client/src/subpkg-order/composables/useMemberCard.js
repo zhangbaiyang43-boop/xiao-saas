@@ -42,9 +42,17 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
     LV2: { bg: '/static/member-levels/card-bg-lv2.jpg', tint: '100,112,128' },
     LV3: { bg: '/static/member-levels/card-bg-lv3.jpg', tint: '176,130,32' },
   }
-  const memberIdentityCardStyle = computed(() => {
+  // 真机微信运行时证实：动态 inline style 里引用本地静态 jpg 当背景图不可靠，
+  // 本地图不会显示（同一张图片改用 <image :src> 在同一环境能正常加载）。所以
+  // 背景改成真正的 <image> 节点，这里只出 src；tint 渐变单独出一份纯色叠加层
+  // style，跟背景图分开，两者在 MemberCard.vue 里分层叠加。
+  const memberIdentityCardBgSrc = computed(() => {
     const meta = MEMBER_LEVEL_CARD_META[bannerInfo.value?.levelCode] || MEMBER_LEVEL_CARD_META.LV1
-    return `background-image: linear-gradient(135deg, rgba(${meta.tint},0.68), rgba(${meta.tint},0.42)), url('${meta.bg}'); background-size: cover; background-position: center;`
+    return meta.bg
+  })
+  const memberIdentityCardTintStyle = computed(() => {
+    const meta = MEMBER_LEVEL_CARD_META[bannerInfo.value?.levelCode] || MEMBER_LEVEL_CARD_META.LV1
+    return `background: linear-gradient(135deg, rgba(${meta.tint},0.68), rgba(${meta.tint},0.42));`
   })
   const memberProgressPercent = computed(() => {
     const current = Number(bannerInfo.value?.growth || bannerInfo.value?.growthValue || 0)
@@ -72,7 +80,8 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
     memberSinceText,
     memberLevelLabel,
     memberLevelBadgeSrc,
-    memberIdentityCardStyle,
+    memberIdentityCardBgSrc,
+    memberIdentityCardTintStyle,
     memberProgressPercent,
     memberUpgradeText,
     usableMemberCoupons,
