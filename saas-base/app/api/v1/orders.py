@@ -14,7 +14,9 @@ from sqlalchemy.future import select
 
 from app.config import settings
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.logger import logger, safe_log
+from app.core.plan_capabilities import CAP_KITCHEN_PRINT
 from app.core.platform_rules import cap_discount_amount
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
@@ -1560,6 +1562,9 @@ async def reprint_order_ticket(
     allowed, reason = can_reprint_order(order, print_type=print_type)
     if not allowed:
         return error_response(code=400, msg=reason or "order cannot reprint")
+    denial = await require_capability_response(db, principal.tenant_id, CAP_KITCHEN_PRINT)
+    if denial is not None:
+        return denial
     operator = str(principal.account_id) if principal.account_id else "owner"
     print_result = await _print_paid_order_ticket(
         order,

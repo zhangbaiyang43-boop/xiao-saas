@@ -4,6 +4,7 @@ from starlette.responses import JSONResponse
 
 from app.core.merchant_auth import resolve_merchant_request_auth, staff_route_allowed
 from app.core.permissions import ROLE_OWNER
+from app.core.plan_capabilities import CAP_STAFF_MANAGEMENT
 from app.core.response import RespVo
 from app.core.security import verify_token
 
@@ -33,6 +34,41 @@ async def _is_tenant_active(tenant_id: str) -> bool:
     active = bool(status)
     await set_cache(cache_key, active, ttl=TENANT_STATUS_CACHE_TTL_SECONDS)
     return active
+
+
+# Phase F1F-B (docs/saas-subscription-audit.md): a staff JWT can live for
+# days, and a tenant's plan can lapse/downgrade at any moment -- so this
+# check runs fresh on every non-owner request, with NO cross-request cache
+# (unlike _is_tenant_active's TTL cache above). The frozen contract requires
+# a downgrade to take effect on the very next request, not after up to
+# TENANT_STATUS_CACHE_TTL_SECONDS of staleness; EntitlementService's own
+# per-instance memoization (a fresh instance every call here) is the only
+# memoization in play. Read-only: this session never commits, and its
+# lifetime is scoped to entitlement resolution alone -- never the request's
+# own business transaction.
+async def _staff_capability_denial(tenant_id: str):
+    from app.core.database import AsyncSessionLocal
+    from app.core.logger import logger
+    from app.services.entitlement_service import EntitlementRequiredError, EntitlementService
+
+    async with AsyncSessionLocal() as session:
+        try:
+            await EntitlementService(session).require_capability(tenant_id, CAP_STAFF_MANAGEMENT)
+        except EntitlementRequiredError as exc:
+            return exc
+        except Exception as exc:
+            # A genuine system/data error resolving entitlement (e.g. a
+            # missing Plan catalog row) is not the same thing as "this
+            # tenant's plan lacks the capability" -- unlike a clean
+            # EntitlementRequiredError, this must fail OPEN. This check runs
+            # on every non-owner request platform-wide; failing closed here
+            # would turn an unrelated data/infra problem into a total staff
+            # outage across every tenant, not just the one affected. Logged
+            # loudly so it gets fixed -- staff functionality degrades to
+            # pre-F1F-B behavior (unenforced), never a hard platform outage.
+            logger.error("[STAFF_ENTITLEMENT_CHECK_FAILED] tenant_id=%s error=%s", tenant_id, exc)
+            return None
+    return None
 
 WHITELIST = {
     "/",
@@ -150,6 +186,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     return JSONResponse(
                         status_code=403,
                         content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+                    )
+                # Plan-downgrade enforcement (Phase F1F-B): an existing, unexpired staff
+                # JWT must not keep working once the tenant's effective plan lacks
+                # STAFF_MANAGEMENT. Owner is structurally exempt -- this whole block only
+                # runs for role != ROLE_OWNER, so an owner request can never reach here
+                # regardless of the tenant's plan.
+                staff_denial = await _staff_capability_denial(request.state.tenant_id)
+                if staff_denial is not None:
+                    return JSONResponse(
+                        status_code=403,
+                        content=RespVo(
+                            code=403,
+                            msg="该功能需要更高套餐",
+                            data={
+                                "error_code": "PLAN_CAPABILITY_REQUIRED",
+                                "capability": staff_denial.capability,
+                                "effective_plan_code": staff_denial.effective_plan_code,
+                                "required_plan_codes": list(staff_denial.required_plan_codes),
+                            },
+                        ).to_response(),
                     )
 
         if is_optional:
