@@ -48,6 +48,28 @@ async def get_my_billing_invoice(invoice_id: str, request: Request, db: AsyncSes
     return success_response(data=serialize_invoice(invoice), msg="ok")
 
 
+@router.get("/payment-readiness", response_model=RespVo)
+async def get_merchant_payment_readiness(request: Request) -> ApiResponse:
+    # Merchant-facing readiness check (Phase F1E-A) -- lets the "我的套餐"
+    # page disable its purchase/renewal CTA BEFORE ever calling
+    # renewal-orders, so a merchant can never end up with a Pending
+    # BillingInvoice they have no way to pay. Pure read, no `db` dependency
+    # at all: BillingService.payment_config_status() is a static method, so
+    # this handler cannot write anything even by accident.
+    #
+    # Maps the internal platform_payment_config_audit() dict down to a
+    # single boolean -- merchants never see provider names, WX_SP_* config
+    # presence, or the internal blocked_reason text; that's platform-ops-only
+    # detail already exposed separately at
+    # GET /api/super/billing/payment-config-status (SuperAdmin token only).
+    tenant_id = _merchant_tenant_id(request)
+    if not tenant_id:
+        return error_response(code=401, msg="请先登录")
+    config_status = BillingService.payment_config_status()
+    online_payment_available = bool(config_status.get("real_payment_enabled", False))
+    return success_response(data={"online_payment_available": online_payment_available}, msg="ok")
+
+
 @router.post("/invoices/{invoice_id}/payments", response_model=RespVo)
 async def create_my_billing_payment(
     invoice_id: str,
