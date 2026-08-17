@@ -45,4 +45,15 @@ describe('ordering startup package contracts', () => {
     expect(memberCardComponentSource).toContain(':style="memberIdentityCardStyle"')
     expect(menuSource).toContain(':member-identity-card-style="memberIdentityCardStyle"')
   })
+
+  it('member-avatar-badge 用固定 rpx 尺寸，不用百分比（微信运行时曾在 flex 交叉轴上把百分比高度塌成 0）', () => {
+    expect(memberCardComponentSource).toContain('width: 96rpx; height: 96rpx; display: block;')
+    expect(memberCardComponentSource).not.toMatch(/\.member-avatar-badge\s*\{\s*width:\s*96%;\s*height:\s*96%;/)
+  })
+
+  it('member-avatar-badge 的数据合同（prop + WXML 绑定）保持不变', () => {
+    expect(memberCardComponentSource).toContain("memberLevelBadgeSrc: { type: String, default: '' }")
+    expect(memberCardComponentSource).toContain('class="member-avatar-badge"')
+    expect(memberCardComponentSource).toContain(':src="memberLevelBadgeSrc"')
+  })
 })

@@ -167,7 +167,7 @@ export default {
 .member-avatar-img { width: 100%; height: 100%; }
 
 
-.member-avatar-badge { width: 96%; height: 96%; animation: micBadgePulse 3.2s ease-in-out infinite; }
+.member-avatar-badge { width: 96rpx; height: 96rpx; display: block; flex-shrink: 0; animation: micBadgePulse 3.2s ease-in-out infinite; }
 
 
 .member-identity-main { flex: 1; min-width: 0; }
