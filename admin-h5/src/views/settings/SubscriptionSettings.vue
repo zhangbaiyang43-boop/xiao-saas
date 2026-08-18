@@ -428,7 +428,7 @@ async function handleManualClaim() {
     mergeManualPayment(res.data)
     manualClaimSubmitting.value = false
     pendingPurchasePlanCode.value = manualPayment.value.plan_code
-    startPaymentPolling(manualPayment.value.id)
+    startPaymentPolling(manualPayment.value.id, MANUAL_PAYMENT_POLL_INTERVAL_MS)
   } catch (err) {
     message.error(mapPurchaseErrorMessage(err?.response?.data?.msg))
     manualClaimSubmitting.value = false
@@ -437,13 +437,17 @@ async function handleManualClaim() {
 
 // ---- 支付状态轮询：与 AssistedOrderSheet.vue 的 payment-handoff 轮询同一
 // 形状（chained setTimeout，单飞行守卫，隐藏时暂停，可见时恢复，有限次数
-// 上限），不发明第二套轮询实现。 ----
+// 上限），不发明第二套轮询实现——只是同一实现按 provider 参数化轮询间隔：
+// WXPAY 沿用既有的 2.5s（未改动既有实时收银台行为），MANUAL 用 8s（Phase
+// F1G-CM-B §15：人工核实通常 10 分钟内完成，没必要用秒级频率打 DB）。
 const paymentStatusTimer = ref(null)
 const paymentStatusInFlight = ref(false)
 const paymentPollingActive = ref(false)
 const pollingPaymentId = ref(null)
 const paymentStatusAttempts = ref(0)
+const paymentPollIntervalMs = ref(2500)
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 2500
+const MANUAL_PAYMENT_POLL_INTERVAL_MS = 8000
 const PAYMENT_STATUS_MAX_ATTEMPTS = 120
 
 function clearPaymentStatusTimer() {
@@ -471,7 +475,7 @@ function schedulePaymentStatusCheck() {
   paymentStatusTimer.value = setTimeout(() => {
     paymentStatusTimer.value = null
     void checkBillingPaymentStatus({ scheduleAfter: true })
-  }, PAYMENT_STATUS_POLL_INTERVAL_MS)
+  }, paymentPollIntervalMs.value)
 }
 
 async function checkBillingPaymentStatus({ scheduleAfter = true } = {}) {
@@ -544,9 +548,10 @@ async function handleBillingPaymentUpdate(payment) {
   }
 }
 
-function startPaymentPolling(paymentId) {
+function startPaymentPolling(paymentId, intervalMs = PAYMENT_STATUS_POLL_INTERVAL_MS) {
   pollingPaymentId.value = paymentId
   paymentStatusAttempts.value = 0
+  paymentPollIntervalMs.value = intervalMs
   clearPaymentStatusTimer()
   paymentPollingActive.value = true
   void checkBillingPaymentStatus({ scheduleAfter: true })

@@ -106,6 +106,17 @@ assert.ok(source.includes(':disabled="qrLoadError"'), 'claim button must be disa
   assert.ok(modalCloseIdx !== -1 && paidIdx < modalCloseIdx, 'reaching PAID must close the manual payment modal')
 }
 
+// ---- manual polling interval is DB-friendly (Phase 15: ~8-10s, not the
+// WXPAY handoff's 2.5s), while reusing the exact same polling shape/timer --
+{
+  const manualIntervalIdx = indexOfOrFail('const MANUAL_PAYMENT_POLL_INTERVAL_MS = 8000', 'manual payment poll interval constant (8-10s range)')
+  assert.ok(manualIntervalIdx !== -1)
+  assert.ok(
+    source.includes('startPaymentPolling(manualPayment.value.id, MANUAL_PAYMENT_POLL_INTERVAL_MS)'),
+    'claiming/resubmitting a manual payment must poll at the slower manual interval, not the 2.5s WXPAY cadence',
+  )
+}
+
 // ---- polling stays read-only and shares the existing cleanup contract -----
 assert.ok(source.includes('function mergeManualPayment(payment)'), 'manual payment state must only be updated from real server responses')
 assert.ok(source.includes('onBeforeUnmount'), 'manual polling reuses the page-level teardown on unmount')
