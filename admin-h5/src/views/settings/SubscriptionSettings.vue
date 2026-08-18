@@ -375,7 +375,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .subscription-page { min-height: 100vh; background: var(--bg-page); }
-.page-body { padding: 12px 16px 28px; }
+/* .sub-page 的全局底部留白（32px + 安全区）没有把固定 TabBar 算进去——
+   Layout.vue 对所有路由都无条件渲染 <TabBar/>，包括这个通过 PageHeader
+   返回按钮进入的“子页面”。这里按 .page-wrap 里已经在用的同一套算法
+   （TabBar 自身高度 56px + safe-area-inset-bottom + 视觉留白）单独把
+   最后一张套餐卡的 CTA 让出来，不改 .sub-page/.bottom-tabbar 全局定义，
+   避免影响其它同样用 .sub-page 但没有这个问题的页面。 */
+.page-body { padding: 12px 16px calc(56px + env(safe-area-inset-bottom) + 12px); }
 
 .state-card, .current-card, .period-card, .plan-card {
   background: var(--bg-card);

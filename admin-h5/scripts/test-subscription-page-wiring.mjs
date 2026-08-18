@@ -125,4 +125,26 @@ for (const forbidden of ['自定义积分', '自定义等级', '营销活动搭�
   assert.ok(!source.includes(forbidden), `must not market unverified capability: ${forbidden}`)
 }
 
+// ---- BOTTOM_TABBAR_SAFE_SPACE_TEST (F1G-BF): Layout.vue renders <TabBar/>
+// unconditionally on every route including this one, and the tabbar is
+// `position:fixed` with `height: calc(56px + env(safe-area-inset-bottom))`
+// (see src/styles/global.scss). This page must reserve at least that much
+// bottom space locally so the last plan card's CTA can be scrolled fully
+// above the tabbar instead of being covered by it with no scroll to reveal
+// it (F1G-B P1-1). Assert the actual reserved space, not just a magic
+// number -- it must be a calc() that both accounts for the tabbar's own
+// 56px base height and honors env(safe-area-inset-bottom), the same way
+// every other tabbar-aware page in this app already does (.page-wrap in
+// global.scss, OrderPage.vue's cart-sheet, etc).
+{
+  const styleStart = indexOfOrFail('<style scoped>', 'scoped style block')
+  const styleBlock = source.slice(styleStart)
+  const pageBodyMatch = styleBlock.match(/\.page-body\s*\{([^}]*)\}/)
+  assert.ok(pageBodyMatch, '.page-body rule must exist in the scoped style block')
+  const pageBodyRule = pageBodyMatch[1]
+  assert.ok(/calc\(/.test(pageBodyRule), '.page-body bottom space must be a calc() expression, not a fixed magic number')
+  assert.ok(/56px/.test(pageBodyRule), '.page-body must reserve the fixed TabBar\'s own 56px base height')
+  assert.ok(/env\(safe-area-inset-bottom\)/.test(pageBodyRule), '.page-body must also honor safe-area-inset-bottom, like every other tabbar-aware page')
+}
+
 console.log('test-subscription-page-wiring: ok')
