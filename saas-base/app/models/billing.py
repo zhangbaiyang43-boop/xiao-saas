@@ -49,6 +49,21 @@ class BillingPayment(BaseModel):
     provider_metadata = Column(JSON, nullable=True)
     failure_reason = Column(Text, nullable=True)
 
+    # F1G-CM: manual-verified payment review trail (provider="MANUAL" only).
+    # Deliberately separate from `status` above -- `status` remains the one
+    # PENDING/PAID/FAILED/... funds-state authority for every provider, and
+    # manual_review_status is purely "where is this in the human review
+    # workflow" (NULL = no claim submitted yet). Real, indexed, typed
+    # columns rather than packing this into provider_metadata (JSON): the
+    # SuperAdmin pending-list query needs to filter/sort on review status
+    # efficiently, and each of these is meaningful audit-trail data in its
+    # own right (who reviewed, when claimed, when reviewed).
+    manual_review_status = Column(String(32), nullable=True, index=True)
+    manual_claimed_at = Column(DateTime, nullable=True)
+    manual_reviewed_at = Column(DateTime, nullable=True)
+    manual_reviewed_by = Column(String(64), nullable=True)
+    manual_review_note = Column(String(255), nullable=True)
+
     __table_args__ = (
         UniqueConstraint("payment_no", name="ux_billing_payment_no"),
         UniqueConstraint("out_trade_no", name="ux_billing_payment_out_trade_no"),

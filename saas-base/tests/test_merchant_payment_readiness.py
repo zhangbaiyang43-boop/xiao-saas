@@ -117,9 +117,13 @@ class MerchantPaymentReadinessTest(unittest.IsolatedAsyncioTestCase):
     # ---- Response shape ----------------------------------------------
 
     async def test_response_shape_exposes_only_boolean(self):
+        # F1G-CM: manual_payment_available is a second, independent boolean
+        # authority added alongside online_payment_available -- the shape
+        # widened intentionally, still both-booleans-only, no internal detail.
         resp = await get_merchant_payment_readiness(make_request())
-        self.assertEqual(set(resp.data.keys()), {"online_payment_available"})
+        self.assertEqual(set(resp.data.keys()), {"online_payment_available", "manual_payment_available"})
         self.assertIsInstance(resp.data["online_payment_available"], bool)
+        self.assertIsInstance(resp.data["manual_payment_available"], bool)
         forbidden_substrings = [
             "provider", "mchid", "appid", "wx_sp", "secret", "cert",
             "private_key", "RuntimeError", "blocked_reason", "audit_result",

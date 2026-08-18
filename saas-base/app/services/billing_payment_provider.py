@@ -7,6 +7,7 @@ from app.config import settings
 
 
 REAL_PAYMENT_BLOCKED_REASON = "REAL PAYMENT BLOCKED BY PLATFORM PAYMENT CONFIG"
+MANUAL_PAYMENT_BLOCKED_REASON = "MANUAL PAYMENT NOT AVAILABLE"
 
 # F1G-CF-C1: the real WXPAY provider protocol (signature verification,
 # decryption, prepay order construction) is not implemented yet -- this is
@@ -95,6 +96,51 @@ class FakeBillingPaymentProvider(BillingPaymentProvider):
             return None
 
 
+class ManualBillingPaymentProvider(BillingPaymentProvider):
+    """F1G-CM: V1 SaaS subscription payment -- official QR code + platform
+    SuperAdmin manually confirms the funds actually arrived. Unlike WXPAY
+    (blocked because no protocol implementation exists) and FAKE (blocked by
+    ALLOW_MOCK_MONEY_ENDPOINTS when disabled, but otherwise a fully working
+    test provider), MANUAL is a real, intentionally-used V1 payment path,
+    gated by its own independent settings.SAAS_MANUAL_PAYMENT_ENABLED.
+
+    create_payment() only ever returns display data (payee name, QR image
+    URL, confirmation-window minutes) that a client shows to a human -- it
+    is not a signed protocol payload and carries no secret.
+
+    verify_notify() always returns None: MANUAL never receives a provider
+    callback. Confirmation is a trusted platform-operator action (see
+    BillingService.confirm_manual_payment), which builds a
+    BillingPaymentNotification directly from the server's own persisted
+    Payment/Invoice rows and feeds it into the SAME
+    process_verified_payment_fact() core a real WXPAY callback or query
+    would use -- MANUAL is not a special bypass of that core, just a
+    different, trusted way of producing the same verified-fact shape."""
+
+    provider = "MANUAL"
+
+    @property
+    def enabled(self) -> bool:
+        return bool(manual_payment_config_audit()["manual_payment_available"])
+
+    async def create_payment(self, data: BillingPaymentRequest) -> dict[str, Any]:
+        if not self.enabled:
+            raise RuntimeError(MANUAL_PAYMENT_BLOCKED_REASON)
+        return {
+            "provider": self.provider,
+            "provider_mchid": None,
+            "provider_appid": None,
+            "pay_params": {
+                "payee_name": settings.SAAS_MANUAL_PAYMENT_PAYEE_NAME,
+                "qr_url": settings.SAAS_MANUAL_PAYMENT_QR_URL,
+                "confirmation_minutes": settings.SAAS_MANUAL_PAYMENT_CONFIRM_MINUTES,
+            },
+        }
+
+    def verify_notify(self, headers: dict[str, str], body: bytes) -> BillingPaymentNotification | None:
+        return None
+
+
 class PlatformWxPayBillingProvider(BillingPaymentProvider):
     provider = "WXPAY"
 
@@ -116,9 +162,30 @@ class PlatformWxPayBillingProvider(BillingPaymentProvider):
 
 
 def get_billing_payment_provider(provider: str | None = None) -> BillingPaymentProvider:
-    if (provider or "").upper() == "WXPAY":
+    normalized = (provider or "").upper()
+    if normalized == "WXPAY":
         return PlatformWxPayBillingProvider()
+    if normalized == "MANUAL":
+        return ManualBillingPaymentProvider()
     return FakeBillingPaymentProvider()
+
+
+def manual_payment_config_audit() -> dict[str, Any]:
+    """Structured, fail-closed manual-payment readiness audit (F1G-CM).
+    Independent of platform_payment_config_audit() (real WXPAY) -- neither
+    flag's state affects the other. Every field is a local presence/shape
+    check only; payee_name and qr_url are display data, never secrets, but
+    are still never given a value in this repo."""
+    enabled = bool(settings.SAAS_MANUAL_PAYMENT_ENABLED)
+    payee_present = bool((settings.SAAS_MANUAL_PAYMENT_PAYEE_NAME or "").strip())
+    qr_present = bool((settings.SAAS_MANUAL_PAYMENT_QR_URL or "").strip())
+    manual_payment_available = enabled and payee_present and qr_present
+    return {
+        "manual_payment_enabled": enabled,
+        "payee_present": payee_present,
+        "qr_present": qr_present,
+        "manual_payment_available": manual_payment_available,
+    }
 
 
 def platform_notify_url() -> str:

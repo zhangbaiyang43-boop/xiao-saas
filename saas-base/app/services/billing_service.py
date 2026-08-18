@@ -12,8 +12,10 @@ from app.services.base_service import BaseService
 from app.services.billing_payment_provider import (
     BillingPaymentNotification,
     BillingPaymentRequest,
+    MANUAL_PAYMENT_BLOCKED_REASON,
     REAL_PAYMENT_BLOCKED_REASON,
     get_billing_payment_provider,
+    manual_payment_config_audit,
     platform_payment_config_audit,
 )
 from app.services.channel_commission_policy import invoice_commission_snapshot
@@ -43,8 +45,16 @@ CHARGE_TYPES = {
     "OTHER",
 }
 
-PAYMENT_PROVIDERS = {"FAKE", "WXPAY"}
+PAYMENT_PROVIDERS = {"FAKE", "WXPAY", "MANUAL"}
 DUPLICATE_INVOICE_PAYMENT = "DUPLICATE_INVOICE_PAYMENT"
+
+# F1G-CM: manual-review workflow state for provider="MANUAL" payments.
+# Deliberately NOT a "NONE" string -- manual_review_status is NULL until the
+# merchant's first claim, so "no claim yet" and "explicitly some other
+# state" are never confusable.
+MANUAL_REVIEW_WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
+MANUAL_REVIEW_REJECTED = "REJECTED"
+MANUAL_REVIEW_CONFIRMED = "CONFIRMED"
 
 
 class MockPaymentDisabledError(RuntimeError):
@@ -61,6 +71,27 @@ class MockPaymentDisabledError(RuntimeError):
     RuntimeError so it funnels through the SAME `except RuntimeError` branch
     POST /api/v1/billing/invoices/{id}/payments already has for the WXPAY
     block, instead of leaking as an unhandled 500."""
+
+    pass
+
+
+class ManualPaymentDisabledError(RuntimeError):
+    """Raised when a caller tries to create a MANUAL billing payment while
+    settings.SAAS_MANUAL_PAYMENT_ENABLED (or the payee-name/QR-URL presence
+    it also requires) is not satisfied (F1G-CM). Independent of
+    MockPaymentDisabledError/ALLOW_MOCK_MONEY_ENDPOINTS -- MANUAL is a real
+    V1 payment path, not a test/mock one, so it is never gated by that flag.
+    Subclasses RuntimeError so it funnels through the SAME `except
+    RuntimeError` branch the WXPAY block already uses."""
+
+    pass
+
+
+class ManualPaymentStateError(ValueError):
+    """Raised when a manual-payment claim/confirm/reject is attempted
+    against a payment that is not in the state that action requires (F1G-CM)
+    -- e.g. confirming a payment that was never claimed, or claiming one
+    that's already PAID. A client-input problem (400), not a server fault."""
 
     pass
 
@@ -122,6 +153,9 @@ def serialize_payment(payment: BillingPayment) -> dict[str, Any]:
         "anomaly_reason": payment.anomaly_reason,
         "provider_metadata": payment.provider_metadata or {},
         "failure_reason": payment.failure_reason,
+        "manual_review_status": payment.manual_review_status,
+        "manual_claimed_at": _iso(payment.manual_claimed_at),
+        "manual_reviewed_at": _iso(payment.manual_reviewed_at),
         "created_at": _iso(payment.created_at),
         "updated_at": _iso(payment.updated_at),
     }
@@ -222,6 +256,12 @@ class BillingService(BaseService):
         # row is touched, so a disabled attempt leaves nothing behind.
         if provider_name == "FAKE" and not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
             raise MockPaymentDisabledError("模拟支付未启用")
+        # F1G-CM: MANUAL is a real V1 payment path (not a test/mock one), so
+        # it is gated by its OWN independent flag, never
+        # ALLOW_MOCK_MONEY_ENDPOINTS. Checked here, before any DB row is
+        # touched, mirroring the FAKE gate above exactly.
+        if provider_name == "MANUAL" and not manual_payment_config_audit()["manual_payment_available"]:
+            raise ManualPaymentDisabledError(MANUAL_PAYMENT_BLOCKED_REASON)
 
         invoice_result = await self.db.execute(
             select(BillingInvoice)
@@ -280,7 +320,23 @@ class BillingService(BaseService):
             return {"code": "FAIL", "message": "验签失败"}
         if notice.trade_state != "SUCCESS":
             return {"code": "SUCCESS", "message": "ok"}
+        return await self.process_verified_payment_fact(notice)
 
+    async def process_verified_payment_fact(self, notice: BillingPaymentNotification) -> dict[str, str]:
+        """Shared verified-success core (F1G-CM Phase 14 / F1G-CF-B design).
+
+        Callers MUST have already established that `notice` represents a
+        genuinely trusted payment fact BEFORE calling this -- a real
+        provider's verified+decrypted callback (process_provider_notification
+        above), a real provider's signed order-query result (future
+        WXPAY_ORDER_QUERY recovery), or a platform SuperAdmin's manual
+        confirmation built from the server's own persisted Payment/Invoice
+        rows (confirm_manual_payment below). This method does not know or
+        care which of those produced `notice` -- it only ever re-derives
+        truth from the DB rows it locks here via _validate_success_notice(),
+        the same amount/currency/out_trade_no cross-check every provider
+        goes through. MANUAL is not a special bypass of this core; it is
+        one more trusted producer of the same verified-fact shape."""
         payment_result = await self.db.execute(
             select(BillingPayment)
             .where(BillingPayment.out_trade_no == notice.out_trade_no)
@@ -421,6 +477,163 @@ class BillingService(BaseService):
             commit=False,
         )
 
+    # ---- F1G-CM: manual-verified payment (V1) -----------------------------
+
+    async def claim_manual_payment(self, payment_id: int) -> BillingPayment:
+        """Merchant '我已付款' action (F1G-CM Phase 8). This is a PAYMENT
+        CLAIM, never a PAYMENT FACT: it only ever moves
+        manual_review_status/manual_claimed_at. It must NEVER touch
+        BillingInvoice.status, BillingPayment.status/paid_at, or call
+        anything that applies a subscription -- only confirm_manual_payment()
+        (SuperAdmin-only) can do that, via the shared
+        process_verified_payment_fact() core."""
+        tenant_id = self.require_tenant_id()
+        payment_result = await self.db.execute(
+            select(BillingPayment)
+            .where(BillingPayment.id == payment_id, BillingPayment.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        payment = payment_result.scalar_one_or_none()
+        if not payment:
+            raise ValueError("支付记录不存在")
+        if payment.provider != "MANUAL":
+            raise ManualPaymentStateError("该支付方式不支持人工核账")
+        if payment.status == PAYMENT_STATUS_PAID:
+            raise ManualPaymentStateError("账单已支付")
+        if payment.manual_review_status == MANUAL_REVIEW_WAITING_CONFIRMATION:
+            # Idempotent: repeated "我已付款" clicks are a safe no-op --
+            # report the current state, don't re-stamp manual_claimed_at.
+            return payment
+        # First claim, or a resubmit after a prior REJECTED review -- both
+        # land here and transition to WAITING_CONFIRMATION identically.
+        payment.manual_review_status = MANUAL_REVIEW_WAITING_CONFIRMATION
+        payment.manual_claimed_at = datetime.utcnow()
+        await self.db.commit()
+        await self.db.refresh(payment)
+        return payment
+
+    async def list_manual_payments_for_super(
+        self, review_status: str = MANUAL_REVIEW_WAITING_CONFIRMATION
+    ) -> list[dict[str, Any]]:
+        """SuperAdmin pending-manual-payments list (F1G-CM Phase 11). Only
+        display fields a human reviewer needs to decide CONFIRM/REJECT --
+        never a tenant payment secret, never an editable amount/plan/date
+        (Phase 26: the confirm/reject actions below accept no such field
+        either)."""
+        result = await self.db.execute(
+            select(BillingPayment, BillingInvoice, Tenant)
+            .join(BillingInvoice, BillingInvoice.id == BillingPayment.invoice_id)
+            .join(Tenant, Tenant.tenant_id == BillingPayment.tenant_id)
+            .where(
+                BillingPayment.provider == "MANUAL",
+                BillingPayment.manual_review_status == review_status,
+            )
+            .order_by(BillingPayment.manual_claimed_at.asc())
+        )
+        return [
+            {
+                "payment_id": str(payment.id),
+                "invoice_id": str(invoice.id),
+                "out_trade_no": payment.out_trade_no,
+                "tenant_id": payment.tenant_id,
+                "tenant_name": tenant.name,
+                "plan_code": invoice.plan_code,
+                "billing_period": invoice.billing_period,
+                "amount_cents": payment.amount_cents,
+                "currency": payment.currency,
+                "manual_claimed_at": _iso(payment.manual_claimed_at),
+                "review_status": payment.manual_review_status,
+            }
+            for payment, invoice, tenant in result.all()
+        ]
+
+    async def confirm_manual_payment(
+        self, payment_id: int, *, verified_by: str, note: str | None = None
+    ) -> dict[str, str]:
+        """Platform SuperAdmin confirms funds actually arrived (F1G-CM Phase
+        12-13) -- the ONLY action that produces a MANUAL_VERIFIED_PAYMENT_FACT.
+        Built entirely from this payment's own server-persisted amount_cents/
+        currency/out_trade_no -- the request carries no amount/plan/tenant/
+        date field for this to consume -- then handed to the SAME
+        process_verified_payment_fact() core a real WXPAY callback or future
+        order-query recovery would use."""
+        payment_result = await self.db.execute(
+            select(BillingPayment).where(BillingPayment.id == payment_id).with_for_update()
+        )
+        payment = payment_result.scalar_one_or_none()
+        if not payment:
+            raise ValueError("支付记录不存在")
+        if payment.provider != "MANUAL":
+            raise ManualPaymentStateError("不是人工核实支付")
+        if payment.status == PAYMENT_STATUS_PAID:
+            # Idempotent: a second confirm click (or two SuperAdmins racing
+            # in) must not re-run success processing or extend the
+            # subscription again.
+            await self.db.commit()
+            return {"code": "SUCCESS", "message": "ok", "already_processed": "true"}
+        if payment.manual_review_status != MANUAL_REVIEW_WAITING_CONFIRMATION:
+            raise ManualPaymentStateError("当前状态不允许确认到账")
+
+        confirmed_at = datetime.utcnow()
+        payment.manual_review_status = MANUAL_REVIEW_CONFIRMED
+        payment.manual_reviewed_at = confirmed_at
+        payment.manual_reviewed_by = verified_by
+        if note:
+            payment.manual_review_note = (note or "").strip()[:255]
+
+        notice = BillingPaymentNotification(
+            out_trade_no=payment.out_trade_no,
+            # MANUAL has no real provider transaction id; payment.id is
+            # already globally unique (snowflake), so this is trivially
+            # unique too, satisfying transaction_id's UNIQUE constraint.
+            transaction_id=f"MANUAL{payment.id}",
+            amount_cents=payment.amount_cents,
+            currency=payment.currency,
+            trade_state="SUCCESS",
+            # V1 MANUAL paid_at authority: the platform's confirmation
+            # timestamp, NOT the merchant's claim time and NOT a WeChat
+            # success_time (there is no real provider here) -- F1G-CM Phase
+            # 18. A future real-WXPAY path replaces this with the
+            # provider's own success_time.
+            paid_at=confirmed_at,
+            metadata={"event_type": "MANUAL_CONFIRMED", "provider": "MANUAL", "verified_by": verified_by},
+        )
+        return await self.process_verified_payment_fact(notice)
+
+    async def reject_manual_payment(
+        self, payment_id: int, *, verified_by: str, note: str | None = None
+    ) -> BillingPayment:
+        """SuperAdmin found no matching funds received (F1G-CM Phase 10).
+        Leaves BillingInvoice/BillingPayment funds status untouched (still
+        PENDING) -- only records the review outcome, so the merchant can
+        submit a new claim and the SAME invoice can still be paid later; no
+        expiry is invented here."""
+        payment_result = await self.db.execute(
+            select(BillingPayment).where(BillingPayment.id == payment_id).with_for_update()
+        )
+        payment = payment_result.scalar_one_or_none()
+        if not payment:
+            raise ValueError("支付记录不存在")
+        if payment.provider != "MANUAL":
+            raise ManualPaymentStateError("不是人工核实支付")
+        if payment.status == PAYMENT_STATUS_PAID:
+            raise ManualPaymentStateError("账单已支付，不能驳回")
+        if payment.manual_review_status != MANUAL_REVIEW_WAITING_CONFIRMATION:
+            raise ManualPaymentStateError("当前状态不允许驳回")
+
+        payment.manual_review_status = MANUAL_REVIEW_REJECTED
+        payment.manual_reviewed_at = datetime.utcnow()
+        payment.manual_reviewed_by = verified_by
+        if note:
+            payment.manual_review_note = (note or "").strip()[:255]
+        await self.db.commit()
+        await self.db.refresh(payment)
+        return payment
+
     @staticmethod
     def payment_config_status() -> dict[str, Any]:
         return platform_payment_config_audit()
+
+    @staticmethod
+    def manual_payment_config_status() -> dict[str, Any]:
+        return manual_payment_config_audit()

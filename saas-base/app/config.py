@@ -79,6 +79,20 @@ class Settings(BaseSettings):
     # cannot flip.
     SAAS_REAL_PAYMENT_ENABLED: bool = False
 
+    # F1G-CM: V1 SaaS subscription payment is manual-verified (official QR
+    # code + platform SuperAdmin confirms receipt), not real automated WXPAY
+    # -- see MANUAL_PAYMENT_PROVIDER's own docs for the full authority chain.
+    # Independent of SAAS_REAL_PAYMENT_ENABLED and ALLOW_MOCK_MONEY_ENDPOINTS:
+    # none of the three flags implies or excludes either of the others.
+    SAAS_MANUAL_PAYMENT_ENABLED: bool = False
+    # Display-only text (e.g. the receiving account holder's name) and a
+    # static QR image URL (COS/CDN/static HTTPS host) -- never a secret, but
+    # still never given a real value here; production values are provisioned
+    # out of band. Never a base64-embedded image, never a file committed to git.
+    SAAS_MANUAL_PAYMENT_PAYEE_NAME: str = ""
+    SAAS_MANUAL_PAYMENT_QR_URL: str = ""
+    SAAS_MANUAL_PAYMENT_CONFIRM_MINUTES: int = 10
+
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
 

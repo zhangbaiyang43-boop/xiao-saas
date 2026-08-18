@@ -6,7 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.response import RespVo, error_response, success_response
-from app.services.billing_service import BillingService, MockPaymentDisabledError, serialize_invoice, serialize_payment
+from app.services.billing_service import (
+    BillingService,
+    ManualPaymentDisabledError,
+    ManualPaymentStateError,
+    MockPaymentDisabledError,
+    serialize_invoice,
+    serialize_payment,
+)
 
 
 ApiResponse: TypeAlias = RespVo[Any]
@@ -74,7 +81,19 @@ async def get_merchant_payment_readiness(request: Request) -> ApiResponse:
         return error_response(code=401, msg="请先登录")
     config_status = BillingService.payment_config_status()
     online_payment_available = bool(config_status.get("real_payment_enabled", False))
-    return success_response(data={"online_payment_available": online_payment_available}, msg="ok")
+    # F1G-CM: manual_payment_available is a SEPARATE authority from
+    # online_payment_available -- one flag being true never implies or
+    # excludes the other. Same minimal-boolean shape as online_payment_available:
+    # no provider names, no config presence, no internal detail.
+    manual_status = BillingService.manual_payment_config_status()
+    manual_payment_available = bool(manual_status.get("manual_payment_available", False))
+    return success_response(
+        data={
+            "online_payment_available": online_payment_available,
+            "manual_payment_available": manual_payment_available,
+        },
+        msg="ok",
+    )
 
 
 @router.post("/invoices/{invoice_id}/payments", response_model=RespVo)
@@ -97,6 +116,8 @@ async def create_my_billing_payment(
         # mock_pay_order) -- not the WXPAY-blocked 422, and no
         # payment_config_status() attached, since that dict describes real
         # platform WXPAY config presence, not mock-money policy.
+        return error_response(code=403, msg=str(exc))
+    except ManualPaymentDisabledError as exc:
         return error_response(code=403, msg=str(exc))
     except RuntimeError as exc:
         # F1G-CF-C1: no longer attaches BillingService.payment_config_status()
@@ -129,6 +150,35 @@ async def get_my_billing_payment(payment_id: str, request: Request, db: AsyncSes
     if not payment:
         return error_response(code=404, msg="支付记录不存在")
     return success_response(data=serialize_payment(payment), msg="ok")
+
+
+@router.post("/payments/{payment_id}/manual-claim", response_model=RespVo)
+async def claim_manual_billing_payment(
+    payment_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    # F1G-CM Phase 8: "我已付款" -- a PAYMENT CLAIM, never a PAYMENT FACT.
+    # See BillingService.claim_manual_payment()'s own docstring: this can
+    # never mark the invoice/payment paid or apply a subscription. Owner-only
+    # enforcement comes from the SAME middleware default-deny every other
+    # /api/v1/billing/* route already relies on (staff_route_allowed()) --
+    # no extra role check needed here.
+    tenant_id = _merchant_tenant_id(request)
+    if not tenant_id:
+        return error_response(code=401, msg="请先登录")
+    service = BillingService(db)
+    service.set_tenant_id(tenant_id)
+    try:
+        payment = await service.claim_manual_payment(int(payment_id))
+    except ManualPaymentStateError as exc:
+        return error_response(code=400, msg=str(exc))
+    except ValueError as exc:
+        # Covers both "no such payment" and "belongs to a different tenant"
+        # (claim_manual_payment's own lookup is tenant-scoped) -- 404 either
+        # way, never distinguishing the two to an external caller.
+        return error_response(code=404, msg=str(exc))
+    return success_response(data=serialize_payment(payment), msg="已提交付款确认")
 
 
 @router.post("/wxpay-notify")
