@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.logger import logger
 from app.models.billing import BillingInvoice, BillingPayment
 from app.models.tenant import Tenant
@@ -44,6 +45,24 @@ CHARGE_TYPES = {
 
 PAYMENT_PROVIDERS = {"FAKE", "WXPAY"}
 DUPLICATE_INVOICE_PAYMENT = "DUPLICATE_INVOICE_PAYMENT"
+
+
+class MockPaymentDisabledError(RuntimeError):
+    """Raised when a caller (payment-attempt creation OR the public provider
+    callback) tries to use the FAKE billing provider while
+    settings.ALLOW_MOCK_MONEY_ENDPOINTS is not explicitly true (F1G-CF-A).
+
+    FAKE's "signature" is the static header value x-billing-fake-signature:
+    valid -- not a real cryptographic check -- so unlike WXPAY (which is
+    blocked by having no working implementation at all), FAKE is fully
+    functional and must be gated by policy, the same way every other
+    mock-money endpoint in this codebase already is (app/api/v1/member.py's
+    /recharge, order_payment_service.py's mock_pay_order). Subclasses
+    RuntimeError so it funnels through the SAME `except RuntimeError` branch
+    POST /api/v1/billing/invoices/{id}/payments already has for the WXPAY
+    block, instead of leaking as an unhandled 500."""
+
+    pass
 
 
 class SubscriptionSnapshotIntegrityError(ValueError):
@@ -189,13 +208,20 @@ class BillingService(BaseService):
         )
         return result.scalar_one_or_none()
 
-    async def create_payment_attempt(self, invoice_id: int, provider_name: str = "FAKE") -> tuple[BillingPayment, dict[str, Any]]:
+    async def create_payment_attempt(self, invoice_id: int, provider_name: str = "WXPAY") -> tuple[BillingPayment, dict[str, Any]]:
         tenant_id = self.require_tenant_id()
-        provider_name = (provider_name or "FAKE").upper()
+        provider_name = (provider_name or "WXPAY").upper()
         if provider_name not in PAYMENT_PROVIDERS:
             raise ValueError("支付渠道不支持")
         if provider_name == "WXPAY":
             raise RuntimeError(REAL_PAYMENT_BLOCKED_REASON)
+        # F1G-CF-A: FAKE is a fully working provider (unlike WXPAY, which has
+        # no real implementation to begin with) -- it must be gated by the
+        # SAME policy every other mock-money endpoint in this codebase already
+        # uses, not left reachable by default. Checked here, before any DB
+        # row is touched, so a disabled attempt leaves nothing behind.
+        if provider_name == "FAKE" and not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
+            raise MockPaymentDisabledError("模拟支付未启用")
 
         invoice_result = await self.db.execute(
             select(BillingInvoice)
@@ -237,6 +263,17 @@ class BillingService(BaseService):
         return payment, provider_result
 
     async def process_provider_notification(self, *, provider_name: str, headers: dict[str, str], body: bytes) -> dict[str, str]:
+        provider_name = (provider_name or "WXPAY").upper()
+        # F1G-CF-A: authoritative gate #2 (independent of create_payment_attempt's
+        # gate #1) -- this route is public and unauthenticated by necessity
+        # (real payment providers can't carry a merchant JWT), so an attacker
+        # who never went through payment-attempt creation at all must still be
+        # rejected here, before verify_notify() ever runs. Same message as a
+        # genuine signature failure so a disabled-mock-money environment
+        # doesn't leak that fact to an anonymous caller.
+        if provider_name == "FAKE" and not settings.ALLOW_MOCK_MONEY_ENDPOINTS:
+            logger.warning("[BILLING_FAKE_CALLBACK_BLOCKED] mock money disabled")
+            return {"code": "FAIL", "message": "验签失败"}
         provider = get_billing_payment_provider(provider_name)
         notice = provider.verify_notify(headers, body)
         if not notice:

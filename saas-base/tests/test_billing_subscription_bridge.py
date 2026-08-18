@@ -31,6 +31,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.api.v1.billing import billing_wxpay_notify
+from app.config import settings
 from app.models.base import Base
 from app.models.billing import BillingInvoice, BillingPayment
 from app.models.subscription import Plan, Subscription
@@ -133,8 +134,14 @@ class BillingSubscriptionBridgeTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         await self.db.commit()
+        # F1G-CF-A: this file exercises the real FAKE provider path
+        # end-to-end (never a mocked "success") -- that path is now gated by
+        # settings.ALLOW_MOCK_MONEY_ENDPOINTS, same as every other mock-money
+        # endpoint in this codebase.
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = True
 
     async def asyncTearDown(self):
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = False
         await self.db.close()
         await self.engine.dispose()
 

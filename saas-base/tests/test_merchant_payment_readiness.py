@@ -22,6 +22,7 @@ from starlette.requests import Request
 
 from app.api.v1.billing import get_merchant_payment_readiness
 from app.api.v1.super_admin import _verify_super_token
+from app.config import settings
 from app.models.base import Base
 from app.models.billing import BillingInvoice, BillingPayment
 from app.models.subscription import Subscription
@@ -83,8 +84,13 @@ class MerchantPaymentReadinessTest(unittest.IsolatedAsyncioTestCase):
         self.db = self.SessionLocal()
         self.db.add(Tenant(tenant_id=TENANT_A, name="Readiness Tenant", password_hash="x", status=True))
         await self.db.commit()
+        # F1G-CF-A: test_fake_provider_actually_works_as_a_test_capability
+        # exercises the real FAKE provider, now gated by
+        # settings.ALLOW_MOCK_MONEY_ENDPOINTS.
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = True
 
     async def asyncTearDown(self):
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = False
         await self.db.close()
         await self.engine.dispose()
 

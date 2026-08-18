@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.response import RespVo, error_response, success_response
-from app.services.billing_service import BillingService, serialize_invoice, serialize_payment
+from app.services.billing_service import BillingService, MockPaymentDisabledError, serialize_invoice, serialize_payment
 
 
 ApiResponse: TypeAlias = RespVo[Any]
@@ -15,7 +15,14 @@ router = APIRouter(prefix="/api/v1/billing", tags=["SaaS Billing"])
 
 
 class BillingPaymentCreateRequest(BaseModel):
-    provider: str = "FAKE"
+    # F1G-CF-A: a merchant-facing commercial API must never silently default
+    # into the mock-money test provider. WXPAY is always blocked today
+    # (REAL_PAYMENT_BLOCKED_REASON), so an omitted provider now lands on the
+    # same safe, already-rejected path instead of quietly creating a FAKE
+    # payment. The Admin frontend already sends provider: 'WXPAY' explicitly
+    # (SubscriptionSettings.vue) -- this default only closes the gap for any
+    # caller that omits the field.
+    provider: str = "WXPAY"
 
 
 def _merchant_tenant_id(request: Request) -> str | None:
@@ -84,6 +91,13 @@ async def create_my_billing_payment(
     service.set_tenant_id(tenant_id)
     try:
         payment, provider_result = await service.create_payment_attempt(int(invoice_id), body.provider)
+    except MockPaymentDisabledError as exc:
+        # Same code/shape as every other mock-money-disabled response in this
+        # codebase (app/api/v1/member.py's /recharge, order_payment_service.py's
+        # mock_pay_order) -- not the WXPAY-blocked 422, and no
+        # payment_config_status() attached, since that dict describes real
+        # platform WXPAY config presence, not mock-money policy.
+        return error_response(code=403, msg=str(exc))
     except RuntimeError as exc:
         return error_response(code=422, msg=str(exc), data=BillingService.payment_config_status())
     except ValueError as exc:
@@ -114,7 +128,12 @@ async def get_my_billing_payment(payment_id: str, request: Request, db: AsyncSes
 async def billing_wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, str]:
     headers = {k.lower(): v for k, v in dict(request.headers).items()}
     raw_body = await request.body()
-    provider = request.query_params.get("provider") or "FAKE"
+    # F1G-CF-A: this route's own name/purpose is a WeChat Pay callback --
+    # missing/omitted provider must not implicitly mean the mock-money test
+    # provider. See BillingService.process_provider_notification() for the
+    # authoritative FAKE-disabled gate (this default is defense-in-depth,
+    # not the real boundary).
+    provider = request.query_params.get("provider") or "WXPAY"
     return await BillingService(db).process_provider_notification(
         provider_name=provider,
         headers=headers,

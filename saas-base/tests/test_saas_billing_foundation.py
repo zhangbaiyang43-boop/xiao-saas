@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.api.v1.billing import billing_wxpay_notify
+from app.config import settings
 from app.middleware.auth_middleware import WHITELIST
 from app.models.base import Base
 from app.models.billing import BillingInvoice, BillingPayment
@@ -84,8 +85,14 @@ class SaasBillingFoundationTest(unittest.IsolatedAsyncioTestCase):
             ]
         )
         await self.db.commit()
+        # F1G-CF-A: the FAKE provider path is now gated by
+        # settings.ALLOW_MOCK_MONEY_ENDPOINTS, same as every other mock-money
+        # endpoint in this codebase; this file's tests use it as a genuine
+        # test capability (test_fake_provider_actually_works_as_a_test_capability).
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = True
 
     async def asyncTearDown(self):
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = False
         await self.db.close()
         await self.engine.dispose()
 

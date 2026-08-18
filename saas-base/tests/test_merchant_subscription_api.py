@@ -30,6 +30,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.api.v1.billing import BillingPaymentCreateRequest, billing_wxpay_notify, create_my_billing_payment
+from app.config import settings
 from app.api.v1.subscription import (
     RenewalOrderCreateRequest,
     create_renewal_order,
@@ -126,8 +127,14 @@ class MerchantSubscriptionApiTest(unittest.IsolatedAsyncioTestCase):
         await self._add_default_plans()
         await self.db.commit()
         self.service = SubscriptionService(self.db)
+        # F1G-CF-A: this file's commercial-flow tests exercise the real FAKE
+        # billing provider end-to-end, now gated by
+        # settings.ALLOW_MOCK_MONEY_ENDPOINTS, same as every other mock-money
+        # endpoint in this codebase.
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = True
 
     async def asyncTearDown(self):
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = False
         await self.db.close()
         await self.engine.dispose()
 

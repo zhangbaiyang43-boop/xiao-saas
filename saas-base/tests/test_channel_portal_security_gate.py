@@ -110,8 +110,13 @@ class ChannelPortalSecurityGateTest(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_db] = override_get_db
         transport = httpx.ASGITransport(app=app)
         self.client = httpx.AsyncClient(transport=transport, base_url="http://test")
+        # F1G-CF-A: the FAKE billing provider path used as a fixture in this
+        # file is now gated by settings.ALLOW_MOCK_MONEY_ENDPOINTS, same as
+        # every other mock-money endpoint in this codebase.
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = True
 
     async def asyncTearDown(self):
+        settings.ALLOW_MOCK_MONEY_ENDPOINTS = False
         await self.client.aclose()
         app.dependency_overrides.clear()
         await self.db.close()
