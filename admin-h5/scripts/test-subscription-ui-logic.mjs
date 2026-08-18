@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import {
   PLAN_CODE_FREE,
   annualDiscountCopy,
+  billingPeriodLabel,
   buildRenewalOrderPayload,
   currentPlanCardCopy,
   formatDate,
@@ -17,9 +18,11 @@ import {
   homeStatusStripCopy,
   isBillingPaymentTerminal,
   isBillingPaymentWaiting,
+  manualPaymentStatusCopy,
   mapPurchaseErrorMessage,
   planCardState,
   planDisplayName,
+  resolveManualPaymentAvailable,
   resolveOnlinePaymentAvailable,
   trialDisclosure,
 } from '../src/utils/subscriptionUi.js'
@@ -233,5 +236,55 @@ assert.equal(formatDate('not-a-date'), '')
 assert.equal(planDisplayName('FREE'), '免费版')
 assert.equal(planDisplayName('STANDARD'), '普通版')
 assert.equal(planDisplayName('PRO'), '专业版')
+
+// ---- MANUAL_READINESS_TRUE_ENABLES_CTA_TEST (Phase F1G-CM-B, UI contract
+// only, NOT real WXPAY/real payment) -----------------------------------------
+assert.equal(
+  resolveManualPaymentAvailable({ ok: true, data: { manual_payment_available: true } }),
+  true,
+)
+// manual=true must never be read as online=true, and vice versa.
+assert.equal(
+  resolveOnlinePaymentAvailable({ ok: true, data: { online_payment_available: false, manual_payment_available: true } }),
+  false,
+)
+assert.equal(
+  resolveManualPaymentAvailable({ ok: true, data: { online_payment_available: true, manual_payment_available: false } }),
+  false,
+)
+
+// ---- MANUAL_READINESS_REQUEST_FAILURE_FAILS_CLOSED_TEST --------------------
+assert.equal(resolveManualPaymentAvailable(null), false)
+assert.equal(resolveManualPaymentAvailable(undefined), false)
+assert.equal(resolveManualPaymentAvailable({ ok: false }), false)
+assert.equal(resolveManualPaymentAvailable({ ok: true, data: {} }), false)
+assert.equal(resolveManualPaymentAvailable({ ok: true, data: { manual_payment_available: false } }), false)
+assert.equal(resolveManualPaymentAvailable({ ok: true, data: { manual_payment_available: 1 } }), false)
+assert.equal(resolveManualPaymentAvailable({ ok: true, data: { manual_payment_available: 'true' } }), false)
+
+// ---- Billing period label ---------------------------------------------------
+assert.equal(billingPeriodLabel('YEAR'), '1年')
+assert.equal(billingPeriodLabel('MONTH'), '1个月')
+assert.equal(billingPeriodLabel(undefined), '1个月')
+
+// ---- Manual payment review status copy (Phase 6 frozen copy) ---------------
+{
+  const waiting = manualPaymentStatusCopy('WAITING_CONFIRMATION')
+  assert.deepEqual(waiting.lines, ['已提交付款确认', '等待平台核实', '通常10分钟内完成，不用重复付款'])
+  assert.equal(waiting.actionText, '')
+  for (const forbidden of ['支付成功', '付款成功', '已开通']) {
+    assert.ok(!waiting.lines.join('').includes(forbidden), `waiting copy must never include: ${forbidden}`)
+  }
+
+  const rejected = manualPaymentStatusCopy('REJECTED')
+  assert.deepEqual(rejected.lines, ['暂未查到对应款项', '请确认付款后重新提交'])
+  assert.equal(rejected.actionText, '重新提交付款确认')
+
+  const initial = manualPaymentStatusCopy(null)
+  assert.deepEqual(initial.lines, [])
+  assert.equal(initial.actionText, '我已付款')
+
+  assert.equal(manualPaymentStatusCopy('CONFIRMED').actionText, '我已付款')
+}
 
 console.log('test-subscription-ui-logic: ok')

@@ -39,14 +39,21 @@ assert.ok(!/toFixed\(2\).*\/\s*12/.test(source), 'must not compute a monthly-equ
 assert.ok(source.includes('annualDiscountCopy('), 'annual discount label must come from the shared helper, not inline text')
 
 // ---- READINESS_FALSE_DISABLES_CTA_TEST: renewal-orders must not be
-// reachable when online payment is unavailable -----------------------------
+// reachable when neither online nor manual payment is available
+// (F1G-CM-B extends the single online-only gate to an online-OR-manual gate)
 {
-  const guardIdx = indexOfOrFail('if (!onlinePaymentAvailable.value) return', 'readiness guard in handlePurchaseClick')
+  const guardIdx = indexOfOrFail(
+    'if (!onlinePaymentAvailable.value && !manualPaymentAvailable.value) return',
+    'combined online/manual readiness guard in handlePurchaseClick',
+  )
   const createOrderCallIdx = indexOfOrFail('await createRenewalOrder(', 'createRenewalOrder call site')
   assert.ok(guardIdx < createOrderCallIdx, 'the readiness guard must appear before the renewal-orders call')
-  // The template must also bind :disabled to onlinePaymentAvailable so a
+  // The template must also bind :disabled to the combined availability so a
   // real click can never reach the handler in the first place.
-  assert.ok(source.includes(':disabled="!onlinePaymentAvailable'), 'purchase CTA must be template-disabled when readiness is false')
+  assert.ok(
+    source.includes(':disabled="!(onlinePaymentAvailable || manualPaymentAvailable)'),
+    'purchase CTA must be template-disabled unless online or manual payment is available',
+  )
 }
 
 // ---- READINESS_FAILURE_BEHAVIOR: fail closed on request failure ---------
@@ -54,12 +61,17 @@ assert.ok(source.includes('annualDiscountCopy('), 'annual discount label must co
   const loadFnIdx = indexOfOrFail('async function loadPage()', 'loadPage function')
   const readinessBlock = source.slice(loadFnIdx)
   assert.ok(readinessBlock.includes('readinessKnown.value = false'), 'readiness must default/reset to unknown-false on failure')
-  assert.ok(readinessBlock.includes('onlinePaymentAvailable.value = false'), 'readiness must reset to unavailable on failure')
+  assert.ok(readinessBlock.includes('onlinePaymentAvailable.value = false'), 'online readiness must reset to unavailable on failure')
+  assert.ok(readinessBlock.includes('manualPaymentAvailable.value = false'), 'manual readiness must reset to unavailable on failure')
 }
-assert.ok(source.includes('resolveOnlinePaymentAvailable('), 'must use the shared fail-closed readiness resolver, not ad-hoc logic')
+assert.ok(source.includes('resolveOnlinePaymentAvailable('), 'must use the shared fail-closed online readiness resolver, not ad-hoc logic')
+assert.ok(source.includes('resolveManualPaymentAvailable('), 'must use the shared fail-closed manual readiness resolver, not ad-hoc logic')
 
-// ---- Real payment provider only, never FAKE for merchant purchases ------
-assert.ok(source.includes("provider: 'WXPAY'"), 'merchant purchase flow must request the real WXPAY provider')
+// ---- Real/manual payment providers only, never FAKE for merchant purchases
+assert.ok(
+  source.includes("const provider = onlinePaymentAvailable.value ? 'WXPAY' : 'MANUAL'"),
+  'merchant purchase flow must pick WXPAY when online is ready, otherwise MANUAL',
+)
 assert.ok(!source.includes("provider: 'FAKE'"), 'merchant purchase flow must never request the FAKE provider')
 
 // ---- AMOUNT_NOT_SENT_TEST: renewal order body built via the shared,

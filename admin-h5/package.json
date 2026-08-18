@@ -22,7 +22,8 @@
     "test:subscription-ui-logic": "node scripts/test-subscription-ui-logic.mjs",
     "test:subscription-page-wiring": "node scripts/test-subscription-page-wiring.mjs",
     "test:subscription-home-and-entry": "node scripts/test-subscription-home-and-entry.mjs",
-    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run test:super-channel-partners && npm run test:workbench-sync && npm run test:p0-08-sync && npm run test:p0-08-acceptance && npm run test:workbench-print-status && npm run test:payment-handoff-polling && npm run test:order-page-table-context && npm run test:subscription-ui-logic && npm run test:subscription-page-wiring && npm run test:subscription-home-and-entry && npm run build"
+    "test:subscription-manual-payment": "node scripts/test-subscription-manual-payment.mjs",
+    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run test:super-channel-partners && npm run test:workbench-sync && npm run test:p0-08-sync && npm run test:p0-08-acceptance && npm run test:workbench-print-status && npm run test:payment-handoff-polling && npm run test:order-page-table-context && npm run test:subscription-ui-logic && npm run test:subscription-page-wiring && npm run test:subscription-home-and-entry && npm run test:subscription-manual-payment && npm run build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

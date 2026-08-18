@@ -212,5 +212,8 @@ export const getPaymentReadiness = (config = {}) => request.get('/v1/billing/pay
 export const createRenewalOrder = (data) => request.post('/v1/subscription/renewal-orders', data)
 export const createBillingPayment = (invoiceId, data = {}) => request.post(`/v1/billing/invoices/${invoiceId}/payments`, data)
 export const getBillingPayment = (paymentId, config = {}) => request.get(`/v1/billing/payments/${paymentId}`, config)
+// Phase F1G-CM-B — 商家"我已付款" claim，仅提交 claim 状态，绝不代表付款
+// 事实；真正核实由 SuperAdmin confirm 触发（不在本文件范围内）。
+export const claimManualBillingPayment = (paymentId) => request.post(`/v1/billing/payments/${paymentId}/manual-claim`)
 
 

@@ -35,15 +35,31 @@
           </a-radio-group>
         </section>
 
-        <!-- 在线支付未就绪提示（Phase 17/18）——CTA 已经 disabled，这里只是把
-             disabled 的原因说清楚，不靠点击后报错兜底。 -->
+        <!-- 支付未就绪提示（Phase 17/18，F1G-CM-B 扩展 online/manual 双轨）——
+             CTA 已经 disabled，这里只是把 disabled 的原因说清楚，不靠点击后
+             报错兜底。online 与 manual 任一可用即可购买，不展示此提示。 -->
         <a-alert
-          v-if="!onlinePaymentAvailable"
+          v-if="!onlinePaymentAvailable && !manualPaymentAvailable"
           class="readiness-banner animate-in"
           type="warning"
           show-icon
           :message="readinessDisabledText"
         />
+
+        <!-- 未完成的人工核实付款（Phase F1G-CM-B §19/§20）——本会话内存态
+             恢复入口，不新增 Backend 查询；离开页面后无法自动恢复（记录为
+             MANUAL_PAYMENT_RESUME_P1=YES），但不影响真实 Subscription 状态。 -->
+        <a-alert
+          v-if="manualPayment && !manualModalOpen"
+          class="pending-manual-banner animate-in"
+          type="info"
+          show-icon
+          message="有一笔付款待确认"
+        >
+          <template #action>
+            <a-button type="link" size="small" @click="manualModalOpen = true">查看</a-button>
+          </template>
+        </a-alert>
 
         <!-- C/D/E. 套餐卡片：FREE 只展示，STANDARD/PRO 带价格与 CTA -->
         <section
@@ -72,7 +88,7 @@
               v-if="cardStateFor(plan.plan_code).enabled"
               type="primary"
               block
-              :disabled="!onlinePaymentAvailable || purchaseSubmitting"
+              :disabled="!(onlinePaymentAvailable || manualPaymentAvailable) || purchaseSubmitting"
               :loading="purchaseSubmitting && pendingPurchasePlanCode === plan.plan_code"
               @click="handlePurchaseClick(plan.plan_code)"
             >{{ cardStateFor(plan.plan_code).ctaText }}</a-button>
@@ -94,6 +110,81 @@
       <p v-if="purchaseSuccess?.endsAtText" class="success-line success-line--muted">有效期至：{{ purchaseSuccess.endsAtText }}</p>
       <a-button type="primary" block style="margin-top:16px" @click="purchaseSuccess = null">完成</a-button>
     </a-modal>
+
+    <!-- 人工核实付款（Phase F1G-CM-B）：仅商户侧 CLAIM 界面，绝不在此处
+         把 BillingInvoice/BillingPayment 标记为已支付——那只能来自 SuperAdmin
+         confirm 之后的真实轮询结果。 -->
+    <a-modal
+      :open="manualModalOpen"
+      :title="manualPaymentTitle"
+      :footer="null"
+      :closable="!manualClaimSubmitting"
+      :mask-closable="false"
+      centered
+      class="manual-payment-modal"
+      @cancel="closeManualModal"
+    >
+      <template v-if="manualPayment">
+        <p class="mp-amount">{{ manualAmountText }}</p>
+        <p class="mp-period">{{ manualPeriodText }}</p>
+
+        <template v-if="!manualPayment.manual_review_status">
+          <p class="mp-method">微信扫码付款</p>
+          <div class="mp-qr">
+            <img
+              v-if="manualPayment.qr_url && !qrLoadError"
+              :src="manualPayment.qr_url"
+              alt="收款二维码"
+              @error="onQrError"
+            />
+            <div v-else class="mp-qr-error">付款二维码暂不可用<br />请稍后重试</div>
+          </div>
+        </template>
+
+        <div class="mp-field">
+          <span class="mp-field-label">收款方</span>
+          <span class="mp-field-value">{{ manualPayment.payee_name || '—' }}</span>
+        </div>
+        <div class="mp-field mp-field--out-trade-no">
+          <span class="mp-field-label">账单号</span>
+          <span class="mp-field-value mp-out-trade-no">{{ manualPayment.out_trade_no }}</span>
+          <a-button type="link" size="small" @click="copyOutTradeNo">复制</a-button>
+        </div>
+
+        <template v-if="!manualPayment.manual_review_status">
+          <a-button
+            type="primary"
+            block
+            style="margin-top:12px"
+            :loading="manualClaimSubmitting"
+            :disabled="qrLoadError"
+            @click="handleManualClaim"
+          >我已付款</a-button>
+          <p class="mp-hint">付款完成后点击"我已付款"，通常10分钟内确认开通</p>
+        </template>
+
+        <template v-else-if="manualPayment.manual_review_status === 'WAITING_CONFIRMATION'">
+          <div class="mp-waiting">
+            <p v-for="line in manualStatusCopy.lines" :key="line">{{ line }}</p>
+          </div>
+        </template>
+
+        <template v-else-if="manualPayment.manual_review_status === 'REJECTED'">
+          <div class="mp-rejected">
+            <p v-for="line in manualStatusCopy.lines" :key="line">{{ line }}</p>
+          </div>
+          <a-button
+            type="primary"
+            block
+            style="margin-top:12px"
+            :loading="manualClaimSubmitting"
+            @click="handleManualClaim"
+          >{{ manualStatusCopy.actionText }}</a-button>
+        </template>
+
+        <a-button block style="margin-top:8px" @click="closeManualModal">返回</a-button>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -102,6 +193,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Modal, message } from 'ant-design-vue'
 import PageHeader from '../../components/PageHeader.vue'
 import {
+  claimManualBillingPayment,
   createBillingPayment,
   createRenewalOrder,
   getBillingPayment,
@@ -112,14 +204,18 @@ import {
 import {
   PLAN_CODE_FREE,
   annualDiscountCopy,
+  billingPeriodLabel,
   buildRenewalOrderPayload,
   currentPlanCardCopy,
   formatDate,
   formatPlanPrice,
+  formatYuan,
   isBillingPaymentTerminal,
+  manualPaymentStatusCopy,
   mapPurchaseErrorMessage,
   planCardState,
   planDisplayName,
+  resolveManualPaymentAvailable,
   resolveOnlinePaymentAvailable,
   trialDisclosure,
 } from '../../utils/subscriptionUi'
@@ -140,11 +236,25 @@ const loadError = ref(false)
 const currentSubscription = ref(null)
 const plans = ref([])
 const onlinePaymentAvailable = ref(false)
+const manualPaymentAvailable = ref(false)
 const readinessKnown = ref(false)
 const billingPeriod = ref('MONTH')
 const purchaseSubmitting = ref(false)
 const pendingPurchasePlanCode = ref('')
 const purchaseSuccess = ref(null)
+
+// ---- 人工核实付款（Phase F1G-CM-B）。manualPayment 在内存中保留直到
+// PAID 或用户离开本组件实例，用来支撑同会话内的"查看"恢复入口——不新增
+// Backend 查询接口（MANUAL_PAYMENT_RESUME_P1=YES）。 ----
+const manualPayment = ref(null)
+const manualModalOpen = ref(false)
+const manualClaimSubmitting = ref(false)
+const qrLoadError = ref(false)
+const manualPaymentTitle = ref('')
+
+const manualStatusCopy = computed(() => manualPaymentStatusCopy(manualPayment.value?.manual_review_status))
+const manualAmountText = computed(() => formatYuan(manualPayment.value?.amount_cents))
+const manualPeriodText = computed(() => billingPeriodLabel(manualPayment.value?.billing_period))
 
 const currentCard = computed(() => currentPlanCardCopy(currentSubscription.value))
 const isTrial = computed(() => currentSubscription.value?.subscription_status === 'TRIAL')
@@ -192,14 +302,16 @@ async function loadPage() {
     loadError.value = true
   }
 
-  // Fail closed（Phase 18）：只有请求成功且明确返回 true 才判定可购买；
-  // 请求失败/异常一律留在初始的 false，不得默认放行。
+  // Fail closed（Phase 18，F1G-CM-B 扩展 manual 轨道）：只有请求成功且明确
+  // 返回 true 才判定可购买；请求失败/异常一律留在初始的 false，不得默认放行。
   if (readinessRes.status === 'fulfilled' && readinessRes.value?.code === 200) {
     readinessKnown.value = true
     onlinePaymentAvailable.value = resolveOnlinePaymentAvailable({ ok: true, data: readinessRes.value.data })
+    manualPaymentAvailable.value = resolveManualPaymentAvailable({ ok: true, data: readinessRes.value.data })
   } else {
     readinessKnown.value = false
     onlinePaymentAvailable.value = false
+    manualPaymentAvailable.value = false
   }
 
   loading.value = false
@@ -208,8 +320,8 @@ async function loadPage() {
 function handlePurchaseClick(planCode) {
   if (purchaseSubmitting.value) return
   // CTA 已经在渲染层用 :disabled 挡住，这里是二次防御，绝不依赖点击后
-  // 才发现 online_payment_available=false（Phase 17）。
-  if (!onlinePaymentAvailable.value) return
+  // 才发现 online/manual 都不可用（Phase 17，F1G-CM-B 扩展 manual 轨道）。
+  if (!onlinePaymentAvailable.value && !manualPaymentAvailable.value) return
 
   const plan = planByCode(planCode)
   const priceText = plan ? formatPlanPrice(priceCentsFor(plan), billingPeriod.value) : ''
@@ -236,8 +348,11 @@ async function submitPurchase(planCode) {
     }
     const invoiceId = orderRes.data.invoice_id
     // 商家真实购买流程只能走真实支付渠道，绝不能悄悄落到默认的 FAKE
-    // provider——那是仅供内部/测试使用的能力，见 F1E-A 冻结语义。
-    const paymentRes = await createBillingPayment(invoiceId, { provider: 'WXPAY' })
+    // provider——那是仅供内部/测试使用的能力，见 F1E-A 冻结语义。本阶段
+    // online_payment_available 恒为 false，实际必然走 MANUAL；WXPAY 分支
+    // 保留给未来 online 就绪时使用，不在本阶段被触达。
+    const provider = onlinePaymentAvailable.value ? 'WXPAY' : 'MANUAL'
+    const paymentRes = await createBillingPayment(invoiceId, { provider })
     if (paymentRes?.code !== 200) {
       message.error(mapPurchaseErrorMessage(paymentRes?.msg))
       purchaseSubmitting.value = false
@@ -249,10 +364,74 @@ async function submitPurchase(planCode) {
       message.error('续费失败，请稍后重试')
       return
     }
+
+    if (provider === 'MANUAL') {
+      const payParams = paymentRes.data?.provider?.pay_params || {}
+      manualPaymentTitle.value = cardStateFor(planCode).ctaText || '开通套餐'
+      manualPayment.value = {
+        ...payment,
+        plan_code: planCode,
+        billing_period: billingPeriod.value,
+        payee_name: payParams.payee_name || '',
+        qr_url: payParams.qr_url || '',
+      }
+      qrLoadError.value = false
+      manualModalOpen.value = true
+      purchaseSubmitting.value = false
+      return
+    }
+
     startPaymentPolling(payment.id)
   } catch (err) {
     message.error(mapPurchaseErrorMessage(err?.response?.data?.msg))
     purchaseSubmitting.value = false
+  }
+}
+
+function mergeManualPayment(payment) {
+  if (!manualPayment.value || !payment) return
+  manualPayment.value = { ...manualPayment.value, ...payment }
+}
+
+function onQrError() {
+  qrLoadError.value = true
+}
+
+async function copyOutTradeNo() {
+  const text = manualPayment.value?.out_trade_no
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success('已复制账单号')
+  } catch {
+    // 复制失败不影响付款流程（Phase 11），静默即可。
+  }
+}
+
+function closeManualModal() {
+  if (manualClaimSubmitting.value) return
+  manualModalOpen.value = false
+}
+
+async function handleManualClaim() {
+  // Loading lock 防止连续快速点击重复创建请求（Phase 12/13）；Backend
+  // 自身也保证幂等，这里只是前端的第一道防御。
+  if (manualClaimSubmitting.value || !manualPayment.value?.id) return
+  manualClaimSubmitting.value = true
+  try {
+    const res = await claimManualBillingPayment(manualPayment.value.id)
+    if (res?.code !== 200) {
+      message.error(mapPurchaseErrorMessage(res?.msg))
+      manualClaimSubmitting.value = false
+      return
+    }
+    mergeManualPayment(res.data)
+    manualClaimSubmitting.value = false
+    pendingPurchasePlanCode.value = manualPayment.value.plan_code
+    startPaymentPolling(manualPayment.value.id)
+  } catch (err) {
+    message.error(mapPurchaseErrorMessage(err?.response?.data?.msg))
+    manualClaimSubmitting.value = false
   }
 }
 
@@ -333,13 +512,32 @@ async function handleBillingPaymentUpdate(payment) {
   if (payment.status === 'PAID') {
     stopBillingPaymentPolling()
     const planCode = pendingPurchasePlanCode.value
+    manualModalOpen.value = false
+    manualPayment.value = null
+    manualClaimSubmitting.value = false
     await loadPage()
     purchaseSubmitting.value = false
     purchaseSuccess.value = {
       planName: planDisplayName(planCode),
       endsAtText: formatDate(currentSubscription.value?.paid_ends_at),
     }
-  } else if (isBillingPaymentTerminal(payment.status)) {
+    return
+  }
+
+  // MANUAL 支付：只读轮询 manual_review_status，绝不在前端把这当作
+  // "已支付"——只有真正的 status === 'PAID'（来自 SuperAdmin confirm 触发
+  // 的 process_verified_payment_fact()）才算数（Phase F1G-CM-B 安全冻结）。
+  if (payment.provider === 'MANUAL') {
+    mergeManualPayment(payment)
+    if (payment.manual_review_status === 'REJECTED') {
+      // 驳回后不再自动轮询，等待商家重新提交 claim 才重启轮询。
+      stopBillingPaymentPolling()
+      manualClaimSubmitting.value = false
+    }
+    return
+  }
+
+  if (isBillingPaymentTerminal(payment.status)) {
     stopBillingPaymentPolling()
     purchaseSubmitting.value = false
     message.error('支付未完成，请重试')
@@ -401,6 +599,8 @@ onBeforeUnmount(() => {
 
 .trial-disclosure { margin-bottom: 12px; border-radius: 10px; }
 .readiness-banner { margin-bottom: 12px; border-radius: 10px; }
+.pending-manual-banner { margin-bottom: 12px; border-radius: 10px; }
+.pending-manual-banner :deep(.ant-alert-content) { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 
 .period-card { padding: 12px; margin-bottom: 12px; }
 .period-options { display: flex; width: 100%; }
@@ -429,4 +629,25 @@ onBeforeUnmount(() => {
 
 .success-line { margin: 0 0 6px; color: var(--text-1); font-size: 15px; font-weight: 700; text-align: center; }
 .success-line--muted { color: var(--text-2); font-size: 13px; font-weight: 400; }
+
+/* 人工核实付款弹层（Phase F1G-CM-B）——只展示商家能理解的字段，绝不
+   暴露 payment id / invoice id / provider / manual_review_status 等内部
+   技术状态（Phase 40）。 */
+.manual-payment-modal .mp-amount { margin: 0; color: var(--text-1); font-size: 26px; font-weight: 900; text-align: center; }
+.manual-payment-modal .mp-period { margin: 4px 0 14px; color: var(--text-2); font-size: 13px; text-align: center; }
+.manual-payment-modal .mp-method { margin: 0 0 8px; color: var(--text-2); font-size: 13px; text-align: center; }
+.manual-payment-modal .mp-qr { display: flex; align-items: center; justify-content: center; width: 220px; height: 220px; margin: 0 auto 14px; background: var(--bg-page); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.manual-payment-modal .mp-qr img { width: 100%; height: 100%; object-fit: contain; }
+.manual-payment-modal .mp-qr-error { padding: 0 16px; color: var(--text-3); font-size: 12px; text-align: center; line-height: 1.6; }
+.manual-payment-modal .mp-field { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.manual-payment-modal .mp-field-label { flex: 0 0 auto; color: var(--text-3); font-size: 13px; }
+.manual-payment-modal .mp-field-value { flex: 1; min-width: 0; color: var(--text-1); font-size: 13px; word-break: break-all; }
+.manual-payment-modal .mp-out-trade-no { font-family: 'SFMono-Regular', Consolas, monospace; }
+.manual-payment-modal .mp-hint { margin: 10px 0 0; color: var(--text-3); font-size: 12px; text-align: center; line-height: 1.6; }
+.manual-payment-modal .mp-waiting,
+.manual-payment-modal .mp-rejected { padding: 14px 0 0; text-align: center; }
+.manual-payment-modal .mp-waiting p,
+.manual-payment-modal .mp-rejected p { margin: 0 0 4px; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+.manual-payment-modal .mp-waiting p:first-child,
+.manual-payment-modal .mp-rejected p:first-child { color: var(--text-1); font-size: 15px; font-weight: 700; }
 </style>

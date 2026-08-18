@@ -165,6 +165,30 @@ export function resolveOnlinePaymentAvailable(readinessResult) {
   return readinessResult.data?.online_payment_available === true
 }
 
+// 人工核实支付就绪判定（Phase F1G-CM-B）：与 resolveOnlinePaymentAvailable
+// 同一 fail-closed 形状，独立字段，不得把 manual=true 误解释成 online=true。
+export function resolveManualPaymentAvailable(readinessResult) {
+  if (!readinessResult || readinessResult.ok !== true) return false
+  return readinessResult.data?.manual_payment_available === true
+}
+
+// 账单周期展示文案（Phase F1G-CM-B §5）。
+export function billingPeriodLabel(billingPeriod) {
+  return billingPeriod === 'YEAR' ? '1年' : '1个月'
+}
+
+// 人工核实支付状态冻结文案（Phase F1G-CM-B §6）——claim 后绝不能出现
+// "支付成功/付款成功/已开通" 字样，因为 claim 只是声明，不是事实。
+export function manualPaymentStatusCopy(reviewStatus) {
+  if (reviewStatus === 'REJECTED') {
+    return { lines: ['暂未查到对应款项', '请确认付款后重新提交'], actionText: '重新提交付款确认' }
+  }
+  if (reviewStatus === 'WAITING_CONFIRMATION') {
+    return { lines: ['已提交付款确认', '等待平台核实', '通常10分钟内完成，不用重复付款'], actionText: '' }
+  }
+  return { lines: [], actionText: '我已付款' }
+}
+
 // 账单支付状态轮询的终态判断（Phase F1E-B §20）。
 export function isBillingPaymentTerminal(status) {
   return ['PAID', 'FAILED', 'CANCELLED', 'REFUNDED'].includes(status)
