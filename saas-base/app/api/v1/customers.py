@@ -182,6 +182,9 @@ async def create_customer(data: CreateCustomerRequest, request: Request, db: Asy
     from app.core.tenant_context import TenantContext
 
     tenant_id = TenantContext.get_tenant_id()
+    denial = await require_capability_response(db, tenant_id, CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     customer_service = CustomerService(db)
     customer = await customer_service.create_customer(
         tenant_id=tenant_id,
@@ -216,6 +219,9 @@ async def list_tags(db: AsyncSession = Depends(get_db)):
 
 @router.post("/merge", response_model=RespVo)
 async def merge_customers(data: MergeCustomerRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     customer = await service.merge_customers(data.source_customer_id, data.target_customer_id)
     if not customer:
@@ -238,6 +244,9 @@ async def merge_customers(data: MergeCustomerRequest, request: Request, db: Asyn
 
 @router.put("/{customer_id}", response_model=RespVo)
 async def update_customer(customer_id: int, data: UpdateCustomerRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     before = await service.get_customer_any_status(customer_id)
     customer = await service.update_customer(customer_id, **data.model_dump(exclude_unset=True))
@@ -274,6 +283,9 @@ async def update_customer_status(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     before = await service.get_customer_any_status(customer_id)
     customer = await service.set_customer_status(customer_id, data.status)
@@ -300,6 +312,9 @@ async def update_customer_status(
 
 @router.post("/{customer_id}/restore", response_model=RespVo)
 async def restore_customer(customer_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     before = await service.get_customer_any_status(customer_id)
     customer = await service.set_customer_status(customer_id, 1)
@@ -323,6 +338,9 @@ async def restore_customer(customer_id: int, request: Request, db: AsyncSession 
 
 @router.delete("/{customer_id}", response_model=RespVo)
 async def delete_customer(customer_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     customer = await CustomerService(db).soft_delete_customer(customer_id)
     if not customer:
         return error_response(code=404, msg="会员不存在")
@@ -379,6 +397,9 @@ async def get_customer_operation_logs(
 
 @router.get("/{customer_id}/identities", response_model=RespVo)
 async def get_customer_identities(customer_id: int, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_CUSTOMER_CONSUMPTION)
+    if denial is not None:
+        return denial
     service = CustomerService(db)
     customer = await service.get_customer_any_status(customer_id)
     if not customer:

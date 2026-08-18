@@ -221,6 +221,18 @@ async def recall_coupon(
     data: RecallCouponRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    from app.core.tenant_context import TenantContext
+
+    # Merchant-proactive recall of a still-UNUSED coupon (e.g. issued in
+    # error, fraud suspicion) -- confirmed by source reverify to be
+    # completely unrelated to the order cancel/refund liability path
+    # (_unlock_order_coupon_if_locked / _set_order_coupon_status_if_locked
+    # in coupon_service.py are separate, never call recall_coupon, and this
+    # is the only call site of CouponService.recall_coupon in the codebase).
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_COUPONS)
+    if denial is not None:
+        return denial
+
     service = CouponService(db)
     result = await service.recall_coupon(coupon_id, data.reason)
     if not result["success"]:
