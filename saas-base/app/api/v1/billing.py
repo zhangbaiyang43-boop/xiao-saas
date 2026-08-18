@@ -99,7 +99,14 @@ async def create_my_billing_payment(
         # platform WXPAY config presence, not mock-money policy.
         return error_response(code=403, msg=str(exc))
     except RuntimeError as exc:
-        return error_response(code=422, msg=str(exc), data=BillingService.payment_config_status())
+        # F1G-CF-C1: no longer attaches BillingService.payment_config_status()
+        # here. That dict is now a more granular structured audit (mchid/
+        # appid/cert/key presence booleans, payment mode, etc.) than the old
+        # 4-field wx_sp_config_present shape -- exactly the kind of "which
+        # secret is missing" internal config detail this phase's own
+        # payment-readiness design says merchants must never see (it remains
+        # available to SuperAdmin via GET /api/super/billing/payment-config-status).
+        return error_response(code=422, msg=str(exc))
     except ValueError as exc:
         return error_response(code=400, msg=str(exc))
     return success_response(

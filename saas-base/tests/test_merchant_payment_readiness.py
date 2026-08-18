@@ -196,13 +196,22 @@ class MerchantPaymentReadinessTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/super/billing/payment-config-status", paths)
         self.assertEqual(paths["/api/super/billing/payment-config-status"], ["GET"])
 
-    def test_payment_config_status_shape_unchanged(self):
+    def test_payment_config_status_shape_is_structured_audit(self):
+        # F1G-CF-C1: the old 4-field wx_sp_config_present/audit_result shape
+        # was replaced with a flat, structured audit -- update this test to
+        # the new intentional shape rather than pin the old one.
         status = BillingService.payment_config_status()
-        self.assertIn("real_payment_enabled", status)
-        self.assertIn("blocked_reason", status)
-        self.assertIn("wx_sp_config_present", status)
-        self.assertIn("audit_result", status)
+        for key in (
+            "release_switch_enabled", "payment_mode", "payment_mode_valid",
+            "mchid_present", "appid_present", "api_v3_key_present",
+            "cert_serial_present", "private_key_present",
+            "verification_material_present", "callback_url_valid",
+            "provider_implementation_ready", "config_complete",
+            "real_payment_enabled", "blocked_reason",
+        ):
+            self.assertIn(key, status)
         self.assertIs(status["real_payment_enabled"], False)
+        self.assertIs(status["provider_implementation_ready"], False)
 
 
 if __name__ == "__main__":
