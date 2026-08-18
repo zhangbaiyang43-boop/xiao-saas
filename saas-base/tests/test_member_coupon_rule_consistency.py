@@ -1,5 +1,8 @@
 import asyncio
+import os
+import tempfile
 import unittest
+import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -51,7 +54,13 @@ class MemberCouponRuleConsistencyTest(unittest.IsolatedAsyncioTestCase):
         self._original_redis_enabled = settings.REDIS_ENABLED
         settings.REDIS_ENABLED = False
 
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        # A real file-backed SQLite DB, not :memory: -- see
+        # tests/test_optional_side_effect_wiring.py for why: a nested
+        # optional_capability_enabled() session mid-transaction can spuriously
+        # roll back this session's pending writes under :memory:, a
+        # SQLite/aiosqlite test-only artifact absent on any real DB.
+        self._db_file = f"{tempfile.gettempdir()}/f1fd1a_member_coupon_{uuid.uuid4().hex}.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self._db_file}")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
@@ -89,6 +98,13 @@ class MemberCouponRuleConsistencyTest(unittest.IsolatedAsyncioTestCase):
         ))
         await self.db.commit()
 
+        # Phase F1F-D1A: order_payment_service.py now calls
+        # optional_capability_enabled() inside _on_payment_success, which opens
+        # its own AsyncSessionLocal() session -- point that factory at this
+        # test's own in-memory engine instead of the real production DB.
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.SessionLocal)
+        self._session_patch.start()
+
         self.captured_rule_types: list[str] = []
         captured = self.captured_rule_types
 
@@ -111,9 +127,14 @@ class MemberCouponRuleConsistencyTest(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self._issue_patcher.stop()
         self._event_patcher.stop()
+        self._session_patch.stop()
         settings.REDIS_ENABLED = self._original_redis_enabled
         await self.db.close()
         await self.engine.dispose()
+        try:
+            os.remove(self._db_file)
+        except OSError:
+            pass
 
     async def _pay_order_online(self, customer_id):
         order = Order(

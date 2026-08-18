@@ -12,11 +12,13 @@ from starlette.requests import Request
 
 from app.config import settings
 from app.core.logger import logger, safe_log
+from app.core.plan_capabilities import CAP_COUPONS, CAP_DISTRIBUTION_REFERRAL, CAP_MEMBERSHIP
 from app.core.response import RespVo, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order
 from app.services.base_service import BaseService
 from app.services.coupon_service import CouponService
+from app.services.optional_entitlement import optional_capability_enabled
 from app.services.order_print_service import _print_paid_order_ticket
 
 if TYPE_CHECKING:
@@ -281,17 +283,18 @@ class OrderPaymentService(BaseService):
                     from app.models.coupon_template import CouponTemplate
                     from app.services.commission_service import CommissionService
 
-                    template_result = await self.db.execute(
-                        select(CouponTemplate).where(CouponTemplate.id == locked_coupon.template_id)
-                    )
-                    coupon_template = template_result.scalar_one_or_none()
-                    commission_svc = CommissionService(self.db)
-                    commission_svc.set_tenant_id(str(order.tenant_id))
-                    await commission_svc.record_after_verify(
-                        locked_coupon,
-                        coupon_template,
-                        auto_commit=False,
-                    )
+                    if await optional_capability_enabled(str(order.tenant_id), CAP_DISTRIBUTION_REFERRAL):
+                        template_result = await self.db.execute(
+                            select(CouponTemplate).where(CouponTemplate.id == locked_coupon.template_id)
+                        )
+                        coupon_template = template_result.scalar_one_or_none()
+                        commission_svc = CommissionService(self.db)
+                        commission_svc.set_tenant_id(str(order.tenant_id))
+                        await commission_svc.record_after_verify(
+                            locked_coupon,
+                            coupon_template,
+                            auto_commit=False,
+                        )
                     # Payment transition uses flush-only mode; refresh keeps the
                     # shared session state explicit before the remaining writes.
                     await self.db.refresh(order)
@@ -326,7 +329,7 @@ class OrderPaymentService(BaseService):
 
 
         # DB-only coupon/member effects remain inside the outer payment transaction.
-        if customer_id:
+        if customer_id and await optional_capability_enabled(str(order.tenant_id), CAP_COUPONS):
             try:
                 svc = CouponService(self.db)
                 prior_paid_count_result = await self.db.execute(
@@ -383,6 +386,7 @@ class OrderPaymentService(BaseService):
                 logger.warning(f"post-payment coupon failed: {e}")
                 raise
 
+        if customer_id and await optional_capability_enabled(str(order.tenant_id), CAP_MEMBERSHIP):
             try:
                 from app.services.membership_service import MembershipService
                 from app.services.customer_service import CustomerService
@@ -445,25 +449,27 @@ class OrderPaymentService(BaseService):
         if not customer:
             return
 
-        membership_svc = MembershipService(self.db)
-        membership_svc.set_tenant_id(tenant_id)
-        await membership_svc.apply_consumption(customer, float(order.total or 0), consumption_id=int(order.id or 0))
+        if await optional_capability_enabled(tenant_id, CAP_MEMBERSHIP):
+            membership_svc = MembershipService(self.db)
+            membership_svc.set_tenant_id(tenant_id)
+            await membership_svc.apply_consumption(customer, float(order.total or 0), consumption_id=int(order.id or 0))
 
         # 新客券/复购券：prepay 支付成功（_on_payment_success）会发，但 postpay/table_account
         # 结账走的是这个函数，之前完全没有这一段——商户后台"复购券"卡片的文案明确写的是
         # "每次下单后自动推送下次用的券"，不是"微信支付后"，postpay/table_account 静默漏发
         # 与文案承诺不符。同一套 rule_type 判定逻辑（按已支付订单数区分新客/复购），
         # 发放本身的去重交给 issue_auto_coupon 自己的幂等保护（_dedup_issue_lock）。
-        try:
-            coupon_svc = CouponService(self.db)
-            coupon_svc.set_tenant_id(tenant_id)
-            rule_type = await coupon_svc.resolve_consumption_coupon_rule_type(
-                customer_id,
-                exclude_order_id=int(order.id or 0),
-            )
-            await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
-        except Exception as e:
-            logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")
+        if await optional_capability_enabled(tenant_id, CAP_COUPONS):
+            try:
+                coupon_svc = CouponService(self.db)
+                coupon_svc.set_tenant_id(tenant_id)
+                rule_type = await coupon_svc.resolve_consumption_coupon_rule_type(
+                    customer_id,
+                    exclude_order_id=int(order.id or 0),
+                )
+                await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
+            except Exception as e:
+                logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")
 
 
     async def _refund_order_payment(self, order: Order, reason: str) -> RefundResult:

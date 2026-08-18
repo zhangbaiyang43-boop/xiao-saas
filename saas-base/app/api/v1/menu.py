@@ -14,13 +14,14 @@ from typing import Optional
 from app.config import settings
 from app.core.database import get_db
 from app.core.entitlement_guard import require_capability_response
-from app.core.plan_capabilities import CAP_MENU_ADVANCED_TOOLS
+from app.core.plan_capabilities import CAP_COUPONS, CAP_MENU_ADVANCED_TOOLS
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.dish_library_item import DishLibraryItem
 from app.models.menu_item import MenuItem
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
+from app.services.optional_entitlement import optional_capability_enabled
 from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/api/v1", tags=["点餐"])
@@ -172,6 +173,8 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
 
     async def _issue_entry_coupon():
         if not customer_id:
+            return None
+        if not await optional_capability_enabled(shop, CAP_COUPONS):
             return None
         try:
             async with AsyncSessionLocal() as session:

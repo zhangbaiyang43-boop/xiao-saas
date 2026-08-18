@@ -3,11 +3,13 @@ from datetime import datetime
 from sqlalchemy import func, or_
 from sqlalchemy.future import select
 
+from app.core.plan_capabilities import CAP_COUPONS, CAP_DISTRIBUTION_REFERRAL
 from app.models.coupon import Coupon
 from app.models.coupon_template import CouponTemplate
 from app.models.customer import Customer
 from app.services.anti_fraud_service import AntiFraudService
 from app.services.base_service import BaseService
+from app.services.optional_entitlement import optional_capability_enabled
 
 VERIFY_FAILURE_MESSAGES = {
     "NOT_FOUND": "核销码不存在",
@@ -258,6 +260,8 @@ class VerifyService(BaseService):
 
     async def _trigger_commission(self, coupon: Coupon, template: CouponTemplate | None):
         try:
+            if not await optional_capability_enabled(coupon.tenant_id, CAP_DISTRIBUTION_REFERRAL):
+                return
             from app.services.commission_service import CommissionService
 
             service = CommissionService(self.db)
@@ -270,6 +274,8 @@ class VerifyService(BaseService):
 
     async def _trigger_consumption_coupon(self, coupon: Coupon):
         try:
+            if not await optional_capability_enabled(coupon.tenant_id, CAP_COUPONS):
+                return
             from app.services.coupon_service import CouponService
 
             service = CouponService(self.db)

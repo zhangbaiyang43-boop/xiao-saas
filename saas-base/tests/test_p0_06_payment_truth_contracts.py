@@ -1,6 +1,9 @@
 import asyncio
+import os
 import pathlib
+import tempfile
 import unittest
+import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, PropertyMock, patch
 
@@ -18,9 +21,11 @@ from app.models.member_account import MemberAccount
 from app.models.order import Order
 from app.models.point_ledger import PointLedger
 from app.models.staff_assisted_payment_handoff import StaffAssistedPaymentHandoff
+from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 from app.services.order_payment_service import OrderPaymentService
 from app.services.payment_handoff_service import PaymentHandoffService
+from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 from app.services.wxpay_service import WxPayService
 
 
@@ -53,11 +58,25 @@ def make_notify_request() -> Request:
 
 class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        # A real file-backed SQLite DB, not :memory: -- see
+        # tests/test_optional_side_effect_wiring.py for why: a nested
+        # optional_capability_enabled() session mid-transaction can spuriously
+        # roll back this session's pending writes under :memory:, a
+        # SQLite/aiosqlite test-only artifact absent on any real DB.
+        self._db_file = f"{tempfile.gettempdir()}/f1fd1a_p006_{uuid.uuid4().hex}.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self._db_file}")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.Session = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         self.db = self.Session()
+
+        # Phase F1F-D1A: order_payment_service.py's _on_payment_success now calls
+        # optional_capability_enabled(), which opens its own AsyncSessionLocal()
+        # session -- point that factory at this test's own file-backed engine
+        # instead of the real production DB.
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.Session)
+        self._session_patch.start()
+
         self.db.add(
             Tenant(
                 tenant_id=TENANT_ID,
@@ -70,11 +89,34 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
                 wx_mchid="1900000109",
             )
         )
+        # Phase F1F-D1A: order_payment_service.py's post-payment membership/coupon
+        # accrual now requires real capability data to resolve -- this file
+        # predates subscription-awareness and asserts on real MemberAccount
+        # accrual, unrelated to plan tier, so give TENANT_ID a real PRO baseline.
+        self.db.add_all(
+            [
+                Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
+                Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200, sort_order=2),
+            ]
+        )
+        await self.db.commit()
+        pro_plan = await SubscriptionService(self.db).get_plan_by_code("PRO")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=TENANT_ID, plan_id=pro_plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
         await self.db.commit()
 
     async def asyncTearDown(self):
+        self._session_patch.stop()
         await self.db.close()
         await self.engine.dispose()
+        try:
+            os.remove(self._db_file)
+        except OSError:
+            pass
 
     async def make_order(self, total="28.00", **overrides) -> Order:
         values = {
