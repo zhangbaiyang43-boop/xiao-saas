@@ -81,8 +81,16 @@ class SubscribeMessageServiceTests(unittest.IsolatedAsyncioTestCase):
         wechat = AsyncMock()
         wechat.send_subscribe_message = AsyncMock(return_value=True)
 
+        # F1F-D1B: send_order_success_subscribe now checks MARKETING_AUTOMATION via
+        # optional_capability_enabled(), which opens its own real AsyncSessionLocal()
+        # session -- this file predates subscription-awareness and uses a fully
+        # mocked `db` throughout (no real engine at all), so patch the checker
+        # itself rather than standing up a real DB fixture just for this gate.
         with patch("app.services.subscribe_message_service.settings") as settings, patch(
             "app.services.wechat_service.WechatService", return_value=wechat
+        ), patch(
+            "app.services.subscribe_message_service.optional_capability_enabled",
+            new=AsyncMock(return_value=True),
         ):
             settings.WECHAT_ORDER_SUCCESS_TEMPLATE_ID = "tmpl-order"
             sent = await send_order_success_subscribe(db, order)
@@ -136,8 +144,13 @@ class SubscribeMessageServiceTests(unittest.IsolatedAsyncioTestCase):
         wechat = AsyncMock()
         wechat.send_subscribe_message = AsyncMock(return_value=True)
 
+        # F1F-D1B: see the matching comment in test_send_order_success_calls_wechat --
+        # same reason for patching the checker instead of adding a real DB fixture.
         with patch("app.services.subscribe_message_service.settings") as settings, patch(
             "app.services.wechat_service.WechatService", return_value=wechat
+        ), patch(
+            "app.services.subscribe_message_service.optional_capability_enabled",
+            new=AsyncMock(return_value=True),
         ):
             settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID = "tmpl-queue"
             sent = await send_queue_reminder_subscribe(db, ticket)

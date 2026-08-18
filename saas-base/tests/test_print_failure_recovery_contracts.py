@@ -206,6 +206,10 @@ async def _noop_async(*args, **kwargs):
     return None
 
 
+async def _true_async(*args, **kwargs):
+    return True
+
+
 _ORIGINAL_MODULES = {}
 
 
@@ -238,6 +242,7 @@ def install_stubs():
         "app.core": types.ModuleType("app.core"),
         "app.core.database": types.ModuleType("app.core.database"),
         "app.core.logger": types.ModuleType("app.core.logger"),
+        "app.core.plan_capabilities": types.ModuleType("app.core.plan_capabilities"),
         "app.core.platform_rules": types.ModuleType("app.core.platform_rules"),
         "app.core.response": types.ModuleType("app.core.response"),
         "app.core.tenant_context": types.ModuleType("app.core.tenant_context"),
@@ -252,6 +257,7 @@ def install_stubs():
         "app.services.kuaimai_service": types.ModuleType("app.services.kuaimai_service"),
         "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
         "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
+        "app.services.optional_entitlement": types.ModuleType("app.services.optional_entitlement"),
         "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
         "app.services.pickup_no_service": types.ModuleType("app.services.pickup_no_service"),
     }
@@ -263,6 +269,13 @@ def install_stubs():
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
     modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
+    # F1F-D1B: order_print_service._print_paid_order_ticket now checks
+    # KITCHEN_PRINT via optional_capability_enabled() for the auto (non-manual)
+    # path. This harness predates plan-tier awareness and has no concept of a
+    # tenant/subscription at all, so give it a permissive always-True stub --
+    # every print-behavior assertion here is orthogonal to plan tier.
+    modules["app.core.plan_capabilities"].CAP_KITCHEN_PRINT = "KITCHEN_PRINT"
+    modules["app.services.optional_entitlement"].optional_capability_enabled = _true_async
     modules["app.core.platform_rules"].cap_discount_amount = lambda discount, total: discount
     modules["app.core.response"].error_response = lambda code=-1, msg="error", data=None: {"code": code, "msg": msg, "data": data}
     modules["app.core.response"].success_response = lambda data=None, msg="ok": {"code": 200, "msg": msg, "data": data}

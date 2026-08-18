@@ -15,6 +15,8 @@ from sqlalchemy.future import select
 
 from app.config import settings
 from app.core.logger import logger
+from app.core.plan_capabilities import CAP_MARKETING_AUTOMATION
+from app.services.optional_entitlement import optional_capability_enabled
 
 
 def is_real_wechat_openid(openid: Optional[str]) -> bool:
@@ -164,6 +166,9 @@ async def send_order_success_subscribe(db: AsyncSession, order: Any) -> bool:
     template_id = (settings.WECHAT_ORDER_SUCCESS_TEMPLATE_ID or "").strip()
     if not template_id:
         return False
+    tenant_id = str(getattr(order, "tenant_id", "") or "")
+    if tenant_id and not await optional_capability_enabled(tenant_id, CAP_MARKETING_AUTOMATION):
+        return False
     try:
         openid = await _load_customer_openid(db, order)
         if not openid:
@@ -186,6 +191,9 @@ async def send_pickup_reminder_subscribe(db: AsyncSession, order: Any) -> bool:
     """订单进入 done（已上餐）后发「取餐提醒」。"""
     template_id = (settings.WECHAT_PICKUP_REMINDER_TEMPLATE_ID or "").strip()
     if not template_id:
+        return False
+    tenant_id = str(getattr(order, "tenant_id", "") or "")
+    if tenant_id and not await optional_capability_enabled(tenant_id, CAP_MARKETING_AUTOMATION):
         return False
     try:
         openid = await _load_customer_openid(db, order)
@@ -229,6 +237,9 @@ async def send_queue_reminder_subscribe(db: AsyncSession, ticket: Any) -> bool:
     """叫号后发「排队提醒」。票上无真实 openid 时跳过（店员后台取号通常无 openid）。"""
     template_id = (settings.WECHAT_QUEUE_REMINDER_TEMPLATE_ID or "").strip()
     if not template_id:
+        return False
+    tenant_id = str(getattr(ticket, "tenant_id", "") or "")
+    if tenant_id and not await optional_capability_enabled(tenant_id, CAP_MARKETING_AUTOMATION):
         return False
     try:
         openid = getattr(ticket, "openid", None)
