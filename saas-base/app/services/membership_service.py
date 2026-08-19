@@ -355,12 +355,19 @@ class MembershipService(BaseService):
         # 回账户里实际还剩的部分，否则 points_balance 会被扣成负数。
         points_to_deduct = min(earned_points, int(account.points_balance or 0)) if earned_points > 0 else 0
 
+        # F1G-CM-PD0-COMP: the account row lock (with_for_update above) must stay
+        # held for this whole check-then-act sequence -- an intermediate commit()
+        # here releases it early, opening a window where a second truly-concurrent
+        # caller can pass the existing_reversal check above before this call's own
+        # refund_reversal ledger row (the idempotency marker) is committed, and
+        # write a redundant (harmless but spurious) ledger row of its own. flush()
+        # keeps changes visible to this same transaction without releasing the lock.
         consume_amount = Decimal(str(amount or 0))
         account.total_consumption = MemberAccount.total_consumption - consume_amount
         account.yearly_consumption = MemberAccount.yearly_consumption - consume_amount
         if points_to_deduct:
             account.points_balance = MemberAccount.points_balance - points_to_deduct
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(account)
 
         customer_result = await self.db.execute(
@@ -371,7 +378,7 @@ class MembershipService(BaseService):
         account.level_code = new_level["code"]
         account.level_name = new_level["name"]
         account.level_checked_at = datetime.utcnow()
-        await self.db.commit()
+        await self.db.flush()
         await self.db.refresh(account)
 
         remark = "订单退款收回积分"
