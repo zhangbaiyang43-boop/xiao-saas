@@ -610,7 +610,13 @@ class DowngradeReupgradeLifecycleTest(FinalIntegrationBaseTest):
 
         await self._expire(TENANT_PRO)
 
-        with patch.object(MembershipService, "reverse_consumption", wraps=MembershipService.reverse_consumption, autospec=True) as spy:
+        # NOTE (F1G-CM-PD0-COMP): `wraps=` combined with `autospec=True` silently
+        # no-ops for async methods in unittest.mock -- the mock returns a bare
+        # AsyncMock instead of calling through, so the real reverse_consumption()
+        # body never ran and this assertion was passing/failing for the wrong
+        # reason. `side_effect=` is the correct pattern for an autospec'd async
+        # spy that must actually execute the wrapped implementation.
+        with patch.object(MembershipService, "reverse_consumption", side_effect=MembershipService.reverse_consumption, autospec=True) as spy:
             await OrderPaymentService(self.db)._refund_order_payment(order, reason="test refund")
         spy.assert_awaited_once()
         await self.db.commit()
