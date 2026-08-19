@@ -80,10 +80,14 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
         self.assertIn('"payment_status": order.payment_status', get_my_order_source)
 
     def test_merchant_order_query_recovers_paid_pending_payment_orders(self):
+        # P0-MISSING-GREENLET: recovery now runs on an isolated `recon_db` session (not
+        # self.db) so its commit/rollback can never expire the ORM objects this read path
+        # is about to serialize -- see order_lifecycle_service.py for the full rationale.
         list_orders_source = class_method_source("list_orders")
-        self.assertIn('if order.status == "pending_payment"', list_orders_source)
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", list_orders_source)
-        self.assertIn("await self.db.commit()", list_orders_source)
+        self.assertIn('if o.status == "pending_payment"', list_orders_source)
+        self.assertIn("payment_svc._recover_wxpay_order_if_paid(", list_orders_source)
+        self.assertIn("recon_order, source=", list_orders_source)
+        self.assertIn("await recon_db.commit()", list_orders_source)
 
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):
         recover_source = function_source("_recover_wxpay_order_if_paid", source=PAYMENT_SERVICE_SOURCE)

@@ -286,6 +286,7 @@ class OrderLifecycleService(BaseService):
             TABLE_CLOSE_BLOCKING_STATUSES,
             serialize_order,
         )
+        from app.core.logger import logger
         from app.services.order_payment_service import OrderPaymentService
         from app.services.order_print_service import reconcile_print_orders
 
@@ -355,22 +356,56 @@ class OrderLifecycleService(BaseService):
         result = await self.db.execute(query)
         orders = result.scalars().all()
 
-        recovered_any = False
-        payment_svc = OrderPaymentService(self.db)
-        for order in orders:
-            if order.status == "pending_payment":
-                recovered_any = (await payment_svc._recover_wxpay_order_if_paid(order, source="merchant_order_query")) or recovered_any
-        print_recovered = await reconcile_print_orders(
-            self.db, orders, trigger="merchant_list_recovery"
-        )
-        if print_recovered:
-            recovered_any = True
-        if recovered_any:
-            await self.db.commit()
-            for order in orders:
-                await self.db.refresh(order)
-
         order_ids = [o.id for o in orders]
+        pending_payment_ids = {o.id for o in orders if o.status == "pending_payment"}
+
+        # P0-MISSING-GREENLET: payment recovery and print reconciliation both have
+        # transactional side effects (WeChat query -> commit/rollback). Running them on
+        # self.db -- the same session this read path just loaded `orders` from -- means a
+        # rollback (which SQLAlchemy always performs unconditionally, regardless of
+        # expire_on_commit) expires every object in this session's identity map,
+        # including `orders` itself. The next attribute read on any of them then tries an
+        # implicit lazy reload outside any greenlet context and crashes with
+        # MissingGreenlet. Give recovery its own throwaway session so its commits/
+        # rollbacks can never reach the objects this request is about to serialize, and
+        # make the whole pass best-effort: GET /orders must never 500 because a WeChat
+        # query or print provider call failed.
+        recovered_any = False
+        if order_ids:
+            try:
+                from app.core.database import AsyncSessionLocal
+
+                async with AsyncSessionLocal() as recon_db:
+                    recon_result = await recon_db.execute(select(Order).where(Order.id.in_(order_ids)))
+                    recon_orders = recon_result.scalars().all()
+                    payment_svc = OrderPaymentService(recon_db)
+                    for recon_order in recon_orders:
+                        if recon_order.id in pending_payment_ids:
+                            recovered_any = (
+                                await payment_svc._recover_wxpay_order_if_paid(
+                                    recon_order, source="merchant_order_query"
+                                )
+                            ) or recovered_any
+                    print_recovered = await reconcile_print_orders(
+                        recon_db, recon_orders, trigger="merchant_list_recovery"
+                    )
+                    if print_recovered:
+                        recovered_any = True
+                    if recovered_any:
+                        await recon_db.commit()
+            except Exception:
+                logger.exception(
+                    "[list_orders] best-effort payment/print recovery failed tenant_id=%s order_ids=%s",
+                    tenant_id, order_ids,
+                )
+
+        if recovered_any:
+            # Re-select through the display session instead of db.refresh()/relying on
+            # any cross-session identity-map state, so the response reflects whatever
+            # the isolated recovery pass above just committed.
+            result = await self.db.execute(query)
+            orders = result.scalars().all()
+            order_ids = [o.id for o in orders]
         items_by_order: dict[int, list[OrderItem]] = {}
         if order_ids:
             items_result = await self.db.execute(
