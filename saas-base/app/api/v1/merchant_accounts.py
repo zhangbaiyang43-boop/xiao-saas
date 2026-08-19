@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.merchant_auth import (
     clear_staff_login_failures,
     get_request_principal,
@@ -15,6 +16,7 @@ from app.core.permissions import (
     ROLE_OWNER,
     staff_home_path,
 )
+from app.core.plan_capabilities import CAP_STAFF_MANAGEMENT
 from app.core.rate_limiter import login_limit
 from app.core.response import error_response, success_response
 from app.schemas.tenant import normalize_phone
@@ -127,6 +129,14 @@ async def staff_login(
 
     await clear_staff_login_failures(tenant.tenant_id, username, client_ip)
 
+    # Plan gate, not a credential gate: password already verified above, so
+    # this must never be disguised as "wrong username/password" -- a
+    # downgraded tenant's staff account exists and the password is correct,
+    # it's the plan that currently disallows STAFF_MANAGEMENT.
+    denial = await require_capability_response(db, tenant.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
+
     # Store-device trusted login via neutral StaffSessionService (no WeChat dependency).
     # Wrong/disabled password paths never reach here — no device created on failure.
     existing_cred = read_device_credential(request, None)
@@ -163,6 +173,9 @@ async def create_merchant_account(
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
+    denial = await require_capability_response(db, principal.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
     return await MerchantAccountService(db).create_account(
         tenant_id=principal.tenant_id,
         name=body.name,
@@ -182,6 +195,9 @@ async def update_merchant_account(
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
+    denial = await require_capability_response(db, principal.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
     return await MerchantAccountService(db).update_account(
         tenant_id=principal.tenant_id,
         account_id=int(account_id),
@@ -201,6 +217,9 @@ async def reset_merchant_account_password(
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
+    denial = await require_capability_response(db, principal.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
     return await MerchantAccountService(db).reset_password(
         tenant_id=principal.tenant_id,
         account_id=int(account_id),
@@ -218,6 +237,9 @@ async def set_backup_login(
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
+    denial = await require_capability_response(db, principal.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
     return await MerchantAccountService(db).set_backup_login(
         tenant_id=principal.tenant_id,
         account_id=int(account_id),
@@ -235,6 +257,9 @@ async def revoke_all_devices(
     principal, err = _require_perm(request, PERM_STAFF_MANAGE)
     if err:
         return err
+    denial = await require_capability_response(db, principal.tenant_id, CAP_STAFF_MANAGEMENT)
+    if denial is not None:
+        return denial
     account = await MerchantAccountService(db).get_by_id(principal.tenant_id, int(account_id))
     if not account:
         return error_response(code=404, msg="员工不存在")

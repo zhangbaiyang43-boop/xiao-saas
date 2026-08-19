@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -25,8 +26,10 @@ from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice  # noqa: F401
 from app.models.merchant_account_wechat_binding import MerchantAccountWechatBinding  # noqa: F401
 from app.models.order import Order, OrderItem  # noqa: F401
+from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 from app.services.order_lifecycle_service import OrderLifecycleService
+from app.services.subscription_service import STATUS_ACTIVE
 from app.services.workbench_sync_service import is_order_visible_in_workbench, is_waiting_to_serve
 from app.utils.id_generator import generate_snowflake_id
 
@@ -249,6 +252,15 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
                         status=True,
                         is_open=True,
                     ),
+                    # Phase F1F-BH: AuthMiddleware's real STAFF_MANAGEMENT gate now
+                    # fails closed on entitlement resolution errors, so a Plan catalog
+                    # row is required. This file tests pure role/permission gating
+                    # (unrelated to plan tier), so TENANT additionally needs an active
+                    # STANDARD subscription -- otherwise a legitimately FREE tenant
+                    # would have every staff request denied by the plan gate before
+                    # ever reaching the RBAC/workbench behavior under test.
+                    Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                    Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
                     MerchantAccount(
                         id=self.waiter_id,
                         tenant_id=TENANT,
@@ -390,6 +402,13 @@ class PhaseR2ServeHttpTest(unittest.IsolatedAsyncioTestCase):
                     ),
                 ]
             )
+            await db.commit()
+
+            standard_plan = (await db.execute(select(Plan).where(Plan.code == "STANDARD"))).scalar_one()
+            db.add(Subscription(
+                tenant_id=TENANT, plan_id=standard_plan.id, status=STATUS_ACTIVE,
+                started_at=now, ends_at=now + timedelta(days=30),
+            ))
             await db.commit()
 
         from app.main import app

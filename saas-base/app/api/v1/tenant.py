@@ -5,6 +5,8 @@ from pydantic import BaseModel as PydanticBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
+from app.core.plan_capabilities import CAP_KITCHEN_PRINT
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.schemas.tenant import ChangePasswordRequest, UpdateTenantProfileRequest
@@ -325,6 +327,9 @@ async def update_printer_config(data: PrinterConfigRequest, db: AsyncSession = D
     tenant_id, tenant, error = await get_current_tenant(service)
     if error:
         return error
+    denial = await require_capability_response(db, tenant_id, CAP_KITCHEN_PRINT)
+    if denial is not None:
+        return denial
     from sqlalchemy import select as _select
     result = await db.execute(_select(Tenant).where(Tenant.tenant_id == tenant_id))
     t = result.scalar_one_or_none()

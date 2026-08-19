@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -11,7 +11,9 @@ from app.core.tenant_context import TenantContext
 from app.models.base import Base
 from app.models.channel_entry import ChannelEntry
 from app.models.coupon_template import CouponTemplate
+from app.models.subscription import Plan, Subscription
 from app.services.channel_entry_service import ChannelEntryService
+from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -88,9 +90,27 @@ class ChannelEntryTenantIsolationTest(unittest.IsolatedAsyncioTestCase):
                     visit_count=0,
                     scan_count=0,
                 ),
+                # Phase F1F-BH/F1F-C: AuthMiddleware/route guards now fail closed
+                # on entitlement resolution errors, and channel-entries list/read
+                # is gated behind CHANNEL_ENTRY (PRO). This file predates
+                # subscription-awareness -- give TENANT_A a real PRO baseline so
+                # the admin list/detail read under test (unrelated to plan tier)
+                # keeps working.
+                Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
+                Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200, sort_order=2),
             ]
         )
         await self.db.commit()
+
+        pro_plan = await SubscriptionService(self.db).get_plan_by_code("PRO")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=TENANT_A, plan_id=pro_plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
+        await self.db.commit()
+
         TenantContext.set_tenant_id(TENANT_A)
 
     async def asyncTearDown(self):

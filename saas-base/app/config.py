@@ -42,10 +42,56 @@ class Settings(BaseSettings):
     H5_ORDER_BASE_URL: str = "https://saas.zhangbaiyang.com"
     PUBLIC_BASE_URL: str = "https://saas.zhangbaiyang.com"
 
-    WX_SP_MCH: str = ""            
-    WX_SP_API_KEY_V3: str = ""       
-    WX_SP_CERT_SERIAL: str = ""      
-    WX_SP_PRIVATE_KEY: str = ""      
+    # Platform SaaS-billing WeChat Pay merchant-of-record credentials
+    # (F1G-CF-C1) -- collects 开心点单's own subscription fees. Independent
+    # of Tenant.wx_* (each restaurant's own WeChat Pay account, used for
+    # customer order payments) and independent of WECHAT_APP_ID (the
+    # restaurant mini-program's AppID) -- neither of those is ever read as a
+    # fallback for the fields below. WX_SP_MCHID (not WX_SP_MCH) is the one
+    # canonical name, matching WeChat Pay's own API field name; the old
+    # WX_SP_MCH name had no runtime consumer and is not kept as a
+    # compatibility alias. All secrets default to "" -- production values
+    # are provisioned out of band, never committed here.
+    WX_SP_MCHID: str = ""
+    WX_SP_APPID: str = ""
+    WX_SP_API_KEY_V3: str = ""
+    WX_SP_CERT_SERIAL: str = ""
+    WX_SP_PRIVATE_KEY: str = ""
+    # WeChat Pay public-key verification mode (the newer mode; platform-cert
+    # mode is not wired up yet -- see platform_payment_config_audit()).
+    WX_SP_PUBLIC_KEY_ID: str = ""
+    WX_SP_PUBLIC_KEY: str = ""
+
+    # JSAPI (certified service account, not yet registered) or MINIPROGRAM
+    # (the existing certified mini-program). H5 is not eligible for this
+    # platform's merchant-of-record entity type (个体工商户, confirmed
+    # 2026-08 by the product owner) and must never be selectable --
+    # platform_payment_config_audit() fails closed on any other value.
+    SAAS_PAYMENT_MODE: str = "JSAPI"
+
+    # Explicit, human-controlled go-live switch for real SaaS subscription
+    # payment -- independent of ALLOW_MOCK_MONEY_ENDPOINTS (mock money and
+    # real payment are orthogonal; neither implies or excludes the other).
+    # Filling in every WX_SP_* secret above must NEVER, by itself, enable
+    # real money movement: platform_payment_config_audit()'s
+    # real_payment_enabled additionally requires PROVIDER_IMPLEMENTATION_READY
+    # (billing_payment_provider.py), a code-level constant that env values
+    # cannot flip.
+    SAAS_REAL_PAYMENT_ENABLED: bool = False
+
+    # F1G-CM: V1 SaaS subscription payment is manual-verified (official QR
+    # code + platform SuperAdmin confirms receipt), not real automated WXPAY
+    # -- see MANUAL_PAYMENT_PROVIDER's own docs for the full authority chain.
+    # Independent of SAAS_REAL_PAYMENT_ENABLED and ALLOW_MOCK_MONEY_ENDPOINTS:
+    # none of the three flags implies or excludes either of the others.
+    SAAS_MANUAL_PAYMENT_ENABLED: bool = False
+    # Display-only text (e.g. the receiving account holder's name) and a
+    # static QR image URL (COS/CDN/static HTTPS host) -- never a secret, but
+    # still never given a real value here; production values are provisioned
+    # out of band. Never a base64-embedded image, never a file committed to git.
+    SAAS_MANUAL_PAYMENT_PAYEE_NAME: str = ""
+    SAAS_MANUAL_PAYMENT_QR_URL: str = ""
+    SAAS_MANUAL_PAYMENT_CONFIRM_MINUTES: int = 10
 
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"

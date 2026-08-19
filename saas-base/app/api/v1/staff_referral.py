@@ -3,8 +3,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_DISTRIBUTION_REFERRAL
 from app.core.response import RespVo, error_response, success_response
+from app.core.tenant_context import TenantContext
 from app.services.commission_service import CommissionService
 
 router = APIRouter(prefix="/api/v1/staff-referral", tags=["员工推荐"])
@@ -29,12 +32,18 @@ async def get_staff_referral_settings(db: AsyncSession = Depends(get_db)):
 
 @router.put("/settings", response_model=RespVo)
 async def update_staff_referral_settings(data: StaffReferralSettingsRequest, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     rules = await CommissionService(db).update_staff_referral_rules(data.model_dump())
     return success_response(data=rules, msg="员工推荐设置已保存")
 
 
 @router.get("/preview", response_model=RespVo)
 async def get_staff_referral_preview(db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     data = await CommissionService(db).get_staff_referral_preview()
     return success_response(data=data, msg="ok")
 
@@ -68,6 +77,9 @@ async def settle_staff_referral_record(record_id: int, db: AsyncSession = Depend
 
 @router.post("/staff", response_model=RespVo)
 async def create_staff(data: CreateStaffRequest, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     staff = await CommissionService(db).create_staff(data.name)
     return success_response(
         data={
@@ -108,6 +120,9 @@ class UpdateStaffStatusRequest(BaseModel):
 
 @router.put("/staff/{staff_id}/status", response_model=RespVo)
 async def update_staff_status(staff_id: int, data: UpdateStaffStatusRequest, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     staff = await CommissionService(db).update_staff_status(staff_id, data.status)
     if not staff:
         return error_response(code=404, msg="员工不存在")

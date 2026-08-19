@@ -128,7 +128,9 @@
         :banner-info="bannerInfo"
         :shop-name="shopName"
         :member-level-badge-src="memberLevelBadgeSrc"
-        :member-identity-card-style="memberIdentityCardStyle"
+        :member-identity-card-bg-src="memberIdentityCardBgSrc"
+        :member-identity-card-tint-style="memberIdentityCardTintStyle"
+        :member-identity-card-foreground-style="memberIdentityCardForegroundStyle"
         :member-level-label="memberLevelLabel"
         :member-upgrade-text="memberUpgradeText"
         :member-progress-percent="memberProgressPercent"
@@ -607,7 +609,7 @@ export default {
     const tableSessionClosedNotice = ref('\u672c\u684c\u7528\u9910\u5df2\u7ed3\u675f\uff0c\u5982\u9700\u7ee7\u7eed\u70b9\u9910\uff0c\u8bf7\u91cd\u65b0\u626b\u7801\u8fdb\u5165\u65b0\u4e00\u684c')
     const {
       bannerInfo, isMember, memberLoading, memberAuthorizing, memberSinceText,
-      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardStyle, memberProgressPercent, memberUpgradeText,
+      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardBgSrc, memberIdentityCardTintStyle, memberIdentityCardForegroundStyle, memberProgressPercent, memberUpgradeText,
       usableMemberCoupons, goOrderFromMember, useMemberCoupon,
     } = useMemberCard({
       shopCreatedAt,
@@ -1354,7 +1356,7 @@ export default {
       successDiscount, wechatPayAmount, expectedOrderPoints, checkoutMemberSummaryText, canSubmitOrder, payButtonText,
       storeClosed, closedNotice, tableSessionClosed, tableSessionClosedNotice, isMember, bannerInfo, memberAuthorizing, memberLoading, isCustomerLoggedIn, hasCustomerIdentity,
       activeTab, shopDistance, switchToCard, goMine,
-      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardStyle, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
+      memberLevelLabel, memberLevelBadgeSrc, memberIdentityCardBgSrc, memberIdentityCardTintStyle, memberIdentityCardForegroundStyle, memberProgressPercent, memberUpgradeText, usableMemberCoupons, couponAmountText, couponConditionText, couponValidityText, goOrderFromMember, handleMemberCardAuth, useMemberCoupon,
       homeStatusDesc, homeOrderButtonText, homeCouponHint, canStartOrdering, featuredDish, featuredDishTag, canHomeAdd, homeLastOrderItems,
       handleHomeStartOrder, handleFeaturedAdd, handleHomeReorderItem, handleHomeReorderAll,
       loadMemberStatus, refreshCustomerAuthState, loadShopSettings,

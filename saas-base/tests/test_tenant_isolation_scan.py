@@ -28,7 +28,7 @@ SENSITIVE_MODELS = frozenset(
 ALLOWLIST: dict[tuple[str, int, str], str] = {
     (
         "app/api/v1/customers.py",
-        165,
+        170,
         "list_customers",
     ): "MemberAccount rows loaded by customer_ids from CustomerService.list_customers(tenant_id=...); customers are already tenant-scoped.",
     (
@@ -100,7 +100,7 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     "order.tenant_id != tenant_id check in _load_order_for_staff_handoff()).",
     (
         "app/services/order_print_service.py",
-        962,
+        974,
         "recover_pending_print_orders_once",
     ): "Intentionally cross-tenant: a startup/interval background recovery job (see _print_recovery_loop in "
     "main.py), same trust model as _pending_payment_reconcile_once and _marketing_recall_loop. Each recovered "

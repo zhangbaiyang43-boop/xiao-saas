@@ -21,6 +21,7 @@ const MerchantSettings = () => import('../views/MerchantSettings.vue')
 const BusinessSettings = () => import('../views/settings/BusinessSettings.vue')
 const PaymentSettings = () => import('../views/settings/PaymentSettings.vue')
 const DeviceSettings = () => import('../views/settings/DeviceSettings.vue')
+const SubscriptionSettings = () => import('../views/settings/SubscriptionSettings.vue')
 const NotificationSettings = () => import('../views/settings/NotificationSettings.vue')
 const StoreSettings = () => import('../views/settings/StoreSettings.vue')
 const WeworkSettings = () => import('../views/WeworkSettings.vue')
@@ -94,6 +95,7 @@ const routes = [
       { path: 'settings/business', name: 'BusinessSettings', component: BusinessSettings, meta: { requiresPermission: 'settings.store' } },
       { path: 'settings/payment', name: 'PaymentSettings', component: PaymentSettings, meta: { requiresPermission: 'settings.payment' } },
       { path: 'settings/devices', name: 'DeviceSettings', component: DeviceSettings, meta: { requiresPermission: 'settings.printer' } },
+      { path: 'subscription', name: 'SubscriptionSettings', component: SubscriptionSettings, meta: ownerOnly },
       { path: 'settings/notifications', name: 'NotificationSettings', component: NotificationSettings, meta: ownerOnly },
       { path: 'settings/store', name: 'StoreSettings', component: StoreSettings, meta: { requiresPermission: 'settings.store' } },
       { path: 'wework-settings', name: 'WeworkSettings', component: WeworkSettings, meta: ownerOnly },

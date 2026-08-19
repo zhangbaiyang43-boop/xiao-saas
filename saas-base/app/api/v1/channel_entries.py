@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_CHANNEL_ENTRY
 from app.core.response import RespVo, error_response, success_response
 from app.services.channel_entry_service import ChannelEntryService
 
@@ -38,6 +40,9 @@ async def list_entries(
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     skip, limit = normalize_pagination(skip, limit)
     service = ChannelEntryService(db)
     entries, total = await service.list_entries(skip, limit)
@@ -74,6 +79,9 @@ async def get_entry(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     service = ChannelEntryService(db)
     entry = await service.get_entry(entry_id)
     if not entry:
@@ -101,6 +109,9 @@ async def create_entry(
     data: dict,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     service = ChannelEntryService(db)
     try:
         entry = await service.create_entry(
@@ -125,6 +136,9 @@ async def update_entry(
     data: dict,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     service = ChannelEntryService(db)
     try:
         entry = await service.update_entry(
@@ -149,6 +163,9 @@ async def delete_entry(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     service = ChannelEntryService(db)
     result = await service.delete_entry(entry_id)
     if not result:
@@ -162,6 +179,9 @@ async def toggle_status(
     entry_id: int,
     db: AsyncSession = Depends(get_db),
 ):
+    denial = await require_capability_response(db, getattr(request.state, "tenant_id", None), CAP_CHANNEL_ENTRY)
+    if denial is not None:
+        return denial
     service = ChannelEntryService(db)
     entry = await service.toggle_status(entry_id)
     if not entry:

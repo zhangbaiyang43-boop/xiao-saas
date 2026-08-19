@@ -22,6 +22,19 @@
         </div>
       </div>
 
+      <!-- 套餐状态条：低视觉强度，绝不能挡在订单/KPI 之前，加载失败就直接
+           不渲染，不影响 Dashboard 其它任何功能（Phase F1E-B §4）。 -->
+      <div v-if="subscriptionStrip" class="section-block animate-in" style="animation-delay:.01s">
+        <div
+          class="subscription-strip tap-shrink"
+          :class="{ 'subscription-strip--urgent': subscriptionStrip.urgent }"
+          @click="router.push('/subscription')"
+        >
+          <span>{{ subscriptionStrip.text }}</span>
+          <span class="subscription-strip-cta">{{ subscriptionStrip.cta }}</span>
+        </div>
+      </div>
+
       <!-- 待办：只有需要商家处理的事才出现，全部正常时不占版面 -->
       <div class="section-block animate-in">
         <TransitionGroup tag="div" name="list-fade" style="display:flex;flex-direction:column;gap:8px;position:relative">
@@ -138,7 +151,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SettingOutlined, BellOutlined, ThunderboltOutlined, RiseOutlined } from '@ant-design/icons-vue'
-import { getDashboardStats, getTenantProfile, getOrders, updateTenantSettings, getMerchantSystemStatus, getMarketingPreview, getTableCouponActivity } from '../api'
+import { getDashboardStats, getTenantProfile, getOrders, updateTenantSettings, getMerchantSystemStatus, getMarketingPreview, getTableCouponActivity, getCurrentSubscription } from '../api'
+import { homeStatusStripCopy } from '../utils/subscriptionUi'
 import pollingManager from '../utils/pollingManager'
 import { useCountUp } from '../composables/useCountUp'
 import StatCard from '../components/StatCard.vue'
@@ -167,6 +181,7 @@ const lastUpdatedAt = ref(null)
 const refreshing = ref(false)
 const revenueDisplay = useCountUp(computed(() => overview.value.todayRevenue))
 const flaggedTables = ref([])
+const subscriptionStrip = ref(null)
 const systemStatus = ref({ api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'warning', checked_at: '', message: '正在检测系统状态' })
 const systemStatusLoading = ref(false)
 const systemStatusError = ref('')
@@ -287,6 +302,17 @@ async function loadTableCouponActivity() {
     // 静默失败
   }
 }
+// 静默失败：套餐状态条是次要商业曝光，绝不能因为这一个请求失败就影响
+// 商家接单——失败就干脆不展示这条状态，Dashboard 其它任何功能不受影响。
+async function loadSubscriptionStrip() {
+  try {
+    const res = await getCurrentSubscription()
+    if (res?.code === 200) subscriptionStrip.value = homeStatusStripCopy(res.data)
+  } catch {
+    subscriptionStrip.value = null
+  }
+}
+
 const guideSteps = [
   { title: '上菜单', description: '添加菜品，设置价格和分类' },
   { title: '生成桌码', description: '为每张桌子生成专属二维码打印贴上' },
@@ -363,7 +389,7 @@ async function loadStats(pollMeta = {}) {
 }
 
 async function onPullRefresh() {
-  await Promise.all([loadStats(), loadMarketingPreview(), loadSystemStatus(), loadTableCouponActivity()])
+  await Promise.all([loadStats(), loadMarketingPreview(), loadSystemStatus(), loadTableCouponActivity(), loadSubscriptionStrip()])
   refreshing.value = false
   if (!statsError.value) message.success('已刷新')
 }
@@ -429,6 +455,7 @@ onMounted(() => {
   loadSystemStatus()
   loadMarketingPreview()
   loadTableCouponActivity()
+  loadSubscriptionStrip()
 
   pollingManager.start('dashboard:orders:today', {
     task: (meta) => loadStats(meta).catch(() => {}),
@@ -442,6 +469,22 @@ onBeforeUnmount(() => pollingManager.stop('dashboard:orders:today'))
 </script>
 
 <style scoped>
+.subscription-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+.subscription-strip-cta { color: var(--brand); font-weight: 800; }
+.subscription-strip--urgent { border-color: #fde68a; background: #fffbeb; }
+.subscription-strip--urgent .subscription-strip-cta { color: #92400e; }
+
 .open-badge {
   display: inline-flex;
   align-items: center;

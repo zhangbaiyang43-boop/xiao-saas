@@ -27,6 +27,9 @@
 
       <div class="console-tabs animate-in">
         <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'merchants' }" @click="activeTab = 'merchants'">商家管理</button>
+        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'billing' }" @click="activeTab = 'billing'">
+          待确认付款<span v-if="pendingPaymentCount > 0" class="tab-badge">{{ pendingPaymentCount }}</span>
+        </button>
         <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'channel' }" @click="activeTab = 'channel'">渠道管理</button>
       </div>
 
@@ -119,6 +122,8 @@
       </div>
       </div>
 
+      <ManualPaymentPanel v-else-if="activeTab === 'billing'" :super-token="superToken" @update:count="pendingPaymentCount = $event" />
+
       <ChannelPartnerPanel v-else :super-token="superToken" />
     </div>
 
@@ -202,10 +207,11 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import axios from 'axios'
+import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
+import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 
-const BASE = '/api/super'
+const BASE = '/super'
 
 const authed = ref(false)
 const pwd = ref('')
@@ -216,6 +222,7 @@ const totpCode = ref('')
 const totpEnabled = ref(false)
 let superToken = ''
 const activeTab = ref('merchants')
+const pendingPaymentCount = ref(0)
 
 const stats = reactive({ total_merchants: 0, active_merchants: 0, today_orders: 0, today_revenue: 0 })
 const merchants = ref([])
@@ -304,7 +311,7 @@ async function doLogin() {
   logging.value = true
   loginErr.value = ''
   try {
-    const res = await axios.post(`${BASE}/login`, { password: pwd.value, totp_code: totpCode.value.trim() || undefined })
+    const res = await superRequest.post(`${BASE}/login`, { password: pwd.value, totp_code: totpCode.value.trim() || undefined })
     if (res.data?.code === 200) {
       superToken = res.data.data.token
       totpEnabled.value = !!res.data.data.totp_enabled
@@ -327,7 +334,7 @@ async function loadPerfStats() {
   perfStatsLoading.value = true
   perfStatsError.value = false
   try {
-    const res = await axios.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
+    const res = await superRequest.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
     if (res.data?.code === 200) {
       perfStats.value = res.data.data?.stats || []
     } else {
@@ -349,8 +356,8 @@ async function loadData() {
   loadingList.value = true
   try {
     const [statsRes, listRes] = await Promise.all([
-      axios.get(`${BASE}/stats`, { headers: superHeaders() }),
-      axios.get(`${BASE}/merchants`, { headers: superHeaders() }),
+      superRequest.get(`${BASE}/stats`, { headers: superHeaders() }),
+      superRequest.get(`${BASE}/merchants`, { headers: superHeaders() }),
     ])
     if (statsRes.data?.code === 200) Object.assign(stats, statsRes.data.data)
     if (listRes.data?.code === 200) merchants.value = listRes.data.data
@@ -374,7 +381,7 @@ async function createMerchant() {
   creating.value = true
   createResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants`, { ...newMerchant }, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants`, { ...newMerchant }, { headers: superHeaders() })
     if (res.data?.code === 200) {
       const d = res.data.data
       createResult.value = { ok: true, msg: `已开通「${d.name}」，手机号 ${d.phone}，登录码 ${d.login_code}` }
@@ -406,7 +413,7 @@ async function savePayConfig() {
   savingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, {
+    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, {
       wx_mchid: payConfigForm.wx_mchid.trim(),
       wx_api_key_v3: payConfigForm.wx_api_key_v3.trim(),
       wx_cert_serial: payConfigForm.wx_cert_serial.trim(),
@@ -431,7 +438,7 @@ async function verifyPayConfig() {
   verifyingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {}, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
       applyPaymentData(payConfigTarget.value, res.data.data)
@@ -467,7 +474,7 @@ async function copyPayConfig(totpCodeInput = '') {
   copyingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/copy-from`, {
+    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/copy-from`, {
       source_tenant_id: copySourceId.value,
       totp_code: totpCodeInput || undefined,
     }, { headers: superHeaders() })
@@ -494,7 +501,7 @@ async function pausePay(totpCodeInput = '') {
   pausingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, { totp_code: totpCodeInput || undefined }, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, { totp_code: totpCodeInput || undefined }, { headers: superHeaders() })
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: '已暂停支付' }
       applyPaymentData(payConfigTarget.value, res.data.data)
@@ -509,7 +516,7 @@ async function seedTestData(merchant) {
   seedingId.value = merchant.tenant_id
   seedResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${merchant.tenant_id}/seed-test-data`, {}, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${merchant.tenant_id}/seed-test-data`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) {
       const d = res.data.data
       seedResult.value = { tenant_id: merchant.tenant_id, ok: true, msg: `填充成功：${d.menu_items} 道菜 · ${d.customers} 位会员 · 历史 ${d.history_orders} 单 · 今日 ${d.today_orders} 单` }
@@ -522,7 +529,7 @@ async function seedTestData(merchant) {
 
 async function toggleStatus(merchant) {
   try {
-    const res = await axios.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) merchant.status = res.data.data.status
   } catch {}
 }
@@ -577,9 +584,10 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .top-bar { display: flex; justify-content: space-between; align-items: center; padding: 52px 16px 12px; background: var(--hero-dark); color: #fff; }
 .top-title { font-size: 18px; font-weight: 900; }
 .logout-btn { border: 1px solid rgba(255,255,255,.25); border-radius: 8px; background: rgba(255,255,255,.08); color: #fff; cursor: pointer; padding: 5px 12px; font-size: 13px; }
-.console-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px 16px 0; background: var(--hero-dark); }
-.tab-btn { height: 40px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px 8px 0 0; background: rgba(255,255,255,.08); color: rgba(255,255,255,.72); font-weight: 800; cursor: pointer; }
+.console-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px 0; background: var(--hero-dark); }
+.tab-btn { position: relative; height: 40px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px 8px 0 0; background: rgba(255,255,255,.08); color: rgba(255,255,255,.72); font-weight: 800; cursor: pointer; font-size: 13px; padding: 0 4px; }
 .tab-btn.active { background: var(--bg-page); border-color: var(--bg-page); color: var(--text-1); }
+.tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 4px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 800; vertical-align: middle; }
 .refresh-btn, .pay-cfg-btn, .cancel-btn, .fold-btn { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-2); cursor: pointer; }
 .refresh-btn { padding: 5px 12px; font-size: 13px; }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); padding: 12px 16px; gap: 8px; }

@@ -718,6 +718,18 @@ async def _print_paid_order_ticket(
             return {"success": True, "skipped": True, "status": "printed"}
         return {"success": False, "skipped": True, "code": code}
 
+    # Entitlement only gates the auto-print attempt itself, after business/workflow
+    # eligibility (NOT_YET_PAYABLE, WAITING_PICKUP_NO, ...) has already had its say --
+    # those structured codes carry real staff-facing meaning and must not be masked
+    # by a plan-tier skip. Manual reprint is ungated here; it already has its own
+    # interactive (F1F-B) capability check upstream of this function.
+    if not manual:
+        from app.core.plan_capabilities import CAP_KITCHEN_PRINT
+        from app.services.optional_entitlement import optional_capability_enabled
+
+        if not await optional_capability_enabled(tenant_id, CAP_KITCHEN_PRINT):
+            return {"success": False, "skipped": True, "code": "PLAN_CAPABILITY_DISABLED"}
+
     meta = _get_print_meta(order)
     existing_initial = meta.get("initial_print")
     if not isinstance(existing_initial, dict) or not existing_initial.get("route"):

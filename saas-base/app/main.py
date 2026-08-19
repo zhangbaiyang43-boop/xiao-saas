@@ -35,6 +35,7 @@ from app.api.v1.orders import router as order_router
 from app.api.v1.payment_handoffs import router as payment_handoff_router
 from app.api.v1.perf import router as perf_router
 from app.api.v1.billing import router as billing_router
+from app.api.v1.subscription import router as subscription_router
 from app.api.v1.channel import router as channel_router
 from app.api.v1.super_billing import router as super_billing_router
 from app.api.v1.super_channel import router as super_channel_router
@@ -83,7 +84,7 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Super-Token"],
     expose_headers=["X-Process-Time-Ms", "X-Workbench-Cursor"],
 )
 
@@ -116,6 +117,7 @@ app.include_router(order_router)
 app.include_router(payment_handoff_router)
 app.include_router(perf_router)
 app.include_router(billing_router)
+app.include_router(subscription_router)
 app.include_router(channel_router)
 app.include_router(queue_router)
 app.include_router(super_admin_router)
@@ -277,8 +279,10 @@ async def _marketing_recall_loop():
     import asyncio
     from app.core.database import AsyncSessionLocal
     from app.core.logger import logger
+    from app.core.plan_capabilities import CAP_MARKETING_AUTOMATION
     from app.models.tenant import Tenant
     from app.services.coupon_service import CouponService
+    from app.services.optional_entitlement import optional_capability_enabled
     from sqlalchemy.future import select as _select
 
     INTERVAL = 24 * 3600  # 每天一次
@@ -291,6 +295,8 @@ async def _marketing_recall_loop():
 
             for tid in tenant_ids:
                 try:
+                    if not await optional_capability_enabled(tid, CAP_MARKETING_AUTOMATION):
+                        continue
                     async with AsyncSessionLocal() as db:
                         service = CouponService(db)
                         service.set_tenant_id(tid)
@@ -319,9 +325,11 @@ async def _coupon_expiry_reminder_loop():
     from datetime import datetime as _dt, timedelta
     from app.core.database import AsyncSessionLocal
     from app.core.logger import logger
+    from app.core.plan_capabilities import CAP_MARKETING_AUTOMATION
     from app.models.coupon import Coupon
     from app.models.coupon_template import CouponTemplate
     from app.models.customer import Customer
+    from app.services.optional_entitlement import optional_capability_enabled
     from app.services.wechat_service import WechatService
     from sqlalchemy.future import select as _select
 
@@ -354,6 +362,13 @@ async def _coupon_expiry_reminder_loop():
 
                 for coupon in due_coupons:
                     try:
+                        # Non-PRO: skip the reminder only, without marking remind_sent_at --
+                        # coupon validity/expiry/redemption are untouched, and an upgrade
+                        # before expiry still gets a real reminder on the next scan.
+                        if not await optional_capability_enabled(
+                            str(coupon.tenant_id), CAP_MARKETING_AUTOMATION
+                        ):
+                            continue
                         customer = await db.get(Customer, coupon.customer_id)
                         if not customer or not customer.openid:
                             coupon.remind_sent_at = now

@@ -1,18 +1,8 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
+import { resolveApiBaseURL } from './apiBaseUrl'
 
-const getBaseURL = () => {
-  const envBaseURL = import.meta.env.VITE_API_BASE_URL
-  const hostname = window.location.hostname
-
-  if (hostname === 'saas.zhangbaiyang.com') {
-    return '/api'
-  }
-
-  return envBaseURL || '/api'
-}
-
-const baseURL = getBaseURL()
+const baseURL = resolveApiBaseURL()
 const pendingRequests = new Map()
 
 const stableStringify = (value) => {

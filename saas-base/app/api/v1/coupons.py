@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_COUPONS
 from app.core.response import RespVo, error_response, success_response
 from app.core.time_utils import to_utc_iso
 from app.schemas.coupon import RecallCouponRequest, SendCouponsRequest
@@ -111,13 +113,17 @@ async def send_coupons(request: Request, db: AsyncSession = Depends(get_db)):
     # 租户校验
     if not tenant_id:
         return error_response(code=401, msg="缺少租户信息")
-    
+
+    denial = await require_capability_response(db, tenant_id, CAP_COUPONS)
+    if denial is not None:
+        return denial
+
     # 设置租户上下文
     TenantContext.set_tenant_id(tenant_id)
 
     service = CouponService(db)
     service.set_tenant_id(tenant_id)
-    
+
     # 调用发券服务
     result = await service.send_coupons_with_result(template_id, customer_ids)
 
@@ -138,6 +144,10 @@ async def batch_recall_coupons(
     tenant_id = request.state.tenant_id
     if tenant_id:
         TenantContext.set_tenant_id(tenant_id)
+
+    denial = await require_capability_response(db, tenant_id, CAP_COUPONS)
+    if denial is not None:
+        return denial
 
     service = CouponService(db)
     result = await service.batch_issue_recall_coupon(inactive_days=inactive_days, limit=limit)
@@ -211,6 +221,18 @@ async def recall_coupon(
     data: RecallCouponRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    from app.core.tenant_context import TenantContext
+
+    # Merchant-proactive recall of a still-UNUSED coupon (e.g. issued in
+    # error, fraud suspicion) -- confirmed by source reverify to be
+    # completely unrelated to the order cancel/refund liability path
+    # (_unlock_order_coupon_if_locked / _set_order_coupon_status_if_locked
+    # in coupon_service.py are separate, never call recall_coupon, and this
+    # is the only call site of CouponService.recall_coupon in the codebase).
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_COUPONS)
+    if denial is not None:
+        return denial
+
     service = CouponService(db)
     result = await service.recall_coupon(coupon_id, data.reason)
     if not result["success"]:

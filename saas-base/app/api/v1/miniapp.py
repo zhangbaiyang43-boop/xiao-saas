@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.plan_capabilities import CAP_COUPONS, CAP_DISTRIBUTION_REFERRAL
 from app.core.rate_limiter import join_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.security import create_customer_access_token
@@ -14,6 +15,7 @@ from app.schemas.miniapp import EntryJoinRequest
 from app.services.anti_fraud_service import AntiFraudService
 from app.services.commission_service import CommissionService
 from app.services.coupon_service import CouponService
+from app.services.optional_entitlement import optional_capability_enabled
 from app.services.customer_operation_log_service import CustomerOperationLogService
 from app.services.customer_service import CustomerService
 from app.services.customer_identity_service import (
@@ -254,7 +256,11 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
             )
 
         await membership_service.ensure_account(customer)
-        if is_new_customer and data.invite_code:
+        if (
+            is_new_customer
+            and data.invite_code
+            and await optional_capability_enabled(tenant_id, CAP_DISTRIBUTION_REFERRAL)
+        ):
             customer = await commission_service.bind_inviter_for_new_customer(customer, data.invite_code)
         customer_id_for_log = customer.id
         logger.info(f"确认会员  - customer_id: {customer.id}")
@@ -288,23 +294,24 @@ async def entry_join(request: Request, data: EntryJoinRequest, db: AsyncSession 
                         ip=None,
                         user_agent=None,
                     )
-                coupon_result = await coupon_service.issue_auto_coupon(customer.id, "new_customer_coupon")
-                if coupon_result and coupon_result.get("success_count", 0) > 0:
-                    sent_coupons = coupon_result.get("sent", [])
-                    if sent_coupons:
-                        coupon_info = sent_coupons[0]
-                        template = await coupon_service.get_template(coupon_info.get("template_id"))
-                        coupon_data = {
-                            "id": coupon_info.get("id"),
-                            "name": template.name if template else "新人券",
-                            "amount": float(template.value) if template else 0,
-                            "min_amount": float(template.min_amount) if template else 0,
-                            "expired_at": coupon_info.get("expire_time"),
-                        }
-                    logger.info(f"新人券发放成功 - customer_id: {customer.id}, coupon_data: {coupon_data}")
-                else:
-                    coupon_error = (coupon_result or {}).get("reason") or "新人券未配置"
-                    logger.info(f"新人券未发放 - customer_id: {customer.id}, coupon_result: {coupon_result}")
+                if await optional_capability_enabled(tenant_id, CAP_COUPONS):
+                    coupon_result = await coupon_service.issue_auto_coupon(customer.id, "new_customer_coupon")
+                    if coupon_result and coupon_result.get("success_count", 0) > 0:
+                        sent_coupons = coupon_result.get("sent", [])
+                        if sent_coupons:
+                            coupon_info = sent_coupons[0]
+                            template = await coupon_service.get_template(coupon_info.get("template_id"))
+                            coupon_data = {
+                                "id": coupon_info.get("id"),
+                                "name": template.name if template else "新人券",
+                                "amount": float(template.value) if template else 0,
+                                "min_amount": float(template.min_amount) if template else 0,
+                                "expired_at": coupon_info.get("expire_time"),
+                            }
+                        logger.info(f"新人券发放成功 - customer_id: {customer.id}, coupon_data: {coupon_data}")
+                    else:
+                        coupon_error = (coupon_result or {}).get("reason") or "新人券未配置"
+                        logger.info(f"新人券未发放 - customer_id: {customer.id}, coupon_result: {coupon_result}")
             except Exception as coupon_exc:
                 await db.rollback()
                 coupon_error = "新人券发放失败，请稍后重试"  # BUG-G fix
@@ -621,6 +628,14 @@ async def invite_bind(request: Request, db: AsyncSession = Depends(get_db)):
 
     if customer.inviter_id:
         return success_response(data={"bound": False, "reason": "已绑定过邀请人"}, msg="已绑定过邀请人")
+
+    # Optional growth feature, not an interactive paid API (F1F-C's interactive
+    # DISTRIBUTION_REFERRAL gate covers merchant-facing distribution config
+    # only, never this customer-facing endpoint) -- reuses this route's own
+    # existing no-op-success shape for "no binding happened", same as the
+    # already-bound case above, rather than a 403/500.
+    if not await optional_capability_enabled(tenant_id, CAP_DISTRIBUTION_REFERRAL):
+        return success_response(data={"bound": False, "reason": "该功能暂不可用"}, msg="暂无法绑定邀请关系")
 
     service = CommissionService(db)
     service.set_tenant_id(tenant_id)

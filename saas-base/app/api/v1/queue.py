@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
+from app.core.plan_capabilities import CAP_KITCHEN_PRINT
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
+from app.services.entitlement_service import EntitlementRequiredError, EntitlementService
 from app.models.queue_ticket import QueueTicket
 from app.schemas.queue import QueueCallNext, QueueCustomerTicketCreate, QueueTicketCreate
 from app.services.queue_service import QueueCallBlocked, QueueService, print_queue_test_ticket, serialize_queue_ticket
@@ -239,7 +241,36 @@ async def print_test_queue_ticket(request: Request, db: AsyncSession = Depends(g
     
     if not tenant_id:
         return fail("merchant login required")
-    
+
+    try:
+        await EntitlementService(db).require_capability(tenant_id, CAP_KITCHEN_PRINT)
+    except EntitlementRequiredError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "success": False,
+                "code": "PLAN_CAPABILITY_REQUIRED",
+                "message": "该功能需要更高套餐",
+                "capability": exc.capability,
+                "effective_plan_code": exc.effective_plan_code,
+                "required_plan_codes": list(exc.required_plan_codes),
+            },
+        )
+    except Exception as exc:
+        # Phase F1F-BH: a system/data error resolving entitlement is not the
+        # same outcome as "plan lacks capability" -- but it must not be
+        # treated as an implicit grant either. Fail closed, same contract as
+        # app/core/entitlement_guard.py's require_capability_response.
+        logger.exception("[ENTITLEMENT_CHECK_FAILED] tenant_id=%s capability=KITCHEN_PRINT error=%s", tenant_id, exc)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "code": "INTERNAL_ERROR",
+                "message": "系统繁忙，请稍后重试",
+            },
+        )
+
     try:
         logger.warning("[PRINT_TEST_CALL_SERVICE] about to call print_queue_test_ticket")
         result = await print_queue_test_ticket(db, tenant_id)

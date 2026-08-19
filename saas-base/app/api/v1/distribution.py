@@ -3,8 +3,11 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
+from app.core.plan_capabilities import CAP_DISTRIBUTION_REFERRAL
 from app.core.response import RespVo, error_response, success_response
+from app.core.tenant_context import TenantContext
 from app.services.commission_service import CommissionService
 
 router = APIRouter(prefix="/api/v1/distribution", tags=["邀请奖励"])
@@ -25,6 +28,9 @@ async def get_distribution_settings(db: AsyncSession = Depends(get_db)):
 
 @router.put("/settings", response_model=RespVo)
 async def update_distribution_settings(data: DistributionSettingsRequest, db: AsyncSession = Depends(get_db)):
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     service = CommissionService(db)
     rules = await service.update_distribution_rules(data.model_dump())
     return success_response(data=rules, msg="邀请奖励设置已保存")
@@ -33,6 +39,9 @@ async def update_distribution_settings(data: DistributionSettingsRequest, db: As
 @router.get("/preview", response_model=RespVo)
 async def get_distribution_preview(db: AsyncSession = Depends(get_db)):
     """三档强度各自算出来的真实金额/门槛，供后台"选强度"卡片直接渲染。"""
+    denial = await require_capability_response(db, TenantContext.get_tenant_id(), CAP_DISTRIBUTION_REFERRAL)
+    if denial is not None:
+        return denial
     data = await CommissionService(db).get_distribution_preview()
     return success_response(data=data, msg="ok")
 

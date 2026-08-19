@@ -13,12 +13,15 @@ from typing import Optional
 
 from app.config import settings
 from app.core.database import get_db
+from app.core.entitlement_guard import require_capability_response
+from app.core.plan_capabilities import CAP_COUPONS, CAP_MENU_ADVANCED_TOOLS
 from app.core.response import error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.dish_library_item import DishLibraryItem
 from app.models.menu_item import MenuItem
 from app.models.tenant import Tenant
 from app.models.tenant_config import TenantConfig
+from app.services.optional_entitlement import optional_capability_enabled
 from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/api/v1", tags=["点餐"])
@@ -170,6 +173,8 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
 
     async def _issue_entry_coupon():
         if not customer_id:
+            return None
+        if not await optional_capability_enabled(shop, CAP_COUPONS):
             return None
         try:
             async with AsyncSessionLocal() as session:
@@ -469,10 +474,13 @@ class DishDescRequest(PydanticBase):
 
 
 @router.post("/menu/generate-desc")
-async def generate_dish_desc(body: DishDescRequest, request: Request):
+async def generate_dish_desc(body: DishDescRequest, request: Request, db: AsyncSession = Depends(get_db)):
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
         return error_response(code=401, msg="请先登录")
+    denial = await require_capability_response(db, tenant_id, CAP_MENU_ADVANCED_TOOLS)
+    if denial is not None:
+        return denial
     if not body.name.strip():
         return error_response(code=400, msg="请填写菜品名称")
     try:
@@ -494,10 +502,14 @@ class MenuTextParseRequest(PydanticBase):
 async def parse_menu_from_text(
     body: MenuTextParseRequest,
     request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
         return error_response(code=401, msg="请先登录")
+    denial = await require_capability_response(db, tenant_id, CAP_MENU_ADVANCED_TOOLS)
+    if denial is not None:
+        return denial
     if not body.text or not body.text.strip():
         return error_response(code=400, msg="请输入菜单文字")
     if len(body.text) > 5000:
@@ -523,6 +535,9 @@ async def import_menu_batch(
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
         return error_response(code=401, msg="请先登录")
+    denial = await require_capability_response(db, tenant_id, CAP_MENU_ADVANCED_TOOLS)
+    if denial is not None:
+        return denial
     body = await request.json()
     items_data = body.get("items", [])
     if not items_data:
@@ -656,6 +671,9 @@ async def import_dish_library_batch(
     tenant_id = getattr(request.state, "tenant_id", None)
     if not tenant_id or getattr(request.state, "token_type", None) != "merchant":
         return error_response(code=401, msg="请先登录")
+    denial = await require_capability_response(db, tenant_id, CAP_MENU_ADVANCED_TOOLS)
+    if denial is not None:
+        return denial
     if not body.items:
         return error_response(code=400, msg="没有要导入的菜品")
     ids = [int(i.id) for i in body.items]

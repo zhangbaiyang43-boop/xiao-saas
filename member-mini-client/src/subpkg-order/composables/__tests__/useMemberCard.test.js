@@ -29,20 +29,117 @@ describe('useMemberCard', () => {
     it('还没有 bannerInfo 时按普通会员/LV1 兜底', () => {
       const { card } = setup()
       expect(card.memberLevelLabel.value).toBe('普通会员')
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.webp')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.png')
     })
 
     it('bannerInfo 有等级信息时展示对应文案和徽章', () => {
       const { card } = setup()
       card.bannerInfo.value = { levelLabel: '黄金会员', levelCode: 'LV3' }
       expect(card.memberLevelLabel.value).toBe('黄金会员')
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv3.webp')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv3.png')
     })
 
     it('等级码不在已知映射里时按 LV1 兜底，不留空图', () => {
       const { card } = setup()
       card.bannerInfo.value = { levelLabel: '神秘等级', levelCode: 'LV99' }
-      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.webp')
+      expect(card.memberLevelBadgeSrc.value).toBe('/static/member-levels/level-lv1.png')
+    })
+  })
+
+  describe('memberIdentityCardBgSrc / memberIdentityCardTintStyle', () => {
+    // 真机微信运行时证实：动态 inline style 里 background-image: url('/static/...jpg')
+    // 加载不出来，改成真正的 <image :src>，tint 单独出一份不含 url(...) 的纯色渐变。
+    it('返回对象里存在 memberIdentityCardBgSrc 和 memberIdentityCardTintStyle', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardBgSrc).toBeDefined()
+      expect(card.memberIdentityCardTintStyle).toBeDefined()
+    })
+
+    it('LV1 会员卡背景 src 是 card-bg-lv1.jpg，tint 是对应 rgba，不含 url(', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV1' }
+      expect(card.memberIdentityCardBgSrc.value).toBe('/static/member-levels/card-bg-lv1.jpg')
+      expect(card.memberIdentityCardTintStyle.value).toContain('rgba(6,163,94')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('url(')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('background-image')
+    })
+
+    it('LV2 会员卡背景 src 是 card-bg-lv2.jpg，tint 是对应 rgba，不含 url(', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV2' }
+      expect(card.memberIdentityCardBgSrc.value).toBe('/static/member-levels/card-bg-lv2.jpg')
+      expect(card.memberIdentityCardTintStyle.value).toContain('rgba(100,112,128')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('url(')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('background-image')
+    })
+
+    it('LV3 会员卡背景 src 是 card-bg-lv3.jpg，tint 是对应 rgba，不含 url(', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV3' }
+      expect(card.memberIdentityCardBgSrc.value).toBe('/static/member-levels/card-bg-lv3.jpg')
+      expect(card.memberIdentityCardTintStyle.value).toContain('rgba(176,130,32')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('url(')
+      expect(card.memberIdentityCardTintStyle.value).not.toContain('background-image')
+    })
+
+    it('还没有 bannerInfo 时按 LV1 兜底', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardBgSrc.value).toBe('/static/member-levels/card-bg-lv1.jpg')
+      expect(card.memberIdentityCardTintStyle.value).toContain('rgba(6,163,94')
+    })
+
+    it('等级码不在已知映射里时按 LV1 兜底，不留空背景', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV99' }
+      expect(card.memberIdentityCardBgSrc.value).toBe('/static/member-levels/card-bg-lv1.jpg')
+      expect(card.memberIdentityCardTintStyle.value).toContain('rgba(6,163,94')
+    })
+  })
+
+  describe('memberIdentityCardForegroundStyle', () => {
+    // 真机验证：原来跨等级统一用的浅金色文字（#f3e6cf 系）在 LV1 的亮绿底上
+    // 对比度不够，发虚。改成每个等级各自一套深色文字，通过 CSS 变量单一入口下发。
+    it('返回对象里存在 memberIdentityCardForegroundStyle', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardForegroundStyle).toBeDefined()
+    })
+
+    it('LV1 前景色变量：primary #123B2A / secondary #35634F / tertiary #527563', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV1' }
+      const style = card.memberIdentityCardForegroundStyle.value
+      expect(style).toContain('--member-text-primary:#123B2A')
+      expect(style).toContain('--member-text-secondary:#35634F')
+      expect(style).toContain('--member-text-tertiary:#527563')
+    })
+
+    it('LV2 前景色变量：primary #26323A / secondary #53616B / tertiary #6F7B83', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV2' }
+      const style = card.memberIdentityCardForegroundStyle.value
+      expect(style).toContain('--member-text-primary:#26323A')
+      expect(style).toContain('--member-text-secondary:#53616B')
+      expect(style).toContain('--member-text-tertiary:#6F7B83')
+    })
+
+    it('LV3 前景色变量：primary #4A3210 / secondary #715224 / tertiary #8A6A37', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV3' }
+      const style = card.memberIdentityCardForegroundStyle.value
+      expect(style).toContain('--member-text-primary:#4A3210')
+      expect(style).toContain('--member-text-secondary:#715224')
+      expect(style).toContain('--member-text-tertiary:#8A6A37')
+    })
+
+    it('还没有 bannerInfo 时按 LV1 兜底', () => {
+      const { card } = setup()
+      expect(card.memberIdentityCardForegroundStyle.value).toContain('--member-text-primary:#123B2A')
+    })
+
+    it('等级码不在已知映射里时按 LV1 兜底', () => {
+      const { card } = setup()
+      card.bannerInfo.value = { levelCode: 'LV99' }
+      expect(card.memberIdentityCardForegroundStyle.value).toContain('--member-text-primary:#123B2A')
     })
   })
 

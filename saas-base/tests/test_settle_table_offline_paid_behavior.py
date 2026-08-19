@@ -1,7 +1,11 @@
 import asyncio
+import os
+import tempfile
 import unittest
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -13,7 +17,9 @@ from app.models.consumption import Consumption
 from app.models.customer import Customer
 from app.models.member_account import MemberAccount
 from app.models.point_ledger import PointLedger
+from app.models.subscription import Plan, Subscription
 from app.api.v1.orders import settle_table
+from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 from app.utils.id_generator import generate_snowflake_id
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
@@ -35,15 +41,50 @@ class SettleTableOfflinePaidBehaviorTest(unittest.IsolatedAsyncioTestCase):
     "每个函数单独看都对，拼起来才错"——source-string 合同测试完全测不出来。"""
 
     async def asyncSetUp(self):
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        # A real file-backed SQLite DB, not :memory: -- see
+        # tests/test_optional_side_effect_wiring.py for why: a nested
+        # optional_capability_enabled() session mid-transaction can spuriously
+        # roll back this session's pending writes under :memory:, a
+        # SQLite/aiosqlite test-only artifact absent on any real DB.
+        self._db_file = f"{tempfile.gettempdir()}/f1fd1a_settle_table_{uuid.uuid4().hex}.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self._db_file}")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         self.db = self.SessionLocal()
 
+        # Phase F1F-D1A: _apply_paid_order_member_assets_once now calls
+        # optional_capability_enabled(), which opens its own AsyncSessionLocal()
+        # session -- point that factory at this test's own file-backed engine
+        # (instead of the real production DB) and give TENANT a real PRO
+        # baseline so the membership-accrual assertions below keep exercising
+        # real (not skipped) behavior, unrelated to plan tier.
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.SessionLocal)
+        self._session_patch.start()
+        self.db.add_all(
+            [
+                Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
+                Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200, sort_order=2),
+            ]
+        )
+        await self.db.commit()
+        pro_plan = await SubscriptionService(self.db).get_plan_by_code("PRO")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=TENANT, plan_id=pro_plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
+        await self.db.commit()
+
     async def asyncTearDown(self):
+        self._session_patch.stop()
         await self.db.close()
         await self.engine.dispose()
+        try:
+            os.remove(self._db_file)
+        except OSError:
+            pass
 
     async def _make_open_session(self, table_no):
         now = datetime.utcnow()

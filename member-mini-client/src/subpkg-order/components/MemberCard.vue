@@ -2,28 +2,37 @@
   <scroll-view class="tab-scroll" scroll-y>
     <view v-if="bannerInfo" class="card-tab member-center">
       <view class="member-identity-card tap-shrink" @click="uni.navigateTo({ url: '/subpkg-member/pages/growth' })">
-        <view class="mic-glow"></view>
-        <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
-        <view class="mic-body">
-          <view class="member-avatar">
-            <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
-            <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
-          </view>
-          <view class="member-identity-main">
-            <view class="mic-crest-row">
-              <text class="member-level">{{ memberLevelLabel }}</text>
+        <image
+          v-if="memberIdentityCardBgSrc"
+          class="member-identity-card-bg"
+          :src="memberIdentityCardBgSrc"
+          mode="aspectFill"
+        />
+        <view class="member-identity-card-tint" :style="memberIdentityCardTintStyle"></view>
+        <view class="member-identity-card-content" :style="memberIdentityCardForegroundStyle">
+          <view class="mic-glow"></view>
+          <view class="mic-issuer"><text>{{ shopName }} · 甄选会员</text></view>
+          <view class="mic-body">
+            <view class="member-avatar">
+              <image v-if="bannerInfo.avatar" class="member-avatar-img" :src="bannerInfo.avatar" mode="aspectFill" />
+              <image v-else class="member-avatar-badge" :src="memberLevelBadgeSrc" mode="aspectFit" />
             </view>
-            <text class="mic-sub">MEMBER</text>
+            <view class="member-identity-main">
+              <view class="mic-crest-row">
+                <text class="member-level">{{ memberLevelLabel }}</text>
+              </view>
+              <text class="mic-sub">MEMBER</text>
+            </view>
+            <text class="mic-chevron iconfont icon-roundright"></text>
           </view>
-          <text class="mic-chevron iconfont icon-roundright"></text>
-        </view>
-        <view v-if="memberUpgradeText" class="member-progress-wrap">
-          <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
-          <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
-        </view>
-        <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
-          <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
-          <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
+          <view v-if="memberUpgradeText" class="member-progress-wrap">
+            <view class="member-progress-track"><view class="member-progress-fill" :style="{ width: memberProgressPercent + '%' }"></view></view>
+            <text class="member-upgrade-text">{{ memberUpgradeText }}</text>
+          </view>
+          <view v-if="bannerInfo.memberNo || memberSinceText" class="mic-footer">
+            <text v-if="bannerInfo.memberNo" class="mic-number">{{ 'NO. ' + bannerInfo.memberNo }}</text>
+            <text v-if="memberSinceText" class="mic-since">{{ memberSinceText }}</text>
+          </view>
         </view>
       </view>
 
@@ -111,6 +120,9 @@ export default {
     bannerInfo: { type: Object, default: null },
     shopName: { type: String, default: '' },
     memberLevelBadgeSrc: { type: String, default: '' },
+    memberIdentityCardBgSrc: { type: String, default: '' },
+    memberIdentityCardTintStyle: { type: String, default: '' },
+    memberIdentityCardForegroundStyle: { type: String, default: '' },
     memberLevelLabel: { type: String, default: '' },
     memberUpgradeText: { type: String, default: '' },
     memberProgressPercent: { type: Number, default: 0 },
@@ -148,10 +160,32 @@ export default {
 .member-identity-card::before { content:''; position: absolute; inset: 0; opacity: .5; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.035) 0px, rgba(255,255,255,.035) 1px, transparent 1px, transparent 7px); pointer-events: none; }
 
 
+// 会员等级背景改成真正的 <image>，而不是 inline style 里的 background-image: url(...)：
+// 真机微信运行时证实本地 /static jpg 用 CSS background-image 加载不出来，同一张图
+// 用 <image :src> 在同一环境能正常显示。背景图（z0）+ 色调叠加层（z1）+ 原有内容
+// （z2，包在 member-identity-card-content 里）三层叠加；.member-identity-card 自己
+// 的 background（上面那行）留着不动，图片加载失败时兜底，不会让卡片空白。
+.member-identity-card-bg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+
+
+.member-identity-card-tint { position: absolute; inset: 0; z-index: 1; }
+
+
+.member-identity-card-content {
+  position: relative;
+  z-index: 2;
+  // LV1 兜底值：memberIdentityCardForegroundStyle 意外为空时，行内 style 不会
+  // 覆盖这三个变量，靠这里的默认值保证至少 LV1 底色下文字仍然可读。
+  --member-text-primary: #123B2A;
+  --member-text-secondary: #35634F;
+  --member-text-tertiary: #527563;
+}
+
+
 .mic-glow { position: absolute; right: -68rpx; top: -68rpx; width: 260rpx; height: 260rpx; border-radius: 50%; background: radial-gradient(circle, rgba(212,175,110,.2), transparent 70%); pointer-events: none; }
 
 
-.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: rgba(232,202,160,.5); text-transform: uppercase; }
+.mic-issuer { position: relative; z-index: 1; font-size: 21rpx; font-weight: 800; letter-spacing: 2rpx; color: var(--member-text-secondary); text-transform: uppercase; }
 
 
 .mic-body { position: relative; z-index: 1; margin-top: 20rpx; display: flex; align-items: center; gap: 22rpx; }
@@ -166,7 +200,7 @@ export default {
 .member-avatar-img { width: 100%; height: 100%; }
 
 
-.member-avatar-badge { width: 96%; height: 96%; animation: micBadgePulse 3.2s ease-in-out infinite; }
+.member-avatar-badge { width: 96rpx; height: 96rpx; display: block; flex-shrink: 0; animation: micBadgePulse 3.2s ease-in-out infinite; }
 
 
 .member-identity-main { flex: 1; min-width: 0; }
@@ -175,13 +209,13 @@ export default {
 .mic-crest-row { display: flex; align-items: center; gap: 10rpx; min-width: 0; }
 
 
-.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: #f3e6cf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-level { display: block; font-size: 38rpx; line-height: 50rpx; font-weight: 900; color: var(--member-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 
-.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: rgba(232,202,160,.55); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
+.mic-sub { display: block; margin-top: 6rpx; font-size: 21rpx; color: var(--member-text-secondary); font-weight: 700; letter-spacing: 3rpx; text-transform: uppercase; }
 
 
-.mic-chevron { position: relative; z-index: 1; color: rgba(232,202,160,.55); font-size: 28rpx; flex-shrink: 0; }
+.mic-chevron { position: relative; z-index: 1; color: var(--member-text-tertiary); font-size: 28rpx; flex-shrink: 0; }
 
 
 .member-progress-wrap { position: relative; z-index: 1; margin-top: 22rpx; }
@@ -193,16 +227,16 @@ export default {
 .member-progress-fill { height: 100%; border-radius: 999rpx; background: linear-gradient(90deg,#c9a668,#f3e6cf); }
 
 
-.member-upgrade-text { display: block; margin-top: 10rpx; color: rgba(232,202,160,.7); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
+.member-upgrade-text { display: block; margin-top: 10rpx; color: var(--member-text-secondary); font-size: 22rpx; line-height: 32rpx; font-weight: 700; }
 
 
 .mic-footer { position: relative; z-index: 1; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid rgba(232,202,160,.16); display: flex; align-items: center; justify-content: space-between; }
 
 
-.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: rgba(232,202,160,.65); }
+.mic-number { font-size: 22rpx; font-weight: 700; letter-spacing: 3rpx; color: var(--member-text-tertiary); }
 
 
-.mic-since { font-size: 20rpx; color: rgba(232,202,160,.4); font-weight: 700; }
+.mic-since { font-size: 20rpx; color: var(--member-text-tertiary); font-weight: 700; }
 
 
 .member-assets-card { min-height: 168rpx; background: #fff; border-radius: 32rpx; display: flex; align-items: stretch; padding: 28rpx 0; box-sizing: border-box; }

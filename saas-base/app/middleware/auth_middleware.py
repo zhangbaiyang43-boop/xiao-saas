@@ -2,8 +2,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from app.core.logger import logger
 from app.core.merchant_auth import resolve_merchant_request_auth, staff_route_allowed
 from app.core.permissions import ROLE_OWNER
+from app.core.plan_capabilities import CAP_STAFF_MANAGEMENT
 from app.core.response import RespVo
 from app.core.security import verify_token
 
@@ -33,6 +35,35 @@ async def _is_tenant_active(tenant_id: str) -> bool:
     active = bool(status)
     await set_cache(cache_key, active, ttl=TENANT_STATUS_CACHE_TTL_SECONDS)
     return active
+
+
+# Phase F1F-B (docs/saas-subscription-audit.md): a staff JWT can live for
+# days, and a tenant's plan can lapse/downgrade at any moment -- so this
+# check runs fresh on every non-owner request, with NO cross-request cache
+# (unlike _is_tenant_active's TTL cache above). The frozen contract requires
+# a downgrade to take effect on the very next request, not after up to
+# TENANT_STATUS_CACHE_TTL_SECONDS of staleness; EntitlementService's own
+# per-instance memoization (a fresh instance every call here) is the only
+# memoization in play. Read-only: this session never commits, and its
+# lifetime is scoped to entitlement resolution alone -- never the request's
+# own business transaction.
+#
+# Phase F1F-BH: only EntitlementRequiredError (a clean "this plan lacks the
+# capability" outcome) is caught here. Any other exception -- a genuine
+# system/data error resolving entitlement -- is deliberately left to
+# propagate to the caller (dispatch()), which fails the request CLOSED
+# (503) rather than letting an unrelated data/infra problem silently grant
+# staff access platform-wide. PAID_FEATURE_FAILS_CLOSED.
+async def _staff_capability_denial(tenant_id: str):
+    from app.core.database import AsyncSessionLocal
+    from app.services.entitlement_service import EntitlementRequiredError, EntitlementService
+
+    async with AsyncSessionLocal() as session:
+        try:
+            await EntitlementService(session).require_capability(tenant_id, CAP_STAFF_MANAGEMENT)
+        except EntitlementRequiredError as exc:
+            return exc
+    return None
 
 WHITELIST = {
     "/",
@@ -150,6 +181,43 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     return JSONResponse(
                         status_code=403,
                         content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+                    )
+                # Plan-downgrade enforcement (Phase F1F-B): an existing, unexpired staff
+                # JWT must not keep working once the tenant's effective plan lacks
+                # STAFF_MANAGEMENT. Owner is structurally exempt -- this whole block only
+                # runs for role != ROLE_OWNER, so an owner request can never reach here
+                # regardless of the tenant's plan.
+                try:
+                    staff_denial = await _staff_capability_denial(request.state.tenant_id)
+                except Exception as exc:
+                    # Phase F1F-BH: a system/data error resolving entitlement must
+                    # NOT be treated as "capability granted." Fail closed -- this
+                    # request does not proceed as staff.
+                    logger.exception(
+                        "[STAFF_ENTITLEMENT_CHECK_FAILED] tenant_id=%s error=%s",
+                        request.state.tenant_id, exc,
+                    )
+                    return JSONResponse(
+                        status_code=503,
+                        content=RespVo(
+                            code=503,
+                            msg="系统繁忙，请稍后重试",
+                            data={"error_code": "INTERNAL_ERROR"},
+                        ).to_response(),
+                    )
+                if staff_denial is not None:
+                    return JSONResponse(
+                        status_code=403,
+                        content=RespVo(
+                            code=403,
+                            msg="该功能需要更高套餐",
+                            data={
+                                "error_code": "PLAN_CAPABILITY_REQUIRED",
+                                "capability": staff_denial.capability,
+                                "effective_plan_code": staff_denial.effective_plan_code,
+                                "required_plan_codes": list(staff_denial.required_plan_codes),
+                            },
+                        ).to_response(),
                     )
 
         if is_optional:

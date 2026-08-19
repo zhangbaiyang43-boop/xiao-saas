@@ -83,7 +83,12 @@ assert(!staffManage.includes('生成微信绑定码'), 'WeChat bind button remov
 assert(!staffManage.includes('正式小程序码'), 'formal wxacode UI removed from StaffManage')
 assert(!staffManage.includes('备用账号登录'), 'backup login copy removed from StaffManage')
 
-assert(read('src/api/request.js').includes("hostname === 'saas.zhangbaiyang.com'"), 'prod H5 uses same-origin /api')
-assert(read('src/api/request.js').includes("return '/api'"), 'prod H5 baseURL is /api')
+// F1G-CM-RF: this resolution moved out of request.js into the shared
+// apiBaseUrl.js (so the SuperAdmin client can reuse the exact same origin
+// authority instead of drifting out of sync) -- request.js now just calls
+// resolveApiBaseURL(), verified by test-super-api-origin-authority.mjs.
+assert(read('src/api/apiBaseUrl.js').includes("hostname === 'saas.zhangbaiyang.com'"), 'prod H5 uses same-origin /api')
+assert(read('src/api/apiBaseUrl.js').includes("return '/api'"), 'prod H5 baseURL is /api')
+assert(read('src/api/request.js').includes('resolveApiBaseURL()'), 'request.js must resolve baseURL through the shared authority, not its own copy')
 
 console.log('TEST-FE staffPasswordLoginGuard: passed')

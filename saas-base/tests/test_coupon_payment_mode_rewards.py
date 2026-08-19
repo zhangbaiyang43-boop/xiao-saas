@@ -1,6 +1,10 @@
 import asyncio
+import os
+import tempfile
 import unittest
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -13,8 +17,10 @@ from app.models.coupon import Coupon
 from app.models.customer import Customer
 from app.models.dining import DiningParticipant, DiningSession
 from app.models.order import Order
+from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 from app.api.v1.orders import settle_table, update_order_status, OrderStatusUpdate
+from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -51,7 +57,18 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         self._original_redis_enabled = settings.REDIS_ENABLED
         settings.REDIS_ENABLED = False
 
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        # A real file-backed SQLite DB, not :memory: -- settle_table now calls
+        # optional_capability_enabled() mid-transaction (via
+        # _apply_paid_order_member_assets_once), which opens its own
+        # AsyncSessionLocal() session. With :memory:, that nested session can
+        # spuriously roll back this session's already-flushed-but-uncommitted
+        # writes when it closes (a SQLite/aiosqlite test-only artifact; see
+        # tests/test_optional_side_effect_wiring.py for the full writeup and a
+        # standalone repro -- it disappears entirely on a real file-backed DB,
+        # i.e. on any real production database each session already has its
+        # own independent connection/transaction with no such interference).
+        self._db_file = f"{tempfile.gettempdir()}/f1fd1a_coupon_reward_{uuid.uuid4().hex}.db"
+        self.engine = create_async_engine(f"sqlite+aiosqlite:///{self._db_file}")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
@@ -64,12 +81,43 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         self.db.add(self.tenant)
         self.customer = Customer(tenant_id=TENANT_A, openid="openid-1", status=1)
         self.db.add(self.customer)
+        # Phase F1F-D1A: order_payment_service.py's offline-settlement auto-coupon
+        # issuance now calls optional_capability_enabled(CAP_COUPONS) before
+        # issuing. This file predates subscription-awareness and tests coupon
+        # reward rule selection, unrelated to plan tier -- give TENANT_A a real
+        # PRO baseline so the reward-issuance assertions below keep exercising
+        # real (not skipped) behavior.
+        self.db.add_all(
+            [
+                Plan(code="FREE", name="免费版", is_active=True, price_month_cents=0, price_year_cents=0, sort_order=0),
+                Plan(code="STANDARD", name="普通版", is_active=True, price_month_cents=5900, price_year_cents=60900, sort_order=1),
+                Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200, sort_order=2),
+            ]
+        )
+        await self.db.commit()
+        pro_plan = await SubscriptionService(self.db).get_plan_by_code("PRO")
+        now = datetime.utcnow()
+        self.db.add(Subscription(
+            tenant_id=TENANT_A, plan_id=pro_plan.id, status=STATUS_ACTIVE,
+            started_at=now, ends_at=now + timedelta(days=30),
+        ))
         await self.db.commit()
 
+        # optional_capability_enabled() opens its own AsyncSessionLocal() session
+        # -- point that factory at this test's own in-memory engine instead of
+        # the real production DB.
+        self._session_patch = patch("app.core.database.AsyncSessionLocal", self.SessionLocal)
+        self._session_patch.start()
+
     async def asyncTearDown(self):
+        self._session_patch.stop()
         settings.REDIS_ENABLED = self._original_redis_enabled
         await self.db.close()
         await self.engine.dispose()
+        try:
+            os.remove(self._db_file)
+        except OSError:
+            pass
 
     async def _unused_coupon_count(self, customer_id):
         result = await self.db.execute(
