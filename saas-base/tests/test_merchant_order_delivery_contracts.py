@@ -72,14 +72,19 @@ def lifecycle_method_source(name: str) -> str:
 
 class MerchantOrderDeliveryContractsTest(unittest.TestCase):
     def test_backend_merchant_query_returns_full_today_paid_orders(self):
-        # P0-MISSING-GREENLET: recovery now runs on an isolated `recon_db` session (not
-        # self.db) so its commit/rollback can never expire the ORM objects this read path
-        # is about to serialize -- see order_lifecycle_service.py for the full rationale.
+        # P0-MISSING-GREENLET: print reconciliation runs on an isolated `recon_db`
+        # session (not self.db) so its commit/rollback can never expire the ORM objects
+        # this read path is about to serialize -- see order_lifecycle_service.py for the
+        # full rationale. P1-WXPAY-RECOVERY-GATE (MERCHANT_PROVIDER_QUERY=REMOVE): GET
+        # /orders no longer calls WeChat at all -- pending_payment_background already
+        # covers every pending_payment order on the same cadence this page's own polling
+        # used to provide.
         source = lifecycle_method_source("list_orders")
         self.assertIn("Order.tenant_id == tenant_id", source)
         self.assertIn("date_str == \"today\"", source)
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(", source)
-        self.assertIn("recon_order, source=", source)
+        self.assertNotIn("_recover_wxpay_order_if_paid(", source)
+        self.assertIn("reconcile_print_orders(", source)
+        self.assertIn("recon_db, recon_orders, trigger=", source)
         self.assertIn("serialize_order(", source)
         self.assertIn("items_by_order.get(o.id or 0, [])", source)
         self.assertIn("checkout_requested_at=checkout_requested_by_session.get(", source)

@@ -67,9 +67,14 @@ def function_source(source: str, name: str) -> str:
 
 class PaymentResultRecoveryContractsTest(unittest.TestCase):
     def test_backend_order_query_recovers_paid_wxpay_order(self):
+        # P1-WXPAY-RECOVERY-GATE: client_order_query now goes through the shared gate
+        # (fast_lane=True) on its own isolated recon_db session instead of calling
+        # _recover_wxpay_order_if_paid directly -- the gate's own attempt_recovery still
+        # calls straight into the same, unmodified core function underneath.
         get_my_order = function_source(LIFECYCLE_SERVICE_SOURCE, "get_my_order")
         recover = function_source(PAYMENT_SERVICE_SOURCE, "_recover_wxpay_order_if_paid")
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", get_my_order)
+        self.assertIn("recovery_gate.attempt_recovery(", get_my_order)
+        self.assertIn('recon_order, recon_db, source="client_order_query"', get_my_order)
         self.assertIn("query_order_by_out_trade_no", recover)
         self.assertIn("_apply_confirmed_wx_payment", recover)
         self.assertIn("with_for_update()", recover)

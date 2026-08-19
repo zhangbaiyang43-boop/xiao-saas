@@ -43,12 +43,26 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     ): "Order loaded by primary key then customer/participant ownership is verified before any mutation.",
     (
         "app/services/order_lifecycle_service.py",
-        219,
+        224,
         "get_my_order",
     ): "Order loaded by primary key then customer/participant ownership is verified before returning data.",
     (
         "app/services/order_lifecycle_service.py",
-        469,
+        268,
+        "get_my_order",
+    ): "P1-WXPAY-RECOVERY-GATE: re-selects the same already-ownership-verified order by "
+    "primary key inside the isolated recovery-gate session; ownership was already "
+    "verified against the original `order` above before this point is ever reached.",
+    (
+        "app/services/order_lifecycle_service.py",
+        284,
+        "get_my_order",
+    ): "P1-WXPAY-RECOVERY-GATE: re-selects the same already-ownership-verified order_id "
+    "by primary key through the display session after a successful gate-mediated "
+    "recovery commit; ownership was already verified above.",
+    (
+        "app/services/order_lifecycle_service.py",
+        504,
         "create_review",
     ): "Order loaded by primary key then customer_id must match caller before review is created.",
     (

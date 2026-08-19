@@ -171,17 +171,24 @@ class CallbackAndRecoveryTraceTest(unittest.IsolatedAsyncioTestCase):
 
 class RecoverySourceCompletenessTest(unittest.TestCase):
     """T06: the exact completeness guard requested -- every real runtime call
-    site of _recover_wxpay_order_if_paid must pass a `source=` kwarg. Prevents
-    a repeat of "7 callers, only 6 updated" silently happening again."""
+    site of the WXPay recovery path must pass a `source=` kwarg. Prevents a
+    repeat of "7 callers, only 6 updated" silently happening again.
+
+    PROD-STABILITY-P1-01 routed every caller through the shared
+    WxpayRecoveryGate instead of calling _recover_wxpay_order_if_paid
+    directly, and removed merchant_order_query's WeChat call entirely (GET
+    /orders is now a pure DB read for payment purposes -- see that phase's
+    MERCHANT_PROVIDER_QUERY=REMOVE decision) -- so this now guards the 6
+    remaining recovery_gate.attempt_recovery(...) call sites instead of the 7
+    original direct _recover_wxpay_order_if_paid(...) call sites."""
 
     EXPECTED_CALL_SITES = {
-        ("app/api/v1/orders.py", 723): "synchronous_stale_cleanup",
-        ("app/main.py", 169): "stale_order_background",
-        ("app/main.py", 232): "pending_payment_background",
-        ("app/services/order_lifecycle_service.py", 169): "cancel_precheck",
-        ("app/services/order_lifecycle_service.py", 235): "client_order_query",
-        ("app/services/order_lifecycle_service.py", 352): "merchant_order_query",
-        ("app/services/order_lifecycle_service.py", 504): "status_update_precheck",
+        ("app/api/v1/orders.py", 754): "synchronous_stale_cleanup",
+        ("app/main.py", 201): "stale_order_background",
+        ("app/main.py", 287): "pending_payment_background",
+        ("app/services/order_lifecycle_service.py", 174): "cancel_precheck",
+        ("app/services/order_lifecycle_service.py", 271): "client_order_query",
+        ("app/services/order_lifecycle_service.py", 599): "status_update_precheck",
     }
 
     def _find_call_lines(self, relpath):
@@ -191,7 +198,7 @@ class RecoverySourceCompletenessTest(unittest.TestCase):
         lines = text.splitlines()
         hits = []
         for idx, line in enumerate(lines, start=1):
-            if "_recover_wxpay_order_if_paid(" in line and "async def " not in line:
+            if "recovery_gate.attempt_recovery(" in line and "async def " not in line:
                 # capture this line plus a couple following, since calls can
                 # wrap across lines with the source kwarg on a later line
                 snippet = "\n".join(lines[idx - 1:idx + 2])
@@ -207,7 +214,7 @@ class RecoverySourceCompletenessTest(unittest.TestCase):
                 total_found += 1
                 if not re.search(r"source\s*=", snippet):
                     missing_source.append(f"{relpath}:{lineno}")
-        self.assertEqual(total_found, 7, f"expected 7 runtime call sites, found {total_found}")
+        self.assertEqual(total_found, 6, f"expected 6 runtime gate call sites, found {total_found}")
         self.assertEqual(missing_source, [], f"call sites missing source= kwarg: {missing_source}")
 
     def test_no_two_call_sites_share_the_same_source_label(self):

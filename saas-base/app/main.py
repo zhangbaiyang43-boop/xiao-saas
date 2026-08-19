@@ -155,32 +155,54 @@ async def _stale_order_cleanup_once():
     from sqlalchemy.future import select as _select
 
     threshold = _dt.utcnow() - timedelta(minutes=STALE_ORDER_CLEANUP_TIMEOUT_MINUTES)
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            _select(Order).where(
+    async with AsyncSessionLocal() as discovery_db:
+        result = await discovery_db.execute(
+            _select(Order.id, Order.tenant_id).where(
                 Order.status == "pending_payment",
                 Order.created_at < threshold,
             )
         )
-        stale = result.scalars().all()
-        if stale:
-            from app.api.v1.orders import _restore_order_stock
-            from app.services.order_payment_service import OrderPaymentService
+        # Plain (id, tenant_id) scalar rows, not ORM Order instances -- nothing here can
+        # ever become "expired" by a later rollback, unlike the ORM objects below.
+        stale_candidates = result.all()
 
-            payment_svc = OrderPaymentService(db)
-        for o in stale:
-            # P0-MISSING-GREENLET: capture these as plain scalars *before* calling
-            # into recovery. _recover_wxpay_order_if_paid may rollback `db` (e.g. WeChat
-            # reports the order still unpaid, which raises and hits its except-block
-            # rollback) -- and SQLAlchemy's rollback() unconditionally expires every
-            # object in the session's identity map regardless of expire_on_commit, so
-            # `o` itself would come out of that call expired. Reading `o.id`/`o.tenant_id`
-            # afterward would then be a bare synchronous attribute access trying an
-            # implicit lazy reload with no active greenlet -> MissingGreenlet.
-            stale_id = o.id
-            stale_tenant_id = o.tenant_id
-            recovered = await payment_svc._recover_wxpay_order_if_paid(o, source="stale_order_background")
-            if recovered:
+    if not stale_candidates:
+        return
+
+    from app.api.v1.orders import _restore_order_stock
+    from app.services.wxpay_recovery_gate import recovery_gate
+
+    for stale_id, stale_tenant_id in stale_candidates:
+        # P1-WXPAY-RECOVERY-GATE / P0-MISSING-GREENLET: each stale order now gets its
+        # own isolated session and transaction. Previously this whole batch shared one
+        # `db` across every order in `stale` -- recovering order N could rollback (e.g.
+        # WeChat still reports it unpaid), which unconditionally expires every object in
+        # that SHARED session's identity map, including orders N+1..M not yet processed
+        # in this same loop (their `.id`/`.tenant_id` reads at the top of their own
+        # iteration would then crash with MissingGreenlet), AND -- more seriously --
+        # could silently roll back an EARLIER order's already-applied-but-not-yet-
+        # committed cancellation mutation, since the whole batch shared one uncommitted
+        # transaction until a single commit at the very end. Isolating each order to its
+        # own session/transaction, with its own commit, eliminates both risks.
+        async with AsyncSessionLocal() as db:
+            discovery_result = await db.execute(
+                _select(Order).where(Order.id == stale_id, Order.status == "pending_payment")
+            )
+            o = discovery_result.scalar_one_or_none()
+            if not o:
+                continue
+
+            # P1-WXPAY-RECOVERY-GATE / STALE_CANCEL_SAFETY_INVARIANT: Class C
+            # (destructive) -- force_fresh bypasses cooldown and wait_for_inflight
+            # guarantees a genuinely fresh (or freshly-joined-in-flight) payment fact
+            # before this loop ever decides to cancel. A real payment that just
+            # succeeded, with its webhook still lost/delayed, must be discoverable here
+            # even if this order is mid-cooldown from an earlier background attempt.
+            outcome = await recovery_gate.attempt_recovery(
+                o, db, source="stale_order_background",
+                force_fresh=True, wait_for_inflight=True,
+            )
+            if outcome.recovered:
                 continue
             # Discovery is intentionally unlocked.  After the external payment
             # query, reacquire a fresh row lock and recheck both lifecycle and
@@ -207,7 +229,6 @@ async def _stale_order_cleanup_once():
                 coupon = await db.get(_Coupon, locked.coupon_id)
                 if coupon and coupon.status == "LOCKED":
                     coupon.status = "UNUSED"
-        if stale:
             await db.commit()
 
 
@@ -231,25 +252,41 @@ async def _pending_payment_reconcile_once():
     from sqlalchemy.future import select as _select
 
     threshold = _dt.utcnow() - timedelta(seconds=PENDING_PAYMENT_RECONCILE_AFTER_SECONDS)
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            _select(Order).where(
+    async with AsyncSessionLocal() as discovery_db:
+        result = await discovery_db.execute(
+            _select(Order.id).where(
                 Order.status == "pending_payment",
                 Order.created_at < threshold,
             )
         )
-        pending = result.scalars().all()
-        if not pending:
-            return
-        from app.services.order_payment_service import OrderPaymentService
+        # Plain ids, not ORM Order instances -- see _stale_order_cleanup_once for why
+        # this loop must never share one ORM-tracked session/identity-map across
+        # multiple orders' recovery attempts.
+        pending_ids = [row[0] for row in result.all()]
 
-        payment_svc = OrderPaymentService(db)
-        recovered_any = False
-        for o in pending:
-            if await payment_svc._recover_wxpay_order_if_paid(o, source="pending_payment_background"):
-                recovered_any = True
-        if recovered_any:
-            await db.commit()
+    if not pending_ids:
+        return
+
+    # P1-WXPAY-RECOVERY-GATE: this loop is the primary steady-state recovery driver
+    # (see PROD-STABILITY-P1-01 Phase 2 Option D) -- standard Class B caller, no
+    # force_fresh, no wait_for_inflight (nothing here depends on knowing the result of
+    # a query someone else already has in flight; a fresh answer will surface on this
+    # loop's own next tick regardless).
+    from app.services.wxpay_recovery_gate import recovery_gate
+
+    for order_id in pending_ids:
+        # P0-MISSING-GREENLET: each order gets its own isolated session -- recovering
+        # order N's rollback must never expire order N+1..M's not-yet-processed ORM
+        # object in a shared session (see _stale_order_cleanup_once for the full
+        # rationale; the same multi-order contamination risk applies here).
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(_select(Order).where(Order.id == order_id))
+            o = result.scalar_one_or_none()
+            if not o:
+                continue
+            await recovery_gate.attempt_recovery(o, db, source="pending_payment_background")
+            # _recover_wxpay_order_if_paid already commits internally on a successful
+            # recovery; nothing else in this loop needs to commit.
 
 
 async def _pending_payment_reconcile_loop():
@@ -268,6 +305,8 @@ async def _stale_order_cleanup_loop():
     """Clean stale unpaid orders and restore locked coupons."""
     import asyncio
 
+    from app.services.wxpay_recovery_gate import recovery_gate
+
     INTERVAL = 300  # 5分钟
     await asyncio.sleep(10)  # 等待应用完全启动
     while True:
@@ -275,6 +314,13 @@ async def _stale_order_cleanup_loop():
             await _stale_order_cleanup_once()
         except Exception:
             logger.exception("[stale_order_cleanup] loop iteration failed")
+        try:
+            # P1-WXPAY-RECOVERY-GATE: piggyback the gate's periodic TTL sweep on this
+            # already-running 300s tick rather than spinning up a dedicated background
+            # task/thread just for gate cleanup.
+            recovery_gate.sweep_expired()
+        except Exception:
+            logger.exception("[stale_order_cleanup] recovery gate sweep failed")
         await asyncio.sleep(INTERVAL)
 
 

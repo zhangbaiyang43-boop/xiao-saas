@@ -281,15 +281,25 @@ class ReconcilePrintOrdersFailureIsolationTest(_MySQLGreenletTestBase):
 
 class WxpayRecoveryAuthorityUnchangedTest(_MySQLGreenletTestBase):
     """P0 objective: fixing the session-isolation bug must not change WXPAY money
-    authority. A genuinely-paid order recovered through the new isolated-session path
-    inside list_orders must still transition to paid/pending, exactly as before."""
+    authority. A genuinely-paid order recovered through an isolated-session path must
+    still transition to paid/pending, exactly as before.
+
+    P1-WXPAY-RECOVERY-GATE retargeted this from list_orders to
+    _pending_payment_reconcile_once (main.py): PROD-STABILITY-P1-01 intentionally
+    removed merchant_order_query's direct WeChat recovery call from GET /api/v1/orders
+    entirely (pending_payment_background already covers the same ground on the same
+    cadence -- see that phase's MERCHANT_PROVIDER_QUERY=REMOVE decision), so this is now
+    the real production path that exercises "does a successful recovery still apply
+    correctly," and it uses the same per-order session isolation principle P0
+    established.
+    """
 
     async def asyncSetUp(self):
         await super().asyncSetUp()
         db = self.SessionLocal()
         self.paid_order = await self._make_order(
             db, status="pending_payment", payment_status="unpaid",
-            created_at=datetime.utcnow(), total="18.00",
+            created_at=datetime.utcnow() - timedelta(seconds=100), total="18.00",
         )
         await db.commit()
         await db.close()
@@ -302,19 +312,13 @@ class WxpayRecoveryAuthorityUnchangedTest(_MySQLGreenletTestBase):
         await super().asyncTearDown()
 
     async def test_successful_recovery_still_flips_order_to_paid(self):
-        from app.api.v1.orders import list_orders as list_orders_endpoint
+        from app.main import _pending_payment_reconcile_once
 
         with patch(
             "app.services.order_print_service._print_paid_order_ticket",
             new=AsyncMock(return_value=None),
         ):
-            request = make_owner_request(TENANT_A)
-            db = self.SessionLocal()
-            try:
-                resp = await list_orders_endpoint(request, date_str="today", db=db, response=None)
-            finally:
-                await db.close()
-        self.assertEqual(resp.code, 200)
+            await _pending_payment_reconcile_once()
 
         verify_db = self.SessionLocal()
         try:

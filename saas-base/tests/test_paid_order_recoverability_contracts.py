@@ -75,18 +75,29 @@ class PaidOrderRecoverabilityContractsTest(unittest.TestCase):
         self.assertIn("WXPAY_ORDER_RECOVERED", PAYMENT_SERVICE_SOURCE)
 
     def test_consumer_order_query_recovers_paid_pending_payment_order(self):
+        # P1-WXPAY-RECOVERY-GATE: client_order_query now goes through the shared gate
+        # (fast_lane=True) on its own isolated recon_db session instead of calling
+        # _recover_wxpay_order_if_paid directly on self.db -- see get_my_order's own
+        # P0-MISSING-GREENLET/P1-WXPAY-RECOVERY-GATE comment for the full rationale.
         get_my_order_source = class_method_source("get_my_order")
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(order, source=", get_my_order_source)
+        self.assertIn("recovery_gate.attempt_recovery(", get_my_order_source)
+        self.assertIn('recon_order, recon_db, source="client_order_query"', get_my_order_source)
         self.assertIn('"payment_status": order.payment_status', get_my_order_source)
 
-    def test_merchant_order_query_recovers_paid_pending_payment_orders(self):
-        # P0-MISSING-GREENLET: recovery now runs on an isolated `recon_db` session (not
-        # self.db) so its commit/rollback can never expire the ORM objects this read path
-        # is about to serialize -- see order_lifecycle_service.py for the full rationale.
+    def test_merchant_order_query_no_longer_calls_wxpay_but_still_reconciles_print(self):
+        # PROD-STABILITY-P1-01 Phase 2 MERCHANT_PROVIDER_QUERY=REMOVE: GET /orders no
+        # longer calls WeChat at all -- pending_payment_background already covers every
+        # pending_payment order on the same ~60s cadence this page's own polling used to
+        # provide. list_orders is now a pure DB read for payment purposes; print
+        # reconciliation (a different provider) is unaffected and still isolated on its
+        # own recon_db session (P0-MISSING-GREENLET).
         list_orders_source = class_method_source("list_orders")
-        self.assertIn('if o.status == "pending_payment"', list_orders_source)
-        self.assertIn("payment_svc._recover_wxpay_order_if_paid(", list_orders_source)
-        self.assertIn("recon_order, source=", list_orders_source)
+        # No actual call/invocation remains (a call always has an opening paren right
+        # after the name) -- only the explanatory comment above documenting the removal
+        # may still mention the old function's name, which is fine.
+        self.assertNotIn("_recover_wxpay_order_if_paid(", list_orders_source)
+        self.assertNotIn("recovery_gate", list_orders_source)
+        self.assertIn("reconcile_print_orders(", list_orders_source)
         self.assertIn("await recon_db.commit()", list_orders_source)
 
     def test_recovery_reuses_normal_payment_success_side_effect_path(self):
