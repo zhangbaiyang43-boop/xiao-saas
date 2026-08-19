@@ -169,6 +169,16 @@ async def _stale_order_cleanup_once():
 
             payment_svc = OrderPaymentService(db)
         for o in stale:
+            # P0-MISSING-GREENLET: capture these as plain scalars *before* calling
+            # into recovery. _recover_wxpay_order_if_paid may rollback `db` (e.g. WeChat
+            # reports the order still unpaid, which raises and hits its except-block
+            # rollback) -- and SQLAlchemy's rollback() unconditionally expires every
+            # object in the session's identity map regardless of expire_on_commit, so
+            # `o` itself would come out of that call expired. Reading `o.id`/`o.tenant_id`
+            # afterward would then be a bare synchronous attribute access trying an
+            # implicit lazy reload with no active greenlet -> MissingGreenlet.
+            stale_id = o.id
+            stale_tenant_id = o.tenant_id
             recovered = await payment_svc._recover_wxpay_order_if_paid(o, source="stale_order_background")
             if recovered:
                 continue
@@ -178,8 +188,8 @@ async def _stale_order_cleanup_once():
             locked_result = await db.execute(
                 _select(Order)
                 .where(
-                    Order.id == o.id,
-                    Order.tenant_id == o.tenant_id,
+                    Order.id == stale_id,
+                    Order.tenant_id == stale_tenant_id,
                     Order.status == "pending_payment",
                 )
                 .with_for_update()
