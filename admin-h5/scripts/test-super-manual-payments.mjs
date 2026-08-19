@@ -24,12 +24,22 @@ assert.match(superAdmin, /let superToken = ''/)
 assert.doesNotMatch(superAdmin, /localStorage\.setItem\(['"]superToken/)
 
 // ---- API client: real CM-A endpoints, real auth header, no localStorage --
-assert.match(api, /\/api\/super\/billing/)
+assert.match(api, /\/super\/billing/)
 assert.match(api, /manual-payments/)
 assert.match(api, /\/confirm/)
 assert.match(api, /\/reject/)
 assert.match(api, /'X-Super-Token': superToken/)
 assert.doesNotMatch(api, /localStorage/)
+
+// ---- Phase F1G-CM-RF: unified API-origin authority, no raw axios ----------
+// superBilling.js must go through the shared superRequest client (which
+// resolves the SAME origin as the merchant client via resolveApiBaseURL()),
+// never the bare axios package with a browser-relative path -- that's
+// exactly the drift that forced a temporary Vite dev-proxy in CM-C/CM-D.
+assert.match(api, /import superRequest from '\.\/superRequest'/)
+assert.doesNotMatch(api, /^import axios from ['"]axios['"]/m, 'must not import raw axios directly')
+assert.doesNotMatch(api, /axios\.(get|post|put|patch|delete)\(/, 'must call through superRequest, not raw axios')
+assert.doesNotMatch(api, /['"`]\/api\/super/, 'BASE must not hardcode the /api prefix a second time -- that authority lives in superRequest\'s baseURL')
 
 // ---- PENDING_LIST_WIRED / CONFIRM_WIRED / REJECT_WIRED --------------------
 assert.match(panel, /listManualPayments/)

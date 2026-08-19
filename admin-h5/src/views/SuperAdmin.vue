@@ -207,11 +207,11 @@
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import axios from 'axios'
+import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 
-const BASE = '/api/super'
+const BASE = '/super'
 
 const authed = ref(false)
 const pwd = ref('')
@@ -311,7 +311,7 @@ async function doLogin() {
   logging.value = true
   loginErr.value = ''
   try {
-    const res = await axios.post(`${BASE}/login`, { password: pwd.value, totp_code: totpCode.value.trim() || undefined })
+    const res = await superRequest.post(`${BASE}/login`, { password: pwd.value, totp_code: totpCode.value.trim() || undefined })
     if (res.data?.code === 200) {
       superToken = res.data.data.token
       totpEnabled.value = !!res.data.data.totp_enabled
@@ -334,7 +334,7 @@ async function loadPerfStats() {
   perfStatsLoading.value = true
   perfStatsError.value = false
   try {
-    const res = await axios.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
+    const res = await superRequest.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
     if (res.data?.code === 200) {
       perfStats.value = res.data.data?.stats || []
     } else {
@@ -356,8 +356,8 @@ async function loadData() {
   loadingList.value = true
   try {
     const [statsRes, listRes] = await Promise.all([
-      axios.get(`${BASE}/stats`, { headers: superHeaders() }),
-      axios.get(`${BASE}/merchants`, { headers: superHeaders() }),
+      superRequest.get(`${BASE}/stats`, { headers: superHeaders() }),
+      superRequest.get(`${BASE}/merchants`, { headers: superHeaders() }),
     ])
     if (statsRes.data?.code === 200) Object.assign(stats, statsRes.data.data)
     if (listRes.data?.code === 200) merchants.value = listRes.data.data
@@ -381,7 +381,7 @@ async function createMerchant() {
   creating.value = true
   createResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants`, { ...newMerchant }, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants`, { ...newMerchant }, { headers: superHeaders() })
     if (res.data?.code === 200) {
       const d = res.data.data
       createResult.value = { ok: true, msg: `已开通「${d.name}」，手机号 ${d.phone}，登录码 ${d.login_code}` }
@@ -413,7 +413,7 @@ async function savePayConfig() {
   savingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, {
+    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, {
       wx_mchid: payConfigForm.wx_mchid.trim(),
       wx_api_key_v3: payConfigForm.wx_api_key_v3.trim(),
       wx_cert_serial: payConfigForm.wx_cert_serial.trim(),
@@ -438,7 +438,7 @@ async function verifyPayConfig() {
   verifyingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {}, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
       applyPaymentData(payConfigTarget.value, res.data.data)
@@ -474,7 +474,7 @@ async function copyPayConfig(totpCodeInput = '') {
   copyingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/copy-from`, {
+    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/copy-from`, {
       source_tenant_id: copySourceId.value,
       totp_code: totpCodeInput || undefined,
     }, { headers: superHeaders() })
@@ -501,7 +501,7 @@ async function pausePay(totpCodeInput = '') {
   pausingPay.value = true
   payConfigResult.value = null
   try {
-    const res = await axios.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, { totp_code: totpCodeInput || undefined }, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, { totp_code: totpCodeInput || undefined }, { headers: superHeaders() })
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: '已暂停支付' }
       applyPaymentData(payConfigTarget.value, res.data.data)
@@ -516,7 +516,7 @@ async function seedTestData(merchant) {
   seedingId.value = merchant.tenant_id
   seedResult.value = null
   try {
-    const res = await axios.post(`${BASE}/merchants/${merchant.tenant_id}/seed-test-data`, {}, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${merchant.tenant_id}/seed-test-data`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) {
       const d = res.data.data
       seedResult.value = { tenant_id: merchant.tenant_id, ok: true, msg: `填充成功：${d.menu_items} 道菜 · ${d.customers} 位会员 · 历史 ${d.history_orders} 单 · 今日 ${d.today_orders} 单` }
@@ -529,7 +529,7 @@ async function seedTestData(merchant) {
 
 async function toggleStatus(merchant) {
   try {
-    const res = await axios.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) merchant.status = res.data.data.status
   } catch {}
 }

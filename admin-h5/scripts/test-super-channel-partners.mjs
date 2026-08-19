@@ -13,10 +13,20 @@ assert.match(superAdmin, /渠道管理/)
 assert.match(superAdmin, /const activeTab = ref\('merchants'\)/)
 assert.match(superAdmin, /let superToken = ''/)
 assert.doesNotMatch(superAdmin, /localStorage\.setItem\(['"]superToken/)
-assert.match(superAdmin, /axios\.post\(`\$\{BASE\}\/merchants`/)
+assert.match(superAdmin, /superRequest\.post\(`\$\{BASE\}\/merchants`/)
 assert.match(superAdmin, /openPayConfig/)
 
-assert.match(api, /\/api\/super\/channel/)
+// ---- Phase F1G-CM-RF: unified API-origin authority, no raw axios ----------
+assert.match(superAdmin, /import superRequest from '\.\.\/api\/superRequest'/)
+assert.doesNotMatch(superAdmin, /^import axios from ['"]axios['"]/m, 'SuperAdmin.vue must not import raw axios directly')
+assert.doesNotMatch(superAdmin, /axios\.(get|post|put|patch|delete)\(/, 'SuperAdmin.vue must call through superRequest, not raw axios')
+assert.match(superAdmin, /const BASE = '\/super'/)
+
+assert.match(api, /\/super\/channel/)
+assert.match(api, /import superRequest from '\.\/superRequest'/)
+assert.doesNotMatch(api, /^import axios from ['"]axios['"]/m, 'must not import raw axios directly')
+assert.doesNotMatch(api, /axios\.(get|post|put|patch|delete)\(/, 'must call through superRequest, not raw axios')
+assert.doesNotMatch(api, /['"`]\/api\/super/, 'BASE must not hardcode the /api prefix a second time')
 assert.match(api, /'X-Super-Token': superToken/)
 assert.doesNotMatch(api, /localStorage/)
 
