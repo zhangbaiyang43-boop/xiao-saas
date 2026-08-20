@@ -13,7 +13,7 @@ class Tenant(Base):
     name = Column(String(64), nullable=False)
     password_hash = Column(String(128), nullable=False)
     corp_id = Column(String(64))
-    phone = Column(String(20))
+    phone = Column(String(20), unique=True)
     address = Column(String(500))
     logo_url = Column(String(500))
     status = Column(Boolean, default=True)

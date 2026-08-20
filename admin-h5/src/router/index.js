@@ -3,6 +3,7 @@ import { clearSession, hasValidSession } from '../utils/session'
 import { useAuthStore } from '../stores/auth'
 
 const Login = () => import('../views/Login.vue')
+const ActivationHome = () => import('../views/ActivationHome.vue')
 const Layout = () => import('../views/Layout.vue')
 const Dashboard = () => import('../views/Dashboard.vue')
 const CustomerList = () => import('../views/CustomerList.vue')
@@ -42,6 +43,7 @@ const ownerOnly = { requiresPermission: '*' }
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
+  { path: '/activation', name: 'ActivationHome', component: ActivationHome, meta: ownerOnly },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
   { path: '/queue/display', name: 'QueueDisplay', component: QueueDisplay },

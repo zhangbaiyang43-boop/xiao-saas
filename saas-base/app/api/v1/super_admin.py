@@ -13,8 +13,11 @@ from app.core.rate_limiter import login_limit
 from app.core.response import RespVo, error_response, success_response
 from app.models.order import Order
 from app.models.tenant import Tenant
-from app.services.tenant_service import TenantService
-from app.utils.id_generator import generate_tenant_id
+from app.services.merchant_provisioning_service import (
+    MerchantProvisioningService,
+    PhoneAlreadyRegisteredError,
+    ProvisioningSource,
+)
 
 router = APIRouter(prefix="/api/super", tags=["平台中控台"])
 
@@ -252,20 +255,24 @@ async def list_merchants(db: AsyncSession = Depends(get_db)):
 
 @router.post("/merchants", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
 async def create_merchant(request: Request, data: CreateMerchantRequest, db: AsyncSession = Depends(get_db)):
-    service = TenantService(db)
-    existing = await service.get_tenant_by_phone(data.phone)
-    if existing:
+    # Delegates to the same Domain Authority self-registration uses
+    # (MerchantProvisioningService) -- Super Admin and self-signup must never
+    # grow two independent "create a tenant" implementations again. Response
+    # shape (tenant_id/name/phone/login_code) is unchanged for backward
+    # compatibility with the existing admin-h5 caller; login_code remains the
+    # pre-existing cosmetic echo of data.initial_code (real owner auth is
+    # SMS-OTP, not this code -- unrelated to this phase, left as-is).
+    try:
+        result = await MerchantProvisioningService(db).provision_merchant(
+            name=data.name,
+            phone=data.phone,
+            source=ProvisioningSource.SUPER_ADMIN,
+        )
+    except PhoneAlreadyRegisteredError:
         return error_response(code=400, msg="该手机号已注册")
-    tenant_id = generate_tenant_id()
-    tenant = await service.create_tenant(
-        tenant_id=tenant_id,
-        name=data.name,
-        password_hash="",
-        phone=data.phone,
-        address=None,
-        logo_url=None,
-    )
-    _audit("create_merchant", request, tenant_id, detail=f"name={data.name}")
+
+    tenant = result.tenant
+    _audit("create_merchant", request, tenant.tenant_id, detail=f"name={data.name}")
     return success_response(
         data={"tenant_id": tenant.tenant_id, "name": tenant.name, "phone": tenant.phone, "login_code": data.initial_code},
         msg="商家创建成功",

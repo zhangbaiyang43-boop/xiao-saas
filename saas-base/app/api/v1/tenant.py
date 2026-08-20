@@ -116,6 +116,62 @@ async def get_profile(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/activation-status", response_model=RespVo)
+async def get_activation_status(db: AsyncSession = Depends(get_db)):
+    """Pure facts for Activation Home (Phase 02) -- no persisted onboarding
+    state, no step/progress numbers. `activated` is exactly `has_orders`:
+    once a tenant has a single real order, Activation is done and Dashboard
+    is authoritative again. `has_dishes` only counts AVAILABLE dishes (an
+    unavailable/off-shelf dish can't actually be ordered, so it doesn't
+    count as "step 1 done" -- see docs/saas-subscription-audit.md Phase
+    02 §15). `has_entrance_codes` only counts active TABLE-channel codes,
+    never a channel/staff-share code, since only a table code lets a
+    customer actually reach the ordering flow via table_registry_active()."""
+    from sqlalchemy import func, select as _select
+
+    from app.models.entrance_code import EntranceCode
+    from app.models.menu_item import MenuItem
+    from app.models.order import Order
+
+    service = TenantService(db)
+    tenant_id, tenant, error = await get_current_tenant(service)
+    if error:
+        return error
+
+    dish_count = (
+        await db.execute(
+            _select(func.count(MenuItem.id)).where(
+                MenuItem.tenant_id == tenant_id, MenuItem.available.is_(True)
+            )
+        )
+    ).scalar() or 0
+    entrance_code_count = (
+        await db.execute(
+            _select(func.count(EntranceCode.id)).where(
+                EntranceCode.tenant_id == tenant_id,
+                EntranceCode.entry_type == "table",
+                EntranceCode.status == 1,
+            )
+        )
+    ).scalar() or 0
+    order_count = (
+        await db.execute(_select(func.count(Order.id)).where(Order.tenant_id == tenant_id))
+    ).scalar() or 0
+
+    return success_response(
+        data={
+            "has_dishes": dish_count > 0,
+            "has_entrance_codes": entrance_code_count > 0,
+            "has_orders": order_count > 0,
+            "activated": order_count > 0,
+            "dish_count": dish_count,
+            "entrance_code_count": entrance_code_count,
+            "order_count": order_count,
+        },
+        msg="ok",
+    )
+
+
 @router.put("/profile", response_model=RespVo)
 async def update_profile(data: UpdateTenantProfileRequest, db: AsyncSession = Depends(get_db)):
     service = TenantService(db)

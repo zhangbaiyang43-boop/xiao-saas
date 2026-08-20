@@ -13,6 +13,21 @@ from app.core.cache_helper import delete_cache, get_cache, set_cache
 from app.core.logger import logger
 
 _memory_cache: dict[str, tuple[float, Any]] = {}
+
+
+class SmsPurpose:
+    """Binds a one-time code to the flow it was issued for, so a code sent
+    for one purpose cannot be replayed to complete a different one (e.g. a
+    LOGIN code cannot be used to REGISTER). Threaded through the cache-key
+    and hash functions below -- each purpose gets its own cooldown/daily-cap/
+    code namespace, entirely independent of the others. Deliberately just two
+    string constants, not a project-wide enum: add a new one here only when a
+    new phone-verification flow actually needs it."""
+
+    LOGIN = "login"
+    REGISTER = "register"
+
+
 _HOST = "sms.tencentcloudapi.com"
 _SERVICE = "sms"
 _VERSION = "2021-01-11"
@@ -60,9 +75,9 @@ async def _cache_delete(key: str) -> None:
     await delete_cache(key)
 
 
-def hash_login_code(phone: str, code: str) -> str:
+def hash_login_code(phone: str, code: str, purpose: str = SmsPurpose.LOGIN) -> str:
     secret = settings.JWT_SECRET_KEY.encode("utf-8")
-    payload = f"merchant-login:{phone}:{code}".encode("utf-8")
+    payload = f"merchant-{purpose}:{phone}:{code}".encode("utf-8")
     return hmac.new(secret, payload, hashlib.sha256).hexdigest()
 
 
@@ -94,15 +109,15 @@ class TencentSmsService:
         self.daily_limit = settings.SMS_CODE_DAILY_LIMIT
         self.max_attempts = settings.SMS_CODE_MAX_ATTEMPTS
 
-    def _code_key(self, phone: str) -> str:
-        return f"sms:merchant-login:code:{phone}"
+    def _code_key(self, phone: str, purpose: str = SmsPurpose.LOGIN) -> str:
+        return f"sms:merchant-{purpose}:code:{phone}"
 
-    def _cooldown_key(self, phone: str) -> str:
-        return f"sms:merchant-login:cooldown:{phone}"
+    def _cooldown_key(self, phone: str, purpose: str = SmsPurpose.LOGIN) -> str:
+        return f"sms:merchant-{purpose}:cooldown:{phone}"
 
-    def _daily_key(self, phone: str) -> str:
+    def _daily_key(self, phone: str, purpose: str = SmsPurpose.LOGIN) -> str:
         day = datetime.utcnow().strftime("%Y%m%d")
-        return f"sms:merchant-login:daily:{day}:{phone}"
+        return f"sms:merchant-{purpose}:daily:{day}:{phone}"
 
     def is_configured(self) -> bool:
         return all([
@@ -113,12 +128,12 @@ class TencentSmsService:
             settings.TENCENT_SMS_LOGIN_TEMPLATE_ID,
         ])
 
-    async def request_login_code(self, phone: str) -> tuple[bool, str, dict]:
-        cooldown = await _cache_get(self._cooldown_key(phone))
+    async def request_login_code(self, phone: str, purpose: str = SmsPurpose.LOGIN) -> tuple[bool, str, dict]:
+        cooldown = await _cache_get(self._cooldown_key(phone, purpose))
         if cooldown:
             return False, "验证码发送过于频繁，请稍后再试", {"retry_after": self.interval}
 
-        sent_count = int(await _cache_get(self._daily_key(phone)) or 0)
+        sent_count = int(await _cache_get(self._daily_key(phone, purpose)) or 0)
         if sent_count >= self.daily_limit:
             return False, "今日验证码发送次数已达上限，请明天再试", {}
 
@@ -131,42 +146,42 @@ class TencentSmsService:
         if not ok:
             return False, message, {}
 
-        await self.store_login_code(phone, code)
-        await _cache_set(self._cooldown_key(phone), True, self.interval)
-        await _cache_set(self._daily_key(phone), sent_count + 1, 86400)
+        await self.store_login_code(phone, code, purpose)
+        await _cache_set(self._cooldown_key(phone, purpose), True, self.interval)
+        await _cache_set(self._daily_key(phone, purpose), sent_count + 1, 86400)
         return True, "验证码已发送", {"expires_in": self.ttl, "retry_after": self.interval}
 
-    async def store_login_code(self, phone: str, code: str) -> None:
+    async def store_login_code(self, phone: str, code: str, purpose: str = SmsPurpose.LOGIN) -> None:
         record = {
-            "hash": hash_login_code(phone, code),
+            "hash": hash_login_code(phone, code, purpose),
             "expires_at": int(_now() + self.ttl),
             "attempts": 0,
         }
-        await _cache_set(self._code_key(phone), record, self.ttl)
+        await _cache_set(self._code_key(phone, purpose), record, self.ttl)
 
-    async def verify_login_code(self, phone: str, code: str) -> bool:
-        record = await _cache_get(self._code_key(phone))
+    async def verify_login_code(self, phone: str, code: str, purpose: str = SmsPurpose.LOGIN) -> bool:
+        record = await _cache_get(self._code_key(phone, purpose))
         if not isinstance(record, dict):
             return False
 
         if int(record.get("expires_at") or 0) <= int(_now()):
-            await _cache_delete(self._code_key(phone))
+            await _cache_delete(self._code_key(phone, purpose))
             return False
 
         attempts = int(record.get("attempts") or 0)
         if attempts >= self.max_attempts:
-            await _cache_delete(self._code_key(phone))
+            await _cache_delete(self._code_key(phone, purpose))
             return False
 
         expected = str(record.get("hash") or "")
-        actual = hash_login_code(phone, (code or "").strip())
+        actual = hash_login_code(phone, (code or "").strip(), purpose)
         if hmac.compare_digest(expected, actual):
-            await _cache_delete(self._code_key(phone))
+            await _cache_delete(self._code_key(phone, purpose))
             return True
 
         record["attempts"] = attempts + 1
         remaining_ttl = max(int(record.get("expires_at") or 0) - int(_now()), 1)
-        await _cache_set(self._code_key(phone), record, remaining_ttl)
+        await _cache_set(self._code_key(phone, purpose), record, remaining_ttl)
         return False
 
     async def send_login_code(self, phone: str, code: str) -> tuple[bool, str]:
