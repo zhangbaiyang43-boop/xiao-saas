@@ -185,6 +185,7 @@ class TenantService:
         address: str = None,
         logo_url: str = None,
         status: bool = True,
+        payment_mode: str = None,
         *,
         commit: bool = True,
     ) -> Tenant:
@@ -194,7 +195,12 @@ class TenantService:
         populated and visible to later statements on the same session, but
         nothing is durable until the caller itself commits. Every existing
         caller (super-admin merchant creation, the legacy unmounted /api/auth
-        router) omits this argument and keeps committing immediately, unchanged."""
+        router) omits this argument and keeps committing immediately, unchanged.
+
+        payment_mode=None (the default) lets the Tenant model's own column
+        default ("prepay") apply unchanged -- only a caller that explicitly
+        wants a different starting mode (Phase 02's self-registration
+        Activation policy) passes one."""
         tenant = Tenant(
             tenant_id=tenant_id,
             name=name,
@@ -203,6 +209,7 @@ class TenantService:
             address=address,
             logo_url=logo_url,
             status=status,
+            **({"payment_mode": payment_mode} if payment_mode is not None else {}),
         )
         defaults = self.build_default_config()
         config = TenantConfig(

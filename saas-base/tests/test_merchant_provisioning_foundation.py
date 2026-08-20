@@ -109,6 +109,27 @@ class MerchantProvisioningFoundationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result.subscription)
         self.assertEqual(result.subscription.status, STATUS_TRIAL)
 
+    # ---- Payment mode policy (Phase 02) ------------------------------------
+
+    async def test_self_register_gets_table_account_payment_mode(self):
+        # FIRST_ORDER_SUCCESS must not depend on WeChat Pay credentials only
+        # Super Admin can configure -- table_account is the only payment_mode
+        # that never touches WxPayService (confirmed in app/api/v1/orders.py
+        # and order_payment_service.py's create_wxpay_order guard).
+        result = await self.service.provision_merchant(
+            name="自助注册店二", phone="13700000011", source=ProvisioningSource.SELF_REGISTER
+        )
+        self.assertEqual(result.tenant.payment_mode, "table_account")
+
+    async def test_super_admin_source_keeps_unchanged_prepay_default(self):
+        # Explicitly frozen per Phase 02 scope: Super-Admin-provisioned
+        # tenants keep the pre-existing "prepay" column default untouched --
+        # only the self-registration source's payment_mode changes.
+        result = await self.service.provision_merchant(
+            name="中控台开的店二", phone="13700000012", source=ProvisioningSource.SUPER_ADMIN
+        )
+        self.assertEqual(result.tenant.payment_mode, "prepay")
+
     async def test_super_admin_source_now_also_creates_trial(self):
         # This is the Phase 01 behavior change: previously Super Admin-created
         # tenants got zero Subscription rows (see the frozen, unchanged

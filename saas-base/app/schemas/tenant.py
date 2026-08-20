@@ -37,7 +37,6 @@ class LoginRequest(BaseModel):
 
 class RegisterCodeRequest(BaseModel):
     phone: str = Field(..., description="手机号")
-    platform_key: Optional[str] = Field(None, description="平台注册密钥")
 
     @field_validator("phone")
     @classmethod
@@ -51,7 +50,6 @@ class RegisterRequest(BaseModel):
     code: str = Field(..., description="手机验证码（先调用 /register/code 获取）")
     address: Optional[str] = Field(None, description="商家地址")
     logo_url: Optional[str] = Field(None, description="商家 logo")
-    platform_key: Optional[str] = Field(None, description="平台注册密钥")
     initial_password: Optional[str] = Field(None, description="初始登录码（默认 123456）")
 
     @field_validator("phone")

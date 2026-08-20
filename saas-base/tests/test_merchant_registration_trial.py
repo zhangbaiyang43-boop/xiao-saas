@@ -5,12 +5,22 @@ login already does) and delegates the actual Tenant+TenantConfig+trial
 creation to MerchantProvisioningService instead of orchestrating
 TenantService/SubscriptionService inline in the router.
 
+Phase 02 (Merchant Signup + Activation) update: PLATFORM_REGISTER_KEY is now
+a pure server-side availability switch (registration is open whenever an
+operator has set ANY non-empty value in the server's own environment) -- the
+client no longer supplies or knows a key at all. This closes an architecture
+gap the Phase 02 audit flagged: the old exact-match-against-a-client-supplied-
+value design would have required a real server secret to live inside the
+public admin-h5 bundle (or every request, either way extractable via
+DevTools) for self-registration to ever work from a browser.
+
 Scope: docs/saas-subscription-audit.md Phase 04, plus Phase 01's OTP-gate and
-provisioning-unification work. POST /api/v1/register is still the same URL/
-method/registration-key gate; the request now also requires `code` (a
-REGISTER-purpose OTP obtained from POST /api/v1/register/code first). A
-successful registration still creates a 30-day PRO trial Subscription in the
-SAME database transaction as the Tenant -- so "registration succeeded" is an
+provisioning-unification work, plus Phase 02's registration-gate and payment-
+mode changes. POST /api/v1/register is still the same URL/method; the request
+requires `code` (a REGISTER-purpose OTP obtained from POST /api/v1/register/
+code first) and no longer accepts/needs a platform_key field. A successful
+registration still creates a 30-day PRO trial Subscription in the SAME
+database transaction as the Tenant -- so "registration succeeded" is an
 all-or-nothing guarantee covering both rows, proven here by directly querying
 the database after simulated failures, not by asserting a mock was called.
 """
@@ -92,8 +102,8 @@ class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
         await self.db.close()
         await self.engine.dispose()
 
-    def _register_data(self, phone: str, key: str = TEST_REGISTER_KEY, name: str = "老王川菜馆", code: str = VALID_CODE) -> RegisterRequest:
-        return RegisterRequest(name=name, phone=phone, platform_key=key, code=code)
+    def _register_data(self, phone: str, name: str = "老王川菜馆", code: str = VALID_CODE) -> RegisterRequest:
+        return RegisterRequest(name=name, phone=phone, code=code)
 
     async def _store_valid_register_code(self, phone: str, code: str = VALID_CODE) -> None:
         await TencentSmsService().store_login_code(phone, code, purpose=SmsPurpose.REGISTER)
@@ -170,23 +180,22 @@ class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
         all_subs = await self.db.execute(select(Subscription))
         self.assertEqual(len(all_subs.scalars().all()), 0)
 
-    # ---- Test 8 — Invalid registration key creates nothing --------------------
-
-    async def test_invalid_registration_key_creates_nothing(self):
-        phone = "13800000008"
-        res = await login_module.register(make_request(), self._register_data(phone, key="wrong-key"), db=self.db)
-
-        self.assertEqual(res.code, 403)
-        self.assertEqual(await self._tenant_count(phone), 0)
-        self.assertEqual(await self._subscription_count_for_phone(phone), 0)
+    # ---- Test 8 — Registration gate is a pure server-side switch --------------
 
     async def test_missing_registration_key_creates_nothing_when_platform_key_unset(self):
         phone = "13800000009"
         settings.PLATFORM_REGISTER_KEY = ""  # simulates the out-of-the-box "not yet opened" state
-        res = await login_module.register(make_request(), self._register_data(phone, key=""), db=self.db)
+        res = await login_module.register(make_request(), self._register_data(phone), db=self.db)
 
         self.assertEqual(res.code, 403)
         self.assertEqual(await self._tenant_count(phone), 0)
+
+    async def test_register_schemas_accept_no_client_supplied_platform_key(self):
+        # Phase 02: PLATFORM_REGISTER_KEY is checked purely server-side
+        # (settings.PLATFORM_REGISTER_KEY truthy => open); the client never
+        # sends a key at all, so neither request schema has the field.
+        self.assertNotIn("platform_key", RegisterRequest.model_fields)
+        self.assertNotIn("platform_key", RegisterCodeRequest.model_fields)
 
     # ---- Test 9 — Existing registration response contract is preserved --------
 
@@ -324,18 +333,20 @@ class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
 
     # ---- Test 16 — POST /register/code contract ---------------------------
 
-    async def test_register_code_endpoint_sends_and_is_gated_by_platform_key(self):
+    async def test_register_code_endpoint_gated_purely_server_side(self):
         phone = "13800000017"
-        wrong_key_res = await login_module.send_register_code(
-            make_request(), RegisterCodeRequest(phone=phone, platform_key="wrong"), db=self.db
+        settings.PLATFORM_REGISTER_KEY = ""
+        closed_res = await login_module.send_register_code(
+            make_request(), RegisterCodeRequest(phone=phone), db=self.db
         )
-        self.assertEqual(wrong_key_res.code, 403)
+        self.assertEqual(closed_res.code, 403)
+        settings.PLATFORM_REGISTER_KEY = TEST_REGISTER_KEY
 
         with patch.object(TencentSmsService, "is_configured", return_value=True), patch.object(
             TencentSmsService, "send_login_code", return_value=(True, "sent")
         ):
             res = await login_module.send_register_code(
-                make_request(), RegisterCodeRequest(phone=phone, platform_key=TEST_REGISTER_KEY), db=self.db
+                make_request(), RegisterCodeRequest(phone=phone), db=self.db
             )
         self.assertEqual(res.code, 200, res.msg)
 
@@ -352,9 +363,22 @@ class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
         await login_module.register(make_request(), self._register_data(phone), db=self.db)
 
         res = await login_module.send_register_code(
-            make_request(), RegisterCodeRequest(phone=phone, platform_key=TEST_REGISTER_KEY), db=self.db
+            make_request(), RegisterCodeRequest(phone=phone), db=self.db
         )
         self.assertEqual(res.code, 400)
+
+    # ---- Test 16b (Phase 02) — Self-registration gets an Activation-ready
+    # payment_mode, never the WeChat-Pay-dependent default -----------------
+
+    async def test_self_registration_sets_table_account_payment_mode(self):
+        phone = "13800000019"
+        await self._store_valid_register_code(phone)
+        res = await login_module.register(make_request(), self._register_data(phone), db=self.db)
+        self.assertEqual(res.code, 200, res.msg)
+
+        tenant_result = await self.db.execute(select(Tenant).where(Tenant.phone == phone))
+        tenant = tenant_result.scalar_one()
+        self.assertEqual(tenant.payment_mode, "table_account")
 
     # ---- Test 17 — Provisioning is delegated, router doesn't own the tx ------
 

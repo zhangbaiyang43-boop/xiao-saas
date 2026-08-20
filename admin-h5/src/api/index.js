@@ -38,9 +38,11 @@ export const getWorkbenchOrderChanges = (params, config) =>
   request.get('/v1/orders/workbench/changes', { ...(config || {}), params })
 export const getRecentServedByMe = (params, config) =>
   request.get('/v1/orders/workbench/recent-served-by-me', { ...(config || {}), params })
+export const sendRegisterCode = (data) => request.post('/v1/register/code', data)
 export const registerTenant = (data) => request.post('/v1/register', data)
 export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')
+export const getActivationStatus = () => request.get('/v1/tenant/activation-status')
 export const updateTenantProfile = (data) => request.put('/v1/tenant/profile', data)
 export const uploadShopLogo = (file) => {
   const fd = new FormData()

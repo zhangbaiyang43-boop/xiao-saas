@@ -84,8 +84,12 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
 @router.post("/register/code", response_model=RespVo)
 @public_limit()
 async def send_register_code(request: Request, data: RegisterCodeRequest, db: AsyncSession = Depends(get_db)):
-    expected_key = settings.PLATFORM_REGISTER_KEY
-    if not expected_key or data.platform_key != expected_key:
+    # PLATFORM_REGISTER_KEY is a platform-operator-controlled availability
+    # switch, not a per-user invite code: the client never supplies or knows
+    # its value (Phase 02, docs/saas-subscription-audit.md). Registration is
+    # simply open whenever an operator has set a non-empty value in the
+    # server's own environment; there is nothing here for a client to send.
+    if not settings.PLATFORM_REGISTER_KEY:
         return error_response(code=403, msg="注册暂未开放，请联系平台开通")
 
     service = TenantService(db)
@@ -102,8 +106,12 @@ async def send_register_code(request: Request, data: RegisterCodeRequest, db: As
 @router.post("/register", response_model=RespVo)
 @public_limit()
 async def register(request: Request, data: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    expected_key = settings.PLATFORM_REGISTER_KEY
-    if not expected_key or data.platform_key != expected_key:
+    # PLATFORM_REGISTER_KEY is a platform-operator-controlled availability
+    # switch, not a per-user invite code: the client never supplies or knows
+    # its value (Phase 02, docs/saas-subscription-audit.md). Registration is
+    # simply open whenever an operator has set a non-empty value in the
+    # server's own environment; there is nothing here for a client to send.
+    if not settings.PLATFORM_REGISTER_KEY:
         return error_response(code=403, msg="注册暂未开放，请联系平台开通")
 
     # Registration must prove phone ownership the same way login does --

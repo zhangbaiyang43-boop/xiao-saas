@@ -40,6 +40,20 @@ class ProvisioningSource:
     SUPER_ADMIN = "SUPER_ADMIN"
 
 
+# Activation Home (Phase 02) needs a new self-registered tenant to be able to
+# complete a real first order with zero payment configuration. table_account
+# is the only payment_mode that never touches WxPayService (confirmed by
+# reading app/api/v1/orders.py's create_order path and order_payment_service.
+# py's create_wxpay_order guard, which independently rejects any call for a
+# non-"prepay" order) -- prepay, the Tenant model's own column default,
+# requires WeChat Pay merchant credentials only Super Admin can configure
+# today, which would block FIRST_ORDER_SUCCESS for every self-registered
+# merchant. This is source-scoped on purpose: Super-Admin-provisioned tenants
+# keep the existing, unchanged "prepay" default -- that contract is not part
+# of this phase's scope and nothing here alters it.
+_SELF_REGISTER_PAYMENT_MODE = "table_account"
+
+
 class TrialPolicy:
     """Explicit trial-grant decision for one provisioning call, so a future
     caller that genuinely needs to skip the trial (e.g. a not-yet-existing
@@ -129,6 +143,7 @@ class MerchantProvisioningService:
             raise ValueError(f"unknown provisioning source: {source!r}")
 
         tenant_id = generate_tenant_id()
+        payment_mode = _SELF_REGISTER_PAYMENT_MODE if source == ProvisioningSource.SELF_REGISTER else None
         try:
             tenant = await tenant_service.create_tenant(
                 tenant_id=tenant_id,
@@ -137,6 +152,7 @@ class MerchantProvisioningService:
                 phone=phone,
                 address=address,
                 logo_url=logo_url,
+                payment_mode=payment_mode,
                 commit=False,
             )
 

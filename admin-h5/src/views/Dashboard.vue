@@ -134,8 +134,9 @@
         <RankList title="近7天热销榜" :items="topDishRankItems" :loading="!statsLoaded" />
       </div>
 
-      <!-- 新商家引导 -->
-      <div v-if="isNewMerchant" class="section-block animate-in" style="animation-delay:.16s">
+      <!-- 新商家引导：与 Activation Home（Phase 02）内容重复，改成低优先级
+           入口——整卡可点，跳到完整的开店引导页 -->
+      <div v-if="isNewMerchant" class="section-block animate-in tap-shrink" style="animation-delay:.16s;cursor:pointer" @click="router.push('/activation')">
         <a-card :bordered="false" title="开店三步走">
           <a-steps direction="vertical" size="small" :current="0" :items="guideSteps" />
         </a-card>
