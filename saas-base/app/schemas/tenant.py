@@ -35,9 +35,20 @@ class LoginRequest(BaseModel):
         return normalize_phone(value)
 
 
+class RegisterCodeRequest(BaseModel):
+    phone: str = Field(..., description="手机号")
+    platform_key: Optional[str] = Field(None, description="平台注册密钥")
+
+    @field_validator("phone")
+    @classmethod
+    def phone_format(cls, value):
+        return normalize_phone(value)
+
+
 class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=1, description="店名")
     phone: str = Field(..., description="手机号")
+    code: str = Field(..., description="手机验证码（先调用 /register/code 获取）")
     address: Optional[str] = Field(None, description="商家地址")
     logo_url: Optional[str] = Field(None, description="商家 logo")
     platform_key: Optional[str] = Field(None, description="平台注册密钥")

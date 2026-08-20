@@ -9,11 +9,14 @@ from app.core.rate_limiter import login_limit, public_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.permissions import ROLE_OWNER, permission_list
 from app.core.security import create_access_token
-from app.schemas.tenant import LoginRequest, RegisterRequest, normalize_phone
-from app.services.subscription_service import SubscriptionService
-from app.services.tencent_sms_service import TencentSmsService
+from app.schemas.tenant import LoginRequest, RegisterCodeRequest, RegisterRequest, normalize_phone
+from app.services.merchant_provisioning_service import (
+    MerchantProvisioningService,
+    PhoneAlreadyRegisteredError,
+    ProvisioningSource,
+)
+from app.services.tencent_sms_service import SmsPurpose, TencentSmsService
 from app.services.tenant_service import TenantService
-from app.utils.id_generator import generate_tenant_id
 
 router = APIRouter(prefix="/api/v1", tags=["认证"])
 
@@ -78,9 +81,9 @@ async def login(request: Request, data: LoginRequest, db: AsyncSession = Depends
     return success_response(data=serialize_tenant_session(tenant, token), msg="登录成功")
 
 
-@router.post("/register", response_model=RespVo)
+@router.post("/register/code", response_model=RespVo)
 @public_limit()
-async def register(request: Request, data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def send_register_code(request: Request, data: RegisterCodeRequest, db: AsyncSession = Depends(get_db)):
     expected_key = settings.PLATFORM_REGISTER_KEY
     if not expected_key or data.platform_key != expected_key:
         return error_response(code=403, msg="注册暂未开放，请联系平台开通")
@@ -90,32 +93,42 @@ async def register(request: Request, data: RegisterRequest, db: AsyncSession = D
     if existing:
         return error_response(code=400, msg="手机号已注册，请直接登录")
 
-    tenant_id = generate_tenant_id()
-    # Tenant+TenantConfig and the trial Subscription are one all-or-nothing unit:
-    # both created with commit=False (flush only) and committed together at the
-    # end, so "registration succeeded" always means both exist, never just one.
-    # Any failure in either step rolls back everything flushed so far -- no
-    # orphan tenant, no orphan subscription. (See create_trial_for_tenant()'s own
-    # docstring for why ensure_plan() is the one part of this that's allowed its
-    # own independent commit.)
+    ok, msg, payload = await TencentSmsService().request_login_code(data.phone, purpose=SmsPurpose.REGISTER)
+    if not ok:
+        return error_response(code=400, msg=msg, data=payload or None)
+    return success_response(data=payload, msg=msg)
+
+
+@router.post("/register", response_model=RespVo)
+@public_limit()
+async def register(request: Request, data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    expected_key = settings.PLATFORM_REGISTER_KEY
+    if not expected_key or data.platform_key != expected_key:
+        return error_response(code=403, msg="注册暂未开放，请联系平台开通")
+
+    # Registration must prove phone ownership the same way login does --
+    # a REGISTER-purpose code, never a LOGIN one (SmsPurpose keeps the two
+    # namespaces disjoint, so a login code cannot be replayed here).
+    if not await TencentSmsService().verify_login_code(data.phone, data.code, purpose=SmsPurpose.REGISTER):
+        return error_response(code=400, msg="验证码错误或已过期")
+
+    # MerchantProvisioningService owns the whole Tenant + TenantConfig + trial
+    # Subscription transaction, including the commit -- this router no longer
+    # orchestrates multiple domain services or manages the transaction itself.
     try:
-        tenant = await service.create_tenant(
-            tenant_id=tenant_id,
+        result = await MerchantProvisioningService(db).provision_merchant(
             name=data.name,
-            password_hash="",
             phone=data.phone,
+            source=ProvisioningSource.SELF_REGISTER,
             address=data.address,
             logo_url=data.logo_url,
-            commit=False,
         )
-        await SubscriptionService(db).create_trial_for_tenant(tenant.tenant_id, commit=False)
+    except PhoneAlreadyRegisteredError:
+        return error_response(code=400, msg="手机号已注册，请直接登录")
     except Exception:
-        await db.rollback()
-        logger.error(f"registration provisioning failed, tenant_id={tenant_id}")
+        logger.error(f"registration provisioning failed, phone={data.phone}")
         return error_response(code=500, msg="注册失败，请稍后重试")
 
-    await db.commit()
-    await db.refresh(tenant)
-
+    tenant = result.tenant
     token = create_access_token(tenant.tenant_id, role=ROLE_OWNER)
     return success_response(data=serialize_tenant_session(tenant, token), msg="注册成功")
