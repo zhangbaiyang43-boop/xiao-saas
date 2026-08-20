@@ -102,10 +102,7 @@ class OrderLifecycleService(BaseService):
     ) -> ApiResponse:
         from app.models.coupon import Coupon as _Coupon
 
-        from app.services.order_payment_service import OrderPaymentService
         from app.services.order_stock_service import _restore_order_stock
-
-        payment_svc = OrderPaymentService(self.db)
 
         def owned_order_stmt(*, tenant_id: str | None = None, for_update: bool = False):
             filters = [Order.id == order_id]
@@ -166,7 +163,18 @@ class OrderLifecycleService(BaseService):
             and getattr(order, "payment_status", None) != "paid"
         ):
             # Never hold the cancellation mutation lock across provider I/O.
-            await payment_svc._recover_wxpay_order_if_paid(order, source="cancel_precheck")
+            # P1-WXPAY-RECOVERY-GATE: Class C (destructive) -- force_fresh bypasses
+            # cooldown and wait_for_inflight ensures we never decide to cancel without a
+            # genuinely fresh (or freshly-joined-in-flight) payment fact. Safe to use
+            # self.db directly here (unlike get_my_order): `order` is unconditionally
+            # re-selected fresh via owned_order_stmt(for_update=True) immediately below,
+            # with no attribute read on the pre-recovery `order` object in between.
+            from app.services.wxpay_recovery_gate import recovery_gate
+
+            await recovery_gate.attempt_recovery(
+                order, self.db, source="cancel_precheck",
+                force_fresh=True, wait_for_inflight=True,
+            )
 
         locked_result = await self.db.execute(
             owned_order_stmt(tenant_id=derived_tenant_id, for_update=True)
@@ -213,9 +221,6 @@ class OrderLifecycleService(BaseService):
         customer_id: int | None,
         participant_token: str | None,
     ) -> ApiResponse:
-        from app.services.order_payment_service import OrderPaymentService
-
-        payment_svc = OrderPaymentService(self.db)
         result = await self.db.execute(select(Order).where(Order.id == order_id))
         order = result.scalar_one_or_none()
         if not order:
@@ -240,12 +245,46 @@ class OrderLifecycleService(BaseService):
             if not owns_order:
                 return error_response(code=403, msg="forbidden")
 
+        # P1-WXPAY-RECOVERY-GATE / P0-MISSING-GREENLET: this used to call
+        # _recover_wxpay_order_if_paid(order, ...) directly on self.db -- the same
+        # session `order` was loaded from and that every attribute read below (status,
+        # payment_status, reward_coupon_snapshot, ...) still depends on. A NOTPAY
+        # response there raises internally and hits that function's own except-block
+        # rollback, which unconditionally expires every object in the session's identity
+        # map (regardless of expire_on_commit) -- the very next attribute read on `order`
+        # below would then attempt an implicit lazy reload outside any greenlet context
+        # and crash with MissingGreenlet, exactly the P0 failure mode, just never
+        # triggered on this particular endpoint before. Route through the isolated
+        # recovery gate (its own throwaway session) instead, same pattern P0 established
+        # for list_orders, so this request's own `order` object is never at risk.
         recovered = False
         if getattr(order, "payment_status", None) != "paid":
-            recovered = await payment_svc._recover_wxpay_order_if_paid(order, source="client_order_query")
+            from app.core.database import AsyncSessionLocal
+            from app.core.logger import logger
+            from app.services.wxpay_recovery_gate import recovery_gate
+
+            try:
+                async with AsyncSessionLocal() as recon_db:
+                    recon_result = await recon_db.execute(select(Order).where(Order.id == order.id))
+                    recon_order = recon_result.scalar_one_or_none()
+                    if recon_order:
+                        outcome = await recovery_gate.attempt_recovery(
+                            recon_order, recon_db, source="client_order_query",
+                            fast_lane=True, wait_for_inflight=True,
+                        )
+                        recovered = outcome.recovered
+            except Exception:
+                logger.exception(
+                    "[get_my_order] best-effort payment recovery failed order_id=%s", order_id,
+                )
         if recovered:
-            await self.db.commit()
-            await self.db.refresh(order)
+            # Re-select through the display session instead of db.refresh()/relying on
+            # any cross-session identity-map state, so the response reflects whatever
+            # the isolated recovery gate call above just committed.
+            result = await self.db.execute(select(Order).where(Order.id == order_id))
+            order = result.scalar_one_or_none()
+            if not order:
+                return error_response(code=404, msg="order not found")
 
         reward_coupon = None
         if order.reward_coupon_snapshot:
@@ -287,7 +326,6 @@ class OrderLifecycleService(BaseService):
             serialize_order,
         )
         from app.core.logger import logger
-        from app.services.order_payment_service import OrderPaymentService
         from app.services.order_print_service import reconcile_print_orders
 
         tenant_id = self.require_tenant_id()
@@ -357,19 +395,25 @@ class OrderLifecycleService(BaseService):
         orders = result.scalars().all()
 
         order_ids = [o.id for o in orders]
-        pending_payment_ids = {o.id for o in orders if o.status == "pending_payment"}
 
-        # P0-MISSING-GREENLET: payment recovery and print reconciliation both have
-        # transactional side effects (WeChat query -> commit/rollback). Running them on
-        # self.db -- the same session this read path just loaded `orders` from -- means a
-        # rollback (which SQLAlchemy always performs unconditionally, regardless of
-        # expire_on_commit) expires every object in this session's identity map,
-        # including `orders` itself. The next attribute read on any of them then tries an
-        # implicit lazy reload outside any greenlet context and crashes with
-        # MissingGreenlet. Give recovery its own throwaway session so its commits/
+        # P0-MISSING-GREENLET: print reconciliation has transactional side effects
+        # (commit/rollback). Running it on self.db -- the same session this read path
+        # just loaded `orders` from -- means a rollback (which SQLAlchemy always performs
+        # unconditionally, regardless of expire_on_commit) expires every object in this
+        # session's identity map, including `orders` itself. The next attribute read on
+        # any of them then tries an implicit lazy reload outside any greenlet context and
+        # crashes with MissingGreenlet. Give it its own throwaway session so its commits/
         # rollbacks can never reach the objects this request is about to serialize, and
-        # make the whole pass best-effort: GET /orders must never 500 because a WeChat
-        # query or print provider call failed.
+        # make it best-effort: GET /orders must never 500 because a print provider call
+        # failed.
+        #
+        # P1-WXPAY-RECOVERY-GATE: this used to also call _recover_wxpay_order_if_paid for
+        # every pending_payment order in the page here (merchant_order_query). That's
+        # removed -- pending_payment_background already independently checks every
+        # pending_payment order on the same ~60s cadence this page's own polling used to
+        # provide, so GET /orders is now a pure DB read for payment purposes (no WeChat
+        # network call on this path at all). See PROD-STABILITY-P1-01 Phase 2
+        # MERCHANT_PROVIDER_QUERY=REMOVE for the full rationale.
         recovered_any = False
         if order_ids:
             try:
@@ -378,24 +422,15 @@ class OrderLifecycleService(BaseService):
                 async with AsyncSessionLocal() as recon_db:
                     recon_result = await recon_db.execute(select(Order).where(Order.id.in_(order_ids)))
                     recon_orders = recon_result.scalars().all()
-                    payment_svc = OrderPaymentService(recon_db)
-                    for recon_order in recon_orders:
-                        if recon_order.id in pending_payment_ids:
-                            recovered_any = (
-                                await payment_svc._recover_wxpay_order_if_paid(
-                                    recon_order, source="merchant_order_query"
-                                )
-                            ) or recovered_any
                     print_recovered = await reconcile_print_orders(
                         recon_db, recon_orders, trigger="merchant_list_recovery"
                     )
                     if print_recovered:
                         recovered_any = True
-                    if recovered_any:
                         await recon_db.commit()
             except Exception:
                 logger.exception(
-                    "[list_orders] best-effort payment/print recovery failed tenant_id=%s order_ids=%s",
+                    "[list_orders] best-effort print recovery failed tenant_id=%s order_ids=%s",
                     tenant_id, order_ids,
                 )
 
@@ -553,7 +588,18 @@ class OrderLifecycleService(BaseService):
         ):
             # Payment query is external I/O; final mutation authority is the fresh
             # tenant-scoped lock acquired immediately below.
-            await payment_svc._recover_wxpay_order_if_paid(discovered_order, source="status_update_precheck")
+            # P1-WXPAY-RECOVERY-GATE: Class C (destructive) -- force_fresh bypasses
+            # cooldown and wait_for_inflight ensures we never decide to reject/cancel
+            # without a genuinely fresh (or freshly-joined-in-flight) payment fact. Safe
+            # to use self.db directly: `order` is unconditionally re-selected fresh via
+            # with_for_update() immediately below, with no attribute read on
+            # `discovered_order` in between.
+            from app.services.wxpay_recovery_gate import recovery_gate
+
+            await recovery_gate.attempt_recovery(
+                discovered_order, self.db, source="status_update_precheck",
+                force_fresh=True, wait_for_inflight=True,
+            )
 
         result = await self.db.execute(
             select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()

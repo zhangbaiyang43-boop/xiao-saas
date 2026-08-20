@@ -24,6 +24,17 @@ from app.services.order_print_service import _print_paid_order_ticket
 if TYPE_CHECKING:
     from app.api.v1.orders import MockPayBody, WxPayBody
 
+# P1-WXPAY-RECOVERY-GATE: (connect, read) timeout, applied ONLY to the recovery-query
+# WxPayService construction below -- create_jsapi_order/wxpay_notify verification/refund
+# elsewhere in this file are untouched (timeout=None, today's existing unbounded behavior).
+# wechatpayv3's Core accepts this exact (connect, read) tuple shape. Value grounded on this
+# repo's own established precedent for calling WeChat's APIs -- wechat_service.py (the
+# official-account/mini-program WeChat API, same vendor) uses a flat 10s timeout on 4 of 5
+# of its urllib.request.urlopen call sites (one uses 12s); no repo precedent or SDK default
+# exists specifically for connect-vs-read split, so 5s connect is a conservative fraction of
+# that same ~10s budget, not an independently invented number.
+WXPAY_RECOVERY_QUERY_TIMEOUT = (5, 10)
+
 
 class RefundResult(TypedDict):
     success: bool
@@ -185,7 +196,7 @@ class OrderPaymentService(BaseService):
 
             tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
             tenant = tenant_result.scalar_one_or_none()
-            svc = WxPayService(tenant) if tenant else None
+            svc = WxPayService(tenant, timeout=WXPAY_RECOVERY_QUERY_TIMEOUT) if tenant else None
             if not svc or not svc.enabled:
                 return False
 

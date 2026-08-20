@@ -719,30 +719,43 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
     from datetime import datetime as _dt, timedelta
 
     from app.models.coupon import Coupon
+    from app.services.wxpay_recovery_gate import recovery_gate
 
     # BUG-4: 处理超时待支付订单，恢复优惠券
     timeout_threshold = _dt.utcnow() - timedelta(minutes=PENDING_PAYMENT_TIMEOUT_MINUTES)
     stale_result = await db.execute(
-        select(Order).where(
+        select(Order.id).where(
             Order.tenant_id == tenant_id,
             Order.status == "pending_payment",
             Order.created_at < timeout_threshold,
         )
     )
-    stale_orders = stale_result.scalars().all()
-    payment_svc = OrderPaymentService(db)
-    for stale in stale_orders:
-        # P0-MISSING-GREENLET: capture the id as a plain scalar before calling into
-        # recovery. _recover_wxpay_order_if_paid may rollback `db` (e.g. WeChat reports
-        # the order still unpaid, which raises and hits its except-block rollback), and
-        # SQLAlchemy's rollback() unconditionally expires every object in the session's
-        # identity map regardless of expire_on_commit -- so `stale` itself would come
-        # out of that call expired. Reading `stale.id` afterward would then be a bare
-        # synchronous attribute access trying an implicit lazy reload with no active
-        # greenlet -> MissingGreenlet.
-        stale_id = stale.id
-        recovered = await payment_svc._recover_wxpay_order_if_paid(stale, source="synchronous_stale_cleanup")
-        if recovered:
+    # P0-MISSING-GREENLET: plain ids, captured before any recovery call for ANY order in
+    # this batch. This whole loop shares one `db` (it must -- this cleanup has to stay
+    # inside create_order's own transaction, not get its own isolated session/commit like
+    # the two background loops). Recovering order N can rollback `db` (e.g. WeChat still
+    # reports it unpaid), which unconditionally expires every object in this SHARED
+    # session's identity map -- including any other stale Order instance already loaded
+    # into memory, not just order N's own. Working from plain ids and re-selecting each
+    # order FRESH right before touching it (below) means no order's attribute read ever
+    # depends on another order's still-cached-but-now-expired state.
+    stale_ids = [row[0] for row in stale_result.all()]
+    for stale_id in stale_ids:
+        discovery_result = await db.execute(
+            select(Order).where(Order.id == stale_id, Order.tenant_id == tenant_id, Order.status == "pending_payment")
+        )
+        stale = discovery_result.scalar_one_or_none()
+        if not stale:
+            continue
+        # P1-WXPAY-RECOVERY-GATE / STALE_CANCEL_SAFETY_INVARIANT: Class C (destructive) --
+        # force_fresh bypasses cooldown and wait_for_inflight guarantees a genuinely
+        # fresh (or freshly-joined-in-flight) payment fact before this ever decides to
+        # cancel this pending_payment order.
+        outcome = await recovery_gate.attempt_recovery(
+            stale, db, source="synchronous_stale_cleanup",
+            force_fresh=True, wait_for_inflight=True,
+        )
+        if outcome.recovered:
             continue
         # Provider I/O above may commit/rollback and invalidate the discovery
         # snapshot.  The mutation authority is a fresh tenant-scoped row lock.
@@ -768,7 +781,7 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
             stale_coupon = await db.get(Coupon, locked.coupon_id)
             if stale_coupon and stale_coupon.status == "LOCKED":
                 stale_coupon.status = "UNUSED"
-    if stale_orders:
+    if stale_ids:
         await db.flush()
 
 
@@ -1248,6 +1261,27 @@ async def create_order(
         tenant, tenant_id, body, db
     )
 
+    # P1-WXPAY-RECOVERY-GATE / CHECKPOINT BLOCKER FIX: stale cleanup calls into the
+    # shared recovery gate with force_fresh=True, which can still reach
+    # _recover_wxpay_order_if_paid's legacy NOTPAY/exception path and `await
+    # db.rollback()`. That rollback is only harmless here because payment_mode/
+    # is_postpay/is_table_account/pay_later_mode have ALREADY been extracted as plain
+    # scalars above (tenant.payment_mode was read to produce them, but `tenant` itself
+    # -- the only ORM object created so far -- is never read again below) -- a rollback
+    # cannot "expire" a plain str/bool. This call MUST run before
+    # _resolve_create_order_dining_context, never after: that function acquires a
+    # SELECT DiningSession ... FOR UPDATE row lock (in the client dining_session_id
+    # path) that is meant to be held continuously until this request's own commit --
+    # its whole purpose is mutual exclusion with settle_table. A rollback from cleanup
+    # running AFTER that lock is acquired would release it early, let settle_table
+    # close the session out from under this request, discard the
+    # participant.last_active_at/locked_session.last_activity_at mutations, and expire
+    # `session_for_pickup` (read again below, in
+    # _persist_create_order_and_build_response) -- an expired-ORM/MissingGreenlet risk
+    # on top of the concurrency-safety break. See PROD-STABILITY-P1-01 checkpoint
+    # blocker fix for the full audit.
+    await _cleanup_stale_pending_payment_orders(tenant_id, db)
+
     request_id = (body.request_id or "").strip() or None
 
     (
@@ -1278,8 +1312,6 @@ async def create_order(
         else:
             created_by_account_id = None
             created_by_role = ROLE_OWNER
-
-    await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
     early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
         body, db, tenant_id, is_staff_order

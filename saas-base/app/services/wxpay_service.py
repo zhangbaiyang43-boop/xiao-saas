@@ -2,6 +2,7 @@
 微信支付普通商户模式封装（每个商家用自己的 mchid + 证书）
 依赖：pip install wechatpayv3
 """
+import asyncio
 import json
 import secrets
 import time
@@ -16,8 +17,22 @@ def _get_wechat_app_id() -> str:
     return (getattr(settings, 'WECHAT_APP_ID', '') or getattr(settings, 'WECHAT_APP_', '') or '').strip()
 
 
-def _build_client(mchid: str, api_key_v3: str, cert_serial: str, private_key_pem: str, public_key_id: str = None, public_key_pem: str = None):
-    """用商家自己的证书初始化 SDK 客户端。支持公钥模式和平台证书模式。"""
+def _build_client(
+    mchid: str,
+    api_key_v3: str,
+    cert_serial: str,
+    private_key_pem: str,
+    public_key_id: str = None,
+    public_key_pem: str = None,
+    timeout=None,
+):
+    """用商家自己的证书初始化 SDK 客户端。支持公钥模式和平台证书模式。
+
+    timeout: optional (connect, read) tuple forwarded to wechatpayv3's requests calls.
+    Defaults to None (unbounded, today's existing behavior for every caller that doesn't
+    explicitly opt in) -- see P1-WXPAY-RECOVERY-GATE: only the recovery-query path passes
+    a real value; create_jsapi_order/refund/notify verification are untouched.
+    """
     try:
         from wechatpayv3 import WeChatPay, WeChatPayType
         private_key = private_key_pem.replace("\\n", "\n")
@@ -28,6 +43,7 @@ def _build_client(mchid: str, api_key_v3: str, cert_serial: str, private_key_pem
             "cert_serial_no": cert_serial,
             "appid": _get_wechat_app_id(),
             "apiv3_key": api_key_v3,
+            "timeout": timeout,
         }
         if public_key_id and public_key_pem:
             kwargs["public_key"] = public_key_pem.replace("\\n", "\n")
@@ -56,8 +72,15 @@ class WxPayService:
         params = await svc.create_jsapi_order(...)
     """
 
-    def __init__(self, tenant):
-        """tenant 为 Tenant ORM 对象，从中读取支付配置。"""
+    def __init__(self, tenant, *, timeout=None):
+        """tenant 为 Tenant ORM 对象，从中读取支付配置。
+
+        timeout: optional (connect, read) tuple, forwarded to the SDK client. Defaults to
+        None (unbounded -- unchanged behavior for every existing caller). Only the P1
+        recovery-query path (_recover_wxpay_order_if_paid) passes a real value; every other
+        WxPayService(tenant) construction in the codebase (create_jsapi_order, wxpay_notify
+        verification, refund) is untouched by this parameter.
+        """
         self._client = None
         if (
             getattr(tenant, "wx_pay_enabled", False)
@@ -73,6 +96,7 @@ class WxPayService:
                 private_key_pem=decrypt_secret(tenant.wx_private_key),
                 public_key_id=getattr(tenant, "wx_public_key_id", None),
                 public_key_pem=getattr(tenant, "wx_public_key", None),
+                timeout=timeout,
             )
 
     @property
@@ -223,7 +247,14 @@ class WxPayService:
             if not callable(fn):
                 continue
             try:
-                result = caller(fn)
+                # P1-WXPAY-RECOVERY-GATE: this is a synchronous, blocking SDK call
+                # (wechatpayv3's Core.request uses module-level requests.get/post, not a
+                # persisted Session -- safe to run off-thread; a fresh WeChatPay/Core
+                # instance is already built per WxPayService(tenant) construction, so
+                # there is no shared mutable client state across threads). Without this,
+                # the call blocks the entire asyncio event loop -- every other coroutine
+                # on this process, not just this request -- for its full duration.
+                result = await asyncio.to_thread(caller, fn)
                 if isinstance(result, tuple) and len(result) >= 2:
                     code, body = result[0], result[1]
                     if code not in (200, 204):
