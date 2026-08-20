@@ -1261,6 +1261,27 @@ async def create_order(
         tenant, tenant_id, body, db
     )
 
+    # P1-WXPAY-RECOVERY-GATE / CHECKPOINT BLOCKER FIX: stale cleanup calls into the
+    # shared recovery gate with force_fresh=True, which can still reach
+    # _recover_wxpay_order_if_paid's legacy NOTPAY/exception path and `await
+    # db.rollback()`. That rollback is only harmless here because payment_mode/
+    # is_postpay/is_table_account/pay_later_mode have ALREADY been extracted as plain
+    # scalars above (tenant.payment_mode was read to produce them, but `tenant` itself
+    # -- the only ORM object created so far -- is never read again below) -- a rollback
+    # cannot "expire" a plain str/bool. This call MUST run before
+    # _resolve_create_order_dining_context, never after: that function acquires a
+    # SELECT DiningSession ... FOR UPDATE row lock (in the client dining_session_id
+    # path) that is meant to be held continuously until this request's own commit --
+    # its whole purpose is mutual exclusion with settle_table. A rollback from cleanup
+    # running AFTER that lock is acquired would release it early, let settle_table
+    # close the session out from under this request, discard the
+    # participant.last_active_at/locked_session.last_activity_at mutations, and expire
+    # `session_for_pickup` (read again below, in
+    # _persist_create_order_and_build_response) -- an expired-ORM/MissingGreenlet risk
+    # on top of the concurrency-safety break. See PROD-STABILITY-P1-01 checkpoint
+    # blocker fix for the full audit.
+    await _cleanup_stale_pending_payment_orders(tenant_id, db)
+
     request_id = (body.request_id or "").strip() or None
 
     (
@@ -1291,8 +1312,6 @@ async def create_order(
         else:
             created_by_account_id = None
             created_by_role = ROLE_OWNER
-
-    await _cleanup_stale_pending_payment_orders(tenant_id, db)
 
     early_response, real_total, order_items_data = await _validate_create_order_items_and_compute_total(
         body, db, tenant_id, is_staff_order
