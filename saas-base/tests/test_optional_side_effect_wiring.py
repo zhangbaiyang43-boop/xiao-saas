@@ -334,7 +334,7 @@ class MembershipAccrualPaymentSafetyTest(BaseWiringTest):
         sub.ends_at = datetime.utcnow() - timedelta(seconds=1)
         await self.db.commit()
 
-        with patch.object(MembershipService, "reverse_consumption", wraps=MembershipService.reverse_consumption, autospec=True) as spy:
+        with patch.object(MembershipService, "reverse_consumption", side_effect=MembershipService.reverse_consumption, autospec=True) as spy:
             await OrderPaymentService(self.db)._refund_order_payment(order, reason="test refund")
         spy.assert_awaited_once()
 
