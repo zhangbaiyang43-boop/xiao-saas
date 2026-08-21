@@ -6,8 +6,12 @@ state, no step numbers, no onboarding_completed-style field that could trap
 an existing tenant under a false default. `activated` is exactly
 `has_orders`; `has_dishes` only counts AVAILABLE dishes (an off-shelf dish
 can't actually be ordered); `has_entrance_codes` only counts active
-TABLE-channel codes (a channel/staff-share code doesn't let a customer reach
-the ordering flow).
+TABLE-entry_type codes that also carry a real, non-blank table_no --
+entrance_codes.py's own scan-resolve contract hard-rejects entry_type="table"
+with a blank table_no (422 TABLE_CONTEXT_MISSING), so a code missing one can
+never actually be scanned and must not be a false completion. A
+channel/staff-share code doesn't let a customer reach the ordering flow
+either way.
 """
 
 from __future__ import annotations
@@ -120,8 +124,13 @@ class TenantActivationStatusTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.data["dish_count"], 1)
 
     async def test_non_table_entrance_code_does_not_count(self):
+        # CASE D: a real table_no doesn't matter here -- entry_type itself
+        # is what disqualifies a channel/staff-share code.
         self.db.add(
-            EntranceCode(tenant_id=TENANT_A, name="渠道码", channel="CHANNEL", scene="s1", entry_type="staff_share", status=1)
+            EntranceCode(
+                tenant_id=TENANT_A, name="渠道码", channel="CHANNEL", scene="s1",
+                entry_type="staff_share", status=1, table_no="1",
+            )
         )
         await self.db.commit()
         res = await self._call()
@@ -129,20 +138,72 @@ class TenantActivationStatusTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_inactive_table_entrance_code_does_not_count(self):
         self.db.add(
-            EntranceCode(tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s2", entry_type="table", status=0)
+            EntranceCode(
+                tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s2",
+                entry_type="table", status=0, table_no="1",
+            )
         )
         await self.db.commit()
         res = await self._call()
         self.assertFalse(res.data["has_entrance_codes"])
 
     async def test_active_table_entrance_code_counts(self):
+        # CASE A: a genuinely scannable table code (real table_no) counts.
         self.db.add(
-            EntranceCode(tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s3", entry_type="table", status=1)
+            EntranceCode(
+                tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s3",
+                entry_type="table", status=1, table_no="1",
+            )
         )
         await self.db.commit()
         res = await self._call()
         self.assertTrue(res.data["has_entrance_codes"])
         self.assertEqual(res.data["entrance_code_count"], 1)
+
+    async def test_table_entrance_code_with_null_table_no_does_not_count(self):
+        # CASE B: entrance_codes.py's own scan-resolve contract hard-rejects
+        # entry_type="table" with a blank table_no (422 TABLE_CONTEXT_MISSING)
+        # -- such a code can never actually be scanned, so it must not be a
+        # false "has_entrance_codes" completion.
+        self.db.add(
+            EntranceCode(
+                tenant_id=TENANT_A, name="坏桌码", channel="STORE", scene="s5",
+                entry_type="table", status=1, table_no=None,
+            )
+        )
+        await self.db.commit()
+        res = await self._call()
+        self.assertFalse(res.data["has_entrance_codes"])
+        self.assertEqual(res.data["entrance_code_count"], 0)
+
+    async def test_table_entrance_code_with_whitespace_table_no_does_not_count(self):
+        # CASE C: whitespace-only table_no is just as unscannable as NULL.
+        self.db.add(
+            EntranceCode(
+                tenant_id=TENANT_A, name="坏桌码2", channel="STORE", scene="s6",
+                entry_type="table", status=1, table_no="   ",
+            )
+        )
+        await self.db.commit()
+        res = await self._call()
+        self.assertFalse(res.data["has_entrance_codes"])
+        self.assertEqual(res.data["entrance_code_count"], 0)
+
+    async def test_table_entrance_code_with_empty_string_table_no_does_not_count(self):
+        # The genuinely missing boundary alongside NULL and whitespace-only:
+        # a plain empty string is what a form field naturally collapses to.
+        # Production code guards this with func.trim(...) != "", so empty
+        # string must be rejected exactly like NULL and whitespace-only.
+        self.db.add(
+            EntranceCode(
+                tenant_id=TENANT_A, name="坏桌码3", channel="STORE", scene="s7",
+                entry_type="table", status=1, table_no="",
+            )
+        )
+        await self.db.commit()
+        res = await self._call()
+        self.assertFalse(res.data["has_entrance_codes"])
+        self.assertEqual(res.data["entrance_code_count"], 0)
 
     async def test_order_marks_activated_regardless_of_dish_or_code_state(self):
         # activated == has_orders, independent of the other two facts --
@@ -158,7 +219,10 @@ class TenantActivationStatusTest(unittest.IsolatedAsyncioTestCase):
     async def test_dishes_and_codes_without_orders_is_not_activated(self):
         self.db.add(MenuItem(tenant_id=TENANT_A, name="宫保鸡丁", price=28, available=True))
         self.db.add(
-            EntranceCode(tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s4", entry_type="table", status=1)
+            EntranceCode(
+                tenant_id=TENANT_A, name="1号桌", channel="STORE", scene="s4",
+                entry_type="table", status=1, table_no="1",
+            )
         )
         await self.db.commit()
         res = await self._call()
