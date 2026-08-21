@@ -106,4 +106,6 @@ jobs:
           echo "PUBLISH_CHECKOUT_ORDERING=success"
           echo "CANONICAL_ARTIFACT_INTEGRITY=success"
           echo "BACKEND_BEFORE_ADMIN_SWITCH=success"
+          echo "ADMIN_RELEASE_TRIGGER_CLOSURE=success"
+          echo "ARTIFACT_CONFIG_MALFORMED_FAIL_CLOSED=success"
           echo "DEPLOY_TOOLING_CERTIFIED=YES"

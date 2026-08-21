@@ -138,6 +138,17 @@ workflow_canonical_checksum_before_cos_publish() {
   cos_line="$(grep -n 'name: Publish to Tencent COS' "$file" | head -n1 | cut -d: -f1)"
   [ -n "$verify_line" ] && [ -n "$cos_line" ] && [ "$verify_line" -lt "$cos_line" ]
 }
+# scripts/publish-admin-artifact-cos.py is the core GitHub Release -> Tencent
+# COS publisher -- both the push and pull_request path filters must trigger
+# this workflow when it changes on its own, independent of admin-h5/**.
+workflow_push_paths_contains_cos_publisher() {
+  local file="$1"
+  sed -n '/^  push:/,/^  pull_request:/p' "$file" | grep -qF "'scripts/publish-admin-artifact-cos.py'"
+}
+workflow_pull_request_paths_contains_cos_publisher() {
+  local file="$1"
+  sed -n '/^  pull_request:/,/^  workflow_dispatch:/p' "$file" | grep -qF "'scripts/publish-admin-artifact-cos.py'"
+}
 
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
@@ -1071,6 +1082,78 @@ assert_exit "first run (new GitHub Release) publishes canonical bytes" 0 "$LAST_
 run_cos_publish shaAL "$WORK/al-canonical.tar.gz" "$WORK/al-canonical.tar.gz.sha256" "$COS_STORE_AL"
 assert_exit "rerun with the same canonical bytes is reused, not blocked" 0 "$LAST_EXIT"
 assert_contains "rerun reports COS_ARTIFACT_READY, not a mismatch" "STATUS=COS_ARTIFACT_READY" "$LAST_OUTPUT"
+
+# ---------------------------------------------------------------------------
+# CASE AM -- admin-h5-release.yml's push.paths must trigger on a standalone
+# change to scripts/publish-admin-artifact-cos.py (it's the core GitHub
+# Release -> Tencent COS production artifact transport publisher now).
+# ---------------------------------------------------------------------------
+echo "== CASE AM: push.paths contains scripts/publish-admin-artifact-cos.py =="
+assert_true "push.paths triggers on publish-admin-artifact-cos.py" \
+  workflow_push_paths_contains_cos_publisher "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AN -- same closure for pull_request.paths, so a PR touching only the
+# publisher gets build-only verification.
+# ---------------------------------------------------------------------------
+echo "== CASE AN: pull_request.paths contains scripts/publish-admin-artifact-cos.py =="
+assert_true "pull_request.paths triggers on publish-admin-artifact-cos.py" \
+  workflow_pull_request_paths_contains_cos_publisher "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AO -- DEPLOY_CONFIG_FILE exists with unrelated keys/comments but no
+# ARTIFACT_BASE_URL= line: resolve_artifact_base_url's grep must not exit
+# the whole script under `set -Eeuo pipefail` when it finds no match. Must
+# still fail closed into BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED, exactly
+# like a missing config file (CASE X), not crash some other way.
+# ---------------------------------------------------------------------------
+echo "== CASE AO: config file exists but has no ARTIFACT_BASE_URL key =="
+setup_case case-ao
+unset ARTIFACT_BASE_URL
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+cat > "$DEPLOY_CONFIG_FILE" <<'EOF'
+# comment line, and an unrelated key -- deliberately no ARTIFACT_BASE_URL=
+SOME_OTHER_KEY=should-be-ignored
+EOF
+OLD_SHA="aaaa1111111111111111111111111111111ao"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+BEFORE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+publish admin-h5/feature.txt hi >/dev/null
+run_deploy
+assert_exit "missing key exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "$LAST_OUTPUT"
+AFTER_SHA_CHECK="$(git -C "$REPO" rev-parse HEAD)"
+assert_eq "HEAD unchanged (never reached git pull)" "$BEFORE_SHA" "$AFTER_SHA_CHECK"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
+
+# ---------------------------------------------------------------------------
+# CASE AP -- DEPLOY_CONFIG_FILE contains ARTIFACT_BASE_URL= with an empty
+# value: must fail closed the same way as a missing key, not resolve to an
+# empty-string transport base.
+# ---------------------------------------------------------------------------
+echo "== CASE AP: config file has ARTIFACT_BASE_URL with an empty value =="
+setup_case case-ap
+unset ARTIFACT_BASE_URL
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+printf 'ARTIFACT_BASE_URL=\n' > "$DEPLOY_CONFIG_FILE"
+OLD_SHA="aaaa2222222222222222222222222222222ap"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+BEFORE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+publish admin-h5/feature.txt hi >/dev/null
+run_deploy
+assert_exit "empty value exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "$LAST_OUTPUT"
+AFTER_SHA_CHECK="$(git -C "$REPO" rev-parse HEAD)"
+assert_eq "HEAD unchanged (never reached git pull)" "$BEFORE_SHA" "$AFTER_SHA_CHECK"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
 
 # ---------------------------------------------------------------------------
 echo

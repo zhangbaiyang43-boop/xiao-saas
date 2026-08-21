@@ -29,6 +29,7 @@ on:
       - '.github/workflows/admin-h5-release.yml'
       - 'scripts/deploy-production.sh'
       - 'scripts/test-deployment-tooling.sh'
+      - 'scripts/publish-admin-artifact-cos.py'
   pull_request:
     branches: [main]
     paths:
@@ -36,6 +37,7 @@ on:
       - '.github/workflows/admin-h5-release.yml'
       - 'scripts/deploy-production.sh'
       - 'scripts/test-deployment-tooling.sh'
+      - 'scripts/publish-admin-artifact-cos.py'
   workflow_dispatch:
     inputs:
       target_ref:

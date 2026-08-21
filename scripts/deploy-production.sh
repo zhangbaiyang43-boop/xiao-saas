@@ -180,7 +180,7 @@ resolve_artifact_base_url() {
   fi
   if [ -f "$DEPLOY_CONFIG_FILE" ]; then
     local line value
-    line="$(grep -E '^ARTIFACT_BASE_URL=' "$DEPLOY_CONFIG_FILE" | tail -n1)"
+    line="$(grep -E '^ARTIFACT_BASE_URL=' "$DEPLOY_CONFIG_FILE" 2>/dev/null | tail -n1 || true)"
     if [ -n "$line" ]; then
       value="${line#ARTIFACT_BASE_URL=}"
       value="${value%\"}"; value="${value#\"}"
