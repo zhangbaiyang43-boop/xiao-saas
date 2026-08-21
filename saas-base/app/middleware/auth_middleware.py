@@ -78,6 +78,7 @@ WHITELIST = {
     "/api/v1/channel/auth/request-code",
     "/api/v1/channel/auth/login",
     "/api/v1/register",
+    "/api/v1/register/code",
     "/api/v1/wework/callback",
     "/api/v1/member/login-or-create",
     "/api/v1/entrance-codes/resolve",
