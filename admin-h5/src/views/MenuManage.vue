@@ -15,6 +15,11 @@
       </div>
     </div>
 
+    <div v-if="isOnboarding" class="onboarding-banner">
+      <span>新手引导 · 添加你的第一道菜</span>
+      <button type="button" class="onboarding-back-link" @click="router.push('/activation')">返回开店引导</button>
+    </div>
+
     <div class="summary-bar animate-in">
       <div class="summary-item">
         <span class="summary-num">{{ allDishes.length }}</span>
@@ -531,9 +536,18 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, EditOutlined, CopyOutlined, EllipsisOutlined } from '@ant-design/icons-vue'
 import { getMenuItems, createMenuItem, updateMenuItem, deleteMenuItem, uploadDishImage, getTenantSettings, updateTenantSettings, updateMenuItemStock, parseMenuText, importMenuBatch, generateDishDesc, searchDishLibrary, contributeDishToLibrary, importDishLibraryBatch } from '../api'
+
+const route = useRoute()
+const router = useRouter()
+// Onboarding continuation (Activation Home Step 1) is a thin, opt-in overlay
+// on this same page -- only active when arriving via ?onboarding=1. Normal
+// /menu navigation must behave exactly as before (see maybeCompleteOnboardingStep1
+// below, which is a no-op unless isOnboarding is true).
+const isOnboarding = computed(() => route.query.onboarding === '1')
 
 const loadingMenu = ref(false)
 const saving = ref(false)
@@ -646,6 +660,15 @@ function addNewCategory() {
 
 const filteredCategories = computed(() => activeCategory.value ? [activeCategory.value] : categories.value)
 const availableCount = computed(() => allDishes.value.filter(d => d.available !== false).length)
+
+// Section 6: not just createMenuItem -- any action that can bring the
+// available-dish count above zero (create, edit-to-available, bulk
+// category restore, restore-all) should be able to complete onboarding
+// Step 1. Reuses the same availableCount this page already displays; no new
+// backend call, no fabricated completion.
+function maybeCompleteOnboardingStep1() {
+  if (isOnboarding.value && availableCount.value > 0) router.replace('/activation')
+}
 const soldOutCount = computed(() => allDishes.value.filter(d => d.available === false || (d.stock !== null && d.stock !== undefined && d.stock <= 0)).length)
 
 function dishesByCategory(cat) { return allDishes.value.filter(d => d.category === cat) }
@@ -729,7 +752,7 @@ async function saveDish() {
       const created = res?.data?.data || res?.data || { ...payload, id: Date.now() }
       allDishes.value.push({ ...created, desc: created.description || payload.description || '', sort_order: created.sort_order ?? payload.sort_order })
     }
-    message.success(form.id ? '已保存' : '已添加')
+    message.success(form.id ? '已保存' : (isOnboarding.value ? '第一道菜已添加' : '已添加'))
     if (form.shareToLibrary && form.image) {
       // 分享到菜品库是锦上添花的动作，失败了不该打断商户本来的保存流程，静默失败即可
       contributeDishToLibrary({
@@ -743,6 +766,7 @@ async function saveDish() {
     }
     formDirty.value = false
     showForm.value = false
+    maybeCompleteOnboardingStep1()
   } catch { message.error('保存失败') }
   finally { saving.value = false }
 }
@@ -774,6 +798,7 @@ async function restoreAll() {
       ...byStock.map(d => updateMenuItemStock(d.id, null)),
     ])
     message.success(`已恢复 ${byAvailable.length + byStock.length} 个菜品供应`)
+    maybeCompleteOnboardingStep1()
   } catch { message.error('操作失败'); await loadMenu() }
 }
 
@@ -814,8 +839,10 @@ async function toggleCategory(cat) {
   const dishes = dishesByCategory(cat)
   const targetVal = !allAvailable(cat)
   dishes.forEach(d => { d.available = targetVal })
-  try { await Promise.all(dishes.map(d => updateMenuItem(d.id, { available: targetVal }))) }
-  catch { message.error('操作失败'); await loadMenu() }
+  try {
+    await Promise.all(dishes.map(d => updateMenuItem(d.id, { available: targetVal })))
+    maybeCompleteOnboardingStep1()
+  } catch { message.error('操作失败'); await loadMenu() }
 }
 
 async function loadMenu() {
@@ -1005,7 +1032,20 @@ async function doGenAiDesc() {
   }
 }
 
-onMounted(() => { loadMenu(); loadCategoryOrder() })
+onMounted(() => {
+  loadCategoryOrder()
+  if (isOnboarding.value) {
+    // Onboarding is gated on loadMenu() resolving first (need a real
+    // availableCount before deciding skip-vs-auto-open); normal navigation
+    // keeps the original fire-and-forget parallel load untouched below.
+    loadMenu().then(() => {
+      if (availableCount.value > 0) router.replace('/activation')
+      else openAdd()
+    })
+  } else {
+    loadMenu()
+  }
+})
 </script>
 
 <style scoped>
@@ -1018,6 +1058,28 @@ onMounted(() => { loadMenu(); loadCategoryOrder() })
   border-bottom: 1px solid var(--border);
 }
 .page-title { font-size: 18px; font-weight: 700; color: var(--text-1); }
+
+.onboarding-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--brand-light);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+.onboarding-back-link {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  flex-shrink: 0;
+}
 
 .summary-bar {
   display: grid;

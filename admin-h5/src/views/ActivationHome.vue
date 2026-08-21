@@ -17,7 +17,7 @@
     <template v-else>
       <h1 class="ah-title">开店只差 3 步</h1>
 
-      <div class="ah-step tap-shrink" :class="{ done: status.has_dishes }" @click="router.push('/menu')">
+      <div class="ah-step tap-shrink" :class="{ done: status.has_dishes }" @click="router.push('/menu?onboarding=1')">
         <div class="ah-step-num">{{ status.has_dishes ? '✓' : '1' }}</div>
         <div class="ah-step-body">
           <div class="ah-step-title">添加一道菜</div>
@@ -26,7 +26,7 @@
         <div class="ah-step-cta">{{ status.has_dishes ? '' : '去添加' }}</div>
       </div>
 
-      <div class="ah-step tap-shrink" :class="{ done: status.has_entrance_codes }" @click="router.push('/entrance-codes')">
+      <div class="ah-step tap-shrink" :class="{ done: status.has_entrance_codes }" @click="router.push('/entrance-codes?onboarding=1')">
         <div class="ah-step-num">{{ status.has_entrance_codes ? '✓' : '2' }}</div>
         <div class="ah-step-body">
           <div class="ah-step-title">生成一个桌码</div>
@@ -56,6 +56,9 @@
           <li>添加刚才创建的菜品</li>
           <li>提交订单，回到这里看结果</li>
         </ol>
+        <button class="ah-primary-btn tap-shrink" :disabled="checkingOrder" style="margin-top:12px" @click="checkTestOrderResult">
+          {{ checkingOrder ? '检查中...' : '我已下单，检查结果' }}
+        </button>
       </div>
     </template>
 
@@ -64,7 +67,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getActivationStatus, getCurrentSubscription, getEntranceCodes } from '../api'
 
@@ -73,6 +76,7 @@ const status = ref({ has_dishes: false, has_entrance_codes: false, has_orders: f
 const trialText = ref('免费试用 30 天')
 const showScanPanel = ref(false)
 const testQrUrl = ref('')
+const checkingOrder = ref(false)
 
 const readyForStep3 = computed(() => status.value.has_dishes && status.value.has_entrance_codes)
 
@@ -119,9 +123,31 @@ async function startTestOrder() {
   }
 }
 
+async function checkTestOrderResult() {
+  checkingOrder.value = true
+  try {
+    await loadStatus()
+  } finally {
+    checkingOrder.value = false
+  }
+}
+
+// Section 8 contract: no continuous polling. A real order placed on another
+// phone is only ever discovered by an explicit user action (the check
+// button above) or by this tab regaining visibility -- each a single
+// one-shot loadStatus() call, never a repeating timer.
+function handleVisibilityRefresh() {
+  if (document.visibilityState === 'visible') loadStatus()
+}
+
 onMounted(() => {
   loadStatus()
   loadTrial()
+  document.addEventListener('visibilitychange', handleVisibilityRefresh)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityRefresh)
 })
 </script>
 

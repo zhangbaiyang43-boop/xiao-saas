@@ -6,6 +6,11 @@
       </a-button>
     </PageHeader>
 
+    <div v-if="isOnboarding" class="onboarding-banner">
+      <span>新手引导 · 生成一个桌码</span>
+      <button type="button" class="onboarding-back-link" @click="router.push('/activation')">返回开店引导</button>
+    </div>
+
     <div class="page-body">
       <!-- 统计卡 -->
       <a-card :bordered="false" class="animate-in" style="margin-bottom:12px">
@@ -104,7 +109,7 @@
         <a-form-item label="码名称" :rules="[{ required: true, message: '请填写码名称' }]">
           <a-input v-model:value="form.name" placeholder="例如：1号桌贴" allow-clear />
         </a-form-item>
-        <a-form-item label="使用场景">
+        <a-form-item v-if="!isOnboarding" label="使用场景">
           <a-row :gutter="8">
             <a-col :span="8" v-for="item in scenes" :key="item.value">
               <div class="scene-btn tap-shrink" :class="{ active: form.channel === item.value }" @click="pickScene(item)">
@@ -137,10 +142,17 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { PlusOutlined, QrcodeOutlined, FileImageOutlined, FireOutlined, WarningOutlined, InfoCircleOutlined, SortAscendingOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
-import { createEntranceCode, getEntranceCodeSummary, getEntranceCodes, regenerateEntranceCode } from '../api'
+import { createEntranceCode, getActivationStatus, getEntranceCodeSummary, getEntranceCodes, regenerateEntranceCode } from '../api'
+
+const route = useRoute()
+const router = useRouter()
+// Onboarding continuation (Activation Home Step 2). Only active via
+// ?onboarding=1 -- normal /entrance-codes navigation is untouched.
+const isOnboarding = computed(() => route.query.onboarding === '1')
 
 const loading = ref(false)
 const saving = ref(false)
@@ -215,6 +227,24 @@ const loadData = async () => {
 
 const openCreate = () => { form.name = '桌贴码'; form.channel = 'TABLE'; form.table_no = ''; form.zone_type = ''; showCreateDialog.value = true }
 
+// Section 7/8: completion is decided by the real activation-status fact
+// (has_entrance_codes), never by guessing from the locally-picked channel --
+// this also sidesteps the entry_type-always-defaults-to-"table" backend
+// quirk noted in the audit. Returns true if it navigated away.
+async function checkOnboardingStep2() {
+  if (!isOnboarding.value) return false
+  try {
+    const res = await getActivationStatus()
+    if (res?.code === 200 && res?.data?.has_entrance_codes) {
+      router.replace('/activation')
+      return true
+    }
+  } catch {
+    // stay on this page; onboarding continuation is best-effort only
+  }
+  return false
+}
+
 const onSubmit = async () => {
   if (!form.name) { message.error('请填写码名称'); return }
   saving.value = true
@@ -223,7 +253,13 @@ const onSubmit = async () => {
     if (form.channel === 'TABLE' && form.table_no) payload.table_no = form.table_no
     if (form.channel === 'TABLE' && form.zone_type) payload.zone_type = form.zone_type
     const res = await createEntranceCode(payload)
-    if (res?.code === 200) { message.success('已创建'); showCreateDialog.value = false; await loadData(); return }
+    if (res?.code === 200) {
+      message.success(isOnboarding.value ? '桌码已生成' : '已创建')
+      showCreateDialog.value = false
+      await loadData()
+      if (isOnboarding.value) await checkOnboardingStep2()
+      return
+    }
     message.error(res?.msg || '创建失败')
   } catch { message.error('创建失败，请稍后再试') }
   finally { saving.value = false }
@@ -242,10 +278,38 @@ const onRegenerate = async code => {
   finally { regenerating.value = null }
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  await loadData()
+  if (isOnboarding.value) {
+    const done = await checkOnboardingStep2()
+    if (!done) openCreate()
+  }
+})
 </script>
 
 <style scoped lang="scss">
+.onboarding-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--brand-light);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+}
+.onboarding-back-link {
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+
 .scene-btn {
   border: 1px solid var(--border);
   border-radius: 10px;
