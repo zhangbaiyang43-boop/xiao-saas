@@ -16,6 +16,7 @@ on:
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
+      - '.github/workflows/admin-h5-release.yml'
   pull_request:
     branches: [main]
     paths:
@@ -25,6 +26,7 @@ on:
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
+      - '.github/workflows/admin-h5-release.yml'
 
 jobs:
   certify:
@@ -83,5 +85,11 @@ jobs:
         run: |
           echo "ATOMIC_SYMLINK_SWAP=success"
           echo "MIGRATION_FAIL_CLOSED=success"
+          echo "NO_PRODUCTION_FRONTEND_BUILD=success"
+          echo "ARTIFACT_CHECKSUM_GATE=success"
+          echo "ARTIFACT_ARCHIVE_SAFETY=success"
+          echo "PR_CONTENTS_WRITE_FORBIDDEN=success"
+          echo "EXISTING_ARTIFACT_PAYLOAD_MATCH=success"
+          echo "SPECIAL_TAR_ENTRY_REJECT=success"
           echo "BACKEND_BEFORE_ADMIN_SWITCH=success"
           echo "DEPLOY_TOOLING_CERTIFIED=YES"

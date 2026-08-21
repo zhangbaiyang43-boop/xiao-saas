@@ -1,0 +1,310 @@
+name: admin-h5 Release Artifact
+
+# PRODUCTION_FRONTEND_BUILD=FORBIDDEN. The production host does not have the
+# RAM to run `vite build` (repeatedly locked up trying) -- this workflow is
+# the ONLY place admin-h5 is ever built. It packages the result as a
+# checksummed, SHA-addressed GitHub Release asset; scripts/deploy-
+# production.sh only ever downloads + verifies + extracts it, never builds.
+#
+# GitHub Actions is not the production deploy authority here -- it only
+# produces the artifact. Going live is still a deliberate, manual
+# `./scripts/deploy-production.sh` run on the server (see
+# docs/production-deployment.md). No production SSH key or PAT is stored
+# anywhere for this -- a GitHub Release asset on a repo the build itself
+# already lives in is a public, content-addressed transport, not a secret.
+#
+# PR_CONTENTS_WRITE=FORBIDDEN: an unmerged PR runs untrusted candidate code
+# through `npm ci && npm run build` -- that must never happen in a job that
+# holds contents:write. The `build` job (all events, including PR) stays
+# read-only; only `publish` (push/workflow_dispatch, never pull_request)
+# gets contents:write, and it never re-builds anything -- it only downloads
+# the artifact `build` already produced (transported job-to-job via
+# actions/upload-artifact, which is NOT the production runtime transport --
+# that's still the GitHub Release asset) and publishes/reuses it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-release.yml'
+      - 'scripts/deploy-production.sh'
+      - 'scripts/test-deployment-tooling.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-release.yml'
+      - 'scripts/deploy-production.sh'
+      - 'scripts/test-deployment-tooling.sh'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Exact branch/tag/40-char commit SHA to build and publish'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build admin-h5 artifact (all events, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      target_sha: ${{ steps.identity.outputs.target_sha }}
+      archive_name: ${{ steps.package.outputs.archive }}
+      checksum_name: ${{ steps.package.outputs.checksum }}
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            ${{
+              github.event_name == 'workflow_dispatch' && inputs.target_ref ||
+              github.event_name == 'pull_request' && github.event.pull_request.head.sha ||
+              github.sha
+            }}
+          fetch-depth: 1
+
+      - name: Identity proof
+        id: identity
+        run: |
+          echo "EVENT=${{ github.event_name }}"
+          echo "WORKFLOW_SHA=${{ github.sha }}"
+          echo "TARGET_REF=${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || '' }}"
+          TARGET_HEAD_SHA="$(git rev-parse HEAD)"
+          echo "TARGET_HEAD_SHA=$TARGET_HEAD_SHA"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "$TARGET_HEAD_SHA" != "${{ github.event.pull_request.head.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match the PR's real head SHA"
+              exit 1
+            fi
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if [ "$TARGET_HEAD_SHA" != "${{ github.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match github.sha"
+              exit 1
+            fi
+          fi
+          echo "target_sha=$TARGET_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin-h5/package-lock.json
+
+      - name: Install dependencies
+        working-directory: admin-h5
+        run: npm ci
+
+      - name: Build
+        working-directory: admin-h5
+        run: npm run build
+
+      - name: Verify build output
+        working-directory: admin-h5
+        run: |
+          test -s dist/index.html
+          test -d dist/assets
+
+      - name: Stage immutable artifact layout
+        id: stage
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+        run: |
+          STAGE="$(mktemp -d)"
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          # Archive root must be index.html + assets/ + release.json directly
+          # -- never a nested dist/ layer -- matching what deploy-
+          # production.sh extracts straight into a release directory.
+          cp -a admin-h5/dist/. "$STAGE/"
+          cat > "$STAGE/release.json" <<EOF
+          {
+            "sha": "$TARGET_SHA",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "builder": "github-actions"
+          }
+          EOF
+          test -s "$STAGE/index.html"
+          test -d "$STAGE/assets"
+          test -s "$STAGE/release.json"
+
+      - name: Package archive + checksum
+        id: package
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+          STAGE: ${{ steps.stage.outputs.stage }}
+        run: |
+          ARCHIVE="admin-h5-dist-${TARGET_SHA}.tar.gz"
+          CHECKSUM="${ARCHIVE}.sha256"
+          OUT="$(mktemp -d)"
+          # Archive contents at the tar root -- no leading "./" or nested
+          # directory component -- deploy-production.sh extracts straight
+          # into a release dir and expects index.html/assets/release.json
+          # right there.
+          tar -C "$STAGE" -czf "$OUT/$ARCHIVE" index.html assets release.json
+          (cd "$OUT" && sha256sum "$ARCHIVE" > "$CHECKSUM")
+          (cd "$OUT" && sha256sum -c "$CHECKSUM")
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact (job-to-job transport only, not production runtime transport)
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-h5-dist-${{ steps.identity.outputs.target_sha }}
+          path: |
+            ${{ steps.package.outputs.out }}/${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.out }}/${{ steps.package.outputs.checksum }}
+          retention-days: 7
+
+      - name: Build summary
+        run: |
+          echo "ARTIFACT_TARGET_SHA=${{ steps.identity.outputs.target_sha }}"
+          echo "ARTIFACT_BUILD_VERIFIED=YES"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ARTIFACT_PUBLISHED=NO"
+            echo "PR_CONTENTS_WRITE=NO"
+          fi
+
+  publish:
+    name: Publish GitHub Release (push/workflow_dispatch only, never PR)
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      TARGET_SHA: ${{ needs.build.outputs.target_sha }}
+      ARCHIVE: ${{ needs.build.outputs.archive_name }}
+      CHECKSUM: ${{ needs.build.outputs.checksum_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download build job artifact (local build -- uses the build job's
+          exact TARGET_SHA, never re-derived from mutable main)
+        uses: actions/download-artifact@v4
+        with:
+          name: admin-h5-dist-${{ env.TARGET_SHA }}
+          path: local-build
+
+      - name: Validate downloaded artifact filenames + checksum
+        run: |
+          test -f "local-build/$ARCHIVE"
+          test -f "local-build/$CHECKSUM"
+          (cd local-build && sha256sum -c "$CHECKSUM")
+
+      - name: Inspect local archive entries (defense in depth)
+        run: |
+          python3 - "local-build/$ARCHIVE" <<'PYEOF'
+          import sys
+          import tarfile
+
+          path = sys.argv[1]
+          with tarfile.open(path, "r:gz") as tf:
+              for info in tf.getmembers():
+                  name = info.name
+                  if name.startswith("/"):
+                      sys.exit("absolute path entry: " + name)
+                  if ".." in name.split("/"):
+                      sys.exit("path traversal entry: " + name)
+                  if not (info.isreg() or info.isdir()):
+                      sys.exit("unsafe entry type: " + name)
+          PYEOF
+
+      - name: Check for an existing release at this tag
+        id: existing
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify existing release is complete and payload-identical (never silently overwrite)
+        if: steps.existing.outputs.exists == 'true'
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+
+          ASSET_NAMES="$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets -q '.assets[].name')"
+          if ! grep -qxF "$ARCHIVE" <<<"$ASSET_NAMES" || ! grep -qxF "$CHECKSUM" <<<"$ASSET_NAMES"; then
+            echo "STATUS=BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE"
+            echo "$TAG exists but is missing $ARCHIVE and/or $CHECKSUM -- refusing to treat this as" >&2
+            echo "'not published yet' and rebuild over it. Needs manual investigation." >&2
+            exit 1
+          fi
+
+          REMOTE_DIR="$(mktemp -d)"
+          gh release download "$TAG" --repo "${{ github.repository }}" -p "$ARCHIVE" -p "$CHECKSUM" -D "$REMOTE_DIR"
+          (cd "$REMOTE_DIR" && sha256sum -c "$CHECKSUM")
+
+          python3 - "$REMOTE_DIR/$ARCHIVE" <<'PYEOF'
+          import sys
+          import tarfile
+
+          path = sys.argv[1]
+          with tarfile.open(path, "r:gz") as tf:
+              for info in tf.getmembers():
+                  name = info.name
+                  if name.startswith("/"):
+                      sys.exit("absolute path entry: " + name)
+                  if ".." in name.split("/"):
+                      sys.exit("path traversal entry: " + name)
+                  if not (info.isreg() or info.isdir()):
+                      sys.exit("unsafe entry type: " + name)
+          PYEOF
+
+          LOCAL_EXTRACT="$(mktemp -d)"
+          REMOTE_EXTRACT="$(mktemp -d)"
+          tar -xzf "local-build/$ARCHIVE" -C "$LOCAL_EXTRACT"
+          tar -xzf "$REMOTE_DIR/$ARCHIVE" -C "$REMOTE_EXTRACT"
+
+          test -s "$REMOTE_EXTRACT/index.html"
+          test -d "$REMOTE_EXTRACT/assets"
+          test -s "$REMOTE_EXTRACT/release.json"
+
+          # Only sha is an identity authority -- built_at legitimately
+          # differs between the local rebuild and what's already published;
+          # that must never fail this check.
+          REMOTE_SHA="$(grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' "$REMOTE_EXTRACT/release.json" | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' | head -n1)"
+          if [ "$REMOTE_SHA" != "$TARGET_SHA" ]; then
+            echo "STATUS=BLOCKED_EXISTING_ADMIN_ARTIFACT_MISMATCH"
+            echo "remote release.json sha ($REMOTE_SHA) != $TARGET_SHA" >&2
+            exit 1
+          fi
+
+          if ! cmp -s "$LOCAL_EXTRACT/index.html" "$REMOTE_EXTRACT/index.html"; then
+            echo "STATUS=BLOCKED_EXISTING_ADMIN_ARTIFACT_MISMATCH"
+            echo "index.html differs from the already-published release for this exact SHA" >&2
+            exit 1
+          fi
+          if ! diff -qr "$LOCAL_EXTRACT/assets" "$REMOTE_EXTRACT/assets" >/dev/null; then
+            echo "STATUS=BLOCKED_EXISTING_ADMIN_ARTIFACT_MISMATCH"
+            echo "assets/ differs from the already-published release for this exact SHA" >&2
+            exit 1
+          fi
+
+          echo "Existing release $TAG is complete and payload-identical to this build -- reusing, not re-uploading."
+
+      - name: Publish GitHub Release
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+          gh release create "$TAG" \
+            "local-build/$ARCHIVE" "local-build/$CHECKSUM" \
+            --repo "${{ github.repository }}" \
+            --title "admin-h5 $TARGET_SHA" \
+            --prerelease \
+            --notes "Automated admin-h5 build artifact for commit $TARGET_SHA. Built by GitHub Actions, never on the production host."
+
+      - name: Publish summary
+        run: |
+          echo "ARTIFACT_TARGET_SHA=$TARGET_SHA"
+          echo "ARTIFACT_TAG=admin-h5-$TARGET_SHA"
+          echo "ARTIFACT_PUBLISHED=YES"
