@@ -72,6 +72,27 @@ assert.ok(!entranceCodeList.includes('onboarding_step'), 'must not introduce a p
 // CASE D: normal creation message/path untouched.
 assert.ok(entranceCodeList.includes("isOnboarding.value ? '桌码已生成' : '已创建'"), 'normal creation must still show the original 已创建 message')
 
+// ---- CASE G / CASE H / CASE I: onboarding table_no must be usable --------
+// Blocker: entrance_codes.py's real scan-resolve contract hard-rejects
+// entry_type="table" with a blank table_no (422 TABLE_CONTEXT_MISSING) --
+// a blank onboarding default/no-guard combination could "complete" Step 2
+// with a code that can never actually be scanned.
+{
+  const fnStart = entranceCodeList.indexOf('const openCreate = () => {')
+  const fnEnd = entranceCodeList.indexOf('\nconst onSubmit', fnStart)
+  const fnBody = entranceCodeList.slice(fnStart, fnEnd)
+  assert.ok(/isOnboarding\.value[\s\S]*?form\.table_no\s*=\s*['"]\S+['"]/.test(fnBody), 'CASE G: onboarding openCreate must pre-fill a real, non-empty table_no')
+  assert.ok(/else[\s\S]*?form\.table_no\s*=\s*['"]['"]/.test(fnBody), 'CASE I: normal (non-onboarding) openCreate must keep the original blank table_no default')
+}
+{
+  const fnStart = entranceCodeList.indexOf('const onSubmit = async () => {')
+  const guardEnd = entranceCodeList.indexOf('saving.value = true', fnStart)
+  const guardBody = entranceCodeList.slice(fnStart, guardEnd)
+  assert.ok(guardBody.includes('isOnboarding.value'), 'CASE H: onSubmit must guard against blank table_no specifically in onboarding mode')
+  assert.ok(guardBody.includes("form.channel === 'TABLE'"), 'CASE H: guard must be scoped to TABLE channel')
+  assert.ok(/!String\(form\.table_no \|\| ['"]['"]\)\.trim\(\)/.test(guardBody), 'CASE H: guard must reject a blank/whitespace-only table_no before calling the API')
+}
+
 // ---- CASE E / CASE F: Step 3 refresh, no continuous polling ---------------
 assert.ok(activationHome.includes('我已下单，检查结果'), 'must offer an explicit manual check button (no silent-only polling)')
 assert.ok(activationHome.includes('checkTestOrderResult'), 'manual button must call an explicit check handler')
@@ -81,9 +102,13 @@ assert.ok(!/setInterval/.test(activationHome), 'must never poll activation-statu
 assert.ok(!/setInterval/.test(menuManage), 'onboarding must not introduce polling in MenuManage')
 assert.ok(!/setInterval/.test(entranceCodeList), 'onboarding must not introduce polling in EntranceCodeList')
 
-// ---- Backend contract left untouched (pure facts, no persisted state) ----
-assert.ok(tenantContract.includes('"has_dishes": dish_count > 0'), 'backend activation-status contract must be unchanged')
-assert.ok(tenantContract.includes('"has_entrance_codes": entrance_code_count > 0'), 'backend activation-status contract must be unchanged')
+// ---- Backend contract: pure facts, minimally corrected, no persisted state
+assert.ok(tenantContract.includes('"has_dishes": dish_count > 0'), 'backend activation-status has_dishes contract must be unchanged')
+assert.ok(tenantContract.includes('"has_entrance_codes": entrance_code_count > 0'), 'backend activation-status has_entrance_codes shape must be unchanged')
+// The only intentional backend change this correction makes: a table code
+// must also carry a real table_no to count as "has_entrance_codes".
+assert.ok(tenantContract.includes('EntranceCode.table_no.is_not(None)'), 'entrance_code_count must require a non-null table_no')
+assert.ok(tenantContract.includes('func.trim(EntranceCode.table_no) != ""'), 'entrance_code_count must reject a blank/whitespace-only table_no')
 assert.ok(!tenantContract.includes('onboarding_step'), 'backend must not gain a persisted onboarding_step column/field')
 assert.ok(!tenantContract.includes('onboarding_progress'), 'backend must not gain a persisted onboarding_progress column/field')
 

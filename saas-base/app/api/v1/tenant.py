@@ -124,9 +124,14 @@ async def get_activation_status(db: AsyncSession = Depends(get_db)):
     is authoritative again. `has_dishes` only counts AVAILABLE dishes (an
     unavailable/off-shelf dish can't actually be ordered, so it doesn't
     count as "step 1 done" -- see docs/saas-subscription-audit.md Phase
-    02 §15). `has_entrance_codes` only counts active TABLE-channel codes,
-    never a channel/staff-share code, since only a table code lets a
-    customer actually reach the ordering flow via table_registry_active()."""
+    02 §15). `has_entrance_codes` only counts active TABLE-channel codes
+    that also have a real, non-blank table_no: entrance_codes.py's own
+    scan-resolve contract hard-rejects entry_type="table" with a blank
+    table_no (422 TABLE_CONTEXT_MISSING), so a table code missing one can
+    never actually be scanned -- counting it here would be a false
+    completion. Never a channel/staff-share code either, since only a
+    genuinely scannable table code lets a customer reach the ordering flow
+    via table_registry_active()."""
     from sqlalchemy import func, select as _select
 
     from app.models.entrance_code import EntranceCode
@@ -151,6 +156,8 @@ async def get_activation_status(db: AsyncSession = Depends(get_db)):
                 EntranceCode.tenant_id == tenant_id,
                 EntranceCode.entry_type == "table",
                 EntranceCode.status == 1,
+                EntranceCode.table_no.is_not(None),
+                func.trim(EntranceCode.table_no) != "",
             )
         )
     ).scalar() or 0

@@ -225,7 +225,25 @@ const loadData = async () => {
   finally { loading.value = false }
 }
 
-const openCreate = () => { form.name = '桌贴码'; form.channel = 'TABLE'; form.table_no = ''; form.zone_type = ''; showCreateDialog.value = true }
+const openCreate = () => {
+  // Onboarding pre-fills a real table number: the actual scan-resolve
+  // contract (entrance_codes.py) hard-rejects entry_type=table with a blank
+  // table_no (422 TABLE_CONTEXT_MISSING) -- a blank default here would let a
+  // new merchant "complete" Step 2 with a code that can never be scanned.
+  // Normal /entrance-codes management keeps the original blank default.
+  if (isOnboarding.value) {
+    form.name = '1号桌'
+    form.channel = 'TABLE'
+    form.table_no = '1'
+    form.zone_type = ''
+  } else {
+    form.name = '桌贴码'
+    form.channel = 'TABLE'
+    form.table_no = ''
+    form.zone_type = ''
+  }
+  showCreateDialog.value = true
+}
 
 // Section 7/8: completion is decided by the real activation-status fact
 // (has_entrance_codes), never by guessing from the locally-picked channel --
@@ -247,6 +265,14 @@ async function checkOnboardingStep2() {
 
 const onSubmit = async () => {
   if (!form.name) { message.error('请填写码名称'); return }
+  // Even with the onboarding pre-fill above, guard the actual submission --
+  // a user could still clear the field. A TABLE code with a blank table_no
+  // can never be scanned (backend hard-rejects it at resolve time), so it
+  // must never be allowed to reach "created" in onboarding mode.
+  if (isOnboarding.value && form.channel === 'TABLE' && !String(form.table_no || '').trim()) {
+    message.error('请填写桌号')
+    return
+  }
   saving.value = true
   try {
     const payload = { name: form.name, channel: form.channel }
