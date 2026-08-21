@@ -16,6 +16,7 @@ on:
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
+      - '.github/workflows/admin-h5-release.yml'
   pull_request:
     branches: [main]
     paths:
@@ -25,6 +26,7 @@ on:
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
+      - '.github/workflows/admin-h5-release.yml'
 
 jobs:
   certify:

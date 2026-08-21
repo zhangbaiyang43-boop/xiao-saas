@@ -60,6 +60,15 @@ workflow_publish_has_write() {
 workflow_publish_guarded_not_pr() {
   sed -n '/^  publish:/,$p' "$1" | grep -qF "github.event_name != 'pull_request'"
 }
+# Real ordering proof (line-number comparison), not just "both strings
+# exist somewhere" -- the incompleteness check must fire before the
+# workflow ever attempts to download the existing release's assets.
+workflow_incomplete_check_before_download() {
+  local file="$1" incomplete_line download_line
+  incomplete_line="$(grep -n 'BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE' "$file" | head -n1 | cut -d: -f1)"
+  download_line="$(grep -n 'gh release download' "$file" | head -n1 | cut -d: -f1)"
+  [ -n "$incomplete_line" ] && [ -n "$download_line" ] && [ "$incomplete_line" -lt "$download_line" ]
+}
 
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
@@ -665,7 +674,7 @@ echo "== CASE U: existing release missing an asset (workflow-side contract) =="
 assert_true "publish job checks for BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE" \
   grep -qF "BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE" "$RELEASE_WORKFLOW"
 assert_true "incompleteness is checked before any download of the existing release" \
-  grep -qF 'gh release view "$TAG"' "$RELEASE_WORKFLOW"
+  workflow_incomplete_check_before_download "$RELEASE_WORKFLOW"
 
 # ---------------------------------------------------------------------------
 # CASE V -- a hardlink archive entry fails closed, just like a symlink
