@@ -176,12 +176,28 @@ class TenantActivationStatusTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(res.data["has_entrance_codes"])
         self.assertEqual(res.data["entrance_code_count"], 0)
 
-    async def test_table_entrance_code_with_blank_table_no_does_not_count(self):
+    async def test_table_entrance_code_with_whitespace_table_no_does_not_count(self):
         # CASE C: whitespace-only table_no is just as unscannable as NULL.
         self.db.add(
             EntranceCode(
                 tenant_id=TENANT_A, name="坏桌码2", channel="STORE", scene="s6",
                 entry_type="table", status=1, table_no="   ",
+            )
+        )
+        await self.db.commit()
+        res = await self._call()
+        self.assertFalse(res.data["has_entrance_codes"])
+        self.assertEqual(res.data["entrance_code_count"], 0)
+
+    async def test_table_entrance_code_with_empty_string_table_no_does_not_count(self):
+        # The genuinely missing boundary alongside NULL and whitespace-only:
+        # a plain empty string is what a form field naturally collapses to.
+        # Production code guards this with func.trim(...) != "", so empty
+        # string must be rejected exactly like NULL and whitespace-only.
+        self.db.add(
+            EntranceCode(
+                tenant_id=TENANT_A, name="坏桌码3", channel="STORE", scene="s7",
+                entry_type="table", status=1, table_no="",
             )
         )
         await self.db.commit()
