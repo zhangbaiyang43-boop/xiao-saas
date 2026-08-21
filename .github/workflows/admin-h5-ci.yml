@@ -1,0 +1,69 @@
+name: admin-h5 CI
+
+# Monorepo: only run when admin-h5 itself (or this workflow) changes.
+#
+# TARGET IDENTITY: on a pull_request event, GitHub's default checkout ref is
+# an ephemeral merge commit, not the PR's real head commit -- that merge ref
+# is not what actually gets merged, so this workflow explicitly checks out
+# github.event.pull_request.head.sha and asserts the checkout landed exactly
+# there before running anything. On push, the target is simply github.sha.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-ci.yml'
+
+defaults:
+  run:
+    working-directory: admin-h5
+
+jobs:
+  check:
+    name: admin-h5 targeted checks + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Identity proof
+        run: |
+          echo "EVENT=${{ github.event_name }}"
+          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "EXPECTED_PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "$(git rev-parse HEAD)" != "${{ github.event.pull_request.head.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match the PR's real head SHA -- refusing to certify a merge-ref build"
+              exit 1
+            fi
+          fi
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin-h5/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # npm run check already chains: source-text guard -> every targeted
+      # regression script (incl. test-onboarding-continuation) -> vite build.
+      # Running only `npm run build` here would silently skip all of that.
+      - name: Run checks (targeted regressions + guards + build)
+        run: npm run check
+
+      - name: Certification summary
+        run: |
+          echo "ADMIN_TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "ADMIN_CHECK=success"
+          echo "ADMIN_CANDIDATE_CERTIFIED=YES"
