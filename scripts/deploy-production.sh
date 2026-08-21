@@ -124,19 +124,44 @@ release_is_valid() {
 
 archive_is_safe() {
   # usage: archive_is_safe <archive.tar.gz>
-  # Reject absolute paths, any ".." path component, and symlink entries --
-  # this is a build artifact from our own CI, not untrusted user upload, but
-  # it's still an unpacked-from-the-internet archive and gets treated as one.
-  local archive="$1" entry
-  while IFS= read -r entry; do
-    case "$entry" in
-      /*|*..*) return 1 ;;
-    esac
-  done < <(tar -tzf "$archive")
-  if tar -tvzf "$archive" | cut -c1 | grep -q '^l'; then
+  # Only regular files and directories are allowed; everything else
+  # (symlink, hardlink, device, fifo, socket) is rejected, along with any
+  # absolute path or genuine ".." path component. This is a build artifact
+  # from our own CI, not an untrusted user upload, but it's still an
+  # unpacked-from-the-internet archive and gets treated as one.
+  #
+  # Delegated to Python's tarfile module rather than parsing `tar -tvzf`
+  # text: GNU tar's verbose listing does not reliably distinguish a
+  # hardlink entry from a regular file in its permission-string column,
+  # and pure-shell path matching (`*..*`) would wrongly reject a legitimate
+  # filename like "app..js". tarfile's TarInfo.isreg()/isdir() and a real
+  # per-path-component check are both exact. saas-base already requires
+  # Python on this host, so this adds no new production dependency.
+  local archive="$1" python_bin
+  python_bin="$(command -v python3 2>/dev/null || command -v python3.12 2>/dev/null || command -v python 2>/dev/null || true)"
+  if [ -z "$python_bin" ]; then
+    log "No python interpreter available to inspect archive entries -- refusing to extract an unverifiable artifact"
     return 1
   fi
-  return 0
+  "$python_bin" - "$archive" <<'PYEOF'
+import sys
+import tarfile
+
+path = sys.argv[1]
+try:
+    with tarfile.open(path, "r:gz") as tf:
+        for info in tf.getmembers():
+            name = info.name
+            if name.startswith("/"):
+                sys.exit(1)
+            if ".." in name.split("/"):
+                sys.exit(1)
+            if not (info.isreg() or info.isdir()):
+                sys.exit(1)
+except tarfile.TarError:
+    sys.exit(1)
+sys.exit(0)
+PYEOF
 }
 
 # ---------------------------------------------------------------------------

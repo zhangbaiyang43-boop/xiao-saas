@@ -46,6 +46,21 @@ assert_true() { local d="$1"; shift; if "$@"; then ok "$d"; else bad "$d"; fi; }
 file_absent() { [ ! -f "$1" ]; }
 path_absent() { [ ! -e "$1" ]; }
 
+# Static workflow-contract predicates for admin-h5-release.yml (CASE S) --
+# each is a real function taking the workflow file path, no bash -c.
+workflow_top_level_read_only() {
+  sed -n '1,/^jobs:/p' "$1" | grep -qE 'contents:[[:space:]]*read'
+}
+workflow_before_publish_has_no_write() {
+  ! sed -n '1,/^  publish:/p' "$1" | grep -q 'contents: write'
+}
+workflow_publish_has_write() {
+  sed -n '/^  publish:/,$p' "$1" | grep -q 'contents: write'
+}
+workflow_publish_guarded_not_pr() {
+  sed -n '/^  publish:/,$p' "$1" | grep -qF "github.event_name != 'pull_request'"
+}
+
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
 # tar, sha256sum, python, grep, sed, cp, mv, ln, mkdir, rm, readlink,
@@ -181,6 +196,22 @@ with tarfile.open(out_path, "w:gz") as tf:
         add(tf, "index.html", INDEX_HTML)
         add(tf, "assets/app.js", APP_JS)
         add(tf, "assets/evil-link", ttype=tarfile.SYMTYPE, linkname="/etc/passwd")
+        add(tf, "release.json", RELEASE_JSON)
+    elif mode == "hardlink":
+        add(tf, "index.html", INDEX_HTML)
+        add(tf, "assets/app.js", APP_JS)
+        # A hardlink entry pointing at another member of the same archive --
+        # tarfile shows this as LNKTYPE, distinct from a regular file even
+        # though naive `tar -tvzf` permission-string parsing can't always
+        # tell the two apart.
+        add(tf, "assets/app-hardlink.js", ttype=tarfile.LNKTYPE, linkname="assets/app.js")
+        add(tf, "release.json", RELEASE_JSON)
+    elif mode == "doubledot":
+        # A legitimate filename containing two literal dots -- must NOT be
+        # rejected as if it were a ".." path-traversal component.
+        add(tf, "index.html", INDEX_HTML)
+        add(tf, "assets/app.js", APP_JS)
+        add(tf, "assets/app..js", APP_JS)
         add(tf, "release.json", RELEASE_JSON)
     else:
         add(tf, "index.html", INDEX_HTML)
@@ -593,6 +624,78 @@ assert_contains "reports PENDING_NGINX_CUTOVER" "ADMIN_HTTP_VERIFICATION=PENDING
 CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
 assert_eq "current points at the new release" "$ADMIN_RELEASE_ROOT/$NEW_SHA" "$CURRENT_TARGET"
 assert_true "bootstrap never invokes npm" file_absent "$MOCK_STATE_DIR/npm_calls.log"
+
+# ---------------------------------------------------------------------------
+# CASE S -- admin-h5-release.yml: PR/build job never holds contents:write
+# ---------------------------------------------------------------------------
+echo "== CASE S: PR build job has no contents:write =="
+RELEASE_WORKFLOW="$SCRIPT_DIR/../.github/workflows/admin-h5-release.yml"
+assert_true "release workflow file exists" test -f "$RELEASE_WORKFLOW"
+assert_true "workflow default permissions is contents: read" workflow_top_level_read_only "$RELEASE_WORKFLOW"
+assert_true "nothing before the publish job holds contents: write" workflow_before_publish_has_no_write "$RELEASE_WORKFLOW"
+assert_true "the publish job holds contents: write" workflow_publish_has_write "$RELEASE_WORKFLOW"
+assert_true "the publish job is guarded to never run on pull_request" workflow_publish_guarded_not_pr "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE T -- existing release: self-consistent + correct sha, but payload
+# (assets/) actually differs -> must fail closed, never silently reused.
+# This contract lives entirely in admin-h5-release.yml's publish job (the
+# production-side deploy script never re-derives or compares payloads for
+# an *existing* release, it only checks release.json's sha -- see CASE I);
+# exercising the real `gh` CLI against a real GitHub Release is out of
+# reach for this mktemp-only, no-network suite (see section 9/12 policy),
+# so this is verified statically: the exact fail-closed status, and that
+# both the index.html and assets/ comparisons are real, not skipped.
+# ---------------------------------------------------------------------------
+echo "== CASE T: existing release with differing asset payload (workflow-side contract) =="
+assert_true "publish job checks for BLOCKED_EXISTING_ADMIN_ARTIFACT_MISMATCH" \
+  grep -qF "BLOCKED_EXISTING_ADMIN_ARTIFACT_MISMATCH" "$RELEASE_WORKFLOW"
+assert_true "publish job compares index.html byte-for-byte (cmp)" \
+  grep -qF "cmp -s" "$RELEASE_WORKFLOW"
+assert_true "publish job compares assets/ recursively (diff -qr)" \
+  grep -qF "diff -qr" "$RELEASE_WORKFLOW"
+assert_true "publish job does not fail on a differing built_at timestamp" \
+  grep -qF "built_at legitimately" "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE U -- existing tag with a missing checksum/archive asset must fail
+# closed as incomplete, never be treated as "not published yet, rebuild it".
+# ---------------------------------------------------------------------------
+echo "== CASE U: existing release missing an asset (workflow-side contract) =="
+assert_true "publish job checks for BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE" \
+  grep -qF "BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE" "$RELEASE_WORKFLOW"
+assert_true "incompleteness is checked before any download of the existing release" \
+  grep -qF 'gh release view "$TAG"' "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE V -- a hardlink archive entry fails closed, just like a symlink
+# ---------------------------------------------------------------------------
+echo "== CASE V: hardlink archive entry =="
+setup_case case-v
+OLD_SHA="8888888888888888888888888888888888888v"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" hardlink "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "hardlink archive exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_UNSAFE_ADMIN_ARTIFACT (hardlink)" "BLOCKED_UNSAFE_ADMIN_ARTIFACT" "$LAST_OUTPUT"
+assert_true "hardlink: release dir was never created" path_absent "$ADMIN_RELEASE_ROOT/$NEW_SHA"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged after hardlink rejection" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE W -- a legal filename containing two literal dots must NOT be
+# misjudged as a ".." path-traversal component.
+# ---------------------------------------------------------------------------
+echo "== CASE W: double-dot filename is not unsafe =="
+setup_case case-w
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" doubledot "$NEW_SHA" "$NEW_SHA"
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+run_deploy
+assert_exit "double-dot filename archive deploys successfully" 0 "$LAST_EXIT"
+assert_true "app..js was extracted, not rejected as unsafe" test -f "$ADMIN_RELEASE_ROOT/$NEW_SHA/assets/app..js"
 
 # ---------------------------------------------------------------------------
 echo
