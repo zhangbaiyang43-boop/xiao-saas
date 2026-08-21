@@ -109,7 +109,7 @@ workflow_canonical_from_remote_when_existing() {
   [ -z "$start" ] && return 1
   [ -z "$end" ] && return 1
   block="$(sed -n "${start},${end}p" "$file")"
-  grep -qF 'cp "$REMOTE_DIR/$ARCHIVE" "canonical-build/$ARCHIVE"' <<<"$block"
+  grep -qF "cp \"\$REMOTE_DIR/\$ARCHIVE\" \"canonical-build/\$ARCHIVE\"" <<<"$block"
 }
 workflow_canonical_from_local_when_new() {
   local file="$1" start end block
@@ -118,7 +118,7 @@ workflow_canonical_from_local_when_new() {
   [ -z "$start" ] && return 1
   [ -z "$end" ] && return 1
   block="$(sed -n "${start},${end}p" "$file")"
-  grep -qF 'cp "local-build/$ARCHIVE" "canonical-build/$ARCHIVE"' <<<"$block"
+  grep -qF "cp \"local-build/\$ARCHIVE\" \"canonical-build/\$ARCHIVE\"" <<<"$block"
 }
 workflow_cos_publish_uses_canonical_build() {
   local file="$1" start end block
@@ -127,10 +127,10 @@ workflow_cos_publish_uses_canonical_build() {
   [ -z "$start" ] && return 1
   [ -z "$end" ] && return 1
   block="$(sed -n "${start},${end}p" "$file")"
-  grep -qF 'canonical-build/$ARCHIVE' <<<"$block" \
-    && grep -qF 'canonical-build/$CHECKSUM' <<<"$block" \
-    && ! grep -qF 'local-build/$ARCHIVE' <<<"$block" \
-    && ! grep -qF 'local-build/$CHECKSUM' <<<"$block"
+  grep -qF "canonical-build/\$ARCHIVE" <<<"$block" \
+    && grep -qF "canonical-build/\$CHECKSUM" <<<"$block" \
+    && ! grep -qF "local-build/\$ARCHIVE" <<<"$block" \
+    && ! grep -qF "local-build/\$CHECKSUM" <<<"$block"
 }
 workflow_canonical_checksum_before_cos_publish() {
   local file="$1" verify_line cos_line
@@ -1010,7 +1010,7 @@ echo "== CASE AG: public COS round-trip verification precedes summary =="
 assert_true "verification step exists" \
   grep -qF -- '- name: Verify public COS runtime URL' "$RELEASE_WORKFLOW"
 assert_true "verification does a real sha256sum -c against the public URL download" \
-  grep -qF 'sha256sum -c "$CHECKSUM"' "$RELEASE_WORKFLOW"
+  grep -qF "sha256sum -c \"\$CHECKSUM\"" "$RELEASE_WORKFLOW"
 assert_true "verification step precedes the summary step" \
   workflow_cos_verification_before_summary "$RELEASE_WORKFLOW"
 
