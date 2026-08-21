@@ -76,8 +76,14 @@ set -Eeuo pipefail
 : "${BACKEND_HEALTH_URL:=http://127.0.0.1:9898/health}"
 : "${PRODUCTION_URL:=https://saas.zhangbaiyang.com/}"
 : "${RELEASE_KEEP_MIN:=4}" # current + at least 3 historical releases
-: "${GITHUB_REPOSITORY:=zhangbaiyang43-boop/xiao-saas}"
-: "${ARTIFACT_BASE_URL:=https://github.com/$GITHUB_REPOSITORY/releases/download}"
+: "${DEPLOY_CONFIG_FILE:=/etc/xiao-deploy.env}"
+# ARTIFACT_BASE_URL has NO default -- production evidence showed direct
+# GitHub Release downloads from mainland China run at ~4-10KB/s and time
+# out (PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN); the real
+# transport is Tencent COS, and there is no safe generic default bucket URL
+# to fall back to. Resolved below, after change detection, from the
+# process environment first and $DEPLOY_CONFIG_FILE second -- never a
+# hardcoded github.com/.../releases/download path.
 
 DRY_RUN=0
 FORCE_ADMIN=0
@@ -164,6 +170,26 @@ sys.exit(0)
 PYEOF
 }
 
+resolve_artifact_base_url() {
+  # Process environment wins if already set. Otherwise parse exactly the
+  # ARTIFACT_BASE_URL= key out of $DEPLOY_CONFIG_FILE -- never `source` the
+  # whole file (it is a deployment-transport config file, not a script, and
+  # must never be treated as one).
+  if [ -n "${ARTIFACT_BASE_URL:-}" ]; then
+    return 0
+  fi
+  if [ -f "$DEPLOY_CONFIG_FILE" ]; then
+    local line value
+    line="$(grep -E '^ARTIFACT_BASE_URL=' "$DEPLOY_CONFIG_FILE" 2>/dev/null | tail -n1 || true)"
+    if [ -n "$line" ]; then
+      value="${line#ARTIFACT_BASE_URL=}"
+      value="${value%\"}"; value="${value#\"}"
+      value="${value%\'}"; value="${value#\'}"
+      ARTIFACT_BASE_URL="$value"
+    fi
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # 1. Identity + dirty-tree gate
 # ---------------------------------------------------------------------------
@@ -248,6 +274,25 @@ if [ "$MIGRATION_CHANGED" -eq 1 ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# 3b. Artifact transport configuration -- only required when this deploy
+#     actually needs to fetch an admin-h5 artifact (ADMIN_CHANGED=1). Must
+#     be resolved and checked before git pull, before any download, before
+#     the backend restart, and before any current switch -- so a missing
+#     config fails closed at the very start, not partway through.
+# ---------------------------------------------------------------------------
+resolve_artifact_base_url
+if [ "$ADMIN_CHANGED" -eq 1 ] && [ -z "${ARTIFACT_BASE_URL:-}" ]; then
+  echo "STATUS=BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" >&2
+  echo "ARTIFACT_BASE_URL is not set (checked the process environment, then" >&2
+  echo "$DEPLOY_CONFIG_FILE) and this deploy needs to download an admin-h5" >&2
+  echo "artifact. Set ARTIFACT_BASE_URL in the environment, or add a line" >&2
+  echo "ARTIFACT_BASE_URL=<public COS base>/deploy-artifacts/admin-h5 to" >&2
+  echo "$DEPLOY_CONFIG_FILE, then re-run. Not pulling, downloading, restarting" >&2
+  echo "the backend, or touching current." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 4. Git update -- main only, fast-forward only. Only reached once we know
 #    there is no unreviewed migration in this range.
 # ---------------------------------------------------------------------------
@@ -299,15 +344,21 @@ if [ "$ADMIN_CHANGED" -eq 1 ]; then
     CLEANUP_TMP="$STAGE_DIR"
     mkdir -p "$STAGE_DIR/download" "$STAGE_DIR/extract"
 
+    # -fsSL: fail on HTTP errors, silent but still show errors, follow
+    # redirects (COS/CDN URLs may redirect). Bounded connect/total time +
+    # a few retries so a transient blip doesn't need a full manual re-run,
+    # without masking a genuinely unreachable/misconfigured transport.
+    DOWNLOAD_CURL_OPTS=(--connect-timeout 10 --max-time 120 --retry 3 --retry-delay 2 --retry-all-errors -fsSL)
+
     log "Downloading admin-h5 artifact: $ARTIFACT_URL"
-    if ! curl -fsSL -o "$STAGE_DIR/download/$ARTIFACT_NAME" "$ARTIFACT_URL"; then
+    if ! curl "${DOWNLOAD_CURL_OPTS[@]}" -o "$STAGE_DIR/download/$ARTIFACT_NAME" "$ARTIFACT_URL"; then
       echo "STATUS=ADMIN_ARTIFACT_NOT_READY" >&2
       echo "Could not download $ARTIFACT_URL -- the admin-h5-release workflow" >&2
       echo "for $AFTER_SHA may not have finished publishing yet. Not restarting" >&2
       echo "the backend or switching current; re-run once the artifact exists." >&2
       exit 1
     fi
-    if ! curl -fsSL -o "$STAGE_DIR/download/$CHECKSUM_NAME" "$CHECKSUM_URL"; then
+    if ! curl "${DOWNLOAD_CURL_OPTS[@]}" -o "$STAGE_DIR/download/$CHECKSUM_NAME" "$CHECKSUM_URL"; then
       echo "STATUS=ADMIN_ARTIFACT_NOT_READY" >&2
       echo "Could not download $CHECKSUM_URL." >&2
       exit 1

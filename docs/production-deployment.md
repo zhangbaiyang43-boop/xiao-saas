@@ -15,6 +15,17 @@ dedicated regression case in `scripts/test-deployment-tooling.sh`), and the
 production host does not need Node.js or `admin-h5/node_modules` installed
 for deployment to work.
 
+**PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN.** GitHub Releases
+remain the audit/backup/immutable-build-evidence copy of every admin-h5
+artifact (see [Artifact build & publish](#artifact-build--publish-github-actions)),
+but production evidence showed a direct `github.com/.../releases/download`
+fetch from mainland China running at ~4-10KB/s and timing out even though
+`github.com` and `raw.githubusercontent.com` were both otherwise reachable.
+**Tencent COS is the production runtime transport** -- see
+[Artifact transport](#artifact-transport-tencent-cos). The production host
+never needs a COS secret to download from it: the public COS base URL is a
+plain HTTPS GET, no credentials required.
+
 **FIRST_MIGRATION_STATUS=NOT_YET_EXECUTED.** The tooling below (`scripts/
 deploy-production.sh`, `scripts/rollback-admin-h5.sh`) exists and is
 Linux-certified (see [GitHub Actions](#github-actions)), but the one-time
@@ -44,20 +55,27 @@ That's it. It:
    changed -- migrations are reviewed and applied by hand, never
    automatically, and the working tree is never advanced past a migration it
    hasn't run. See [Migration releases](#migration-releases) below.
-4. Only now: fast-forwards `main` (`git pull --ff-only`) -- never
+4. If `admin-h5/**` changed: resolves `ARTIFACT_BASE_URL` (process
+   environment first, then a single key parsed out of `$DEPLOY_CONFIG_FILE`
+   -- see [Artifact transport](#artifact-transport-tencent-cos)) and stops
+   here, HEAD still untouched, if it's still unresolved
+   (`BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED`) -- before the pull, before
+   any download, before the backend restart, before touching `current`.
+5. Only now: fast-forwards `main` (`git pull --ff-only`) -- never
    force-pulls, never rebases, never resets.
-5. If `admin-h5/**` changed: downloads the GitHub-built, checksummed
-   artifact for this exact commit (see [Artifact build & publish](#artifact-build--publish-github-actions)),
+6. If `admin-h5/**` changed: downloads the checksummed artifact for this
+   exact commit from the resolved `ARTIFACT_BASE_URL` (production: Tencent
+   COS -- never GitHub, see [Artifact transport](#artifact-transport-tencent-cos)),
    verifies its checksum and archive-entry safety, extracts it into an
    immutable, SHA-named release directory -- but does **not** switch
-   `current` yet. If the artifact isn't published yet, stops here
+   `current` yet. If the artifact isn't there yet, stops here
    (`ADMIN_ARTIFACT_NOT_READY`) before touching the backend or `current`.
-6. If `saas-base/**` changed: restarts `saas-base.service` and verifies
+7. If `saas-base/**` changed: restarts `saas-base.service` and verifies
    `/health` returns healthy. **A failure here stops the whole deploy before
-   the admin-h5 release prepared in step 5 is ever switched live** -- you
+   the admin-h5 release prepared in step 6 is ever switched live** -- you
    never end up with a new frontend talking to a broken backend, or a broken
    frontend at all; `current` simply stays exactly where it was.
-7. Only once the backend (if it was part of this deploy) is confirmed
+8. Only once the backend (if it was part of this deploy) is confirmed
    healthy: atomically switches the `current` symlink -- verified with a
    real HTTP request before committing to the switch (routine mode; see
    [Bootstrap mode](#bootstrap-mode-first-cutover-only) for the one-time
@@ -94,7 +112,9 @@ one command above, run against `/www/wwwroot/xiao`.
 └── scripts/
     ├── deploy-production.sh
     ├── rollback-admin-h5.sh
-    └── test-deployment-tooling.sh   # Linux integration contract, CI-only
+    ├── test-deployment-tooling.sh          # Linux integration contract, CI-only
+    └── publish-admin-artifact-cos.py       # GitHub Actions publish job only,
+                                             # never runs on the production host
 ```
 
 **Frontend release artifacts (build output, not source):**
@@ -170,23 +190,89 @@ that ever executes PR code holds `contents: write`. On a **pull request**,
 release-publish behavior at all. Only `push` to `main` or an explicit
 `workflow_dispatch` (with a real target SHA) reaches the `publish` job.
 
-**Why a GitHub Release asset, not SSH/PAT to the server:** the repo (and its
-build output) isn't a secret, so a public, content-addressed, checksummed
-release asset is a perfectly good runtime artifact transport. This adds *no*
-new credential anywhere -- no production SSH key, no GitHub PAT stored on
-the server, no server-side secret at all. GitHub Actions still isn't the
-deploy authority: it only produces the artifact. Going live is still always
-a deliberate `./scripts/deploy-production.sh` run on the server.
+**GitHub Release = audit/backup/immutable-build-evidence, not the production
+transport.** Production evidence showed a direct `github.com/.../releases/
+download` fetch from mainland China running at ~4-10KB/s and timing out --
+`PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN`. The Release still
+gets published on every push/dispatch (a durable, human-browsable record of
+exactly what was built for a given SHA), but `scripts/deploy-production.sh`
+never fetches from it. See [Artifact transport](#artifact-transport-tencent-cos)
+for what production actually downloads from.
 
-`deploy-production.sh` derives the download URLs itself from `AFTER_SHA`
-(the commit it just checked out):
+After the GitHub Release step, the same `publish` job (still never PR,
+still `permissions: contents: write` for the Release call only) also:
+
+6. Installs `cos-python-sdk-v5==1.9.30` -- pinned to the exact same version
+   `saas-base/requirements.txt` already freezes, so there is only one
+   version of this SDK in play anywhere in this repo. (This does **not**
+   import or reuse `saas-base/app/core/cos.py` -- that module is a
+   different thing, for a different purpose, with its own env var names
+   and its own bucket-wide access, and is untouched by this tooling.)
+7. Runs `scripts/publish-admin-artifact-cos.py` (standalone, no business
+   imports, no production `.env` dependency -- see
+   [Artifact transport](#artifact-transport-tencent-cos)) to upload the
+   archive + checksum to Tencent COS, or verify-and-reuse an existing
+   identical object.
+8. Downloads both files back from the **public** COS base URL with `curl`
+   and re-runs `sha256sum -c` against them -- proving the public runtime
+   path actually serves what was just uploaded (uploading successfully via
+   the COS API is not the same claim as "production's HTTP GET will work").
+
+## Artifact transport (Tencent COS)
+
+**Production never needs a COS secret.** Downloading a public HTTPS object
+requires no credential; only *publishing* to COS (the GitHub Actions
+`publish` job) needs `DEPLOY_COS_SECRET_ID`/`DEPLOY_COS_SECRET_KEY`, and
+those live only as GitHub Actions Secrets, never on the production host,
+never in this repo, never logged.
+
+**Object layout** -- frozen prefix, one immutable directory per SHA:
 
 ```
-GITHUB_REPOSITORY=zhangbaiyang43-boop/xiao-saas   # overridable, fixed default
-TAG=admin-h5-${AFTER_SHA}
-ARTIFACT=admin-h5-dist-${AFTER_SHA}.tar.gz
-CHECKSUM=admin-h5-dist-${AFTER_SHA}.tar.gz.sha256
+deploy-artifacts/admin-h5/
+  admin-h5-<FULL_SHA>/
+    admin-h5-dist-<FULL_SHA>.tar.gz
+    admin-h5-dist-<FULL_SHA>.tar.gz.sha256
 ```
+
+Same URL shape `deploy-production.sh` always expected
+(`<base>/admin-h5-<SHA>/admin-h5-dist-<SHA>.tar.gz`) -- only the base
+changed, from a hardcoded GitHub Release URL to a configured COS base.
+
+**`scripts/publish-admin-artifact-cos.py`** (GitHub Actions side, single
+responsibility, no business-module imports): before uploading, it
+`head_object`s both the archive and checksum keys for this SHA. If neither
+exists, it uploads both (`Content-Type: application/gzip` /
+`text/plain; charset=utf-8`, `Cache-Control: public,max-age=31536000,immutable`
+-- the path is SHA-addressed and therefore genuinely immutable). If both
+already exist, it downloads them back and requires the archive's sha256
+*and* the checksum file's exact bytes to match this build's own output
+before treating it as a safe no-op reuse. Any other combination (only one
+of the pair present, or present-but-different) is
+`BLOCKED_EXISTING_COS_ARTIFACT_MISMATCH` / half-published incompleteness --
+never a silent overwrite, never `delete` + rewrite.
+
+**Production-side config** -- `scripts/deploy-production.sh` resolves
+`ARTIFACT_BASE_URL` from the process environment first, then a *single key*
+parsed out of `$DEPLOY_CONFIG_FILE` (default `/etc/xiao-deploy.env`) --
+never `source`d as a script, just that one `ARTIFACT_BASE_URL=` line. If
+admin-h5 changed this deploy and neither source provides a value, the
+deploy stops (`BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED`) before the git
+pull, before any download, before the backend restart, before touching
+`current`. There is **no automatic fallback to GitHub** if COS is
+misconfigured or unreachable -- production already proved that link
+unreliable; silently falling back to it would just reintroduce the exact
+transport this phase exists to remove. One-time setup on the server:
+
+```
+# /etc/xiao-deploy.env
+ARTIFACT_BASE_URL=<public COS base>/deploy-artifacts/admin-h5
+```
+
+That's the only line this file needs. Do not put the real bucket name,
+region, or any `COS_SECRET_*` value in this doc, in the repo, or in this
+file -- the production host only ever performs a plain, unauthenticated
+`curl` GET.
 
 ## Nginx contract
 
@@ -338,14 +424,18 @@ legacy `/www/wwwroot/admin-h5/dist` layout:
 
 1. The old `dist/` keeps serving traffic throughout -- nothing is torn down
    up front.
-2. Run `deploy-production.sh --bootstrap-admin` (and `--force-backend` if the
-   backend also needs a first sync) to download the GitHub-built artifact
+2. First, ensure `/etc/xiao-deploy.env` exists with `ARTIFACT_BASE_URL=<public
+   COS base>/deploy-artifacts/admin-h5` (see [Artifact transport](#artifact-transport-tencent-cos))
+   -- without it this step stops immediately with
+   `BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED`. Then run
+   `deploy-production.sh --bootstrap-admin` (and `--force-backend` if the
+   backend also needs a first sync) to download the COS-published artifact
    for the current main SHA and produce the first `releases/<sha>` +
    `current` symlink, side by side with the still-live `dist/`. This
    reports `ADMIN_HTTP_VERIFICATION=PENDING_NGINX_CUTOVER`, not a
    verified-live claim -- that's expected. If it instead reports
    `ADMIN_ARTIFACT_NOT_READY`, the `admin-h5-release` workflow for that SHA
-   hasn't finished publishing yet -- wait for it, don't build locally.
+   hasn't finished publishing to COS yet -- wait for it, don't build locally.
 3. Update `saas.zhangbaiyang.com.conf`'s `root` from
    `/www/wwwroot/admin-h5/dist` to `/www/wwwroot/admin-h5/current`.
 4. `nginx -t` -- only proceed if it passes.
@@ -375,20 +465,31 @@ Three separate things, easy to conflate:
 
 1. **Building & publishing the admin-h5 artifact** -- `.github/workflows/
    admin-h5-release.yml`. See [Artifact build & publish](#artifact-build--publish-github-actions)
-   above. The only place `npm run build` ever runs, period.
+   above. The only place `npm run build` ever runs, period. Its `publish`
+   job (never PR, never holding anything but its own scoped `contents:
+   write`) needs these as **GitHub Actions Secrets** (repo or environment
+   settings, never committed, never printed in a workflow log):
+   `DEPLOY_COS_SECRET_ID`, `DEPLOY_COS_SECRET_KEY`, `DEPLOY_COS_REGION`,
+   `DEPLOY_COS_BUCKET`, `DEPLOY_COS_BASE_URL`. A dedicated Tencent CAM
+   sub-account scoped to only `deploy-artifacts/admin-h5/*` put/get/head on
+   the target bucket is the recommended credential shape -- creating or
+   printing real values is out of scope for any of this tooling itself. The
+   `build` job (all events, including PR) never sees these -- see
+   [Artifact transport](#artifact-transport-tencent-cos).
 2. **Certifying the deployment tooling itself** -- `.github/workflows/
    deployment-tooling-ci.yml` runs on every push/PR that touches
    `scripts/deploy-production.sh`, `scripts/rollback-admin-h5.sh`,
-   `scripts/test-deployment-tooling.sh`, this doc, or `Makefile`. It's the
+   `scripts/test-deployment-tooling.sh`, `scripts/publish-admin-artifact-cos.py`,
+   this doc, `Makefile`, or `admin-h5-release.yml` itself. It's the
    authority for the atomic symlink-swap, migration-fail-closed,
-   artifact-checksum, archive-safety, and backend-before-admin-switch
-   contracts -- **a Windows/MSYS dev machine cannot certify this tooling**:
-   `ln -s`/`mv -T` symlink-swap semantics there differ from real GNU
-   coreutils/Linux (confirmed empirically -- running `scripts/test-
-   deployment-tooling.sh` on Windows/Git-Bash fails exactly the
-   symlink-dependent cases and passes everything else, archive/checksum
-   logic included). Only a green run on this workflow's `ubuntu-latest`
-   runner counts.
+   artifact-checksum, archive-safety, PR-secret-isolation, and
+   backend-before-admin-switch contracts -- **a Windows/MSYS dev machine
+   cannot certify this tooling**: `ln -s`/`mv -T` symlink-swap semantics
+   there differ from real GNU coreutils/Linux (confirmed empirically --
+   running `scripts/test-deployment-tooling.sh` on Windows/Git-Bash fails
+   exactly the symlink-dependent cases and passes everything else, archive/
+   checksum/COS-mock logic included). Only a green run on this workflow's
+   `ubuntu-latest` runner counts.
 3. **GitHub -> production SSH auto-deploy** -- still NOT in scope. There is
    no established trust relationship yet between GitHub Actions and the
    production host (no SSH key, no GitHub Environment approval gate), so

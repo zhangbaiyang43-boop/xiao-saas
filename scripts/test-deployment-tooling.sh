@@ -45,6 +45,7 @@ assert_true() { local d="$1"; shift; if "$@"; then ok "$d"; else bad "$d"; fi; }
 # named function makes that unambiguous without a disable comment).
 file_absent() { [ ! -f "$1" ]; }
 path_absent() { [ ! -e "$1" ]; }
+file_not_contains() { ! grep -qF -- "$2" "$1"; }
 
 # Static workflow-contract predicates for admin-h5-release.yml (CASE S) --
 # each is a real function taking the workflow file path, no bash -c.
@@ -68,6 +69,85 @@ workflow_incomplete_check_before_download() {
   incomplete_line="$(grep -n 'BLOCKED_INCOMPLETE_EXISTING_ADMIN_RELEASE' "$file" | head -n1 | cut -d: -f1)"
   download_line="$(grep -n 'gh release download' "$file" | head -n1 | cut -d: -f1)"
   [ -n "$incomplete_line" ] && [ -n "$download_line" ] && [ "$incomplete_line" -lt "$download_line" ]
+}
+# Everything before the "publish:" job marker is the (all-events, including
+# PR) "build" job -- these predicates prove COS credentials/uploads never
+# appear there.
+workflow_before_publish_has_no_cos_secrets() {
+  ! sed -n '1,/^  publish:/p' "$1" | grep -q 'DEPLOY_COS_SECRET'
+}
+workflow_cos_upload_only_in_publish_job() {
+  sed -n '/^  publish:/,$p' "$1" | grep -qF 'Publish to Tencent COS' \
+    && ! sed -n '1,/^  publish:/p' "$1" | grep -qF 'Publish to Tencent COS'
+}
+workflow_cos_verification_before_summary() {
+  local file="$1" verify_line summary_line
+  verify_line="$(grep -n '^      - name: Verify public COS runtime URL' "$file" | head -n1 | cut -d: -f1)"
+  summary_line="$(grep -n '^      - name: Publish summary' "$file" | head -n1 | cut -d: -f1)"
+  [ -n "$verify_line" ] && [ -n "$summary_line" ] && [ "$verify_line" -lt "$summary_line" ]
+}
+
+# --- Canonical-artifact predicates (checkout ordering + canonicalization) ---
+workflow_publish_checkout_before_artifact_download() {
+  local file="$1" section checkout_line download_line
+  section="$(sed -n '/^  publish:/,$p' "$file")"
+  checkout_line="$(grep -n 'uses: actions/checkout@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  download_line="$(grep -n 'uses: actions/download-artifact@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  [ -n "$checkout_line" ] && [ -n "$download_line" ] && [ "$checkout_line" -lt "$download_line" ]
+}
+workflow_publish_no_checkout_after_download() {
+  local file="$1" section download_line
+  section="$(sed -n '/^  publish:/,$p' "$file")"
+  download_line="$(grep -n 'uses: actions/download-artifact@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  [ -z "$download_line" ] && return 1
+  ! sed -n "$((download_line + 1)),\$p" <<<"$section" | grep -q 'uses: actions/checkout@v4'
+}
+workflow_canonical_from_remote_when_existing() {
+  local file="$1" start end block
+  start="$(grep -n 'name: Verify existing release is complete and payload-identical' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n '^      - name: Publish GitHub Release$' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF "cp \"\$REMOTE_DIR/\$ARCHIVE\" \"canonical-build/\$ARCHIVE\"" <<<"$block"
+}
+workflow_canonical_from_local_when_new() {
+  local file="$1" start end block
+  start="$(grep -n '^      - name: Publish GitHub Release$' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n 'name: Verify canonical artifact checksum' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF "cp \"local-build/\$ARCHIVE\" \"canonical-build/\$ARCHIVE\"" <<<"$block"
+}
+workflow_cos_publish_uses_canonical_build() {
+  local file="$1" start end block
+  start="$(grep -n 'name: Publish to Tencent COS' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n 'name: Verify public COS runtime URL' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF "canonical-build/\$ARCHIVE" <<<"$block" \
+    && grep -qF "canonical-build/\$CHECKSUM" <<<"$block" \
+    && ! grep -qF "local-build/\$ARCHIVE" <<<"$block" \
+    && ! grep -qF "local-build/\$CHECKSUM" <<<"$block"
+}
+workflow_canonical_checksum_before_cos_publish() {
+  local file="$1" verify_line cos_line
+  verify_line="$(grep -n 'name: Verify canonical artifact checksum' "$file" | head -n1 | cut -d: -f1)"
+  cos_line="$(grep -n 'name: Publish to Tencent COS' "$file" | head -n1 | cut -d: -f1)"
+  [ -n "$verify_line" ] && [ -n "$cos_line" ] && [ "$verify_line" -lt "$cos_line" ]
+}
+# scripts/publish-admin-artifact-cos.py is the core GitHub Release -> Tencent
+# COS publisher -- both the push and pull_request path filters must trigger
+# this workflow when it changes on its own, independent of admin-h5/**.
+workflow_push_paths_contains_cos_publisher() {
+  local file="$1"
+  sed -n '/^  push:/,/^  pull_request:/p' "$file" | grep -qF "'scripts/publish-admin-artifact-cos.py'"
+}
+workflow_pull_request_paths_contains_cos_publisher() {
+  local file="$1"
+  sed -n '/^  pull_request:/,/^  workflow_dispatch:/p' "$file" | grep -qF "'scripts/publish-admin-artifact-cos.py'"
 }
 
 # ---------------------------------------------------------------------------
@@ -261,6 +341,84 @@ prepare_artifact_fixture() {
 }
 
 # ---------------------------------------------------------------------------
+# Fake qcloud_cos package (CASE AE/AF) -- exercises the real scripts/publish-
+# admin-artifact-cos.py end to end (real hashing, real argument parsing,
+# real control flow) against a disk-backed fake COS store, so no network
+# call and no real credential are ever needed. A separate FAKE_COS_STORE
+# directory per invocation keeps cases isolated from each other.
+# ---------------------------------------------------------------------------
+FAKE_COS_PKG="$WORK/fake_cos_pkg"
+mkdir -p "$FAKE_COS_PKG/qcloud_cos"
+cat > "$FAKE_COS_PKG/qcloud_cos/__init__.py" <<'PYEOF'
+import os
+
+STORE_DIR = os.environ.get("FAKE_COS_STORE", "/tmp/fake_cos_store")
+
+
+class CosConfig:
+    def __init__(self, Region=None, SecretId=None, SecretKey=None):
+        self.region = Region
+
+
+class _FakeStream:
+    def __init__(self, data):
+        self._data = data
+
+    def get_raw_stream(self):
+        import io
+        return io.BytesIO(self._data)
+
+
+def _path_for(key):
+    return os.path.join(STORE_DIR, key.replace("/", "__"))
+
+
+class CosS3Client:
+    def __init__(self, config):
+        self.config = config
+        os.makedirs(STORE_DIR, exist_ok=True)
+
+    def head_object(self, Bucket, Key):
+        from qcloud_cos.cos_exception import CosServiceError
+        if not os.path.isfile(_path_for(Key)):
+            raise CosServiceError("head_object", "not found", 404)
+        return {}
+
+    def get_object(self, Bucket, Key):
+        with open(_path_for(Key), "rb") as f:
+            return {"Body": _FakeStream(f.read())}
+
+    def put_object(self, Bucket, Body, Key, ContentType=None, CacheControl=None):
+        with open(_path_for(Key), "wb") as f:
+            f.write(Body)
+        return {}
+PYEOF
+cat > "$FAKE_COS_PKG/qcloud_cos/cos_exception.py" <<'PYEOF'
+class CosServiceError(Exception):
+    def __init__(self, method, msg, status_code):
+        super().__init__(msg)
+        self._status_code = status_code
+
+    def get_status_code(self):
+        return self._status_code
+PYEOF
+
+# usage: run_cos_publish <sha> <archive> <checksum> <fake-cos-store-dir>
+run_cos_publish() {
+  local sha="$1" archive="$2" checksum="$3" store="$4"
+  mkdir -p "$store"
+  set +e
+  LAST_OUTPUT="$(PYTHONPATH="$FAKE_COS_PKG" FAKE_COS_STORE="$store" \
+    DEPLOY_COS_SECRET_ID=test-id DEPLOY_COS_SECRET_KEY=test-key \
+    DEPLOY_COS_REGION=ap-guangzhou DEPLOY_COS_BUCKET=test-bucket \
+    DEPLOY_COS_BASE_URL=https://cos.example.invalid \
+    "$PYTHON_BIN" "$SCRIPT_DIR/publish-admin-artifact-cos.py" \
+    --sha "$sha" --archive "$archive" --checksum "$checksum" 2>&1)"
+  LAST_EXIT=$?
+  set -e
+}
+
+# ---------------------------------------------------------------------------
 # Fixture repo helpers -- every case gets its own disposable origin + checkout.
 # ---------------------------------------------------------------------------
 setup_case() {
@@ -292,7 +450,16 @@ setup_case() {
   PRODUCTION_URL="https://example.invalid/"
   MOCK_STATE_DIR="$CASE_DIR/mock-state"
   mkdir -p "$MOCK_STATE_DIR"
-  export REPO ADMIN_RELEASE_ROOT ADMIN_CURRENT BACKEND_SERVICE BACKEND_HEALTH_URL PRODUCTION_URL MOCK_STATE_DIR
+  # Default artifact transport: set via env, exactly like production's
+  # "process environment wins" rule -- the mock curl matches on URL suffix
+  # (.tar.gz/.tar.gz.sha256) regardless of host, so any value works here.
+  # CASE X explicitly unsets this to test the missing-config path; CASE Y/Z
+  # exercise the env-vs-config-file precedence directly. Points at a
+  # per-case config file that does NOT exist by default (only CASE Z
+  # creates one), so no case accidentally depends on a real /etc file.
+  ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5"
+  DEPLOY_CONFIG_FILE="$CASE_DIR/xiao-deploy.env"
+  export REPO ADMIN_RELEASE_ROOT ADMIN_CURRENT BACKEND_SERVICE BACKEND_HEALTH_URL PRODUCTION_URL MOCK_STATE_DIR ARTIFACT_BASE_URL DEPLOY_CONFIG_FILE
 }
 
 # publish <path> <content> [<path2> <content2> ...] -- commits+pushes via a
@@ -705,6 +872,288 @@ touch "$MOCK_STATE_DIR/frontend_verifiable"
 run_deploy
 assert_exit "double-dot filename archive deploys successfully" 0 "$LAST_EXIT"
 assert_true "app..js was extracted, not rejected as unsafe" test -f "$ADMIN_RELEASE_ROOT/$NEW_SHA/assets/app..js"
+
+# ---------------------------------------------------------------------------
+# CASE X -- production artifact transport not configured fails closed,
+# before git pull, before download, before backend restart, before switch.
+# ---------------------------------------------------------------------------
+echo "== CASE X: artifact transport not configured =="
+setup_case case-x
+unset ARTIFACT_BASE_URL
+# DEPLOY_CONFIG_FILE (from setup_case) deliberately does not exist yet.
+OLD_SHA="9999999999999999999999999999999999999x"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+BEFORE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+publish admin-h5/feature.txt hi >/dev/null
+run_deploy
+assert_exit "missing transport config exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "$LAST_OUTPUT"
+AFTER_SHA_CHECK="$(git -C "$REPO" rev-parse HEAD)"
+assert_eq "HEAD unchanged (never reached git pull)" "$BEFORE_SHA" "$AFTER_SHA_CHECK"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+assert_true "no download was attempted" file_absent "$MOCK_STATE_DIR/curl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
+
+# ---------------------------------------------------------------------------
+# CASE Y -- explicit environment ARTIFACT_BASE_URL wins over the config file
+# ---------------------------------------------------------------------------
+echo "== CASE Y: environment wins over config file =="
+setup_case case-y
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+echo 'ARTIFACT_BASE_URL=https://this-config-file-value-must-be-ignored.invalid' > "$DEPLOY_CONFIG_FILE"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # already set by setup_case; reaffirm intent
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "deploy succeeds using the env value" 0 "$LAST_EXIT"
+assert_true "downloaded from the env URL, not the config-file URL" \
+  grep -qF "cos.example.invalid" "$MOCK_STATE_DIR/curl_calls.log"
+assert_true "config-file URL was never used" \
+  file_not_contains "$MOCK_STATE_DIR/curl_calls.log" "this-config-file-value-must-be-ignored"
+
+# ---------------------------------------------------------------------------
+# CASE Z -- ARTIFACT_BASE_URL resolved from the config file when the
+# environment doesn't already provide it (single-key parse, not `source`).
+# ---------------------------------------------------------------------------
+echo "== CASE Z: config file provides ARTIFACT_BASE_URL =="
+setup_case case-z
+unset ARTIFACT_BASE_URL
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+cat > "$DEPLOY_CONFIG_FILE" <<'EOF'
+# comment line, and an unrelated key, to prove only ARTIFACT_BASE_URL= is parsed
+SOME_OTHER_KEY=should-be-ignored
+ARTIFACT_BASE_URL=https://cos.example.invalid/deploy-artifacts/admin-h5
+EOF
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "deploy succeeds using the config-file value" 0 "$LAST_EXIT"
+assert_contains "reports DEPLOY_OK" "STATUS=DEPLOY_OK" "$LAST_OUTPUT"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
+
+# ---------------------------------------------------------------------------
+# CASE AA -- production deploy script has no executable/default
+# github.com/releases/download runtime path (code, not comments)
+# ---------------------------------------------------------------------------
+echo "== CASE AA: no GitHub Release runtime download path in production script =="
+DEPLOY_CODE_ONLY="$(grep -v '^[[:space:]]*#' "$DEPLOY_SCRIPT")"
+if grep -qF 'github.com' <<<"$DEPLOY_CODE_ONLY"; then
+  bad "deploy-production.sh must not have any executable github.com reference"
+else
+  ok "deploy-production.sh has no executable github.com reference"
+fi
+
+# ---------------------------------------------------------------------------
+# CASE AB -- COS URL shape is exactly <base>/admin-h5-<SHA>/admin-h5-dist-<SHA>.tar.gz
+# ---------------------------------------------------------------------------
+echo "== CASE AB: artifact URL shape =="
+setup_case case-ab
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "deploy succeeds" 0 "$LAST_EXIT"
+assert_true "URL shape is exactly <base>/admin-h5-<SHA>/admin-h5-dist-<SHA>.tar.gz" \
+  grep -qF "cos.example.invalid/deploy-artifacts/admin-h5/admin-h5-${NEW_SHA}/admin-h5-dist-${NEW_SHA}.tar.gz" \
+  "$MOCK_STATE_DIR/curl_calls.log"
+
+# ---------------------------------------------------------------------------
+# CASE AC / AD -- COS upload + its secrets exist only in the non-PR publish
+# job of admin-h5-release.yml, never in the all-events build job.
+# ---------------------------------------------------------------------------
+echo "== CASE AC/AD: COS upload and its secrets are publish-job-only =="
+assert_true "COS upload step exists only in the publish job" \
+  workflow_cos_upload_only_in_publish_job "$RELEASE_WORKFLOW"
+assert_true "no DEPLOY_COS_SECRET_* reference before the publish job (build/PR section)" \
+  workflow_before_publish_has_no_cos_secrets "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AE -- existing COS object, same sha256 content -> reuse (real script,
+# fake disk-backed COS store, no network).
+# ---------------------------------------------------------------------------
+echo "== CASE AE: existing COS artifact with identical content is reused =="
+COS_STORE_AE="$WORK/cos-store-ae"
+echo "archive payload for AE" > "$WORK/ae-archive.tar.gz"
+sha256sum "$WORK/ae-archive.tar.gz" | awk '{print $1"  admin-h5-dist-shaAE.tar.gz"}' > "$WORK/ae-archive.tar.gz.sha256"
+run_cos_publish shaAE "$WORK/ae-archive.tar.gz" "$WORK/ae-archive.tar.gz.sha256" "$COS_STORE_AE"
+assert_exit "first publish succeeds" 0 "$LAST_EXIT"
+run_cos_publish shaAE "$WORK/ae-archive.tar.gz" "$WORK/ae-archive.tar.gz.sha256" "$COS_STORE_AE"
+assert_exit "second publish with identical content is reused, not blocked" 0 "$LAST_EXIT"
+assert_contains "reports COS_ARTIFACT_READY" "STATUS=COS_ARTIFACT_READY" "$LAST_OUTPUT"
+
+# ---------------------------------------------------------------------------
+# CASE AF -- existing COS object, same sha, differing payload -> fail closed
+# ---------------------------------------------------------------------------
+echo "== CASE AF: existing COS artifact with differing payload fails closed =="
+COS_STORE_AF="$WORK/cos-store-af"
+echo "original payload for AF" > "$WORK/af-archive.tar.gz"
+sha256sum "$WORK/af-archive.tar.gz" | awk '{print $1"  admin-h5-dist-shaAF.tar.gz"}' > "$WORK/af-archive.tar.gz.sha256"
+run_cos_publish shaAF "$WORK/af-archive.tar.gz" "$WORK/af-archive.tar.gz.sha256" "$COS_STORE_AF"
+assert_exit "first publish succeeds" 0 "$LAST_EXIT"
+echo "DIFFERENT payload for AF" > "$WORK/af-archive.tar.gz"
+sha256sum "$WORK/af-archive.tar.gz" | awk '{print $1"  admin-h5-dist-shaAF.tar.gz"}' > "$WORK/af-archive.tar.gz.sha256"
+run_cos_publish shaAF "$WORK/af-archive.tar.gz" "$WORK/af-archive.tar.gz.sha256" "$COS_STORE_AF"
+assert_exit "second publish with different content is blocked" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_EXISTING_COS_ARTIFACT_MISMATCH" "BLOCKED_EXISTING_COS_ARTIFACT_MISMATCH" "$LAST_OUTPUT"
+
+# ---------------------------------------------------------------------------
+# CASE AG -- public COS round-trip verification step precedes the workflow's
+# final success summary (static ordering proof; real network round-trip
+# against a live COS bucket is out of reach for this suite).
+# ---------------------------------------------------------------------------
+echo "== CASE AG: public COS round-trip verification precedes summary =="
+assert_true "verification step exists" \
+  grep -qF -- '- name: Verify public COS runtime URL' "$RELEASE_WORKFLOW"
+assert_true "verification does a real sha256sum -c against the public URL download" \
+  grep -qF "sha256sum -c \"\$CHECKSUM\"" "$RELEASE_WORKFLOW"
+assert_true "verification step precedes the summary step" \
+  workflow_cos_verification_before_summary "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AH -- publish job's checkout happens before actions/download-artifact,
+# and there is no second checkout after the artifact download (checkout can
+# clean/reset the workspace; downloading first then checking out risks the
+# checkout wiping local-build/ out from under the rest of the job).
+# ---------------------------------------------------------------------------
+echo "== CASE AH: publish job checks out before downloading the build artifact =="
+assert_true "checkout precedes actions/download-artifact" \
+  workflow_publish_checkout_before_artifact_download "$RELEASE_WORKFLOW"
+assert_true "no checkout occurs after the artifact download" \
+  workflow_publish_no_checkout_after_download "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AI -- rerun of the same SHA: the existing GitHub Release is accepted
+# (semantic payload match), and canonical-build is populated from THAT
+# release's own bytes, never this run's fresh local rebuild (which can
+# legitimately differ byte-for-byte -- built_at, tar/gzip metadata -- even
+# for an identical source SHA). Static: real GitHub Release network round-
+# trip is out of reach for this suite (see CASE T/U).
+# ---------------------------------------------------------------------------
+echo "== CASE AI: existing-release rerun canonicalizes to remote bytes =="
+assert_true "canonical-build is populated from \$REMOTE_DIR when reusing an existing release" \
+  workflow_canonical_from_remote_when_existing "$RELEASE_WORKFLOW"
+assert_true "canonical-build is populated from local-build only for a newly-created release" \
+  workflow_canonical_from_local_when_new "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AJ -- the COS publisher step is only ever given canonical-build
+# paths, never local-build paths directly.
+# ---------------------------------------------------------------------------
+echo "== CASE AJ: COS publish step receives canonical-build, not local-build =="
+assert_true "COS publish step uses canonical-build/\$ARCHIVE and canonical-build/\$CHECKSUM only" \
+  workflow_cos_publish_uses_canonical_build "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AK -- the canonical artifact's checksum is verified before it is ever
+# handed to the COS publisher.
+# ---------------------------------------------------------------------------
+echo "== CASE AK: canonical checksum verified immediately before COS publish =="
+assert_true "canonical checksum verification step exists" \
+  grep -qF 'name: Verify canonical artifact checksum' "$RELEASE_WORKFLOW"
+assert_true "canonical checksum step runs a real sha256sum -c" \
+  grep -qF 'cd canonical-build && sha256sum -c' "$RELEASE_WORKFLOW"
+assert_true "canonical checksum verification precedes the COS publish step" \
+  workflow_canonical_checksum_before_cos_publish "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AL -- rerunning the same SHA must not produce a false
+# BLOCKED_EXISTING_COS_ARTIFACT_MISMATCH: because canonicalization (CASE AI)
+# always feeds COS the SAME already-published bytes on every rerun of a
+# given SHA -- never a fresh, potentially-different local rebuild -- the
+# real publish-admin-artifact-cos.py script sees identical content both
+# times and reuses cleanly. Real script, fake disk-backed COS store, no
+# network -- exercises the actual mechanism CASE AI's static check proves
+# the workflow wires up correctly.
+# ---------------------------------------------------------------------------
+echo "== CASE AL: same-SHA rerun via canonical bytes does not false-mismatch =="
+COS_STORE_AL="$WORK/cos-store-al"
+echo "canonical payload for AL (this is what canonical-build/ would always contain, regardless of what a fresh local rebuild produced)" > "$WORK/al-canonical.tar.gz"
+sha256sum "$WORK/al-canonical.tar.gz" | awk '{print $1"  admin-h5-dist-shaAL.tar.gz"}' > "$WORK/al-canonical.tar.gz.sha256"
+run_cos_publish shaAL "$WORK/al-canonical.tar.gz" "$WORK/al-canonical.tar.gz.sha256" "$COS_STORE_AL"
+assert_exit "first run (new GitHub Release) publishes canonical bytes" 0 "$LAST_EXIT"
+# "Rerun" hands the exact same canonical bytes again (as the real workflow
+# would, having re-derived them from the existing GitHub Release rather
+# than from a fresh, possibly-different rebuild).
+run_cos_publish shaAL "$WORK/al-canonical.tar.gz" "$WORK/al-canonical.tar.gz.sha256" "$COS_STORE_AL"
+assert_exit "rerun with the same canonical bytes is reused, not blocked" 0 "$LAST_EXIT"
+assert_contains "rerun reports COS_ARTIFACT_READY, not a mismatch" "STATUS=COS_ARTIFACT_READY" "$LAST_OUTPUT"
+
+# ---------------------------------------------------------------------------
+# CASE AM -- admin-h5-release.yml's push.paths must trigger on a standalone
+# change to scripts/publish-admin-artifact-cos.py (it's the core GitHub
+# Release -> Tencent COS production artifact transport publisher now).
+# ---------------------------------------------------------------------------
+echo "== CASE AM: push.paths contains scripts/publish-admin-artifact-cos.py =="
+assert_true "push.paths triggers on publish-admin-artifact-cos.py" \
+  workflow_push_paths_contains_cos_publisher "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AN -- same closure for pull_request.paths, so a PR touching only the
+# publisher gets build-only verification.
+# ---------------------------------------------------------------------------
+echo "== CASE AN: pull_request.paths contains scripts/publish-admin-artifact-cos.py =="
+assert_true "pull_request.paths triggers on publish-admin-artifact-cos.py" \
+  workflow_pull_request_paths_contains_cos_publisher "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AO -- DEPLOY_CONFIG_FILE exists with unrelated keys/comments but no
+# ARTIFACT_BASE_URL= line: resolve_artifact_base_url's grep must not exit
+# the whole script under `set -Eeuo pipefail` when it finds no match. Must
+# still fail closed into BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED, exactly
+# like a missing config file (CASE X), not crash some other way.
+# ---------------------------------------------------------------------------
+echo "== CASE AO: config file exists but has no ARTIFACT_BASE_URL key =="
+setup_case case-ao
+unset ARTIFACT_BASE_URL
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+cat > "$DEPLOY_CONFIG_FILE" <<'EOF'
+# comment line, and an unrelated key -- deliberately no ARTIFACT_BASE_URL=
+SOME_OTHER_KEY=should-be-ignored
+EOF
+OLD_SHA="aaaa1111111111111111111111111111111ao"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+BEFORE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+publish admin-h5/feature.txt hi >/dev/null
+run_deploy
+assert_exit "missing key exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "$LAST_OUTPUT"
+AFTER_SHA_CHECK="$(git -C "$REPO" rev-parse HEAD)"
+assert_eq "HEAD unchanged (never reached git pull)" "$BEFORE_SHA" "$AFTER_SHA_CHECK"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
+
+# ---------------------------------------------------------------------------
+# CASE AP -- DEPLOY_CONFIG_FILE contains ARTIFACT_BASE_URL= with an empty
+# value: must fail closed the same way as a missing key, not resolve to an
+# empty-string transport base.
+# ---------------------------------------------------------------------------
+echo "== CASE AP: config file has ARTIFACT_BASE_URL with an empty value =="
+setup_case case-ap
+unset ARTIFACT_BASE_URL
+mkdir -p "$(dirname "$DEPLOY_CONFIG_FILE")"
+printf 'ARTIFACT_BASE_URL=\n' > "$DEPLOY_CONFIG_FILE"
+OLD_SHA="aaaa2222222222222222222222222222222ap"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+BEFORE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+publish admin-h5/feature.txt hi >/dev/null
+run_deploy
+assert_exit "empty value exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED" "$LAST_OUTPUT"
+AFTER_SHA_CHECK="$(git -C "$REPO" rev-parse HEAD)"
+assert_eq "HEAD unchanged (never reached git pull)" "$BEFORE_SHA" "$AFTER_SHA_CHECK"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
 
 # ---------------------------------------------------------------------------
 echo
