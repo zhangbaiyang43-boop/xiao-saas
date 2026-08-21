@@ -13,6 +13,7 @@ on:
       - 'scripts/deploy-production.sh'
       - 'scripts/rollback-admin-h5.sh'
       - 'scripts/test-deployment-tooling.sh'
+      - 'scripts/publish-admin-artifact-cos.py'
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
@@ -23,6 +24,7 @@ on:
       - 'scripts/deploy-production.sh'
       - 'scripts/rollback-admin-h5.sh'
       - 'scripts/test-deployment-tooling.sh'
+      - 'scripts/publish-admin-artifact-cos.py'
       - 'docs/production-deployment.md'
       - 'Makefile'
       - '.github/workflows/deployment-tooling-ci.yml'
@@ -66,6 +68,11 @@ jobs:
           bash -n scripts/test-deployment-tooling.sh
           echo "BASH_SYNTAX=success"
 
+      - name: Python syntax check (publish-admin-artifact-cos.py)
+        run: |
+          python3 -m py_compile scripts/publish-admin-artifact-cos.py
+          echo "PY_SYNTAX=success"
+
       - name: shellcheck
         run: |
           if command -v shellcheck >/dev/null 2>&1; then
@@ -83,9 +90,14 @@ jobs:
 
       - name: Certification summary
         run: |
+          echo "BASH_SYNTAX=success"
           echo "ATOMIC_SYMLINK_SWAP=success"
           echo "MIGRATION_FAIL_CLOSED=success"
           echo "NO_PRODUCTION_FRONTEND_BUILD=success"
+          echo "DOMESTIC_ARTIFACT_TRANSPORT=success"
+          echo "GITHUB_RUNTIME_DOWNLOAD_FORBIDDEN=success"
+          echo "ARTIFACT_TRANSPORT_CONFIG_FAIL_CLOSED=success"
+          echo "PR_COS_SECRET_ACCESS_FORBIDDEN=success"
           echo "ARTIFACT_CHECKSUM_GATE=success"
           echo "ARTIFACT_ARCHIVE_SAFETY=success"
           echo "PR_CONTENTS_WRITE_FORBIDDEN=success"

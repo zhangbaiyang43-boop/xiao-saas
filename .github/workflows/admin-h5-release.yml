@@ -169,7 +169,9 @@ jobs:
           echo "ARTIFACT_BUILD_VERIFIED=YES"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "ARTIFACT_PUBLISHED=NO"
+            echo "COS_ARTIFACT_PUBLISHED=NO"
             echo "PR_CONTENTS_WRITE=NO"
+            echo "PR_COS_SECRET_ACCESS=NO"
           fi
 
   publish:
@@ -303,8 +305,57 @@ jobs:
             --prerelease \
             --notes "Automated admin-h5 build artifact for commit $TARGET_SHA. Built by GitHub Actions, never on the production host."
 
+      # ---------------------------------------------------------------
+      # GitHub Release above is audit/backup/immutable-build-evidence
+      # only. Production evidence showed direct GitHub Release downloads
+      # from mainland China run at ~4-10KB/s and time out --
+      # PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN. Tencent COS
+      # below is the real production runtime transport. Both always run
+      # here (never conditioned on steps.existing above -- that's the
+      # GitHub Release's own reuse decision, independent of COS's).
+      # ---------------------------------------------------------------
+      - name: Checkout deployment tooling (for scripts/publish-admin-artifact-cos.py)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+
+      - name: Install COS SDK (pinned to the same version as saas-base's requirements.txt)
+        run: python3 -m pip install --user cos-python-sdk-v5==1.9.30
+
+      - name: Publish to Tencent COS
+        env:
+          DEPLOY_COS_SECRET_ID: ${{ secrets.DEPLOY_COS_SECRET_ID }}
+          DEPLOY_COS_SECRET_KEY: ${{ secrets.DEPLOY_COS_SECRET_KEY }}
+          DEPLOY_COS_REGION: ${{ secrets.DEPLOY_COS_REGION }}
+          DEPLOY_COS_BUCKET: ${{ secrets.DEPLOY_COS_BUCKET }}
+          DEPLOY_COS_BASE_URL: ${{ secrets.DEPLOY_COS_BASE_URL }}
+        run: |
+          python3 scripts/publish-admin-artifact-cos.py \
+            --sha "$TARGET_SHA" \
+            --archive "local-build/$ARCHIVE" \
+            --checksum "local-build/$CHECKSUM"
+
+      - name: Verify public COS runtime URL (upload API success != production HTTP transport success)
+        env:
+          DEPLOY_COS_BASE_URL: ${{ secrets.DEPLOY_COS_BASE_URL }}
+        run: |
+          BASE="${DEPLOY_COS_BASE_URL%/}"
+          TAG="admin-h5-${TARGET_SHA}"
+          PUBLIC_ARCHIVE_URL="$BASE/deploy-artifacts/admin-h5/$TAG/$ARCHIVE"
+          PUBLIC_CHECKSUM_URL="$BASE/deploy-artifacts/admin-h5/$TAG/$CHECKSUM"
+
+          VERIFY_DIR="$(mktemp -d)"
+          curl -fsSL --connect-timeout 10 --max-time 60 -o "$VERIFY_DIR/$CHECKSUM" "$PUBLIC_CHECKSUM_URL"
+          curl -fsSL --connect-timeout 10 --max-time 60 -o "$VERIFY_DIR/$ARCHIVE" "$PUBLIC_ARCHIVE_URL"
+          (cd "$VERIFY_DIR" && sha256sum -c "$CHECKSUM")
+          echo "COS_RUNTIME_ARTIFACT_VERIFIED=YES"
+
       - name: Publish summary
         run: |
           echo "ARTIFACT_TARGET_SHA=$TARGET_SHA"
           echo "ARTIFACT_TAG=admin-h5-$TARGET_SHA"
           echo "ARTIFACT_PUBLISHED=YES"
+          echo "GITHUB_RELEASE_ARTIFACT=READY"
+          echo "COS_ARTIFACT=READY"
+          echo "COS_RUNTIME_ARTIFACT_VERIFIED=YES"
