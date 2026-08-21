@@ -144,14 +144,31 @@ explicit `workflow_dispatch` with a full commit SHA), it:
    (`sha256sum <archive> > <archive>.sha256`, directly `sha256sum -c`-able).
 5. Publishes both as assets on a GitHub Release tagged `admin-h5-<FULL_SHA>`
    (title `admin-h5 <FULL_SHA>`, prerelease). If a release for that tag
-   already exists, it's verified for self-consistency (checksum still
-   passes) and reused -- **never silently overwritten** with different bytes.
+   already exists: both assets must actually be present (an incomplete
+   existing release fails closed rather than being silently rebuilt over),
+   the remote pair's own checksum is re-verified, its archive entries are
+   inspected the same way as [Artifact safety gates](#artifact-safety-gates)
+   below, and the extracted payload must be byte-identical to this build's
+   own output (`release.json`'s `sha` matches, `index.html` matches via
+   `cmp`, `assets/` matches via `diff -qr` -- `built_at` is excluded from
+   the comparison, since it legitimately differs between a rebuild and
+   what's already published). Any mismatch stops the workflow --
+   **never silently overwritten, never `--clobber`'d** -- a same-SHA content
+   difference needs a human, not an automatic fix.
 
-On a **pull request**, the same build-and-package steps run (so packaging
-itself is exercised before merge), but nothing is ever published -- an
-unmerged PR never gets `contents: write` release-publish behavior. Only
-`push` to `main` or an explicit `workflow_dispatch` (with a real target SHA)
-publishes a release.
+This is split across two jobs, not one: `build` (all events, `permissions:
+contents: read`) does the actual `npm ci && npm run build` and packaging;
+`publish` (`needs: build`, `if: github.event_name != 'pull_request'`,
+`permissions: contents: write`) never builds anything itself -- it only
+downloads the exact artifact `build` already produced (via a workflow
+artifact, which is job-to-job transport only, never the production runtime
+transport) and publishes/reuses it. Untrusted PR candidate code runs
+`npm ci`/`npm run build` only inside the read-only `build` job; nothing
+that ever executes PR code holds `contents: write`. On a **pull request**,
+`build` still runs (so packaging itself is exercised before merge) but
+`publish` never does -- an unmerged PR never gets `contents: write`
+release-publish behavior at all. Only `push` to `main` or an explicit
+`workflow_dispatch` (with a real target SHA) reaches the `publish` job.
 
 **Why a GitHub Release asset, not SSH/PAT to the server:** the repo (and its
 build output) isn't a secret, so a public, content-addressed, checksummed
@@ -281,7 +298,13 @@ already-valid `releases/<sha>` exists yet) passes through, in order:
 2. **`BLOCKED_ADMIN_ARTIFACT_CHECKSUM`** -- `sha256sum -c` against the
    downloaded `.sha256` file fails.
 3. **`BLOCKED_UNSAFE_ADMIN_ARTIFACT`** -- the archive contains an absolute
-   path, a `..` path component, or a symlink entry. Never extracted.
+   path, a genuine `..` path component (checked per path component, so a
+   legitimate filename like `app..js` is fine), or any entry that isn't a
+   plain regular file or directory -- symlink, hardlink, device, fifo,
+   socket. Never extracted. Checked via Python's `tarfile` module (not
+   `tar -tvzf` text parsing, which can't reliably tell a hardlink from a
+   regular file) -- production already requires Python for `saas-base`, so
+   this adds no new host dependency.
 4. **`BLOCKED_INVALID_ADMIN_ARTIFACT`** -- extracted fine, but missing
    `index.html`/`assets/`/`release.json`, or `release.json`'s `sha` doesn't
    match the commit being deployed.
