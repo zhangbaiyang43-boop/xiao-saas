@@ -26,12 +26,21 @@ if [ "$#" -ne 1 ]; then
   exit 2
 fi
 
+release_json_sha() {
+  grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null \
+    | sed -E 's/.*:[[:space:]]*"([^"]*)"/\1/' \
+    | head -n1
+}
+
 TARGET_SHA="$1"
 RELEASE_DIR="$ADMIN_RELEASE_ROOT/$TARGET_SHA"
 
-if [ ! -s "$RELEASE_DIR/index.html" ]; then
+if ! { [ -s "$RELEASE_DIR/index.html" ] && [ -d "$RELEASE_DIR/assets" ] \
+       && [ -s "$RELEASE_DIR/release.json" ] \
+       && [ "$(release_json_sha "$RELEASE_DIR/release.json")" = "$TARGET_SHA" ]; }; then
   echo "STATUS=BLOCKED_UNKNOWN_RELEASE" >&2
-  echo "$RELEASE_DIR/index.html does not exist -- refusing to switch to it." >&2
+  echo "$RELEASE_DIR failed validation (missing index.html/assets/release.json," >&2
+  echo "or release.json's sha does not match $TARGET_SHA) -- refusing to switch to it." >&2
   echo "Available releases:" >&2
   ls -1t "$ADMIN_RELEASE_ROOT" 2>/dev/null >&2 || true
   exit 1
