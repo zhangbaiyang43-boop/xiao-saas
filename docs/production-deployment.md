@@ -5,6 +5,16 @@ is meant to become the *only* source-of-truth checkout for both `saas-base`
 and `admin-h5` in production, retiring the historical second hand-maintained
 source tree under `/www/wwwroot/admin-h5/{src,scripts,node_modules,...}`.
 
+**PRODUCTION_FRONTEND_BUILD=FORBIDDEN.** The production host has ~1.6 GiB RAM
+and `vite build` reliably locked it up on the first real bootstrap attempt --
+this is a deployment-architecture problem, not something swap/`NODE_OPTIONS`/
+lower concurrency fixes. `admin-h5` is built exactly once, by GitHub Actions,
+and never on the production host at all. `scripts/deploy-production.sh`
+contains no executable `npm`/`npx`/`vite` invocation anywhere (enforced by a
+dedicated regression case in `scripts/test-deployment-tooling.sh`), and the
+production host does not need Node.js or `admin-h5/node_modules` installed
+for deployment to work.
+
 **FIRST_MIGRATION_STATUS=NOT_YET_EXECUTED.** The tooling below (`scripts/
 deploy-production.sh`, `scripts/rollback-admin-h5.sh`) exists and is
 Linux-certified (see [GitHub Actions](#github-actions)), but the one-time
@@ -36,9 +46,12 @@ That's it. It:
    hasn't run. See [Migration releases](#migration-releases) below.
 4. Only now: fast-forwards `main` (`git pull --ff-only`) -- never
    force-pulls, never rebases, never resets.
-5. If `admin-h5/**` changed: builds it and copies the build into an
+5. If `admin-h5/**` changed: downloads the GitHub-built, checksummed
+   artifact for this exact commit (see [Artifact build & publish](#artifact-build--publish-github-actions)),
+   verifies its checksum and archive-entry safety, extracts it into an
    immutable, SHA-named release directory -- but does **not** switch
-   `current` yet.
+   `current` yet. If the artifact isn't published yet, stops here
+   (`ADMIN_ARTIFACT_NOT_READY`) before touching the backend or `current`.
 6. If `saas-base/**` changed: restarts `saas-base.service` and verifies
    `/health` returns healthy. **A failure here stops the whole deploy before
    the admin-h5 release prepared in step 5 is ever switched live** -- you
@@ -57,7 +70,10 @@ That's it. It:
 
 - `cp -r dist ...` by hand into `/www/wwwroot/admin-h5`
 - Edit source files directly under `/www/wwwroot/admin-h5/src`
-- Run `npm run build` inside the old deploy directory
+- Run `npm ci` / `npm run build` / `vite build` / `npx vite` **anywhere on
+  the production host** -- not inside `deploy-production.sh`, not by hand,
+  not to "just this once" work around a stuck deploy. This is the incident
+  that started this phase: the production host doesn't have the RAM for it.
 - Upload `dist/` via FTP/SFTP
 - Maintain a second `git` checkout (or, worse, no `git` at all) under
   `/www/wwwroot/admin-h5`
@@ -72,7 +88,8 @@ one command above, run against `/www/wwwroot/xiao`.
 
 ```
 /www/wwwroot/xiao/            # git checkout of origin/main
-├── admin-h5/                 # frontend source -- built here, never edited elsewhere
+├── admin-h5/                 # frontend source -- built ONLY by GitHub Actions,
+│                              # never on the production host, never edited here
 ├── saas-base/                # backend source, served directly by saas-base.service
 └── scripts/
     ├── deploy-production.sh
@@ -100,7 +117,8 @@ Every release carries `release.json`:
 ```json
 {
   "sha": "<full git sha>",
-  "built_at": "<UTC ISO8601 timestamp>"
+  "built_at": "<UTC ISO8601 timestamp>",
+  "builder": "github-actions"
 }
 ```
 
@@ -108,6 +126,49 @@ To find out which commit is currently live:
 
 ```bash
 cat /www/wwwroot/admin-h5/current/release.json
+```
+
+## Artifact build & publish (GitHub Actions)
+
+`admin-h5` is built exactly once per commit, by `.github/workflows/admin-h5-release.yml`
+on `ubuntu-latest` -- never on the production host. On push to `main` (or an
+explicit `workflow_dispatch` with a full commit SHA), it:
+
+1. Checks out the exact target commit (identity-proofed the same way as the
+   other workflows in this repo).
+2. `npm ci && npm run build` in `admin-h5/`.
+3. Stages `index.html` + `assets/` + a `release.json` (`{"sha", "built_at",
+   "builder": "github-actions"}`, no secrets) at the archive root -- no
+   nested `dist/` layer.
+4. Packages `admin-h5-dist-<FULL_SHA>.tar.gz` + `admin-h5-dist-<FULL_SHA>.tar.gz.sha256`
+   (`sha256sum <archive> > <archive>.sha256`, directly `sha256sum -c`-able).
+5. Publishes both as assets on a GitHub Release tagged `admin-h5-<FULL_SHA>`
+   (title `admin-h5 <FULL_SHA>`, prerelease). If a release for that tag
+   already exists, it's verified for self-consistency (checksum still
+   passes) and reused -- **never silently overwritten** with different bytes.
+
+On a **pull request**, the same build-and-package steps run (so packaging
+itself is exercised before merge), but nothing is ever published -- an
+unmerged PR never gets `contents: write` release-publish behavior. Only
+`push` to `main` or an explicit `workflow_dispatch` (with a real target SHA)
+publishes a release.
+
+**Why a GitHub Release asset, not SSH/PAT to the server:** the repo (and its
+build output) isn't a secret, so a public, content-addressed, checksummed
+release asset is a perfectly good runtime artifact transport. This adds *no*
+new credential anywhere -- no production SSH key, no GitHub PAT stored on
+the server, no server-side secret at all. GitHub Actions still isn't the
+deploy authority: it only produces the artifact. Going live is still always
+a deliberate `./scripts/deploy-production.sh` run on the server.
+
+`deploy-production.sh` derives the download URLs itself from `AFTER_SHA`
+(the commit it just checked out):
+
+```
+GITHUB_REPOSITORY=zhangbaiyang43-boop/xiao-saas   # overridable, fixed default
+TAG=admin-h5-${AFTER_SHA}
+ARTIFACT=admin-h5-dist-${AFTER_SHA}.tar.gz
+CHECKSUM=admin-h5-dist-${AFTER_SHA}.tar.gz.sha256
 ```
 
 ## Nginx contract
@@ -206,16 +267,36 @@ service:
 ./scripts/deploy-production.sh --dry-run
 ```
 
-This only runs `git fetch` + read-only diffs; it never checks out, builds,
-releases, switches, or restarts anything.
+This only runs `git fetch` + read-only diffs; it never checks out,
+downloads, releases, switches, or restarts anything.
+
+## Artifact safety gates
+
+Every admin-h5 deploy that has to download a fresh artifact (i.e. no
+already-valid `releases/<sha>` exists yet) passes through, in order:
+
+1. **`ADMIN_ARTIFACT_NOT_READY`** -- the archive or checksum file 404s (the
+   `admin-h5-release` workflow for this SHA hasn't finished publishing yet).
+   Stops before touching the backend or `current`; just re-run once it's up.
+2. **`BLOCKED_ADMIN_ARTIFACT_CHECKSUM`** -- `sha256sum -c` against the
+   downloaded `.sha256` file fails.
+3. **`BLOCKED_UNSAFE_ADMIN_ARTIFACT`** -- the archive contains an absolute
+   path, a `..` path component, or a symlink entry. Never extracted.
+4. **`BLOCKED_INVALID_ADMIN_ARTIFACT`** -- extracted fine, but missing
+   `index.html`/`assets/`/`release.json`, or `release.json`'s `sha` doesn't
+   match the commit being deployed.
+
+Any of these leaves `current` untouched and the backend untouched (they all
+happen before Phase C/D/E backend deploy even starts).
 
 ## Bootstrap mode (first cutover only)
 
-`--bootstrap-admin` (implies `--force-admin`) builds, releases, and points
-`current` at the new release exactly like routine mode -- but does **not**
-treat a request to the live production URL as proof of anything, because at
-first-cutover time nginx is still serving the legacy `dist/`, so that request
-would just prove the *old* site still works. Instead it reports:
+`--bootstrap-admin` (implies `--force-admin`) downloads, verifies, releases,
+and points `current` at the new release exactly like routine mode -- never
+builds -- but does **not** treat a request to the live production URL as
+proof of anything, because at first-cutover time nginx is still serving the
+legacy `dist/`, so that request would just prove the *old* site still
+works. Instead it reports:
 
 ```
 ADMIN_BOOTSTRAP_READY=YES
@@ -235,10 +316,13 @@ legacy `/www/wwwroot/admin-h5/dist` layout:
 1. The old `dist/` keeps serving traffic throughout -- nothing is torn down
    up front.
 2. Run `deploy-production.sh --bootstrap-admin` (and `--force-backend` if the
-   backend also needs a first sync) to build from `/www/wwwroot/xiao/admin-h5`
-   and produce the first `releases/<sha>` + `current` symlink, side by side
-   with the still-live `dist/`. This reports `ADMIN_HTTP_VERIFICATION=
-   PENDING_NGINX_CUTOVER`, not a verified-live claim -- that's expected.
+   backend also needs a first sync) to download the GitHub-built artifact
+   for the current main SHA and produce the first `releases/<sha>` +
+   `current` symlink, side by side with the still-live `dist/`. This
+   reports `ADMIN_HTTP_VERIFICATION=PENDING_NGINX_CUTOVER`, not a
+   verified-live claim -- that's expected. If it instead reports
+   `ADMIN_ARTIFACT_NOT_READY`, the `admin-h5-release` workflow for that SHA
+   hasn't finished publishing yet -- wait for it, don't build locally.
 3. Update `saas.zhangbaiyang.com.conf`'s `root` from
    `/www/wwwroot/admin-h5/dist` to `/www/wwwroot/admin-h5/current`.
 4. `nginx -t` -- only proceed if it passes.
@@ -264,20 +348,25 @@ commit -- not on every deploy.
 
 ## GitHub Actions
 
-Two separate things, easy to conflate:
+Three separate things, easy to conflate:
 
-1. **Certifying the deployment tooling itself** -- `.github/workflows/
+1. **Building & publishing the admin-h5 artifact** -- `.github/workflows/
+   admin-h5-release.yml`. See [Artifact build & publish](#artifact-build--publish-github-actions)
+   above. The only place `npm run build` ever runs, period.
+2. **Certifying the deployment tooling itself** -- `.github/workflows/
    deployment-tooling-ci.yml` runs on every push/PR that touches
    `scripts/deploy-production.sh`, `scripts/rollback-admin-h5.sh`,
    `scripts/test-deployment-tooling.sh`, this doc, or `Makefile`. It's the
-   authority for the atomic symlink-swap, migration-fail-closed, and
-   backend-before-admin-switch contracts -- **a Windows/MSYS dev machine
-   cannot certify this tooling**: `ln -s`/`mv -T` symlink-swap semantics
-   there differ from real GNU coreutils/Linux (confirmed empirically --
-   running `scripts/test-deployment-tooling.sh` on Windows/Git-Bash fails
-   exactly the symlink-dependent cases and passes everything else). Only a
-   green run on this workflow's `ubuntu-latest` runner counts.
-2. **GitHub -> production SSH auto-deploy** -- still NOT in scope. There is
+   authority for the atomic symlink-swap, migration-fail-closed,
+   artifact-checksum, archive-safety, and backend-before-admin-switch
+   contracts -- **a Windows/MSYS dev machine cannot certify this tooling**:
+   `ln -s`/`mv -T` symlink-swap semantics there differ from real GNU
+   coreutils/Linux (confirmed empirically -- running `scripts/test-
+   deployment-tooling.sh` on Windows/Git-Bash fails exactly the
+   symlink-dependent cases and passes everything else, archive/checksum
+   logic included). Only a green run on this workflow's `ubuntu-latest`
+   runner counts.
+3. **GitHub -> production SSH auto-deploy** -- still NOT in scope. There is
    no established trust relationship yet between GitHub Actions and the
    production host (no SSH key, no GitHub Environment approval gate), so
    automatic `push to main -> production` is a deliberately separate, later

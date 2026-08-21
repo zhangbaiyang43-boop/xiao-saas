@@ -3,12 +3,13 @@
 # Linux integration contract for the deployment tooling (scripts/deploy-
 # production.sh, scripts/rollback-admin-h5.sh). TEST_LEVEL=LINUX_INTEGRATION_CONTRACT.
 #
-# Never touches real /www/wwwroot, systemctl, a production URL, or this
-# repo's own worktree/remote: every case builds a disposable git origin +
-# checkout under mktemp -d, and npm/systemctl/curl/journalctl are replaced
-# with shims on PATH so no real network, service, or Node toolchain is
-# required. git itself is real (that's exactly what needs proving), just
-# operating on throwaway repos.
+# Never touches real /www/wwwroot, systemctl, a production URL, a real
+# GitHub Release, or this repo's own worktree/remote: every case builds a
+# disposable git origin + checkout under mktemp -d, and npm/systemctl/curl/
+# journalctl are replaced with shims on PATH so no real network, service, or
+# Node toolchain is required. git/tar/sha256sum/python are real (that's
+# exactly what needs proving for git logic and archive handling), just
+# operating on throwaway repos and fixture archives.
 #
 # Windows/MSYS note: this script CAN run locally on a dev machine for quick
 # iteration, but its result there is NOT authoritative for the symlink/mv
@@ -47,21 +48,19 @@ path_absent() { [ ! -e "$1" ]; }
 
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
-# grep, sed, cp, mv, ln, mkdir, rm, readlink, mktemp, chown, date, bash...)
-# is the real system binary further down PATH.
+# tar, sha256sum, python, grep, sed, cp, mv, ln, mkdir, rm, readlink,
+# mktemp, chown, date, bash...) is the real system binary further down PATH.
 # ---------------------------------------------------------------------------
 MOCKBIN="$WORK/bin"
 mkdir -p "$MOCKBIN"
 
 cat > "$MOCKBIN/npm" <<'MOCK'
 #!/usr/bin/env bash
+# deploy-production.sh must never invoke this (PRODUCTION_FRONTEND_BUILD=
+# FORBIDDEN) -- this mock exists only so tests can prove that by asserting
+# its call log never gets written to.
 : "${MOCK_STATE_DIR:?MOCK_STATE_DIR not set}"
 echo "$*" >> "$MOCK_STATE_DIR/npm_calls.log"
-if [ "$1" = "run" ] && [ "$2" = "build" ]; then
-  mkdir -p dist/assets
-  echo '<html><body><script src="/assets/app.js"></script></body></html>' > dist/index.html
-  echo 'console.log(1)' > dist/assets/app.js
-fi
 exit 0
 MOCK
 
@@ -81,7 +80,15 @@ MOCK
 cat > "$MOCKBIN/curl" <<'MOCK'
 #!/usr/bin/env bash
 : "${MOCK_STATE_DIR:?MOCK_STATE_DIR not set}"
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
 url="${*: -1}"
+echo "$*" >> "$MOCK_STATE_DIR/curl_calls.log"
+
 case "$url" in
   *9898/health*|*/health)
     if [ -f "$MOCK_STATE_DIR/backend_healthy" ]; then
@@ -89,6 +96,20 @@ case "$url" in
       exit 0
     fi
     exit 7
+    ;;
+  *.tar.gz.sha256)
+    if [ -f "$MOCK_STATE_DIR/artifact_ready" ] && [ -n "$out" ]; then
+      cp "$MOCK_STATE_DIR/artifact.tar.gz.sha256" "$out"
+      exit 0
+    fi
+    exit 22
+    ;;
+  *.tar.gz)
+    if [ -f "$MOCK_STATE_DIR/artifact_ready" ] && [ -n "$out" ]; then
+      cp "$MOCK_STATE_DIR/artifact.tar.gz" "$out"
+      exit 0
+    fi
+    exit 22
     ;;
   *)
     if [ -f "$MOCK_STATE_DIR/frontend_verifiable" ]; then
@@ -110,7 +131,97 @@ chmod +x "$MOCKBIN"/npm "$MOCKBIN"/systemctl "$MOCKBIN"/curl "$MOCKBIN"/journalc
 export PATH="$MOCKBIN:$PATH"
 
 # ---------------------------------------------------------------------------
-# Fixture helpers -- every case gets its own disposable origin + checkout.
+# Fixture archive builder -- crafts tar.gz artifacts (including deliberately
+# unsafe ones: path traversal, symlink entries) purely with Python's
+# tarfile module, so it works identically regardless of whether the host OS
+# can create real symlinks (Windows/Git-Bash notoriously can't without
+# elevated privileges -- this sidesteps that entirely for archive-safety
+# testing specifically).
+# ---------------------------------------------------------------------------
+PYTHON_BIN="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+if [ -z "$PYTHON_BIN" ]; then
+  echo "No python3/python interpreter found -- cannot build test fixture archives." >&2
+  exit 1
+fi
+
+cat > "$WORK/make_archive.py" <<'PYEOF'
+import io
+import json
+import sys
+import tarfile
+
+mode, out_path, sha = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+def add(tf, name, data=b"", ttype=tarfile.REGTYPE, linkname=None):
+    info = tarfile.TarInfo(name=name)
+    info.type = ttype
+    if linkname is not None:
+        info.linkname = linkname
+    if ttype == tarfile.REGTYPE:
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+    else:
+        tf.addfile(info)
+
+
+INDEX_HTML = b'<html><body><script src="/assets/app.js"></script></body></html>'
+APP_JS = b"console.log(1)"
+RELEASE_JSON = json.dumps(
+    {"sha": sha, "built_at": "2026-01-01T00:00:00Z", "builder": "github-actions"}
+).encode()
+
+with tarfile.open(out_path, "w:gz") as tf:
+    if mode == "traversal":
+        add(tf, "../evil.txt", b"pwn")
+        add(tf, "index.html", INDEX_HTML)
+        add(tf, "assets/app.js", APP_JS)
+        add(tf, "release.json", RELEASE_JSON)
+    elif mode == "symlink":
+        add(tf, "index.html", INDEX_HTML)
+        add(tf, "assets/app.js", APP_JS)
+        add(tf, "assets/evil-link", ttype=tarfile.SYMTYPE, linkname="/etc/passwd")
+        add(tf, "release.json", RELEASE_JSON)
+    else:
+        add(tf, "index.html", INDEX_HTML)
+        add(tf, "assets/app.js", APP_JS)
+        add(tf, "release.json", RELEASE_JSON)
+PYEOF
+
+make_archive() {
+  # usage: make_archive <mode: normal|traversal|symlink> <out.tar.gz> <release.json-sha-field>
+  "$PYTHON_BIN" "$WORK/make_archive.py" "$1" "$2" "$3"
+}
+
+make_checksum() {
+  # usage: make_checksum <archive-path> <record-name> <checksum-out-path>
+  local archive="$1" record_name="$2" out="$3" hash
+  hash="$(sha256sum "$archive" | awk '{print $1}')"
+  printf '%s  %s\n' "$hash" "$record_name" > "$out"
+}
+
+# usage: prepare_artifact_fixture <case-dir> <mode> <release-json-sha-field> <expected-local-filename-sha> [--corrupt-checksum]
+# Populates $MOCK_STATE_DIR/artifact.tar.gz(.sha256) and touches
+# artifact_ready, so the mock curl above will "serve" it for any
+# admin-h5-dist-*.tar.gz(.sha256) request.
+prepare_artifact_fixture() {
+  local case_dir="$1" mode="$2" release_sha_field="$3" local_name_sha="$4" corrupt="${5:-}"
+  local raw="$case_dir/raw-artifact.tar.gz"
+  make_archive "$mode" "$raw" "$release_sha_field"
+  make_checksum "$raw" "admin-h5-dist-${local_name_sha}.tar.gz" "$case_dir/raw-artifact.tar.gz.sha256"
+  cp "$raw" "$MOCK_STATE_DIR/artifact.tar.gz"
+  if [ "$corrupt" = "--corrupt-checksum" ]; then
+    local record_name
+    record_name="$(awk '{print $2}' "$case_dir/raw-artifact.tar.gz.sha256")"
+    printf '%064d  %s\n' 0 "$record_name" > "$MOCK_STATE_DIR/artifact.tar.gz.sha256"
+  else
+    cp "$case_dir/raw-artifact.tar.gz.sha256" "$MOCK_STATE_DIR/artifact.tar.gz.sha256"
+  fi
+  touch "$MOCK_STATE_DIR/artifact_ready"
+}
+
+# ---------------------------------------------------------------------------
+# Fixture repo helpers -- every case gets its own disposable origin + checkout.
 # ---------------------------------------------------------------------------
 setup_case() {
   local name="$1"
@@ -134,7 +245,6 @@ setup_case() {
     git commit -q -m init
     git push -q -u origin main
   )
-  ADMIN_SOURCE="$REPO/admin-h5"
   ADMIN_RELEASE_ROOT="$CASE_DIR/admin-h5-releases"
   ADMIN_CURRENT="$CASE_DIR/admin-h5-current"
   BACKEND_SERVICE="fake-backend.service"
@@ -142,7 +252,7 @@ setup_case() {
   PRODUCTION_URL="https://example.invalid/"
   MOCK_STATE_DIR="$CASE_DIR/mock-state"
   mkdir -p "$MOCK_STATE_DIR"
-  export REPO ADMIN_SOURCE ADMIN_RELEASE_ROOT ADMIN_CURRENT BACKEND_SERVICE BACKEND_HEALTH_URL PRODUCTION_URL MOCK_STATE_DIR
+  export REPO ADMIN_RELEASE_ROOT ADMIN_CURRENT BACKEND_SERVICE BACKEND_HEALTH_URL PRODUCTION_URL MOCK_STATE_DIR
 }
 
 # publish <path> <content> [<path2> <content2> ...] -- commits+pushes via a
@@ -210,7 +320,7 @@ assert_exit "dirty tree exits 1" 1 "$LAST_EXIT"
 assert_contains "reports BLOCKED_DIRTY_PRODUCTION_TREE" "BLOCKED_DIRTY_PRODUCTION_TREE" "$LAST_OUTPUT"
 
 # ---------------------------------------------------------------------------
-# CASE C -- dry-run never checks out/builds/restarts/switches
+# CASE C -- dry-run never checks out/downloads/restarts/switches
 # ---------------------------------------------------------------------------
 echo "== CASE C: dry-run is a true no-op =="
 setup_case case-c
@@ -222,6 +332,7 @@ assert_contains "reports DRY_RUN_OK" "STATUS=DRY_RUN_OK" "$LAST_OUTPUT"
 AFTER_SHA="$(git -C "$REPO" rev-parse HEAD)"
 assert_eq "dry-run never advances HEAD" "$BEFORE_SHA" "$AFTER_SHA"
 assert_true "dry-run never invokes npm" file_absent "$MOCK_STATE_DIR/npm_calls.log"
+assert_true "dry-run never downloads anything" file_absent "$MOCK_STATE_DIR/curl_calls.log"
 assert_true "dry-run never creates ADMIN_CURRENT" path_absent "$ADMIN_CURRENT"
 
 # ---------------------------------------------------------------------------
@@ -238,20 +349,22 @@ AFTER_SHA="$(git -C "$REPO" rev-parse HEAD)"
 assert_eq "HEAD unchanged when migration blocks" "$BEFORE_SHA" "$AFTER_SHA"
 
 # ---------------------------------------------------------------------------
-# CASE E -- real atomic symlink swap (admin-only change)
+# CASE E -- real atomic symlink swap (admin-only change, via downloaded artifact)
 # ---------------------------------------------------------------------------
-echo "== CASE E: atomic symlink swap =="
+echo "== CASE E: atomic symlink swap (downloaded artifact) =="
 setup_case case-e
 OLD_SHA="0000000000000000000000000000000000old1"
 make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
 ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
 touch "$MOCK_STATE_DIR/frontend_verifiable"
 NEW_SHA="$(publish admin-h5/feature.txt hello)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
 run_deploy
 assert_exit "admin-only deploy succeeds" 0 "$LAST_EXIT"
 assert_contains "reports DEPLOY_OK" "STATUS=DEPLOY_OK" "$LAST_OUTPUT"
 CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
 assert_eq "current points at the new release" "$ADMIN_RELEASE_ROOT/$NEW_SHA" "$CURRENT_TARGET"
+assert_true "npm was never invoked" file_absent "$MOCK_STATE_DIR/npm_calls.log"
 
 # ---------------------------------------------------------------------------
 # CASE F -- rollback re-points current, no rebuild, no git checkout
@@ -279,11 +392,12 @@ make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
 ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
 touch "$MOCK_STATE_DIR/frontend_verifiable" # would pass if ever reached -- must NOT be reached
 NEW_SHA="$(publish admin-h5/feature.txt hi saas-base/app_marker.py "# backend change")"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
 # deliberately no backend_healthy marker -> systemctl is-active fails
 run_deploy
 assert_exit "combined deploy fails when backend unhealthy" 1 "$LAST_EXIT"
 assert_contains "reports BACKEND_DEPLOY_FAILED" "BACKEND_DEPLOY_FAILED" "$LAST_OUTPUT"
-assert_true "admin release was still built/prepared" test -s "$ADMIN_RELEASE_ROOT/$NEW_SHA/index.html"
+assert_true "admin release was still downloaded/prepared" test -s "$ADMIN_RELEASE_ROOT/$NEW_SHA/index.html"
 CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
 assert_eq "current still points at the OLD release (never switched live)" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
 
@@ -298,6 +412,7 @@ ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
 touch "$MOCK_STATE_DIR/frontend_verifiable"
 touch "$MOCK_STATE_DIR/backend_healthy"
 NEW_SHA="$(publish admin-h5/feature.txt hi saas-base/app_marker.py "# backend change")"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
 run_deploy
 assert_exit "combined deploy succeeds" 0 "$LAST_EXIT"
 assert_contains "reports DEPLOY_OK" "STATUS=DEPLOY_OK" "$LAST_OUTPUT"
@@ -318,6 +433,166 @@ run_deploy
 assert_exit "corrupt existing release blocks with exit 1" 1 "$LAST_EXIT"
 assert_contains "reports BLOCKED_INVALID_EXISTING_RELEASE" "BLOCKED_INVALID_EXISTING_RELEASE" "$LAST_OUTPUT"
 assert_contains "corrupt release.json was not overwritten" "totally-wrong-sha" "$(cat "$ADMIN_RELEASE_ROOT/$NEW_SHA/release.json")"
+
+# ---------------------------------------------------------------------------
+# CASE J -- production deploy script contains no executable npm/npx/vite path
+# ---------------------------------------------------------------------------
+echo "== CASE J: no npm/npx/vite executable path in the production script =="
+CODE_ONLY="$(grep -v '^[[:space:]]*#' "$DEPLOY_SCRIPT")"
+if grep -Eq '(^|[^a-zA-Z0-9_])(npm|npx|vite)([^a-zA-Z0-9_]|$)' <<<"$CODE_ONLY"; then
+  bad "deploy-production.sh must not invoke npm/npx/vite outside comments"
+else
+  ok "deploy-production.sh has no executable npm/npx/vite build path"
+fi
+
+# ---------------------------------------------------------------------------
+# CASE K -- artifact not yet published: fail closed before backend/switch
+# ---------------------------------------------------------------------------
+echo "== CASE K: artifact not yet published =="
+setup_case case-k
+OLD_SHA="1111111111111111111111111111111111111k"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+publish admin-h5/feature.txt hi >/dev/null
+# deliberately never touch artifact_ready
+run_deploy
+assert_exit "missing artifact exits 1" 1 "$LAST_EXIT"
+assert_contains "reports ADMIN_ARTIFACT_NOT_READY" "ADMIN_ARTIFACT_NOT_READY" "$LAST_OUTPUT"
+assert_true "backend was never restarted" file_absent "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged when artifact is missing" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE L -- valid artifact: checksum verified, release prepared and switched
+# ---------------------------------------------------------------------------
+echo "== CASE L: valid artifact -- checksum verified, release prepared =="
+setup_case case-l
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+run_deploy
+assert_exit "valid artifact deploy succeeds" 0 "$LAST_EXIT"
+assert_true "release directory was created" test -s "$ADMIN_RELEASE_ROOT/$NEW_SHA/index.html"
+assert_true "release.json records the correct sha" grep -qF "\"sha\": \"$NEW_SHA\"" "$ADMIN_RELEASE_ROOT/$NEW_SHA/release.json"
+assert_true "release.json records github-actions as builder" grep -qF '"builder": "github-actions"' "$ADMIN_RELEASE_ROOT/$NEW_SHA/release.json"
+
+# ---------------------------------------------------------------------------
+# CASE M -- checksum mismatch fails closed, current unchanged
+# ---------------------------------------------------------------------------
+echo "== CASE M: checksum mismatch =="
+setup_case case-m
+OLD_SHA="2222222222222222222222222222222222222m"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA" --corrupt-checksum
+run_deploy
+assert_exit "checksum mismatch exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_ADMIN_ARTIFACT_CHECKSUM" "BLOCKED_ADMIN_ARTIFACT_CHECKSUM" "$LAST_OUTPUT"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged after checksum failure" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE N -- release.json sha mismatch fails closed, current unchanged
+# ---------------------------------------------------------------------------
+echo "== CASE N: release.json sha mismatch =="
+setup_case case-n
+OLD_SHA="3333333333333333333333333333333333333n"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "totally-wrong-sha-value" "$NEW_SHA"
+run_deploy
+assert_exit "release.json sha mismatch exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_INVALID_ADMIN_ARTIFACT" "BLOCKED_INVALID_ADMIN_ARTIFACT" "$LAST_OUTPUT"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current unchanged after artifact validation failure" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE O -- unsafe archive entries (traversal, symlink) fail closed
+# ---------------------------------------------------------------------------
+echo "== CASE O: unsafe archive entries =="
+setup_case case-o
+OLD_SHA="4444444444444444444444444444444444444o"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" traversal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "traversal archive exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_UNSAFE_ADMIN_ARTIFACT (traversal)" "BLOCKED_UNSAFE_ADMIN_ARTIFACT" "$LAST_OUTPUT"
+assert_true "traversal: release dir was never created" path_absent "$ADMIN_RELEASE_ROOT/$NEW_SHA"
+
+rm -f "$MOCK_STATE_DIR/artifact_ready" "$MOCK_STATE_DIR/artifact.tar.gz" "$MOCK_STATE_DIR/artifact.tar.gz.sha256"
+NEW_SHA2="$(publish admin-h5/feature2.txt hi2)"
+prepare_artifact_fixture "$CASE_DIR" symlink "$NEW_SHA2" "$NEW_SHA2"
+run_deploy
+assert_exit "symlink archive exits 1" 1 "$LAST_EXIT"
+assert_contains "reports BLOCKED_UNSAFE_ADMIN_ARTIFACT (symlink)" "BLOCKED_UNSAFE_ADMIN_ARTIFACT" "$LAST_OUTPUT"
+assert_true "symlink: release dir was never created" path_absent "$ADMIN_RELEASE_ROOT/$NEW_SHA2"
+
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current still unchanged after both unsafe attempts" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE P -- combined admin/backend, artifact fully prepared, backend
+# unhealthy: re-certifies the G invariant specifically through the download
+# path (backend restart genuinely attempted and genuinely fails here, unlike
+# K where the backend is never even reached).
+# ---------------------------------------------------------------------------
+echo "== CASE P: combined deploy, artifact prepared, backend unhealthy =="
+setup_case case-p
+OLD_SHA="5555555555555555555555555555555555555p"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+NEW_SHA="$(publish admin-h5/feature.txt hi saas-base/app_marker.py "# backend change")"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "combined deploy fails when backend unhealthy" 1 "$LAST_EXIT"
+assert_contains "reports BACKEND_DEPLOY_FAILED" "BACKEND_DEPLOY_FAILED" "$LAST_OUTPUT"
+assert_true "release.json records the correct sha even though never switched live" grep -qF "\"sha\": \"$NEW_SHA\"" "$ADMIN_RELEASE_ROOT/$NEW_SHA/release.json"
+assert_true "backend restart was actually attempted" grep -qF "restart" "$MOCK_STATE_DIR/systemctl_calls.log"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current still points at the OLD release" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
+
+# ---------------------------------------------------------------------------
+# CASE Q -- successful combined deployment: artifact verified, backend
+# healthy, atomic switch succeeds, and recent history is retained.
+# ---------------------------------------------------------------------------
+echo "== CASE Q: successful combined deployment =="
+setup_case case-q
+OLD_SHA="6666666666666666666666666666666666666q"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+touch "$MOCK_STATE_DIR/backend_healthy"
+NEW_SHA="$(publish admin-h5/feature.txt hi saas-base/app_marker.py "# backend change")"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+run_deploy
+assert_exit "combined deploy succeeds" 0 "$LAST_EXIT"
+assert_contains "reports DEPLOY_OK" "STATUS=DEPLOY_OK" "$LAST_OUTPUT"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current now points at the new release" "$ADMIN_RELEASE_ROOT/$NEW_SHA" "$CURRENT_TARGET"
+assert_true "the previous release is retained (recent history kept)" test -d "$ADMIN_RELEASE_ROOT/$OLD_SHA"
+
+# ---------------------------------------------------------------------------
+# CASE R -- bootstrap mode uses the prebuilt artifact, never builds
+# ---------------------------------------------------------------------------
+echo "== CASE R: bootstrap uses the prebuilt artifact, never builds =="
+setup_case case-r
+NEW_SHA="$(publish admin-h5/feature.txt hi)"
+prepare_artifact_fixture "$CASE_DIR" normal "$NEW_SHA" "$NEW_SHA"
+# Deliberately do NOT set frontend_verifiable -- bootstrap must not depend
+# on (or even attempt) the real production HTTP gate.
+run_deploy --bootstrap-admin
+assert_exit "bootstrap deploy succeeds" 0 "$LAST_EXIT"
+assert_contains "reports ADMIN_BOOTSTRAP_READY" "ADMIN_BOOTSTRAP_READY=YES" "$LAST_OUTPUT"
+assert_contains "reports PENDING_NGINX_CUTOVER" "ADMIN_HTTP_VERIFICATION=PENDING_NGINX_CUTOVER" "$LAST_OUTPUT"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current points at the new release" "$ADMIN_RELEASE_ROOT/$NEW_SHA" "$CURRENT_TARGET"
+assert_true "bootstrap never invokes npm" file_absent "$MOCK_STATE_DIR/npm_calls.log"
 
 # ---------------------------------------------------------------------------
 echo

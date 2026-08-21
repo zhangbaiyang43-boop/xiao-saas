@@ -83,5 +83,8 @@ jobs:
         run: |
           echo "ATOMIC_SYMLINK_SWAP=success"
           echo "MIGRATION_FAIL_CLOSED=success"
+          echo "NO_PRODUCTION_FRONTEND_BUILD=success"
+          echo "ARTIFACT_CHECKSUM_GATE=success"
+          echo "ARTIFACT_ARCHIVE_SAFETY=success"
           echo "BACKEND_BEFORE_ADMIN_SWITCH=success"
           echo "DEPLOY_TOOLING_CERTIFIED=YES"

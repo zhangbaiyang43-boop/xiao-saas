@@ -1,0 +1,198 @@
+name: admin-h5 Release Artifact
+
+# PRODUCTION_FRONTEND_BUILD=FORBIDDEN. The production host does not have the
+# RAM to run `vite build` (repeatedly locked up trying) -- this workflow is
+# the ONLY place admin-h5 is ever built. It packages the result as a
+# checksummed, SHA-addressed GitHub Release asset; scripts/deploy-
+# production.sh only ever downloads + verifies + extracts it, never builds.
+#
+# GitHub Actions is not the production deploy authority here -- it only
+# produces the artifact. Going live is still a deliberate, manual
+# `./scripts/deploy-production.sh` run on the server (see
+# docs/production-deployment.md). No production SSH key or PAT is stored
+# anywhere for this -- a GitHub Release asset on a repo the build itself
+# already lives in is a public, content-addressed transport, not a secret.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-release.yml'
+      - 'scripts/deploy-production.sh'
+      - 'scripts/test-deployment-tooling.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'admin-h5/**'
+      - '.github/workflows/admin-h5-release.yml'
+      - 'scripts/deploy-production.sh'
+      - 'scripts/test-deployment-tooling.sh'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Exact branch/tag/40-char commit SHA to build and publish'
+        required: true
+        default: 'main'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build admin-h5, package artifact, publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@v4
+        with:
+          ref: >-
+            ${{
+              github.event_name == 'workflow_dispatch' && inputs.target_ref ||
+              github.event_name == 'pull_request' && github.event.pull_request.head.sha ||
+              github.sha
+            }}
+          fetch-depth: 1
+
+      - name: Identity proof
+        id: identity
+        run: |
+          echo "EVENT=${{ github.event_name }}"
+          echo "WORKFLOW_SHA=${{ github.sha }}"
+          echo "TARGET_REF=${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || '' }}"
+          TARGET_HEAD_SHA="$(git rev-parse HEAD)"
+          echo "TARGET_HEAD_SHA=$TARGET_HEAD_SHA"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "$TARGET_HEAD_SHA" != "${{ github.event.pull_request.head.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match the PR's real head SHA"
+              exit 1
+            fi
+          fi
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if [ "$TARGET_HEAD_SHA" != "${{ github.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match github.sha"
+              exit 1
+            fi
+          fi
+          echo "target_sha=$TARGET_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin-h5/package-lock.json
+
+      - name: Install dependencies
+        working-directory: admin-h5
+        run: npm ci
+
+      - name: Build
+        working-directory: admin-h5
+        run: npm run build
+
+      - name: Verify build output
+        working-directory: admin-h5
+        run: |
+          test -s dist/index.html
+          test -d dist/assets
+
+      - name: Stage immutable artifact layout
+        id: stage
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+        run: |
+          STAGE="$(mktemp -d)"
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          # Archive root must be index.html + assets/ + release.json directly
+          # -- never a nested dist/ layer -- matching what deploy-
+          # production.sh extracts straight into a release directory.
+          cp -a admin-h5/dist/. "$STAGE/"
+          cat > "$STAGE/release.json" <<EOF
+          {
+            "sha": "$TARGET_SHA",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "builder": "github-actions"
+          }
+          EOF
+          test -s "$STAGE/index.html"
+          test -d "$STAGE/assets"
+          test -s "$STAGE/release.json"
+
+      - name: Package archive + checksum
+        id: package
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+          STAGE: ${{ steps.stage.outputs.stage }}
+        run: |
+          ARCHIVE="admin-h5-dist-${TARGET_SHA}.tar.gz"
+          CHECKSUM="${ARCHIVE}.sha256"
+          OUT="$(mktemp -d)"
+          # Archive contents at the tar root -- no leading "./" or nested
+          # directory component -- deploy-production.sh extracts straight
+          # into a release dir and expects index.html/assets/release.json
+          # right there.
+          tar -C "$STAGE" -czf "$OUT/$ARCHIVE" index.html assets release.json
+          (cd "$OUT" && sha256sum "$ARCHIVE" > "$CHECKSUM")
+          (cd "$OUT" && sha256sum -c "$CHECKSUM")
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+
+      - name: Check for an existing release at this tag
+        id: existing
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify existing release is self-consistent (never silently overwrite)
+        if: github.event_name != 'pull_request' && steps.existing.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+          ARCHIVE="admin-h5-dist-${TARGET_SHA}.tar.gz"
+          CHECKSUM="${ARCHIVE}.sha256"
+          DL="$(mktemp -d)"
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            -p "$ARCHIVE" -p "$CHECKSUM" -D "$DL"
+          (cd "$DL" && sha256sum -c "$CHECKSUM")
+          echo "Existing release $TAG is self-consistent -- reusing, not re-uploading."
+
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+          OUT: ${{ steps.package.outputs.out }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          TAG="admin-h5-${TARGET_SHA}"
+          gh release create "$TAG" \
+            "$OUT/$ARCHIVE" "$OUT/$CHECKSUM" \
+            --repo "${{ github.repository }}" \
+            --title "admin-h5 $TARGET_SHA" \
+            --prerelease \
+            --notes "Automated admin-h5 build artifact for commit $TARGET_SHA. Built by GitHub Actions, never on the production host."
+
+      - name: Summary
+        env:
+          TARGET_SHA: ${{ steps.identity.outputs.target_sha }}
+        run: |
+          echo "ARTIFACT_TARGET_SHA=$TARGET_SHA"
+          echo "ARTIFACT_TAG=admin-h5-$TARGET_SHA"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ARTIFACT_PUBLISHED=NO (pull_request event -- build/package verification only)"
+          else
+            echo "ARTIFACT_PUBLISHED=YES"
+          fi
