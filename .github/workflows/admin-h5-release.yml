@@ -188,6 +188,17 @@ jobs:
       CHECKSUM: ${{ needs.build.outputs.checksum_name }}
       GH_TOKEN: ${{ github.token }}
     steps:
+      # Checkout runs FIRST, before actions/download-artifact. checkout can
+      # clean/reset the runner workspace; downloading the build artifact
+      # first and checking out afterward risks the checkout wiping
+      # local-build/ out from under the rest of this job.
+      # PUBLISH_CHECKOUT_BEFORE_ARTIFACT_DOWNLOAD=YES.
+      - name: Checkout deployment tooling (for scripts/publish-admin-artifact-cos.py)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 1
+
       - name: Download build job artifact (local build -- uses the build job's
           exact TARGET_SHA, never re-derived from mutable main)
         uses: actions/download-artifact@v4
@@ -294,6 +305,17 @@ jobs:
 
           echo "Existing release $TAG is complete and payload-identical to this build -- reusing, not re-uploading."
 
+          # GITHUB_RELEASE_CANONICAL_ARTIFACT=YES: the already-published
+          # release's own bytes become canonical, NOT this run's local
+          # rebuild -- a semantically-identical rerun of the same SHA can
+          # still produce different tar.gz bytes (built_at, tar/gzip
+          # metadata), so byte-diffing the COS mirror against a fresh
+          # rebuild would be a false mismatch. COS_CANONICAL_SOURCE=existing.
+          mkdir -p canonical-build
+          cp "$REMOTE_DIR/$ARCHIVE" "canonical-build/$ARCHIVE"
+          cp "$REMOTE_DIR/$CHECKSUM" "canonical-build/$CHECKSUM"
+          echo "COS_CANONICAL_SOURCE=existing-github-release"
+
       - name: Publish GitHub Release
         if: steps.existing.outputs.exists == 'false'
         run: |
@@ -305,21 +327,33 @@ jobs:
             --prerelease \
             --notes "Automated admin-h5 build artifact for commit $TARGET_SHA. Built by GitHub Actions, never on the production host."
 
-      # ---------------------------------------------------------------
-      # GitHub Release above is audit/backup/immutable-build-evidence
-      # only. Production evidence showed direct GitHub Release downloads
-      # from mainland China run at ~4-10KB/s and time out --
-      # PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN. Tencent COS
-      # below is the real production runtime transport. Both always run
-      # here (never conditioned on steps.existing above -- that's the
-      # GitHub Release's own reuse decision, independent of COS's).
-      # ---------------------------------------------------------------
-      - name: Checkout deployment tooling (for scripts/publish-admin-artifact-cos.py)
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TARGET_SHA }}
-          fetch-depth: 1
+          # This run's own local-build bytes just became the newly-published
+          # GitHub Release, so they are canonical here.
+          # COS_CANONICAL_SOURCE=new-github-release.
+          mkdir -p canonical-build
+          cp "local-build/$ARCHIVE" "canonical-build/$ARCHIVE"
+          cp "local-build/$CHECKSUM" "canonical-build/$CHECKSUM"
+          echo "COS_CANONICAL_SOURCE=new-github-release"
 
+      - name: Verify canonical artifact checksum
+        run: |
+          test -f "canonical-build/$ARCHIVE"
+          test -f "canonical-build/$CHECKSUM"
+          (cd canonical-build && sha256sum -c "$CHECKSUM")
+          echo "CANONICAL_ARTIFACT_CHECKSUM=success"
+
+      # ---------------------------------------------------------------
+      # GitHub Release above is the canonical build artifact -- see the
+      # canonical-build/ steps below. Production evidence showed direct
+      # GitHub Release downloads from mainland China run at ~4-10KB/s and
+      # time out -- PRODUCTION_GITHUB_RELEASE_DIRECT_DOWNLOAD=FORBIDDEN.
+      # Tencent COS below is the real production runtime transport, and it
+      # always mirrors the canonical GitHub Release bytes for this SHA,
+      # never a fresh local rebuild's bytes directly (those can legitimately
+      # differ byte-for-byte from an already-published release even for the
+      # exact same source SHA -- release.json's built_at, and tar/gzip
+      # metadata, are not guaranteed reproducible run to run).
+      # ---------------------------------------------------------------
       - name: Install COS SDK (pinned to the same version as saas-base's requirements.txt)
         run: python3 -m pip install --user cos-python-sdk-v5==1.9.30
 
@@ -331,10 +365,12 @@ jobs:
           DEPLOY_COS_BUCKET: ${{ secrets.DEPLOY_COS_BUCKET }}
           DEPLOY_COS_BASE_URL: ${{ secrets.DEPLOY_COS_BASE_URL }}
         run: |
+          # Always canonical-build/, never local-build/ directly -- see
+          # GITHUB_RELEASE_CANONICAL_ARTIFACT above. COS_PUBLISH_INPUT=canonical-build.
           python3 scripts/publish-admin-artifact-cos.py \
             --sha "$TARGET_SHA" \
-            --archive "local-build/$ARCHIVE" \
-            --checksum "local-build/$CHECKSUM"
+            --archive "canonical-build/$ARCHIVE" \
+            --checksum "canonical-build/$CHECKSUM"
 
       - name: Verify public COS runtime URL (upload API success != production HTTP transport success)
         env:

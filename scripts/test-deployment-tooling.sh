@@ -87,6 +87,58 @@ workflow_cos_verification_before_summary() {
   [ -n "$verify_line" ] && [ -n "$summary_line" ] && [ "$verify_line" -lt "$summary_line" ]
 }
 
+# --- Canonical-artifact predicates (checkout ordering + canonicalization) ---
+workflow_publish_checkout_before_artifact_download() {
+  local file="$1" section checkout_line download_line
+  section="$(sed -n '/^  publish:/,$p' "$file")"
+  checkout_line="$(grep -n 'uses: actions/checkout@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  download_line="$(grep -n 'uses: actions/download-artifact@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  [ -n "$checkout_line" ] && [ -n "$download_line" ] && [ "$checkout_line" -lt "$download_line" ]
+}
+workflow_publish_no_checkout_after_download() {
+  local file="$1" section download_line
+  section="$(sed -n '/^  publish:/,$p' "$file")"
+  download_line="$(grep -n 'uses: actions/download-artifact@v4' <<<"$section" | head -n1 | cut -d: -f1)"
+  [ -z "$download_line" ] && return 1
+  ! sed -n "$((download_line + 1)),\$p" <<<"$section" | grep -q 'uses: actions/checkout@v4'
+}
+workflow_canonical_from_remote_when_existing() {
+  local file="$1" start end block
+  start="$(grep -n 'name: Verify existing release is complete and payload-identical' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n '^      - name: Publish GitHub Release$' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF 'cp "$REMOTE_DIR/$ARCHIVE" "canonical-build/$ARCHIVE"' <<<"$block"
+}
+workflow_canonical_from_local_when_new() {
+  local file="$1" start end block
+  start="$(grep -n '^      - name: Publish GitHub Release$' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n 'name: Verify canonical artifact checksum' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF 'cp "local-build/$ARCHIVE" "canonical-build/$ARCHIVE"' <<<"$block"
+}
+workflow_cos_publish_uses_canonical_build() {
+  local file="$1" start end block
+  start="$(grep -n 'name: Publish to Tencent COS' "$file" | head -n1 | cut -d: -f1)"
+  end="$(grep -n 'name: Verify public COS runtime URL' "$file" | head -n1 | cut -d: -f1)"
+  [ -z "$start" ] && return 1
+  [ -z "$end" ] && return 1
+  block="$(sed -n "${start},${end}p" "$file")"
+  grep -qF 'canonical-build/$ARCHIVE' <<<"$block" \
+    && grep -qF 'canonical-build/$CHECKSUM' <<<"$block" \
+    && ! grep -qF 'local-build/$ARCHIVE' <<<"$block" \
+    && ! grep -qF 'local-build/$CHECKSUM' <<<"$block"
+}
+workflow_canonical_checksum_before_cos_publish() {
+  local file="$1" verify_line cos_line
+  verify_line="$(grep -n 'name: Verify canonical artifact checksum' "$file" | head -n1 | cut -d: -f1)"
+  cos_line="$(grep -n 'name: Publish to Tencent COS' "$file" | head -n1 | cut -d: -f1)"
+  [ -n "$verify_line" ] && [ -n "$cos_line" ] && [ "$verify_line" -lt "$cos_line" ]
+}
+
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
 # tar, sha256sum, python, grep, sed, cp, mv, ln, mkdir, rm, readlink,
@@ -950,6 +1002,75 @@ assert_true "verification does a real sha256sum -c against the public URL downlo
   grep -qF 'sha256sum -c "$CHECKSUM"' "$RELEASE_WORKFLOW"
 assert_true "verification step precedes the summary step" \
   workflow_cos_verification_before_summary "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AH -- publish job's checkout happens before actions/download-artifact,
+# and there is no second checkout after the artifact download (checkout can
+# clean/reset the workspace; downloading first then checking out risks the
+# checkout wiping local-build/ out from under the rest of the job).
+# ---------------------------------------------------------------------------
+echo "== CASE AH: publish job checks out before downloading the build artifact =="
+assert_true "checkout precedes actions/download-artifact" \
+  workflow_publish_checkout_before_artifact_download "$RELEASE_WORKFLOW"
+assert_true "no checkout occurs after the artifact download" \
+  workflow_publish_no_checkout_after_download "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AI -- rerun of the same SHA: the existing GitHub Release is accepted
+# (semantic payload match), and canonical-build is populated from THAT
+# release's own bytes, never this run's fresh local rebuild (which can
+# legitimately differ byte-for-byte -- built_at, tar/gzip metadata -- even
+# for an identical source SHA). Static: real GitHub Release network round-
+# trip is out of reach for this suite (see CASE T/U).
+# ---------------------------------------------------------------------------
+echo "== CASE AI: existing-release rerun canonicalizes to remote bytes =="
+assert_true "canonical-build is populated from \$REMOTE_DIR when reusing an existing release" \
+  workflow_canonical_from_remote_when_existing "$RELEASE_WORKFLOW"
+assert_true "canonical-build is populated from local-build only for a newly-created release" \
+  workflow_canonical_from_local_when_new "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AJ -- the COS publisher step is only ever given canonical-build
+# paths, never local-build paths directly.
+# ---------------------------------------------------------------------------
+echo "== CASE AJ: COS publish step receives canonical-build, not local-build =="
+assert_true "COS publish step uses canonical-build/\$ARCHIVE and canonical-build/\$CHECKSUM only" \
+  workflow_cos_publish_uses_canonical_build "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AK -- the canonical artifact's checksum is verified before it is ever
+# handed to the COS publisher.
+# ---------------------------------------------------------------------------
+echo "== CASE AK: canonical checksum verified immediately before COS publish =="
+assert_true "canonical checksum verification step exists" \
+  grep -qF 'name: Verify canonical artifact checksum' "$RELEASE_WORKFLOW"
+assert_true "canonical checksum step runs a real sha256sum -c" \
+  grep -qF 'cd canonical-build && sha256sum -c' "$RELEASE_WORKFLOW"
+assert_true "canonical checksum verification precedes the COS publish step" \
+  workflow_canonical_checksum_before_cos_publish "$RELEASE_WORKFLOW"
+
+# ---------------------------------------------------------------------------
+# CASE AL -- rerunning the same SHA must not produce a false
+# BLOCKED_EXISTING_COS_ARTIFACT_MISMATCH: because canonicalization (CASE AI)
+# always feeds COS the SAME already-published bytes on every rerun of a
+# given SHA -- never a fresh, potentially-different local rebuild -- the
+# real publish-admin-artifact-cos.py script sees identical content both
+# times and reuses cleanly. Real script, fake disk-backed COS store, no
+# network -- exercises the actual mechanism CASE AI's static check proves
+# the workflow wires up correctly.
+# ---------------------------------------------------------------------------
+echo "== CASE AL: same-SHA rerun via canonical bytes does not false-mismatch =="
+COS_STORE_AL="$WORK/cos-store-al"
+echo "canonical payload for AL (this is what canonical-build/ would always contain, regardless of what a fresh local rebuild produced)" > "$WORK/al-canonical.tar.gz"
+sha256sum "$WORK/al-canonical.tar.gz" | awk '{print $1"  admin-h5-dist-shaAL.tar.gz"}' > "$WORK/al-canonical.tar.gz.sha256"
+run_cos_publish shaAL "$WORK/al-canonical.tar.gz" "$WORK/al-canonical.tar.gz.sha256" "$COS_STORE_AL"
+assert_exit "first run (new GitHub Release) publishes canonical bytes" 0 "$LAST_EXIT"
+# "Rerun" hands the exact same canonical bytes again (as the real workflow
+# would, having re-derived them from the existing GitHub Release rather
+# than from a fresh, possibly-different rebuild).
+run_cos_publish shaAL "$WORK/al-canonical.tar.gz" "$WORK/al-canonical.tar.gz.sha256" "$COS_STORE_AL"
+assert_exit "rerun with the same canonical bytes is reused, not blocked" 0 "$LAST_EXIT"
+assert_contains "rerun reports COS_ARTIFACT_READY, not a mismatch" "STATUS=COS_ARTIFACT_READY" "$LAST_OUTPUT"
 
 # ---------------------------------------------------------------------------
 echo

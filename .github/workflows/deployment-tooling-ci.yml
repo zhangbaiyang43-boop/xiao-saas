@@ -103,5 +103,7 @@ jobs:
           echo "PR_CONTENTS_WRITE_FORBIDDEN=success"
           echo "EXISTING_ARTIFACT_PAYLOAD_MATCH=success"
           echo "SPECIAL_TAR_ENTRY_REJECT=success"
+          echo "PUBLISH_CHECKOUT_ORDERING=success"
+          echo "CANONICAL_ARTIFACT_INTEGRITY=success"
           echo "BACKEND_BEFORE_ADMIN_SWITCH=success"
           echo "DEPLOY_TOOLING_CERTIFIED=YES"
