@@ -164,6 +164,29 @@ class SubscriptionService:
         )
         return result.scalars().first()
 
+    async def _resolve_effective_subscription(
+        self, tenant_id: str, *, now: datetime
+    ) -> tuple[Optional[Subscription], Optional[Subscription]]:
+        """Return the first currently-valid row and the newest historical row.
+
+        The effective read path retains the existing recency ordering and
+        reuses ``is_active()`` as its sole validity contract.  The newest row
+        is returned separately so the existing FREE/EXPIRED/CANCELLED fallback
+        remains unchanged when no candidate is currently valid.
+        """
+        result = await self.db.execute(
+            select(Subscription)
+            .where(Subscription.tenant_id == tenant_id)
+            .order_by(Subscription.created_at.desc(), Subscription.id.desc())
+        )
+        candidates = list(result.scalars().all())
+        latest = candidates[0] if candidates else None
+        effective = next(
+            (subscription for subscription in candidates if self.is_active(subscription, now=now)),
+            None,
+        )
+        return effective, latest
+
     async def get_plan_by_code(self, code: str) -> Optional[Plan]:
         result = await self.db.execute(select(Plan).where(Plan.code == code))
         return result.scalar_one_or_none()
@@ -209,10 +232,9 @@ class SubscriptionService:
         so there is no second tenant-eligibility judgment to make here.
         """
         now = now or datetime.utcnow()
-        current = await self.get_current_subscription(tenant_id)
-        unexpired = self.is_active(current, now=now)
+        current, latest = await self._resolve_effective_subscription(tenant_id, now=now)
 
-        if current is not None and unexpired and current.status == STATUS_ACTIVE:
+        if current is not None and current.status == STATUS_ACTIVE:
             plan = await self._require_plan_by_id(current.plan_id)
             return EffectiveSubscriptionView(
                 effective_plan=plan,
@@ -225,7 +247,7 @@ class SubscriptionService:
                 can_renew=True,
             )
 
-        if current is not None and unexpired and self.is_trial(current):
+        if current is not None and self.is_trial(current):
             plan = await self._require_plan_by_id(current.plan_id)
             return EffectiveSubscriptionView(
                 effective_plan=plan,
@@ -239,13 +261,13 @@ class SubscriptionService:
             )
 
         free_plan = await self._require_free_plan()
-        if current is None:
+        if latest is None:
             status = SUBSCRIPTION_STATUS_FREE
-        elif current.status == STATUS_CANCELLED:
+        elif latest.status == STATUS_CANCELLED:
             status = STATUS_CANCELLED
         else:
-            # ACTIVE or TRIAL, but expired (unexpired was False above) -- or
-            # any other/future stored status: no current entitlement.
+            # Every candidate was invalid under is_active(): an expired
+            # ACTIVE/TRIAL row or another stored status has no entitlement.
             status = STATUS_EXPIRED
         return EffectiveSubscriptionView(
             effective_plan=free_plan,
