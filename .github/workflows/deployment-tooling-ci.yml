@@ -1,0 +1,87 @@
+name: deployment-tooling CI
+
+# Authoritative Linux certification for the production deployment scripts.
+# A Windows/MSYS dev machine cannot certify this tooling -- ln -s/mv -T
+# symlink-swap semantics differ there from real GNU coreutils/Linux (the
+# actual production target). This workflow is what actually proves the
+# atomic-switch, migration-fail-closed, and backend-before-admin-switch
+# contracts hold, on the same OS family production runs on.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/deploy-production.sh'
+      - 'scripts/rollback-admin-h5.sh'
+      - 'scripts/test-deployment-tooling.sh'
+      - 'docs/production-deployment.md'
+      - 'Makefile'
+      - '.github/workflows/deployment-tooling-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/deploy-production.sh'
+      - 'scripts/rollback-admin-h5.sh'
+      - 'scripts/test-deployment-tooling.sh'
+      - 'docs/production-deployment.md'
+      - 'Makefile'
+      - '.github/workflows/deployment-tooling-ci.yml'
+
+jobs:
+  certify:
+    name: deployment tooling -- Linux integration contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout target commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: Identity proof
+        run: |
+          echo "EVENT=${{ github.event_name }}"
+          TARGET_HEAD_SHA="$(git rev-parse HEAD)"
+          echo "TARGET_HEAD_SHA=$TARGET_HEAD_SHA"
+          echo "EXPECTED_PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "$TARGET_HEAD_SHA" != "${{ github.event.pull_request.head.sha }}" ]; then
+              echo "FAIL: checked-out HEAD does not match the PR's real head SHA"
+              exit 1
+            fi
+          fi
+          echo "DEPLOY_TOOLING_TARGET_HEAD_SHA=$TARGET_HEAD_SHA"
+
+      - name: Configure git identity (for the disposable fixture repos the test suite creates)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "deployment-tooling-ci"
+          git config --global init.defaultBranch main
+
+      - name: bash -n on all deployment scripts
+        run: |
+          bash -n scripts/deploy-production.sh
+          bash -n scripts/rollback-admin-h5.sh
+          bash -n scripts/test-deployment-tooling.sh
+          echo "BASH_SYNTAX=success"
+
+      - name: shellcheck
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck scripts/deploy-production.sh scripts/rollback-admin-h5.sh scripts/test-deployment-tooling.sh
+            echo "SHELLCHECK=success"
+          else
+            echo "SHELLCHECK=NOT_AVAILABLE"
+            echo "::warning::shellcheck not found on this runner -- not treated as a pass, just skipped"
+          fi
+
+      - name: Linux integration contract (test-deployment-tooling.sh)
+        run: |
+          bash scripts/test-deployment-tooling.sh
+          echo "LINUX_INTEGRATION_CONTRACT=success"
+
+      - name: Certification summary
+        run: |
+          echo "ATOMIC_SYMLINK_SWAP=success"
+          echo "MIGRATION_FAIL_CLOSED=success"
+          echo "BACKEND_BEFORE_ADMIN_SWITCH=success"
+          echo "DEPLOY_TOOLING_CERTIFIED=YES"
