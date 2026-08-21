@@ -44,8 +44,32 @@ import hashlib
 import os
 import sys
 import tempfile
+import time
 
 COS_PREFIX = "deploy-artifacts/admin-h5"
+
+# Production evidence: plain put_object() uploads of the admin-h5 archive
+# over the mainland-China COS path have failed with
+# CosClientError(('Connection aborted.', TimeoutError('The write operation
+# timed out'))) -- the SDK's own defaults (no explicit timeout, no retry)
+# aren't resilient enough for that link. Explicit, non-default timeouts:
+# fail a truly dead connection fast (30s to connect), but give a slow
+# upload of a multi-MB archive real room to finish (300s read/write) rather
+# than getting killed mid-transfer.
+COS_CONNECT_TIMEOUT_SECONDS = 30
+COS_READ_TIMEOUT_SECONDS = 300
+
+# Bounded retry around the upload call itself -- never infinite. Schedule:
+# attempt 1 fails -> sleep 2s -> attempt 2; attempt 2 fails -> sleep 5s ->
+# attempt 3; attempt 3 fails -> give up and let the exception propagate.
+COS_UPLOAD_MAX_ATTEMPTS = 3
+COS_UPLOAD_RETRY_DELAYS_SECONDS = (2, 5)
+
+# upload_file()'s multipart threshold/concurrency -- files at or under
+# COS_UPLOAD_PART_SIZE_MB upload as a single streamed PUT; larger ones
+# transparently become a resumable multipart upload.
+COS_UPLOAD_PART_SIZE_MB = 10
+COS_UPLOAD_MAX_THREADS = 5
 
 
 def sha256_of(path: str) -> str:
@@ -86,6 +110,87 @@ def object_exists(client, bucket: str, key: str) -> bool:
         raise
 
 
+def build_cos_config(region: str, secret_id: str, secret_key: str):
+    """CosConfig with explicit connect/read timeouts, never the SDK default.
+
+    Timeout=(connect, read) is forwarded verbatim to every requests call the
+    SDK makes (qcloud_cos.cos_client.CosS3Client.send_request), which is
+    exactly the tuple form the underlying `requests` library expects.
+    """
+    from qcloud_cos import CosConfig
+
+    try:
+        return CosConfig(
+            Region=region,
+            SecretId=secret_id,
+            SecretKey=secret_key,
+            Timeout=(COS_CONNECT_TIMEOUT_SECONDS, COS_READ_TIMEOUT_SECONDS),
+        )
+    except TypeError:
+        # A CosConfig stub without a Timeout parameter -- only happens
+        # against the disk-backed fake in scripts/test-deployment-tooling.sh;
+        # production always uses the pinned real SDK, which accepts it.
+        return CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key)
+
+
+def upload_with_retry(client, bucket: str, key: str, local_path: str, content_type: str, cache_control: str) -> None:
+    """Upload local_path to key with bounded, exponential-backoff retry.
+
+    Prefers the SDK's high-level upload_file(): it streams from disk rather
+    than buffering the whole archive in memory, and for anything over
+    COS_UPLOAD_PART_SIZE_MB transparently does a resumable multipart
+    upload. That -- combined with build_cos_config()'s explicit timeouts --
+    is what actually hardens the upload against the write-timeout class of
+    failure (CosClientError wrapping a socket TimeoutError) this exists to
+    fix; the retry loop below only covers the residual case of a transient
+    failure even after that.
+
+    Falls back to the original single-shot put_object(Body=<bytes>) for any
+    client that doesn't expose upload_file -- only the disk-backed test
+    fake in scripts/test-deployment-tooling.sh lacks it, so local test
+    coverage keeps exercising exactly the code path it always has.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, COS_UPLOAD_MAX_ATTEMPTS + 1):
+        try:
+            if hasattr(client, "upload_file"):
+                client.upload_file(
+                    Bucket=bucket,
+                    Key=key,
+                    LocalFilePath=local_path,
+                    PartSize=COS_UPLOAD_PART_SIZE_MB,
+                    MAXThread=COS_UPLOAD_MAX_THREADS,
+                    ContentType=content_type,
+                    CacheControl=cache_control,
+                )
+            else:
+                with open(local_path, "rb") as f:
+                    client.put_object(
+                        Bucket=bucket,
+                        Body=f.read(),
+                        Key=key,
+                        ContentType=content_type,
+                        CacheControl=cache_control,
+                    )
+            return
+        except Exception as exc:
+            # Caught broadly on purpose: the point is a bounded retry around
+            # any transient transport failure (CosClientError wrapping a
+            # ConnectionError/TimeoutError being the one seen in production),
+            # not a specific exception type.
+            last_exc = exc
+            if attempt == COS_UPLOAD_MAX_ATTEMPTS:
+                break
+            delay = COS_UPLOAD_RETRY_DELAYS_SECONDS[attempt - 1]
+            print(
+                f"upload attempt {attempt}/{COS_UPLOAD_MAX_ATTEMPTS} for {key} failed: {exc} -- retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sha", required=True, help="full git commit SHA this artifact was built from")
@@ -106,9 +211,9 @@ def main() -> int:
     bucket = require_env("DEPLOY_COS_BUCKET")
     base_url = os.environ.get("DEPLOY_COS_BASE_URL", "").rstrip("/")
 
-    from qcloud_cos import CosConfig, CosS3Client
+    from qcloud_cos import CosS3Client
 
-    config = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key)
+    config = build_cos_config(region, secret_id, secret_key)
     client = CosS3Client(config)
 
     archive_name = os.path.basename(args.archive)
@@ -159,22 +264,16 @@ def main() -> int:
 
         print(f"Existing COS object admin-h5-{args.sha}/ matches this build byte-for-byte -- reusing.")
     else:
-        with open(args.archive, "rb") as f:
-            client.put_object(
-                Bucket=bucket,
-                Body=f.read(),
-                Key=archive_key,
-                ContentType="application/gzip",
-                CacheControl="public,max-age=31536000,immutable",
-            )
-        with open(args.checksum, "rb") as f:
-            client.put_object(
-                Bucket=bucket,
-                Body=f.read(),
-                Key=checksum_key,
-                ContentType="text/plain; charset=utf-8",
-                CacheControl="public,max-age=31536000,immutable",
-            )
+        upload_with_retry(
+            client, bucket, archive_key, args.archive,
+            content_type="application/gzip",
+            cache_control="public,max-age=31536000,immutable",
+        )
+        upload_with_retry(
+            client, bucket, checksum_key, args.checksum,
+            content_type="text/plain; charset=utf-8",
+            cache_control="public,max-age=31536000,immutable",
+        )
         print(f"Uploaded {archive_key}")
         print(f"Uploaded {checksum_key}")
 
