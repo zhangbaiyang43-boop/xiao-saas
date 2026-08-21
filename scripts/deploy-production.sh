@@ -276,7 +276,18 @@ fi
 if [ "$BACKEND_CHANGED" -eq 1 ]; then
   if [ "$REQUIREMENTS_CHANGED" -eq 1 ]; then
     log "requirements.txt changed -- installing dependencies"
-    (cd "$REPO/saas-base" && source venv/bin/activate && pip install -r requirements.txt)
+    # Invoke the venv's python directly (production systemd contract) rather
+    # than `source venv/bin/activate` -- that depends on shell-sourcing a
+    # file whose existence a static linter can't verify (ShellCheck SC1091),
+    # and on PATH resolving `pip` to the right interpreter afterwards. Named
+    # explicitly, there's exactly one authority for which Python/pip this is.
+    BACKEND_VENV_PYTHON="$REPO/saas-base/venv/bin/python"
+    if [ ! -x "$BACKEND_VENV_PYTHON" ]; then
+      echo "STATUS=BLOCKED_BACKEND_VENV_MISSING" >&2
+      echo "$BACKEND_VENV_PYTHON does not exist or is not executable." >&2
+      exit 1
+    fi
+    "$BACKEND_VENV_PYTHON" -m pip install -r "$REPO/saas-base/requirements.txt"
   else
     log "requirements.txt unchanged -- skipping pip install"
   fi

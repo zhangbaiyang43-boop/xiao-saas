@@ -38,6 +38,13 @@ assert_exit() { if [ "$2" -eq "$3" ]; then ok "$1"; else bad "$1 (expected exit 
 assert_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1 (did not find [$2] in output)"; fi; }
 assert_true() { local d="$1"; shift; if "$@"; then ok "$d"; else bad "$d"; fi; }
 
+# Named predicate functions instead of `bash -c '...'` one-liners -- avoids
+# ShellCheck SC2016 (single-quoted string won't expand $1 at write-time; the
+# expansion is intentional, deferred to bash -c's own invocation, but a
+# named function makes that unambiguous without a disable comment).
+file_absent() { [ ! -f "$1" ]; }
+path_absent() { [ ! -e "$1" ]; }
+
 # ---------------------------------------------------------------------------
 # Mock bin/: only npm, systemctl, curl, journalctl. Everything else (git,
 # grep, sed, cp, mv, ln, mkdir, rm, readlink, mktemp, chown, date, bash...)
@@ -214,8 +221,8 @@ assert_exit "dry-run exits 0" 0 "$LAST_EXIT"
 assert_contains "reports DRY_RUN_OK" "STATUS=DRY_RUN_OK" "$LAST_OUTPUT"
 AFTER_SHA="$(git -C "$REPO" rev-parse HEAD)"
 assert_eq "dry-run never advances HEAD" "$BEFORE_SHA" "$AFTER_SHA"
-assert_true "dry-run never invokes npm" bash -c '[ ! -f "$1" ]' _ "$MOCK_STATE_DIR/npm_calls.log"
-assert_true "dry-run never creates ADMIN_CURRENT" bash -c '[ ! -e "$1" ]' _ "$ADMIN_CURRENT"
+assert_true "dry-run never invokes npm" file_absent "$MOCK_STATE_DIR/npm_calls.log"
+assert_true "dry-run never creates ADMIN_CURRENT" path_absent "$ADMIN_CURRENT"
 
 # ---------------------------------------------------------------------------
 # CASE D -- migration candidate fails closed BEFORE any checkout/pull
