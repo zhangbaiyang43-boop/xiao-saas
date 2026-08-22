@@ -319,7 +319,9 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(unpaid["can_cancel"])
         self.assertTrue(unpaid["can_reject"])
 
-        result = await OrderLifecycleService(self.db).get_my_order(
+        service = OrderLifecycleService(self.db)
+        service.set_tenant_id(TENANT_ID)
+        result = await service.get_my_order(
             int(paid_terminal.id), customer_id=None, participant_token=None
         )
         self.assertTrue(result.data["refund_required"])
