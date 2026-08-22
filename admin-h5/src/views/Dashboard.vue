@@ -185,7 +185,6 @@ const flaggedTables = ref([])
 const subscriptionStrip = ref(null)
 const systemStatus = ref({ api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'warning', checked_at: '', message: '正在检测系统状态' })
 const systemStatusLoading = ref(false)
-const systemStatusError = ref('')
 
 const todayLabel = computed(() => {
   const d = new Date()
@@ -228,35 +227,25 @@ const topDishRankItems = computed(() => overview.value.topDishes7d.map(d => ({
   unit: '份',
 })))
 
-// database 也在这里参与健康判断（此前遗漏，数据库异常时永远不会触发待办），但它只
-// 影响 systemHealthy 这个布尔结果——具体给商家看的文案永远走下面 systemStatusUserText
-// 的结构化映射，从不直接暴露"数据库"这个词或后端诊断信息。这个数组本身不在模板里
-// 渲染，纯粹是内部健康判断用的。
-const systemStatusItems = computed(() => [
-  { key: 'api', label: '系统服务', status: systemStatus.value.api || 'warning' },
-  { key: 'order', label: '订单服务', status: systemStatus.value.order || 'warning' },
-  { key: 'payment', label: '支付服务', status: systemStatus.value.payment || 'warning' },
-  { key: 'printer', label: '打印服务', status: systemStatus.value.printer || 'warning' },
-  { key: 'database', label: '数据库', status: systemStatus.value.database || 'warning' },
-])
-
-const systemHealthy = computed(() => systemStatusItems.value.every(item => item.status === 'ok'))
-
-// 商家能看到的文案权威来自结构化的 status 字段，绝不是后端 message 自由文本——message
-// 可能是"数据库连接正常"这类运维诊断信息，哪怕整体系统确实不健康（比如支付服务异常，
-// 但 message 字段仍然只描述数据库连接状态）也不能把它原样透传给商家。商家只需要知道
-// 业务影响：能不能接单/收款/打印，不需要知道数据库/API/服务内部诊断。
-const systemStatusUserText = computed(() => {
-  if (systemStatus.value.printer && systemStatus.value.printer !== 'ok') {
-    return '打印服务异常，请检查打印机或手动处理订单'
-  }
-  if (systemStatus.value.payment && systemStatus.value.payment !== 'ok') {
-    return '支付服务暂时异常，请稍后重试'
-  }
-  // api / order / database 中任意一个不健康，统一用这条通用文案——不区分具体是哪一个，
-  // 更不能把 database 这个词说出来。
-  return '系统服务暂时异常，请稍后重试'
-})
+// 首页 todo 只服务"商家自己能采取行动"这一条契约。打印机确实可以让商家检查/手动
+// 处理订单，所以打印异常是唯一保留的首页系统级待办。payment/api/order/database
+// 都不满足这个契约：
+//   - payment=warning 目前只反映支付配置还没做完（wx_mchid/wx_pay_enabled），是
+//     CONFIGURATION_NOT_READY，不是 RUNTIME_INCIDENT——配置引导属于设置页/开店
+//     引导，不该占首页；
+//   - api/order/database 的真实故障会在具体业务动作（加载订单、发起支付）里各自
+//     正常报错，不需要首页再做一次笼统的"系统服务暂时异常"抢占老板的注意力。
+// systemStatus（含 api/database/order/payment/printer/message 全字段）和
+// getMerchantSystemStatus()/loadSystemStatus() 仍然保留、仍在后台探测——后端可以
+// 继续返回全部字段，未来诊断/监控可以直接读 systemStatus，只是不再派生一个
+// "整体是否健康"的聚合判断：那个聚合层此前没有任何消费者，留着只会诱使以后有人
+// 把 database/payment/api/order 的 warning 重新接回首页。printer 是唯一的
+// customer-facing authority，直接读 systemStatus.value.printer，不经过任何中间
+// 聚合状态。后端 message 字段（可能是"数据库连接正常"这类运维诊断信息）从未被
+// 读取到这里，文案是固定的产品文案，不是结构化状态到文本的映射。
+const printerActionable = computed(() =>
+  Boolean(systemStatus.value.printer) && systemStatus.value.printer !== 'ok'
+)
 
 // 系统状态最近一次检测的时间，跟结果类信息的"已更新"角标是同一个套路。
 const systemStatusCheckedLabel = computed(() => {
@@ -283,11 +272,11 @@ const todoItems = computed(() => {
       action: () => router.push({ path: '/orders', query: { view: 'table' } }),
     })
   }
-  if (!systemHealthy.value) {
+  if (printerActionable.value) {
     items.push({
       key: 'system',
       urgent: true,
-      text: systemStatusError.value || systemStatusUserText.value,
+      text: '打印服务异常，请检查打印机或手动处理订单',
       subtext: systemStatusCheckedLabel.value,
       action: () => loadSystemStatus(),
     })
@@ -312,9 +301,10 @@ async function loadSystemStatus() {
     const res = await getMerchantSystemStatus()
     if (res?.code !== 200 || !res.data) throw new Error(res?.msg || 'status unavailable')
     systemStatus.value = { ...systemStatus.value, ...res.data }
-    systemStatusError.value = ''
-  } catch (e) {
-    systemStatusError.value = '系统状态获取失败，请稍后刷新'
+  } catch {
+    // 静默失败：首页 todo 现在只认 printer 这一个已确认的状态字段，拿不到最新探测
+    // 结果时保留上一次已知值就够了，不需要再单独展示一条"系统状态获取失败"这种
+    // 纯技术提示——这本身也是本 phase 要静默掉的同一类噪音。
   } finally {
     systemStatusLoading.value = false
   }
