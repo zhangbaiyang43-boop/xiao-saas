@@ -1,10 +1,11 @@
 import asyncio
+import json
 import os
 import tempfile
 import unittest
 import uuid
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -17,9 +18,12 @@ from app.models.coupon import Coupon
 from app.models.customer import Customer
 from app.models.dining import DiningParticipant, DiningSession
 from app.models.order import Order
+from app.models.point_ledger import PointLedger
 from app.models.subscription import Plan, Subscription
 from app.models.tenant import Tenant
 from app.api.v1.orders import settle_table, update_order_status, OrderStatusUpdate
+from app.services.order_lifecycle_service import build_member_value_for_order
+from app.services.coupon_service import CouponService
 from app.services.subscription_service import STATUS_ACTIVE, SubscriptionService
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
@@ -151,10 +155,19 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
     async def test_table_account_settlement_issues_new_customer_coupon_on_first_paid_order(self):
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 0)
         session, order = await self._make_table_account_order(self.customer.id)
+        pending_value = await build_member_value_for_order(self.db, order)
+        self.assertEqual(pending_value["status"], "pending")
 
         result = await settle_table({"table_no": "A1", "dining_session_id": str(session.id)}, make_merchant_request(), db=self.db)
         self.assertEqual(result.code, 200)
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 1)
+        await self.db.refresh(order)
+        reward = json.loads(order.reward_coupon_snapshot)
+        self.assertTrue(reward["id"])
+        self.assertIn("name", reward)
+        available_value = await build_member_value_for_order(self.db, order)
+        self.assertEqual(available_value["status"], "available")
+        self.assertEqual(available_value["reward_coupon_status"], "issued")
 
     async def test_table_account_settlement_issues_consumption_coupon_on_return_visit(self):
         # First visit: settle once, use up the resulting UNUSED coupon so the dedup check
@@ -193,12 +206,152 @@ class CouponPaymentModeRewardsTest(unittest.IsolatedAsyncioTestCase):
         )
         self.db.add(order)
         await self.db.commit()
+        pending_value = await build_member_value_for_order(self.db, order)
+        self.assertEqual(pending_value["status"], "pending")
 
         result = await update_order_status(
             str(order.id), OrderStatusUpdate(status="settled"), make_merchant_request(), db=self.db,
         )
         self.assertEqual(result.code, 200)
         self.assertEqual(await self._unused_coupon_count(self.customer.id), 1)
+        await self.db.refresh(order)
+        reward = json.loads(order.reward_coupon_snapshot)
+        self.assertTrue(reward["id"])
+        available_value = await build_member_value_for_order(self.db, order)
+        self.assertEqual(available_value["status"], "available")
+        self.assertEqual(available_value["reward_coupon_status"], "issued")
+
+    async def test_postpay_no_reward_persists_explicit_json_null(self):
+        self.tenant.payment_mode = "postpay"
+        order = Order(
+            tenant_id=TENANT_A, customer_id=self.customer.id, table_no="B3", total="25.00",
+            status="done", payment_status="unpaid", payment_mode="postpay",
+        )
+        self.db.add(order)
+        await self.db.commit()
+
+        with (
+            patch.object(CouponService, "resolve_consumption_coupon_rule_type", new=AsyncMock(return_value="new_customer_coupon")),
+            patch.object(CouponService, "issue_auto_coupon", new=AsyncMock(return_value={"success_count": 0})),
+        ):
+            result = await update_order_status(
+                str(order.id), OrderStatusUpdate(status="settled"), make_merchant_request(), db=self.db,
+            )
+
+        self.assertEqual(result.code, 200)
+        await self.db.refresh(order)
+        self.assertEqual(order.reward_coupon_snapshot, "null")
+        value = await build_member_value_for_order(self.db, order)
+        self.assertEqual(value["status"], "available")
+        self.assertEqual(value["reward_coupon_status"], "none")
+
+    async def test_multi_order_table_settlement_persists_known_none_per_order(self):
+        session, first = await self._make_table_account_order(self.customer.id)
+        participant = await self.db.get(DiningParticipant, first.participant_id)
+        second = Order(
+            tenant_id=TENANT_A, customer_id=self.customer.id,
+            dining_session_id=session.id, participant_id=participant.id,
+            table_no="A1", total="30.00", status="done",
+            payment_status="unpaid", payment_mode="table_account",
+        )
+        self.db.add(second)
+        await self.db.commit()
+
+        with (
+            patch.object(CouponService, "resolve_consumption_coupon_rule_type", new=AsyncMock(return_value="new_customer_coupon")),
+            patch.object(CouponService, "issue_auto_coupon", new=AsyncMock(return_value={"success_count": 0})),
+        ):
+            result = await settle_table(
+                {"table_no": "A1", "dining_session_id": str(session.id)},
+                make_merchant_request(), db=self.db,
+            )
+
+        self.assertEqual(result.code, 200)
+        await self.db.refresh(first)
+        await self.db.refresh(second)
+        self.assertEqual(first.reward_coupon_snapshot, "null")
+        self.assertEqual(second.reward_coupon_snapshot, "null")
+        first_value = await build_member_value_for_order(self.db, first)
+        second_value = await build_member_value_for_order(self.db, second)
+        self.assertEqual(first_value["reward_coupon_status"], "none")
+        self.assertEqual(second_value["reward_coupon_status"], "none")
+
+    async def test_offline_member_assets_roll_back_with_later_settlement_failure(self):
+        session, order = await self._make_table_account_order(self.customer.id)
+        order_id = int(order.id)
+        customer_id = int(self.customer.id)
+        with (
+            patch.object(CouponService, "resolve_consumption_coupon_rule_type", new=AsyncMock(return_value="new_customer_coupon")),
+            patch.object(CouponService, "issue_auto_coupon", new=AsyncMock(return_value={"success_count": 0})),
+            patch(
+                "app.services.coupon_service._mark_order_coupon_used_if_locked",
+                new=AsyncMock(side_effect=RuntimeError("simulated later settlement failure")),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "simulated later settlement failure"):
+                await settle_table(
+                    {"table_no": "A1", "dining_session_id": str(session.id)},
+                    make_merchant_request(), db=self.db,
+                )
+
+        self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(order.status, "settled")
+        self.assertEqual(order.reward_coupon_snapshot, "null")
+        in_transaction_ledgers = await self.db.execute(
+            select(func.count()).select_from(PointLedger).where(
+                PointLedger.tenant_id == TENANT_A,
+                PointLedger.customer_id == self.customer.id,
+                PointLedger.event_type == "consumption",
+                PointLedger.ref_id == str(order.id),
+            )
+        )
+        self.assertEqual(int(in_transaction_ledgers.scalar() or 0), 1)
+
+        await self.db.rollback()
+        async with self.SessionLocal() as verify_db:
+            persisted_order = await verify_db.get(Order, order_id)
+            self.assertEqual(persisted_order.payment_status, "unpaid")
+            self.assertEqual(persisted_order.status, "done")
+            self.assertIsNone(persisted_order.reward_coupon_snapshot)
+            persisted_ledgers = await verify_db.execute(
+                select(func.count()).select_from(PointLedger).where(
+                    PointLedger.tenant_id == TENANT_A,
+                    PointLedger.customer_id == customer_id,
+                    PointLedger.event_type == "consumption",
+                    PointLedger.ref_id == str(order_id),
+                )
+            )
+            self.assertEqual(int(persisted_ledgers.scalar() or 0), 0)
+
+    async def test_one_table_settlement_attributes_each_reward_to_its_own_order(self):
+        session, first = await self._make_table_account_order(self.customer.id)
+        participant = await self.db.get(DiningParticipant, first.participant_id)
+        second = Order(
+            tenant_id=TENANT_A,
+            customer_id=self.customer.id,
+            dining_session_id=session.id,
+            participant_id=participant.id,
+            table_no="A1",
+            total="30.00",
+            status="done",
+            payment_status="unpaid",
+            payment_mode="table_account",
+        )
+        self.db.add(second)
+        await self.db.commit()
+
+        result = await settle_table(
+            {"table_no": "A1", "dining_session_id": str(session.id)},
+            make_merchant_request(),
+            db=self.db,
+        )
+
+        self.assertEqual(result.code, 200)
+        await self.db.refresh(first)
+        await self.db.refresh(second)
+        first_reward = json.loads(first.reward_coupon_snapshot)
+        second_reward = json.loads(second.reward_coupon_snapshot)
+        self.assertNotEqual(first_reward["id"], second_reward["id"])
 
 
 if __name__ == "__main__":

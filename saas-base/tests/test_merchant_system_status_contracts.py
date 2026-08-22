@@ -33,15 +33,29 @@ class MerchantSystemStatusContractsTest(unittest.TestCase):
         self.assertIn('from app.api.v1.merchant_system import router as merchant_system_router', MAIN_SOURCE)
         self.assertIn('app.include_router(merchant_system_router)', MAIN_SOURCE)
 
-    def test_admin_dashboard_fetches_and_displays_system_status(self):
+    def test_admin_dashboard_fetches_status_but_only_surfaces_actionable_printer_state(self):
         self.assertIn("getMerchantSystemStatus", ADMIN_API_SOURCE)
         self.assertIn("request.get('/v1/merchant/system-status')", ADMIN_API_SOURCE)
         self.assertIn("getMerchantSystemStatus", DASHBOARD_SOURCE)
-        self.assertIn("systemStatusItems", DASHBOARD_SOURCE)
-        self.assertIn("系统状态", DASHBOARD_SOURCE)
+        self.assertIn("printerActionable", DASHBOARD_SOURCE)
+        self.assertIn("systemStatus.value.printer", DASHBOARD_SOURCE)
+        self.assertIn("systemStatusCheckedLabel", DASHBOARD_SOURCE)
         self.assertIn("最近检测", DASHBOARD_SOURCE)
         self.assertIn("打印服务异常，请检查打印机或手动处理订单", DASHBOARD_SOURCE)
-        self.assertIn("系统状态获取失败，请稍后刷新", DASHBOARD_SOURCE)
+        self.assertNotIn("systemStatusItems", DASHBOARD_SOURCE)
+        self.assertNotIn("系统状态获取失败，请稍后刷新", DASHBOARD_SOURCE)
+
+        load_system_status_source = DASHBOARD_SOURCE.split(
+            "async function loadSystemStatus()", 1
+        )[1].split("async function loadTableCouponActivity()", 1)[0]
+        self.assertIn("getMerchantSystemStatus", load_system_status_source)
+        self.assertNotIn("message.error", load_system_status_source)
+        self.assertNotIn("系统状态获取失败，请稍后刷新", load_system_status_source)
+
+        todo_items_source = DASHBOARD_SOURCE.split("const todoItems = computed", 1)[1].split(
+            "async function loadSystemStatus()", 1
+        )[0]
+        self.assertIn("printerActionable.value", todo_items_source)
 
 
 if __name__ == "__main__":
