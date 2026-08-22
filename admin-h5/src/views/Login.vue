@@ -47,7 +47,7 @@
             <button
               type="button"
               class="code-btn tap-shrink"
-              :disabled="codeSending || codeCountdown > 0"
+              :disabled="codeSending || codeCountdown > 0 || codeDailyLimited"
               @click="handleSendCode"
             >
               {{ codeButtonText }}
@@ -107,7 +107,7 @@
             <button
               type="button"
               class="code-btn tap-shrink"
-              :disabled="registerCodeSending || registerCodeCountdown > 0"
+              :disabled="registerCodeSending || registerCodeCountdown > 0 || registerCodeDailyLimited"
               @click="handleSendRegisterCode"
             >
               {{ registerCodeButtonText }}
@@ -167,6 +167,7 @@ const mode = ref(route.query.mode === 'staff' ? 'staff' : 'owner')
 const loading = ref(false)
 const codeSending = ref(false)
 const codeCountdown = ref(0)
+const codeDailyLimited = ref(false)
 const loginForm = ref({ phone: '', code: '' })
 const staffForm = ref({ shop_phone: '', username: '', password: '' })
 const registerForm = ref({ name: '', phone: '', code: '' })
@@ -178,18 +179,41 @@ const registerCodeError = ref('')
 const registerPhoneAlreadyRegistered = ref(false)
 const registerCodeSending = ref(false)
 const registerCodeCountdown = ref(0)
+const registerCodeDailyLimited = ref(false)
 let countdownTimer = null
 let registerCountdownTimer = null
 
 const isPhone = (v) => /^1\d{10}$/.test(v || '')
 const supportMessage = '账号不存在，请联系服务商：15936889988'
 
+// Stable business error_code -> canonical Chinese copy for a failed SMS
+// send (owner login + register share this contract; see
+// saas-base/app/services/tencent_sms_service.py's SmsErrorCode/
+// _ERROR_CODE_MESSAGES, which this must stay in sync with). When
+// error_code is present we NEVER fall back to the backend's own `msg` --
+// even an error_code we don't recognize maps to the generic rejected copy,
+// so a future backend regression that re-leaks a raw provider string into
+// `msg` still can't reach the user through this path.
+const SMS_ERROR_MESSAGES = {
+  SMS_TOO_FREQUENT: '验证码获取过于频繁，请稍后再试',
+  SMS_DAILY_LIMIT: '今日验证码获取次数已达上限，请明日再试',
+  SMS_PROVIDER_REJECTED: '验证码发送失败，请稍后再试或联系服务商',
+  SMS_PROVIDER_UNAVAILABLE: '短信服务暂时不可用，请稍后再试',
+}
+
+const resolveSmsErrorMessage = (errorCode, fallbackMsg) => {
+  if (errorCode) return SMS_ERROR_MESSAGES[errorCode] || SMS_ERROR_MESSAGES.SMS_PROVIDER_REJECTED
+  return fallbackMsg || '验证码发送失败，请稍后再试'
+}
+
 const codeButtonText = computed(() => {
+  if (codeDailyLimited.value) return '今日已达上限'
   if (codeCountdown.value > 0) return `${codeCountdown.value}s后重发`
   return codeSending.value ? '发送中...' : '获取验证码'
 })
 
 const registerCodeButtonText = computed(() => {
+  if (registerCodeDailyLimited.value) return '今日已达上限'
   if (registerCodeCountdown.value > 0) return `${registerCodeCountdown.value}s后重发`
   return registerCodeSending.value ? '发送中...' : '获取验证码'
 })
@@ -256,9 +280,25 @@ const handleSendCode = async () => {
       startCountdown(res?.data?.retry_after || 60)
       return
     }
-    const msg = res?.msg || '验证码发送失败，请稍后再试'
+    // account-not-found / tenant-disabled never carry data.error_code, so
+    // resolveSmsErrorMessage falls through to res.msg unchanged for those.
+    const errorCode = res?.data?.error_code
+    const msg = resolveSmsErrorMessage(errorCode, res?.msg)
     if (msg === supportMessage) phoneError.value = msg
     message.error(msg)
+    if (errorCode === 'SMS_TOO_FREQUENT') {
+      // Backend already knows the real cooldown window -- honor it with a
+      // real countdown rather than letting the button re-enable instantly.
+      startCountdown(res?.data?.retry_after || 60)
+    } else if (errorCode === 'SMS_DAILY_LIMIT') {
+      // Session-scoped only (no persistence) -- resets on next page load,
+      // just enough to stop pointless repeat taps against a budget we
+      // already know is exhausted for today.
+      codeDailyLimited.value = true
+    }
+    // SMS_PROVIDER_REJECTED / SMS_PROVIDER_UNAVAILABLE / unknown / network
+    // failure: no forced countdown -- these may not have sent anything at
+    // all, so a real retry should stay immediately available.
   } catch (e) {
     const msg = e?.response?.data?.msg || '验证码发送失败，请稍后再试'
     if (msg === supportMessage) phoneError.value = msg
@@ -355,7 +395,17 @@ const handleSendRegisterCode = async () => {
       startRegisterCountdown(res?.data?.retry_after || 60)
       return
     }
-    applyRegisterError(res?.msg)
+    // phone-already-registered / registration-not-open never carry
+    // data.error_code, so resolveSmsErrorMessage falls through to res.msg
+    // unchanged, and applyRegisterError's existing dispatch (already-
+    // registered / not-open / code-field) is untouched.
+    const errorCode = res?.data?.error_code
+    applyRegisterError(resolveSmsErrorMessage(errorCode, res?.msg))
+    if (errorCode === 'SMS_TOO_FREQUENT') {
+      startRegisterCountdown(res?.data?.retry_after || 60)
+    } else if (errorCode === 'SMS_DAILY_LIMIT') {
+      registerCodeDailyLimited.value = true
+    }
   } catch (e) {
     applyRegisterError(e?.response?.data?.msg || '验证码发送失败，请稍后再试')
   } finally {

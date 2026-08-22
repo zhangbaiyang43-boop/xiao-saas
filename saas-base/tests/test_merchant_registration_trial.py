@@ -343,7 +343,9 @@ class MerchantRegistrationTrialTest(unittest.IsolatedAsyncioTestCase):
         settings.PLATFORM_REGISTER_KEY = TEST_REGISTER_KEY
 
         with patch.object(TencentSmsService, "is_configured", return_value=True), patch.object(
-            TencentSmsService, "send_login_code", return_value=(True, "sent")
+            TencentSmsService,
+            "_send_login_code_with_status",
+            return_value=sms_module.SmsSendStatus(ok=True, provider_code="Ok", provider_message="sent"),
         ):
             res = await login_module.send_register_code(
                 make_request(), RegisterCodeRequest(phone=phone), db=self.db
