@@ -515,6 +515,7 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
 import { getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
@@ -538,10 +539,14 @@ function getCurrentTenantId() {
   return String(tokenPayload?.tenant_id || localStorage.getItem('tenant_id') || '')
 }
 
+const route = useRoute()
 const reviewsMap = ref({}) // order_id -> review
 // 默认打开"订单列表"而不是"桌台视图"——按桌视图要点开桌子详情抽屉才能看到接单/出餐
 // 按钮，多了一步；订单列表按钮直接在卡片上。桌台视图还在，需要看整桌汇总时手动切过去。
-const view = ref('list')
+// 唯一例外：从首页"有 N 桌待结账"带 ?view=table 进来时，意图已经很明确是去结账，
+// 直接打开桌台视图，不强迫商家进来再手动切一次 tab；其它任何 query（包括没有 query）
+// 都保持这个默认订单列表不变，不要把普通订单入口整体改成桌台视图。
+const view = ref(route.query.view === 'table' ? 'table' : 'list')
 const selectedTableKey = ref(null)
 const showTableDetail = ref(false)
 const showSettleDialog = ref(false)
