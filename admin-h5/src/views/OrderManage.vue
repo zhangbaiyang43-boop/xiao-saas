@@ -57,6 +57,11 @@
       <a-tab-pane key="list" tab="订单列表" />
     </a-tabs>
 
+    <!-- 没有会话的历史订单不再出现在桌台视图，给一个极轻的入口去订单列表看，不做成大 banner -->
+    <div v-if="view === 'table' && hasSessionlessActiveOrders" style="padding:6px 16px 0;font-size:12px;color:var(--text-3)">
+      有历史订单未关联桌台会话，<a @click="view = 'list'">请在订单列表查看</a>
+    </div>
+
     <!-- 网络警告 -->
     <div v-if="pollFailCount >= 3" class="section-block" style="padding-top:8px">
       <a-alert type="warning" show-icon message="网络连接异常，数据可能不是最新的" style="border-radius:10px">
@@ -946,7 +951,10 @@ async function manualRefresh() {
 
 const pendingCount = computed(() => orders.value.filter(o => o.status === 'pending').length)
 const preparingCount = computed(() => orders.value.filter(o => o.status === 'preparing').length)
-const doneCount = computed(() => orders.value.filter(o => o.status === 'done').length)
+// 待结账只统计属于明确桌台会话的 done 订单——没有 diningSessionId 的历史订单不构成
+// 一张真实可结账的桌台（见 tableGroups 上面的说明），不该被算进这个数字，否则跟桌台
+// 视图上"看不到任何可结账桌子"互相矛盾。
+const doneCount = computed(() => orders.value.filter(o => o.status === 'done' && o.diningSessionId).length)
 const pendingPaymentCount = computed(() => orders.value.filter(o => o.status === 'pending_payment').length)
 // 记账/桌台账模式下，preparing/done 阶段顾客还没有实际付款，钱是结账（settled）那一刻
 // 才真正收到的——用跟预付模式一样的口径把 preparing/done 也算进"今日营收"会让这个数字
@@ -1016,14 +1024,18 @@ watch([statusFilter, searchQuery], () => { listVisibleCount.value = LIST_PAGE_SI
 const tableGroups = computed(() => {
   // 按 dining_session_id 分组，而不是按桌号：同一桌当天翻台会产生多个会话，
   // 按桌号分组会把上一批已结账客人的订单和当前这批混在一起，导致结账金额和小票错乱。
-  // 没有 dining_session_id 的订单（例如 H5 下单）仍按桌号分组，保持原有展示方式。
-  // 待支付订单单独放进 pendingPaymentOrders：它们不计入桌台金额（钱还没收到），
-  // 但会挡住结账（后端 settle-table 会拒绝），过去这里直接把它们过滤掉，导致商家在
-  // 桌台视图上完全看不到、也不知道该结账的桌子为什么结不了账。
+  // 没有 dining_session_id 的订单（老版本 H5 直连下单、超管填充测试数据等历史遗留）
+  // 一律不进桌台视图分组——这类订单从建单起就没有会话身份，按桌号硬凑成一张"桌台卡"
+  // 曾经导致过 P0 事故：同一桌号当时另有一个正在使用中的真实会话，商家在这张假卡片
+  // 上点"结账"，后端为了不误结错桌正确拒绝（要求明确会话），但前端此前完全没有拦这
+  // 一步，商家只能在点了"确认收款"之后才看到"请指定要结账的会话"。这类订单不会从系统
+  // 里消失——它们仍在 orders.value 里，订单列表 tab 照常能看到/搜到，只是不再冒充一张
+  // 可结账的桌台卡。
   const map = {}
   for (const o of orders.value) {
     if (['cancelled', 'rejected'].includes(o.status)) continue
-    const key = o.diningSessionId ? `session:${o.diningSessionId}` : `table:${o.table}`
+    if (!o.diningSessionId) continue
+    const key = `session:${o.diningSessionId}`
     if (!map[key]) map[key] = { groupKey: key, tableNo: o.table, diningSessionId: o.diningSessionId, orders: [], pendingPaymentOrders: [], total: 0, updating: false, checkoutRequestedAt: null }
     if (o.status === 'pending_payment') {
       map[key].pendingPaymentOrders.push(o)
@@ -1038,13 +1050,24 @@ const tableGroups = computed(() => {
     pickupNo: t.orders.find(o => o.pickup_no)?.pickup_no || null,
     pendingOrders: t.orders.filter(o => o.status === 'pending'),
     preparingOrders: t.orders.filter(o => o.status === 'preparing'),
-    canSettle: t.orders.length > 0 && t.orders.every(o => ['done', 'settled'].includes(o.status)) && t.orders.some(o => o.status === 'done') && t.pendingPaymentOrders.length === 0,
+    // Boolean(t.diningSessionId) 是第二道保险：本函数上面已经把没有会话的订单整个跳过、
+    // 从不建组，理论上这里的 t.diningSessionId 必然存在——但结账能力判断本身必须独立
+    // fail closed，不能只依赖分组阶段"恰好没漏"。
+    canSettle: Boolean(t.diningSessionId) && t.orders.length > 0 && t.orders.every(o => ['done', 'settled'].includes(o.status)) && t.orders.some(o => o.status === 'done') && t.pendingPaymentOrders.length === 0,
     isSettled: t.orders.length > 0 && t.orders.every(o => o.status === 'settled'),
   })).sort((a, b) => {
     const p = t => t.pendingOrders.length ? 0 : t.preparingOrders.length ? 1 : t.canSettle ? 2 : 3
     return p(a) - p(b)
   })
 })
+
+// 桌台视图不再展示的历史/无会话订单——不是从系统里消失，只是不再冒充可结账的桌台卡，
+// 订单列表 tab 里始终看得到。这里只用来判断要不要在桌台视图给一个"去订单列表看"的
+// 极轻提示，不建独立的历史订单管理入口。已经 settled 的排除在外——那些是已经处理完
+// 的历史订单，没有任何东西需要商家去订单列表"看"，永久挂着这条提示只是噪音。
+const hasSessionlessActiveOrders = computed(() =>
+  orders.value.some(o => !o.diningSessionId && !['cancelled', 'rejected', 'settled'].includes(o.status))
+)
 
 // 已结账的桌子对商家来说已经"翻台完毕"，不该继续占宫格——这里只在网格里隐藏，
 // tableGroups 本身仍保留全量数据，这样刚结完账那一刻抽屉（selectedTable）还能正常
@@ -1248,7 +1271,19 @@ async function finishTableOrders(table) {
   } catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { table.updating = false }
 }
 
-function settleTableClick(table) { settlingTable.value = table; showSettleDialog.value = true }
+function settleTableClick(table) {
+  // Defensive last line, not the primary guard -- tableGroups() no longer builds a
+  // group without a diningSessionId at all, and canSettle already requires one, so
+  // this should be unreachable in normal operation. Kept anyway so a future regression
+  // in either of those still fails closed BEFORE the confirm-payment dialog opens,
+  // instead of only after the merchant clicks "确认收款" and hits the backend's reject.
+  if (!table?.diningSessionId) {
+    message.error('该桌订单缺少有效桌台会话，请刷新后重试')
+    return
+  }
+  settlingTable.value = table
+  showSettleDialog.value = true
+}
 
 async function confirmSettle() {
   if (!settlingTable.value) return
