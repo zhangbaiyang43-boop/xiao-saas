@@ -37,8 +37,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Frontend UI contracts
+        run: npm run check:ui-contracts
+
       - name: Unit tests
-        run: npm test
+        run: npm run test:unit
 
       - name: Build (H5)
         run: npm run build:h5
+
+      - name: Build (mp-weixin)
+        run: npm run build:mp-weixin

@@ -22,7 +22,20 @@ TOUCH_AND_MIGRATE=REQUIRED
 DOM_ORDER_IS_AUTHORITY=NO
 ```
 
-`build:mp-weixin` MUST enter member-mini-client CI no later than **F1C**.
+## Current CI Contract
+
+mp-weixin is the primary platform build gate. H5 build stays.
+
+```
+CI_REQUIRED_GATES=
+Lint
+Frontend UI Contracts
+Unit Tests
+Build H5
+Build mp-weixin
+```
+
+These run in `.github/workflows/member-mini-client-ci.yml` via package scripts (`npm run lint`, `npm run check:ui-contracts`, `npm run test:unit`, `npm run build:h5`, `npm run build:mp-weixin`). Workflow MUST NOT invoke raw `uni build`.
 
 ## Authority Hierarchy
 
@@ -107,7 +120,7 @@ Do not tokenise every hex.
 
 ## MUST
 
-1. New blocking overlays go through BaseOverlay (legacy: `_shared.scss` `.mask` **and** that import).
+1. New blocking overlays go through BaseOverlay. Exact class token `mask` is legal only on F1C-registered `LEGACY_MASK_ALLOWLIST` paths that also import `_shared.scss`. Importing `_shared.scss` does **not** self-promote a new file to legacy.
 2. Stacked checkout choice/auth layers use `layer="blocking-top"`.
 3. Core-flow state changes are visible.
 4. Touched files migrate only the related primitive.
@@ -116,7 +129,7 @@ Do not tokenise every hex.
 ## MUST NOT
 
 1. Do not implement raw `position:fixed` + full-viewport + dim + blocking z-index outside BaseOverlay / listed legacy.
-2. Do not use class token `mask` without importing `_shared.scss`.
+2. Do not add a new exact class token `mask` consumer. Legacy `mask` files must stay on the F1C allowlist and keep the `_shared.scss` import.
 3. Do not use `class="mask"` in MemberCheckoutChoice or CheckoutAuthSheet.
 4. Do not treat DOM order as overlay stack authority.
 5. Do not big-bang rewrite UI, buttons, typography, cards, or payment state machines under this constitution.
@@ -129,4 +142,3 @@ Unrecorded exceptions are unapproved.
 ## Deferred (not forgotten)
 
 BaseSheet, AppButton, AppCard, typography/spacing/radius systems, full hex cleanup, merging LoadingStates into StateError.
-`build:mp-weixin` in CI: F1C, not later.
