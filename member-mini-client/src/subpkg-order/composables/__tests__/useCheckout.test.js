@@ -367,9 +367,9 @@ describe('useCheckout', () => {
     })
 
     it('发起支付前先核对订单是否已经支付过，已支付则直接对账并放弃重复扣款', async () => {
-      // 这里对齐的是"核对"而不是"重新展示成功页"——真正的成功页只在刚完成
-      // 一次支付动作时由 _handlePaySuccess 触发，recoverPendingPaymentResult
-      // 是页面重进/断线重连时的对账兜底，职责不一样，不应该混着断言。
+      // P0-B2b：confirmPay 的这次核对是用户主动点了"去支付"触发的，属于
+      // "用户仍在这笔支付的上下文里"——发现已支付必须展示完整成功页，
+      // 不再是只做后台对账（P0-B2b 之前的旧合同，已被 parity 需求取代）。
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       getOrderStatus.mockResolvedValue({ data: { status: 'done', payment_status: 'paid' } })
@@ -381,6 +381,7 @@ describe('useCheckout', () => {
       expect(state.orderId.value).toBe('order_1')
       expect(state.orderStatus.value).toBe('done')
       expect(state.pendingOrderId.value).toBe('')
+      expect(state.showSuccess.value).toBe(true)
       expect(callbacks.startStatusPoll).toHaveBeenCalledWith('order_1')
     })
 
@@ -519,7 +520,12 @@ describe('useCheckout', () => {
       expect(getOrderStatus).not.toHaveBeenCalled()
     })
 
-    it('订单已支付/已提交时，把本地状态跟服务端对齐并停止占用"待支付"标记', async () => {
+    it('订单已支付/已提交时，把本地状态跟服务端对齐并停止占用"待支付"标记（不传 presentSuccess 时默认不强弹成功页）', async () => {
+      // P0-B2b：不传 presentSuccess（默认 false）代表调用方不确定用户是否
+      // 还在这笔支付的上下文里——只做后台对账（myOrders upsert + 清 pending
+      // 标记），不触碰 orderId/orderStatus/showSuccess，避免打断用户可能已经
+      // 在做的别的事情。presentSuccess=true 展示完整成功页的行为见
+      // useCheckout.p0-b2b-payment-recovery-parity.test.js。
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       getOrderStatus.mockResolvedValue({ data: { status: 'preparing', payment_status: 'paid', payment_mode: 'prepay' } })
@@ -527,9 +533,12 @@ describe('useCheckout', () => {
       const ok = await checkout.recoverPendingPaymentResult()
 
       expect(ok).toBe(true)
-      expect(state.orderId.value).toBe('order_1')
-      expect(state.orderStatus.value).toBe('preparing')
       expect(state.pendingOrderId.value).toBe('')
+      expect(state.showSuccess.value).toBe(false)
+      expect(state.orderId.value).toBe('')
+      expect(state.myOrders.value[0]).toEqual(expect.objectContaining({
+        id: 'order_1', status: 'preparing', paymentStatus: 'paid',
+      }))
       expect(callbacks.startStatusPoll).toHaveBeenCalledWith('order_1')
     })
 

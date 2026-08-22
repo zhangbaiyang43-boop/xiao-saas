@@ -27,12 +27,22 @@ import { confirmationText, toastText } from '../utils/orderText.js'
 // （唯一 source，永远不在这里重新计算 savings/points），成功页奖励券也统一从
 // 这里的 reward_coupon_status 派生——不再消费入会欢迎券兜底，那是另一套跟
 // "本单支付奖励"无关的合同，保留在 WelcomeCouponSheet/useWelcomeCoupon 里。
+//
+// P0-B2b: 支付结果因为弱网/超时/切后台/被杀进程而进入"未知"，之后恢复对账
+// 确认已支付，最终用户看到的必须跟正常支付成功一致（同一套 member_value/
+// reward）。upsertPaidOrderResult（myOrders upsert，允许重复调用）和
+// hydratePaidSuccessPresentation（成功页展示，显式传 id、cross-order 安全）
+// 是从 _handlePaySuccess 里拆出来的两个可复用职责，recoverPendingPaymentResult
+// 复用它们，而不是直接调用 _handlePaySuccess——后者还带着购物车/备注/优惠券/
+// 幂等请求号这些"这一次结账流程结束了"的清理动作，恢复对账发生的时间点用户
+// 完全可能已经在操作一个新的购物车，不能被这些清理动作误伤。是否安全清空
+// 购物车，交给 applyRecoveryCartCleanup 用指纹比对 successItems 快照判断。
 export function useCheckout({
   shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
   orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
   showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
   payAmount, pendingOrderId, pendingSubmitRequestId,
-  myOrders, showOrders, showCart, showSuccess,
+  myOrders, showOrders, showCart, showSuccess, successPreserveDraft,
   ordering, tableSessionClosed, paymentMode,
   reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
   totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
@@ -181,7 +191,16 @@ export function useCheckout({
     orderStatus.value = data.status
     showSuccess.value = false
     pendingPaymentIntent.value = null
-    clearPendingPaymentOrder()
+    // P0-B2b P0 cross-order 守卫：id 这里完全可能是调用方（比如
+    // recoverPaymentResultById 用一个已经冻结好的 explicit id）传进来的一笔
+    // 早先订单，而 pendingOrderId 这时候已经指向一笔更新的、真正还在等待
+    // 支付的订单——绝不能因为对账了 A 的 terminal 结果，就把 B 的
+    // pending-payment 标记（连带 paymentFailed/paymentConfirming/
+    // paymentResultUnknown）也一起清掉。只有这次对账的订单确实还是当前
+    // pendingOrderId 指向的那一笔时，才允许清。
+    if (String(pendingOrderId.value) === String(id)) {
+      clearPendingPaymentOrder()
+    }
     // The table-session DTO is intentionally narrower than the order status DTO.
     // Sync first, then re-apply the authoritative late-payment attention so the
     // narrower snapshot cannot erase refundRequired from the local order card.
@@ -218,13 +237,124 @@ export function useCheckout({
     }
   }
 
-  let recoveringPayment = false
-  const recoverPendingPaymentResult = async ({ showDetail = false } = {}) => {
-    if (recoveringPayment) return false
-    restorePendingPaymentOrder()
-    const id = pendingOrderId.value
+  // P0-B2b: myOrders 只允许 upsert，绝不 unshift 第二次——同一个 order id 可能
+  // 被正常支付确认和恢复对账各命中一次（甚至恢复本身也可能因为 onShow 重复
+  // 触发），必须幂等。只负责"这笔已支付订单在订单列表里的事实"，不碰
+  // showSuccess/cart 等任何跟"当前正在展示哪张成功页"或"购物车里有什么"
+  // 相关的状态——那是 hydratePaidSuccessPresentation 和各自调用方自己的职责。
+  const upsertPaidOrderResult = (id, data) => {
+    const status = data.status || 'pending'
+    const total = Number(data.total ?? payAmount.value)
+    const now = new Date()
+    const patch = {
+      status,
+      paymentStatus: data.payment_status || '',
+      paymentMode: normalizePaymentMode(data.payment_mode || paymentMode.value),
+      diningSessionId: diningSessionId.value || '',
+      tableSessionId: diningSessionId.value || '',
+    }
+    if (data.pickup_no) patch.pickupNo = data.pickup_no
+    const existing = myOrders.value.find(o => String(o.id) === String(id))
+    if (existing) {
+      Object.assign(existing, patch)
+    } else {
+      myOrders.value.unshift({
+        id,
+        orderNo: orderNo.value || String(id).slice(-4),
+        items: successItems.value,
+        total,
+        createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
+        createdTs: now.getTime(),
+        table: tableNo.value,
+        shop: shopId.value,
+        pickupNo: data.pickup_no || '',
+        ...patch,
+      })
+    }
+    saveMyOrders()
+    startStatusPoll(id)
+  }
+
+  // P0-B2b: 成功页展示唯一入口，正常支付和恢复对账共用同一份 authority——
+  // member_value/reward 继续只透传给 applyAuthoritativeMemberReward，这里不
+  // 重新判断一次。显式接收 id 而不是隐式读 pendingOrderId.value：调用方在
+  // 这之后马上就会 clearPendingPaymentOrder()，届时 pendingOrderId 已经是空的。
+  //
+  // Cross-order 守卫：如果当前正展示的成功页（showSuccess=true）已经是别的
+  // 订单，恢复对账必须整体是安全的 no-op——绝不能让一笔迟到的恢复对账，覆盖
+  // 用户正在看的另一笔订单的成功页（P0-B2b 审计 section 23/24）。这个守卫只
+  // 在 allowOverwrite=false（恢复路径的默认值）时生效——正常支付成功
+  // （_handlePaySuccess 传 allowOverwrite:true）永远可以把这一次真实完成的
+  // 支付变成新的当前成功页，跟原来的行为一致，不因为上一张成功页还没关掉
+  // 就被挡住。同一笔订单重复命中时允许幂等刷新 member_value，但不重复重置
+  // reminderRequested，避免抹掉用户已经点过的"提醒我"状态。
+  const hydratePaidSuccessPresentation = (id, data, { allowOverwrite = false } = {}) => {
+    const isDifferentOrderShowing = showSuccess.value && String(orderId.value) !== String(id)
+    if (isDifferentOrderShowing && !allowOverwrite) {
+      return { applied: false, freshOpen: false }
+    }
+    const freshOpen = !showSuccess.value || isDifferentOrderShowing
+    orderId.value = id
+    orderStatus.value = data.status || 'pending'
+    successTotal.value = Number(data.total ?? payAmount.value)
+    applyAuthoritativeMemberReward(data.member_value || null)
+    if (freshOpen) reminderRequested.value = false
+    showSuccess.value = true
+    return { applied: true, freshOpen }
+  }
+
+  // P0-B2b: 最小语义 fingerprint，只挑会改变"这是不是同一份购物车选择"的字段，
+  // 忽略展示用的临时字段；用 JSON.stringify 而不是比较 Vue Proxy 引用/身份。
+  const cartItemFingerprint = (item) => JSON.stringify({
+    id: item.id,
+    qty: item.qty,
+    price: item.price,
+    specKey: item.specKey || '',
+    itemRemark: item.itemRemark || '',
+    specifications: item.specifications || [],
+    extras: item.extras || [],
+  })
+
+  // 当前购物车是否仍然就是这笔已支付订单提交时的那份快照（successItems）。
+  // 只有完全一致才能证明用户在 UNKNOWN 之后没有再改过购物车。
+  const isCurrentCartSameAsSubmittedSnapshot = () => {
+    const current = cartItems.value
+    const snapshot = Array.isArray(successItems.value) ? successItems.value : []
+    if (current.length !== snapshot.length) return false
+    const sortedCurrent = current.map(cartItemFingerprint).sort()
+    const sortedSnapshot = snapshot.map(cartItemFingerprint).sort()
+    return sortedCurrent.every((fp, idx) => fp === sortedSnapshot[idx])
+  }
+
+  // P0-B2b P0 约束：恢复到的这笔支付可能是很久以前提交的，用户很可能已经在
+  // UNKNOWN 之后继续加了新东西到购物车——不能像正常支付成功那样无条件清空。
+  // 只有指纹证明"购物车原封不动就是刚刚已支付的这些东西"时，才按正常成功页
+  // 的方式清空；否则整体原样保留，交给 successPreserveDraft 让 UI 层提示用户
+  // 自己确认，本阶段不做任何自动增删（数据丢失 fail-closed，见 P0-B2b 审计
+  // section 14）。
+  const applyRecoveryCartCleanup = () => {
+    if (!isCurrentCartSameAsSubmittedSnapshot()) {
+      if (successPreserveDraft) successPreserveDraft.value = true
+      return
+    }
+    cart.value = {}
+    specCartItems.value = []
+    selectedCouponId.value = null
+    remark.value = ''
+    pendingSubmitRequestId.value = ''
+    if (successPreserveDraft) successPreserveDraft.value = false
+  }
+
+  // P0-B2b P0 fix: 对一个显式给定的 order id 做支付结果核对，不读、不依赖
+  // 共享的 pendingOrderId.value——调用方（不管是下面的公开
+  // recoverPendingPaymentResult，还是 confirmPay 支付异常后的 catch）必须
+  // 自己在异步窗口打开之前把 id 冻结好再传进来。这是 P0-B2a/P0-B2b 唯一一套
+  // paid/terminal reconciliation authority，upsertPaidOrderResult/
+  // hydratePaidSuccessPresentation/applyRecoveryCartCleanup/
+  // applyAuthoritativeMemberReward/reconcileTerminalOrder 全部原样复用，不
+  // 写第二套。
+  const recoverPaymentResultById = async (id, { showDetail = false, presentSuccess = false } = {}) => {
     if (!id) return false
-    recoveringPayment = true
     try {
       const res = await getOrderStatus(id, diningParticipantToken.value)
       const data = res?.data || {}
@@ -233,33 +363,41 @@ export function useCheckout({
         return false
       }
       if (isPaidOrSubmittedOrder(data)) {
-        orderId.value = id
-        orderStatus.value = data.status || 'pending'
-        showCart.value = false
-        showCheckoutAuth.value = false
-        if (paymentResultUnknown) paymentResultUnknown.value = false
         pendingPaymentIntent.value = null
-        clearPendingPaymentOrder()
 
-        const now = new Date()
-        const existed = myOrders.value.find(o => String(o.id) === String(id))
-        if (existed) {
-          existed.status = orderStatus.value
+        const paidData = { ...data, total: payAmount.value }
+        upsertPaidOrderResult(id, paidData)
+
+        // 同一订单的成功页已经开着（正常支付和这次恢复撞上了，或者恢复本身
+        // 被重复触发）——幂等刷新，不重复弹、不重复清购物车。
+        const alreadyShowingSameOrder = showSuccess.value && String(orderId.value) === String(id)
+        if (presentSuccess || alreadyShowingSameOrder) {
+          const { applied, freshOpen } = hydratePaidSuccessPresentation(id, paidData)
+          // applied=false 只可能是 cross-order 守卫拦下了（另一笔订单的成功页
+          // 正开着）——这种情况下连 showCart/showCheckoutAuth 都不能碰，用户
+          // 当前在做的事情跟这次恢复完全无关，必须整体是 no-op。
+          if (applied) {
+            showCart.value = false
+            showCheckoutAuth.value = false
+            if (freshOpen) applyRecoveryCartCleanup()
+          }
         } else {
-          myOrders.value.unshift({
-            id,
-            orderNo: orderNo.value || String(id).slice(-4),
-            status: orderStatus.value,
-            items: successItems.value,
-            total: successTotal.value || payAmount.value,
-            createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
-            createdTs: now.getTime(),
-            table: tableNo.value,
-            shop: shopId.value,
-          })
+          // 用户已经不在这笔支付的上下文里了（后台迟到恢复、且当时并不是
+          // "支付结果未知"那种主动等待态）——只非阻塞提示，不强弹成功页，
+          // 不碰 showCart/showCheckoutAuth 这些当前可能正在被用户使用的 UI
+          // 状态，不展示"本单已省 X 元"这类需要 member_value 的具体数值
+          // （P0-B2b 审计 section 22：避免另建一套 display authority）。
+          uni.showToast({ title: '上一笔订单已支付成功', icon: 'none', duration: 2000 })
         }
-        saveMyOrders()
-        startStatusPoll(id)
+
+        // P0-B2b P0 cross-order 守卫：只清跟这次恢复严格同一个 id 的 pending
+        // 标记。pendingOrderId 完全可能已经被另一路并发的恢复/正常支付清成
+        // 空字符串，或者用户在这中间已经提交了一笔全新的订单、pendingOrderId
+        // 指向的是那笔新订单——两种情况都绝不能被这次对账动到，否则会把一笔
+        // 真正还待支付的新订单标记误清掉。
+        if (String(pendingOrderId.value) === String(id)) {
+          clearPendingPaymentOrder()
+        }
         await syncDiningOrders()
         showOrders.value = showDetail || showOrders.value
         return true
@@ -271,6 +409,18 @@ export function useCheckout({
       // 恢复失败率"，不用从一堆通用网络错误里去猜。
       reportError('checkout.recover_pending_payment', e)
       return false
+    }
+  }
+
+  let recoveringPayment = false
+  const recoverPendingPaymentResult = async ({ showDetail = false, presentSuccess = false } = {}) => {
+    if (recoveringPayment) return false
+    restorePendingPaymentOrder()
+    const id = pendingOrderId.value
+    if (!id) return false
+    recoveringPayment = true
+    try {
+      return await recoverPaymentResultById(id, { showDetail, presentSuccess })
     } finally {
       recoveringPayment = false
     }
@@ -609,7 +759,11 @@ export function useCheckout({
         savePendingPaymentOrder()
         return await confirmPay()
       }
-      _handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })
+      // P0-B2b race fix: capture the id synchronously, right here, before
+      // anything else can run -- _handlePaySuccess no longer trusts
+      // pendingOrderId.value internally (see its own definition below).
+      const completedOrderId = pendingOrderId.value
+      _handlePaySuccess(completedOrderId, { ...data, total: payAmount.value, status: data.status || 'pending' })
       pendingPaymentIntent.value = null
       return true
     } catch (err) {
@@ -635,7 +789,10 @@ export function useCheckout({
         if (err.data.need_payment) {
           return await confirmPay()
         }
-        const recovered = await recoverPendingPaymentResult({ showDetail: true })
+        // 用户刚刚主动提交，服务端告知这个 request_id 早就有一笔已支付订单——
+        // 跟上面两处 confirmPay 里的核对同一个道理，属于用户仍在等这笔支付
+        // 结果的场景，发现已支付要展示完整成功页。
+        const recovered = await recoverPendingPaymentResult({ showDetail: true, presentSuccess: true })
         if (recovered) return true
         uni.showToast({ title: toastText.submitOrderFailed, icon: 'none' })
         return false
@@ -722,37 +879,32 @@ export function useCheckout({
     }
   }
 
-  const _handlePaySuccess = (data) => {
+  // P0-B2b: 正常支付成功路径。id 必须由调用方显式传入，本函数内部绝不读
+  // pendingOrderId.value——normal confirmation 的 requestPayment/
+  // getOrderStatus 轮询跟并发的 recoverPendingPaymentResult（比如 onShow
+  // 后台恢复）完全可能撞在一起：如果恢复先一步确认了同一笔订单已支付并调用
+  // 了 clearPendingPaymentOrder()，这里再读 pendingOrderId.value 就会读到
+  // 空字符串，产生一个 id 是空字符串的 myOrders 行/成功页。所有调用方都必须
+  // 在自己那次异步操作开始之前就把 id 冻结成局部变量，而不是在这个函数执行
+  // 的这一刻才去读共享的 pendingOrderId ref。
+  //
+  // 这里的购物车/备注/优惠券/幂等请求号清理保持无条件（P0-B2b 审计
+  // section 9：正常支付成功的收尾行为不允许变化），跟恢复路径那套"先比对
+  // 指纹再决定要不要清"的 applyRecoveryCartCleanup 是两码事，不合并。
+  const _handlePaySuccess = (id, data) => {
+    if (!id) return false
     showCart.value = false
-    orderId.value = pendingOrderId.value
-    orderStatus.value = data.status || 'pending'
-    successTotal.value = Number(data.total ?? payAmount.value)
-    startStatusPoll(orderId.value)
-    const now = new Date()
-    const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0')
-    myOrders.value.unshift({
-      id: orderId.value, orderNo: orderNo.value, status: orderStatus.value,
-      paymentStatus: data.payment_status || '', paymentMode: normalizePaymentMode(data.payment_mode || paymentMode.value),
-      diningSessionId: diningSessionId.value || '', tableSessionId: diningSessionId.value || '',
-      items: successItems.value, total: successTotal.value, createdAt: timeStr,
-      createdTs: now.getTime(), table: tableNo.value, shop: shopId.value,
-      pickupNo: data.pickup_no || '',
-    })
-    saveMyOrders()
-    syncDiningOrders().catch(() => {})
-    reminderRequested.value = false
-    // P0-B2a: member_value/奖励券只信 data.member_value（GET /v1/orders/my 的
-    // authority）。正常微信支付这里的 data 本身就是那次读取的结果，免单/
-    // postpay/table_account 的 data 来自别的响应形状、天然没有这个字段，
-    // 交给 applyAuthoritativeMemberReward 统一清空，不在这里特判。
-    applyAuthoritativeMemberReward(data.member_value || null)
+    if (successPreserveDraft) successPreserveDraft.value = false
+    upsertPaidOrderResult(id, data)
+    hydratePaidSuccessPresentation(id, data, { allowOverwrite: true })
     cart.value = {}
     specCartItems.value = []
     selectedCouponId.value = null
     remark.value = ''
     pendingSubmitRequestId.value = ''
-    showSuccess.value = true
     clearPendingPaymentOrder()
+    syncDiningOrders().catch(() => {})
+    return true
   }
 
   // P0-B2a: 成功页会员价值/奖励券唯一 authority 是 GET /v1/orders/my 的
@@ -824,7 +976,11 @@ export function useCheckout({
             return false
           }
           if (data.payment_status === 'paid') {
-            _handlePaySuccess({ ...data, total: payAmount.value })
+            // P0-B2b race fix: `id` is this call's own parameter, captured by
+            // the caller before this loop's awaits ever started -- it can't
+            // have been clobbered by a concurrent recovery clearing
+            // pendingOrderId.value out from under us.
+            _handlePaySuccess(id, { ...data, total: payAmount.value })
             if (paymentResultUnknown) paymentResultUnknown.value = false
             return true
           }
@@ -844,28 +1000,44 @@ export function useCheckout({
     if (paying.value || !pendingOrderId.value) return false
     paying.value = true
     paymentFailed.value = false
+    // P0-B2b P0 fix: 声明在 try 外面，这样 catch 里也能读到——
+    // createWxPayOrder/uni.requestPayment 这些真正的异步支付动作期间，一旦
+    // 抛出/reject，catch 必须仍然能核对这笔具体订单的服务端 truth，而不是
+    // 重新去读这时候可能已经被并发恢复清空的 pendingOrderId.value。
+    let paymentOrderId = ''
     try {
       // 待支付恢复等只走 confirmPay 的路径，也要再申请一次（已授权时微信通常不再弹框）。
       await requestOrderSubscribeMessages()
-      if (await recoverPendingPaymentResult()) return true
+      // P0-B2b: 用户主动点了去支付，正在核对是不是已经支付过——这就是"用户
+      // 仍在这笔支付的上下文里"，发现已支付必须直接展示完整成功页，不是只
+      // 做后台对账。
+      if (await recoverPendingPaymentResult({ presentSuccess: true })) return true
+
+      // P0-B2b P0 fix: precheck 没能解决这笔订单——从这里开始，接下来还有
+      // createWxPayOrder/uni.requestPayment 这些真正的异步支付动作，每一个
+      // await 都是并发的 onShow/后台恢复可能抢先 clearPendingPaymentOrder 的
+      // 窗口。这笔订单的 identity 就此冻结成外层变量，整条支付链（包括下面
+      // 的 catch）往后绝不再读 pendingOrderId.value。
+      paymentOrderId = pendingOrderId.value
+      if (!paymentOrderId) return false
+
       if (paymentResultUnknown?.value) {
-        return await waitForBackendPaymentConfirmation(pendingOrderId.value)
+        return await waitForBackendPaymentConfirmation(paymentOrderId)
       }
       if (showCheckoutAuth.value) authActionStatus.value = 'paying'
       let jsCode = ''
       if (!uni.getStorageSync('customer_token')) {
         jsCode = await wxLogin()
       }
-      const res = await createWxPayOrder(pendingOrderId.value, false, { authRedirect: false, js_code: jsCode, participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') })
+      const res = await createWxPayOrder(paymentOrderId, false, { authRedirect: false, js_code: jsCode, participant_token: diningParticipantToken.value || uni.getStorageSync('dining_participant_token') })
       const data = res?.data || {}
 
       if (data.free) {
-        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去
-        // 补一次权威 member_value（见 fetchFreeOrderMemberValue 顶部说明）。
-        const paidOrderId = pendingOrderId.value
-        _handlePaySuccess(data)
+        // _handlePaySuccess/fetchFreeOrderMemberValue 都用上面冻结好的
+        // paymentOrderId，不再单独重新读一次 pendingOrderId.value。
+        _handlePaySuccess(paymentOrderId, data)
         pendingPaymentIntent.value = null
-        fetchFreeOrderMemberValue(paidOrderId)
+        fetchFreeOrderMemberValue(paymentOrderId)
         return true
       }
 
@@ -883,12 +1055,11 @@ export function useCheckout({
         paySign: p.paySign,
       })
 
-      const paidOrderId = pendingOrderId.value
       // P0-B2a: waitForBackendPaymentConfirmation 读到的就是 GET /v1/orders/my
       // 本身，member_value 已经在那次响应里——_handlePaySuccess 会直接消费它，
       // 不需要再单独轮询一次奖励券（P0-B1 上线后 reward 快照与 member_value
       // 已经同一次读取里权威可读，不再有"支付成功那一刻奖励还没落库"的旧合同）。
-      const confirmed = await waitForBackendPaymentConfirmation(paidOrderId)
+      const confirmed = await waitForBackendPaymentConfirmation(paymentOrderId)
       if (confirmed) {
         pendingPaymentIntent.value = null
         return true
@@ -900,7 +1071,16 @@ export function useCheckout({
         requireCheckoutAuth()
         return false
       }
-      if (await recoverPendingPaymentResult({ showDetail: true })) return true
+      // 同样是用户主动发起的这次支付动作失败后的核对——真支付成功就该看到
+      // 完整成功页，而不是静默对账、让用户以为支付真的失败了。P0-B2b P0
+      // fix：这里绝不能用会重新读 pendingOrderId.value 的
+      // recoverPendingPaymentResult()——requestPayment reject 之前，并发的
+      // onShow/后台恢复完全可能已经确认了这笔订单已支付并清空了
+      // pendingOrderId，届时公开函数会直接因为"没有 pending 订单"而短路
+      // 返回 false，白白把一次真实支付成功误判成失败。必须用一开始就冻结好
+      // 的 paymentOrderId 去核对服务端 truth——客户端 requestPayment 的
+      // reject 从来就不是支付事实本身。
+      if (await recoverPaymentResultById(paymentOrderId, { showDetail: true, presentSuccess: true })) return true
       const msg = err?.errMsg || err?.message || '支付失败，请重试'
       paymentFailed.value = true
       if (String(msg).includes('cancel')) {
@@ -931,6 +1111,9 @@ export function useCheckout({
     clearPendingPaymentOrder,
     clearStalePrepayOrderForPayLater,
     recoverPendingPaymentResult,
+    // 只为测试可见——生产代码路径一律走 recoverPendingPaymentResult 或者
+    // confirmPay 自己冻结好的 paymentOrderId，不直接调用它。
+    recoverPaymentResultById,
     requireCheckoutAuth,
   }
 }
