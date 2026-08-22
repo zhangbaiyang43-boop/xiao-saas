@@ -41,7 +41,7 @@ These run in `.github/workflows/member-mini-client-ci.yml` via package scripts (
 
 1. Payment / money business contracts (not redefined here)
 2. This Constitution
-3. Named primitives (Overlay, Layer tokens, existing State*, AddBtn)
+3. Named primitives (Overlay, BaseSheet, Layer tokens, existing State*, AddBtn)
 4. Legacy implementation (not a source of new standards)
 
 ## Architecture
@@ -79,11 +79,12 @@ No toast / popover / dropdown / drawer bands.
 
 Full-screen blocking overlay geometry, dim, and layer belong to **BaseOverlay**.
 
-F1B consumers:
+Consumers:
 
 | Surface | Authority | Layer |
 |---|---|---|
-| CheckoutSheet and other `_shared.scss` `.mask` users | legacy `.mask` | BLOCKING (`var(--z-blocking)` = 3100) |
+| CheckoutSheet and remaining `_shared.scss` `.mask` users | legacy `.mask` | BLOCKING (`var(--z-blocking)` = 3100) |
+| OrderHistorySheet, TableBillSheet | BaseSheet → BaseOverlay | BLOCKING (`3100`) |
 | MemberCheckoutChoice | BaseOverlay | BLOCKING_TOP (`3200`) |
 | CheckoutAuthSheet | BaseOverlay | BLOCKING_TOP (`3200`) |
 
@@ -96,6 +97,27 @@ Slot content clicks MUST NOT emit `mask-click`. Consumers MUST NOT be required t
 BaseOverlay does **not** own: sheet chrome, bottom placement, title, footer, safe-area, buttons, business state.
 
 Invalid `layer` MUST fail closed. It MUST NOT fall back to `blocking`.
+
+## Bottom Sheet Shell Contract
+
+**BaseSheet** is sheet-shell authority for new standard bottom sheets.
+
+```
+Pages → Business Components → BaseSheet → BaseOverlay → Tokens
+```
+
+BaseSheet MUST compose BaseOverlay. It MUST NOT reimplement overlay geometry, dim, or blocking z-index.
+
+BaseSheet owns: bottom placement, sheet surface, top radius, max-height, flex column shell, standard header (title + close), optional `header-left`, default body slot, footer slot, mask-click → `close`, and the shared safe-area shell used by the first family.
+
+BaseSheet does **not** own: business loading/empty/error, order status, coupon/payment/table state, business footers, APIs, checkout, or scroll data.
+
+Full-screen blocking overlay → BaseOverlay authority.
+Bottom sheet shell → BaseSheet for **new standard bottom sheets**.
+These layers are not the same.
+
+Legal: a special blocking overlay MAY use BaseOverlay directly.
+Forbidden: requiring every BaseOverlay consumer to use BaseSheet.
 
 ## Async Visible Feedback
 
@@ -122,17 +144,19 @@ Do not tokenise every hex.
 
 1. New blocking overlays go through BaseOverlay. Exact class token `mask` is legal only on F1C-registered `LEGACY_MASK_ALLOWLIST` paths that also import `_shared.scss`. Importing `_shared.scss` does **not** self-promote a new file to legacy.
 2. Stacked checkout choice/auth layers use `layer="blocking-top"`.
-3. Core-flow state changes are visible.
-4. Touched files migrate only the related primitive.
-5. Machine-checkable overlay MUSTs stay in `npm run check:ui-contracts`.
+3. New standard bottom sheets use BaseSheet, which composes BaseOverlay. Touched legacy bottom sheets migrate the shell only.
+4. Core-flow state changes are visible.
+5. Touched files migrate only the related primitive.
+6. Machine-checkable overlay MUSTs stay in `npm run check:ui-contracts`.
 
 ## MUST NOT
 
 1. Do not implement raw `position:fixed` + full-viewport + dim + blocking z-index outside BaseOverlay / listed legacy.
 2. Do not add a new exact class token `mask` consumer. Legacy `mask` files must stay on the F1C allowlist and keep the `_shared.scss` import.
-3. Do not use `class="mask"` in MemberCheckoutChoice or CheckoutAuthSheet.
+3. Do not use `class="mask"` in MemberCheckoutChoice, CheckoutAuthSheet, OrderHistorySheet, or TableBillSheet.
 4. Do not treat DOM order as overlay stack authority.
-5. Do not big-bang rewrite UI, buttons, typography, cards, or payment state machines under this constitution.
+5. Do not require every BaseOverlay consumer to use BaseSheet.
+6. Do not big-bang rewrite UI, buttons, typography, cards, or payment state machines under this constitution.
 
 ## Exception
 
@@ -141,4 +165,4 @@ Unrecorded exceptions are unapproved.
 
 ## Deferred (not forgotten)
 
-BaseSheet, AppButton, AppCard, typography/spacing/radius systems, full hex cleanup, merging LoadingStates into StateError.
+AppButton, AppCard, typography/spacing/radius systems, full hex cleanup, merging LoadingStates into StateError.

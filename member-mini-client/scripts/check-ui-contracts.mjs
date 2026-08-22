@@ -13,10 +13,8 @@ export const BASE_OVERLAY_AUTHORITY = 'components/base-overlay/base-overlay.vue'
 export const LEGACY_MASK_ALLOWLIST = [
   'subpkg-order/components/CheckoutSheet.vue',
   'subpkg-order/components/CouponPicker.vue',
-  'subpkg-order/components/OrderHistorySheet.vue',
   'subpkg-order/components/PaymentSuccessSheet.vue',
   'subpkg-order/components/SpecSheet.vue',
-  'subpkg-order/components/TableBillSheet.vue',
   'subpkg-order/components/WelcomeCouponSheet.vue',
 ]
 
