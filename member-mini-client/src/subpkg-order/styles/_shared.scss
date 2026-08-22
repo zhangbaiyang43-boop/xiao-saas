@@ -101,49 +101,8 @@
   line-height: 36rpx;
 }
 
-// 底部弹层的外壳/头部——OrderHistorySheet（单笔订单历史）和 TableBillSheet
-// （桌台账单）是同一套"本桌订单类弹层"的两种视图，共用同一个外壳骨架。
-.orders-sheet {
-  width: 100%;
-  background: #fff;
-  border-radius: 32rpx 32rpx 0 0;
-  padding: 0 0 calc(24rpx + env(safe-area-inset-bottom));
-  box-sizing: border-box;
-  max-height: 86vh;
-  display: flex;
-  flex-direction: column;
-}
-
-.orders-sheet-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 28rpx 36rpx 18rpx;
-  border-bottom: 0;
-  flex-shrink: 0;
-}
-
-.orders-sheet-title {
-  font-size: 36rpx;
-  font-weight: 800;
-  color: var(--text-1);
-  line-height: 1.2;
-}
-
-.orders-sheet-close {
-  width: 56rpx;
-  height: 56rpx;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #f3f4f6;
-  color: var(--text-3);
-  font-size: 28rpx;
-}
-
 // 两个"本桌订单类弹层"共用的空状态——没有可展示的订单时显示的图标+标题+说明。
+// 外壳/头部已迁到 BaseSheet；这里只保留业务空状态，不是 sheet shell。
 .table-status-empty {
   padding: 90rpx 40rpx;
   display: flex;

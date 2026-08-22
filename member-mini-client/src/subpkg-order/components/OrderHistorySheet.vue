@@ -1,11 +1,5 @@
 <template>
-  <view class="mask" @click="$emit('close')">
-    <view class="orders-sheet" @click.stop>
-      <view class="orders-sheet-head">
-        <text class="orders-sheet-title">本桌订单</text>
-        <text class="orders-sheet-close iconfont icon-close" @click="$emit('close')"></text>
-      </view>
-
+  <base-sheet layer="blocking" title="本桌订单" @close="$emit('close')">
       <scroll-view v-if="currentTableOrder" class="orders-list" scroll-y>
         <view class="table-status-card" :class="'table-status-card--' + tableOrderStatusTone">
           <view class="table-status-top">
@@ -130,13 +124,14 @@
         />
       </view>
 
+      <template #footer>
       <view class="orders-actions">
         <view class="orders-secondary-btn" :class="'orders-secondary-btn--' + tableOrderStatusTone" @click="$emit('close')">
           <text>{{ tableOrderPrimaryButtonText }}</text>
         </view>
       </view>
-    </view>
-  </view>
+      </template>
+  </base-sheet>
 </template>
 
 <script>
@@ -145,10 +140,11 @@
 // 辑——关闭、展开/收起历史订单都只 emit 出去，真正的状态还是父组件的
 // showOrders/showAllOrders，一行逻辑都没有改。
 import StateEmpty from '@/components/state-empty/state-empty.vue'
+import BaseSheet from '@/components/base-sheet/base-sheet.vue'
 
 export default {
   name: 'OrderHistorySheet',
-  components: { StateEmpty },
+  components: { StateEmpty, BaseSheet },
   props: {
     currentTableOrder: { type: Object, default: null },
     historyTableOrders: { type: Array, default: () => [] },

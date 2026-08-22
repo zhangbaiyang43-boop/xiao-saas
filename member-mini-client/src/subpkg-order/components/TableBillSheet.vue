@@ -1,14 +1,15 @@
 <template>
-  <view class="mask" @click="emitCloseOrFinish">
-    <view class="orders-sheet table-account-sheet" @click.stop>
-      <view class="orders-sheet-head table-account-head">
+  <base-sheet
+    class="table-account-sheet"
+    layer="blocking"
+    title="已点菜品"
+    @close="emitCloseOrFinish"
+  >
+      <template #header-left>
         <view class="table-account-back" @click="emitCloseOrFinish">
           <text class="iconfont icon-back"></text>
         </view>
-        <text class="orders-sheet-title">已点菜品</text>
-        <text class="orders-sheet-close iconfont icon-close" @click="emitCloseOrFinish"></text>
-      </view>
-
+      </template>
       <scroll-view v-if="!loadError" class="table-account-list" scroll-y>
         <view id="table-account-status-anchor" class="table-account-status">
           <view class="table-account-status-icon" :class="'table-account-status-icon--' + tableStatusView.tone">
@@ -95,6 +96,7 @@
         />
       </view>
 
+      <template #footer>
       <!-- SETTLED：只保留「完成」；ACTIVE：继续加菜 + 结账相关操作 -->
       <view v-if="isTableSettled" class="table-account-actions">
         <view class="table-account-action table-account-action--primary" @click="$emit('finish')">
@@ -130,8 +132,8 @@
           <text>用餐结束请到收银台或联系服务员结账</text>
         </view>
       </view>
-    </view>
-  </view>
+      </template>
+  </base-sheet>
 </template>
 
 <script>
@@ -140,10 +142,11 @@
 // 改父组件状态的动作都只 emit 出去。
 import StateEmpty from '@/components/state-empty/state-empty.vue'
 import StateError from '@/components/state-error/state-error.vue'
+import BaseSheet from '@/components/base-sheet/base-sheet.vue'
 
 export default {
   name: 'TableBillSheet',
-  components: { StateEmpty, StateError },
+  components: { StateEmpty, StateError, BaseSheet },
   props: {
     loadError: { type: Boolean, default: false },
     tableStatusView: { type: Object, required: true },
