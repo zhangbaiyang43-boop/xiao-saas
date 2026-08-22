@@ -72,7 +72,37 @@ def _numeric_float(value: object) -> float:
     return float(str(value or 0))
 
 
+def _encode_reward_snapshot(coupon_data: PostPaymentCouponData | None) -> str:
+    """Persist the reward tri-state without collapsing JSON null into SQL NULL.
+
+    Call only after reward applicability/resolution is known: ``None`` becomes
+    JSON ``null`` (known none), while a coupon becomes its JSON object snapshot.
+    SQL NULL is deliberately reserved for historical or unresolved attribution.
+    """
+    return json.dumps(coupon_data, ensure_ascii=False, default=str)
+
+
 class OrderPaymentService(BaseService):
+    @staticmethod
+    def _build_reward_coupon_data(
+        issue_result: dict[str, Any] | None,
+        *,
+        is_second_order: bool,
+    ) -> PostPaymentCouponData | None:
+        """Normalize every payment mode to the existing order reward snapshot shape."""
+        if not issue_result or issue_result.get("success_count", 0) <= 0:
+            return None
+        sent_item = (issue_result.get("sent") or [{}])[0]
+        weighted_coupon = issue_result.get("weighted_coupon") or {}
+        return {
+            "id": sent_item.get("id"),
+            "name": weighted_coupon.get("name") or "优惠券",
+            "amount": weighted_coupon.get("amount", 0),
+            "min_amount": weighted_coupon.get("threshold", 0),
+            "expired_at": sent_item.get("expire_time"),
+            "is_second_order": is_second_order,
+        }
+
     @staticmethod
     def _validate_confirmed_wx_payment(order: Order, resource: dict[str, Any]) -> str:
         if resource.get("trade_state") != "SUCCESS":
@@ -340,62 +370,54 @@ class OrderPaymentService(BaseService):
 
 
         # DB-only coupon/member effects remain inside the outer payment transaction.
-        if customer_id and await optional_capability_enabled(str(order.tenant_id), CAP_COUPONS):
-            try:
-                svc = CouponService(self.db)
-                prior_paid_count_result = await self.db.execute(
-                    select(func.count(Order.id)).where(
-                        Order.tenant_id == order.tenant_id,
-                        Order.customer_id == int(customer_id),
-                        Order.payment_status == "paid",
-                        Order.id != order.id,
+        if customer_id:
+            coupons_enabled = await optional_capability_enabled(str(order.tenant_id), CAP_COUPONS)
+            if not coupons_enabled:
+                # Capability policy proves this order cannot issue a reward. That
+                # is known-none, not an unresolved/historical SQL NULL.
+                order.reward_coupon_snapshot = _encode_reward_snapshot(None)
+            else:
+                try:
+                    svc = CouponService(self.db)
+                    prior_paid_count_result = await self.db.execute(
+                        select(func.count(Order.id)).where(
+                            Order.tenant_id == order.tenant_id,
+                            Order.customer_id == int(customer_id),
+                            Order.payment_status == "paid",
+                            Order.id != order.id,
+                        )
                     )
-                )
-                prior_paid_count = int(prior_paid_count_result.scalar() or 0)
-                # 第二单是"首单到复购"这条转化漏斗里最关键的一步——比第三单、第十单都更值得
-                # 单独识别出来，用来在客户端给一句专属文案（"欢迎回来，这是你的第二次光临"），
-                # 而不是把所有复购场景都用同一句"又送你一张券"糊弄过去。
-                is_second_order = prior_paid_count == 1
-                rule_type = await svc.resolve_consumption_coupon_rule_type(
-                    int(customer_id),
-                    exclude_order_id=int(order.id),
-                )
-                issue_result = await svc.issue_auto_coupon(
-                    int(customer_id),
-                    rule_type,
-                    consumption_amount=float(order.total or 0),
-                    auto_commit=False,
-                )
-                # issue_auto_coupon() 的返回值是内部服务间约定的形状（success_count/sent/
-                # weighted_coupon 嵌套），不是给客户端消费的。这里只在真的发出新券时才
-                # 拍平成小程序端认识的 {id,name,amount,min_amount,expired_at}（和入会接口
-                # 的欢迎券是同一套字段），没发新券（未达门槛、规则关闭、已持有同类未用券）
-                # 一律给 None——不然前端只要判断"coupon 字段存在"就会把 success_count:0
-                # 这种失败/跳过结果误当成"又送了一张券"展示出去。
-                coupon_data = None
-                if issue_result and issue_result.get("success_count", 0) > 0:
-                    sent_item = (issue_result.get("sent") or [{}])[0]
-                    wc = issue_result.get("weighted_coupon") or {}
-                    coupon_data = {
-                        "id": sent_item.get("id"),
-                        "name": wc.get("name") or "优惠券",
-                        "amount": wc.get("amount", 0),
-                        "min_amount": wc.get("threshold", 0),
-                        "expired_at": sent_item.get("expire_time"),
-                        "is_second_order": is_second_order,
-                    }
-                # 落库这份快照：微信支付的真实发券走的是 wxpay_notify 异步回调，回调结果
-                # 只回给微信、回不到小程序客户端。存到订单上，客户端支付成功后轮询
-                # /orders/my 就能把这次实际发放的奖励券（或者"这次没发"）拿回来，而不是
-                # 依赖 createWxPayOrder 那个支付前就返回、结构上根本不含 coupon 的旧响应。
-                order.reward_coupon_snapshot = (
-                    json.dumps(coupon_data, ensure_ascii=False, default=str)
-                    if coupon_data
-                    else None
-                )
-            except Exception as e:
-                logger.warning(f"post-payment coupon failed: {e}")
-                raise
+                    prior_paid_count = int(prior_paid_count_result.scalar() or 0)
+                    # 第二单是"首单到复购"这条转化漏斗里最关键的一步——比第三单、第十单都更值得
+                    # 单独识别出来，用来在客户端给一句专属文案（"欢迎回来，这是你的第二次光临"），
+                    # 而不是把所有复购场景都用同一句"又送你一张券"糊弄过去。
+                    is_second_order = prior_paid_count == 1
+                    rule_type = await svc.resolve_consumption_coupon_rule_type(
+                        int(customer_id),
+                        exclude_order_id=int(order.id),
+                    )
+                    issue_result = await svc.issue_auto_coupon(
+                        int(customer_id),
+                        rule_type,
+                        consumption_amount=float(order.total or 0),
+                        auto_commit=False,
+                    )
+                    # issue_auto_coupon() 的返回值是内部服务间约定的形状（success_count/sent/
+                    # weighted_coupon 嵌套），不是给客户端消费的。这里只在真的发出新券时才
+                    # 拍平成小程序端认识的 {id,name,amount,min_amount,expired_at}（和入会接口
+                    # 的欢迎券是同一套字段），没发新券（未达门槛、规则关闭、已持有同类未用券）
+                    # 一律给 None——不然前端只要判断"coupon 字段存在"就会把 success_count:0
+                    # 这种失败/跳过结果误当成"又送了一张券"展示出去。
+                    coupon_data = self._build_reward_coupon_data(
+                        issue_result,
+                        is_second_order=is_second_order,
+                    )
+                    # JSON null is an explicit processed-with-no-reward marker.
+                    # SQL NULL stays reserved for unresolved or historical rows.
+                    order.reward_coupon_snapshot = _encode_reward_snapshot(coupon_data)
+                except Exception as e:
+                    logger.warning(f"post-payment coupon failed: {e}")
+                    raise
 
         if customer_id and await optional_capability_enabled(str(order.tenant_id), CAP_MEMBERSHIP):
             try:
@@ -463,7 +485,12 @@ class OrderPaymentService(BaseService):
         if await optional_capability_enabled(tenant_id, CAP_MEMBERSHIP):
             membership_svc = MembershipService(self.db)
             membership_svc.set_tenant_id(tenant_id)
-            await membership_svc.apply_consumption(customer, float(order.total or 0), consumption_id=int(order.id or 0))
+            await membership_svc.apply_consumption(
+                customer,
+                float(order.total or 0),
+                consumption_id=int(order.id or 0),
+                auto_commit=False,
+            )
 
         # 新客券/复购券：prepay 支付成功（_on_payment_success）会发，但 postpay/table_account
         # 结账走的是这个函数，之前完全没有这一段——商户后台"复购券"卡片的文案明确写的是
@@ -474,13 +501,34 @@ class OrderPaymentService(BaseService):
             try:
                 coupon_svc = CouponService(self.db)
                 coupon_svc.set_tenant_id(tenant_id)
+                prior_paid_count_result = await self.db.execute(
+                    select(func.count(Order.id)).where(
+                        Order.tenant_id == order.tenant_id,
+                        Order.customer_id == customer_id,
+                        Order.payment_status == "paid",
+                        Order.id != order.id,
+                    )
+                )
+                is_second_order = int(prior_paid_count_result.scalar() or 0) == 1
                 rule_type = await coupon_svc.resolve_consumption_coupon_rule_type(
                     customer_id,
                     exclude_order_id=int(order.id or 0),
                 )
-                await coupon_svc.issue_auto_coupon(customer_id, rule_type, consumption_amount=float(order.total or 0))
+                issue_result = await coupon_svc.issue_auto_coupon(
+                    customer_id,
+                    rule_type,
+                    consumption_amount=float(order.total or 0),
+                    auto_commit=False,
+                )
+                coupon_data = self._build_reward_coupon_data(
+                    issue_result,
+                    is_second_order=is_second_order,
+                )
+                order.reward_coupon_snapshot = _encode_reward_snapshot(coupon_data)
             except Exception as e:
                 logger.warning(f"postpay/table_account settlement coupon reward failed: {e}")
+        else:
+            order.reward_coupon_snapshot = _encode_reward_snapshot(None)
 
 
     async def _refund_order_payment(self, order: Order, reason: str) -> RefundResult:

@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, TYPE_CHECKING, Optional
 
@@ -18,6 +19,7 @@ ApiResponse = RespVo[Any]
 
 PAID_ORDER_CANCEL_ERROR = "PAID_ORDER_CANCEL_REQUIRES_REFUND"
 PAID_ORDER_CANCEL_MESSAGE = "该订单已付款，不能直接取消，请先处理退款"
+logger = logging.getLogger(__name__)
 
 
 def _paid_order_cancel_response() -> ApiResponse:
@@ -35,6 +37,100 @@ def _mark_order_offline_paid(order: Order, payment_method: str = "offline") -> b
     order.payment_method = payment_method
     order.payment_time = datetime.now(timezone.utc).isoformat()
     return True
+
+
+def _decode_reward_snapshot(raw_snapshot: object) -> tuple[str, dict[str, Any] | None, bool]:
+    """Decode the persisted three-state reward contract without collapsing NULLs.
+
+    SQL NULL is historical UNKNOWN, JSON null is explicit KNOWN_NONE, and a JSON
+    object is ISSUED. The final boolean reports whether a non-NULL payload obeyed
+    that contract; malformed/other JSON is an invariant failure for paid members.
+    """
+    if raw_snapshot is None:
+        return "unknown", None, True
+    try:
+        decoded = json.loads(str(raw_snapshot))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return "unknown", None, False
+    if decoded is None:
+        return "none", None, True
+    if isinstance(decoded, dict):
+        return "issued", decoded, True
+    return "unknown", None, False
+
+
+async def build_member_value_for_order(db: AsyncSession, order: Order) -> dict[str, Any]:
+    """Build transaction facts for the existing customer-owned order read.
+
+    ``member_savings`` deliberately means CURRENT_CONTRACT member-coupon
+    savings only. A future public promotion may also populate discount_amount,
+    so a discount without the customer-bound coupon that produced it is never
+    classified as member value here. ``points_balance`` is the account's current
+    balance at read time, not a historical balance-after-order snapshot.
+    """
+    reward_status, reward_coupon, reward_snapshot_valid = _decode_reward_snapshot(
+        getattr(order, "reward_coupon_snapshot", None)
+    )
+    empty_value = {
+        "member_savings": None,
+        "points_earned": None,
+        "points_balance": None,
+        "reward_coupon_status": reward_status,
+        "reward_coupon": reward_coupon,
+    }
+    if not getattr(order, "customer_id", None):
+        return {"status": "not_applicable", **empty_value}
+    if getattr(order, "payment_status", None) != "paid":
+        return {"status": "pending", **empty_value}
+
+    if not reward_snapshot_valid:
+        logger.error("member value invariant: malformed reward snapshot")
+        return {"status": "unavailable", **empty_value}
+
+    from app.models.member_account import MemberAccount
+    from app.models.point_ledger import PointLedger
+
+    tenant_id = str(order.tenant_id)
+    customer_id = int(order.customer_id)
+    account_result = await db.execute(
+        select(MemberAccount).where(
+            MemberAccount.tenant_id == tenant_id,
+            MemberAccount.customer_id == customer_id,
+        )
+    )
+    account = account_result.scalar_one_or_none()
+    if not account:
+        return {"status": "unavailable", **empty_value}
+
+    points_result = await db.execute(
+        select(PointLedger).where(
+            PointLedger.tenant_id == tenant_id,
+            PointLedger.customer_id == customer_id,
+            PointLedger.event_type == "consumption",
+            PointLedger.ref_id == str(order.id),
+        )
+    )
+    order_ledgers = list(points_result.scalars().all())
+    if len(order_ledgers) > 1:
+        logger.error("member value invariant: duplicate consumption ledgers")
+        return {"status": "unavailable", **empty_value}
+    if not order_ledgers and float(getattr(order, "total", 0) or 0) > 0:
+        logger.error("member value invariant: positive paid order missing consumption ledger")
+        return {"status": "unavailable", **empty_value}
+
+    member_savings = (
+        float(getattr(order, "discount_amount", 0) or 0)
+        if getattr(order, "coupon_id", None)
+        else 0.0
+    )
+    return {
+        "status": "available",
+        "member_savings": member_savings,
+        "points_earned": int(order_ledgers[0].points) if order_ledgers else 0,
+        "points_balance": int(account.points_balance or 0),
+        "reward_coupon_status": reward_status,
+        "reward_coupon": reward_coupon,
+    }
 
 
 class OrderLifecycleService(BaseService):
@@ -221,7 +317,10 @@ class OrderLifecycleService(BaseService):
         customer_id: int | None,
         participant_token: str | None,
     ) -> ApiResponse:
-        result = await self.db.execute(select(Order).where(Order.id == order_id))
+        tenant_id = self.require_tenant_id()
+        result = await self.db.execute(
+            select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+        )
         order = result.scalar_one_or_none()
         if not order:
             return error_response(code=404, msg="order not found")
@@ -281,7 +380,9 @@ class OrderLifecycleService(BaseService):
             # Re-select through the display session instead of db.refresh()/relying on
             # any cross-session identity-map state, so the response reflects whatever
             # the isolated recovery gate call above just committed.
-            result = await self.db.execute(select(Order).where(Order.id == order_id))
+            result = await self.db.execute(
+                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+            )
             order = result.scalar_one_or_none()
             if not order:
                 return error_response(code=404, msg="order not found")
@@ -295,12 +396,15 @@ class OrderLifecycleService(BaseService):
 
         from app.api.v1.orders import build_order_financial_capabilities
 
+        member_value = await build_member_value_for_order(self.db, order)
+
         return success_response(data={
             "id": str(order.id),
             "status": order.status,
             "payment_status": order.payment_status,
             "merchant_note": order.merchant_note,
             "reward_coupon": reward_coupon,
+            "member_value": member_value,
             "pickup_no": getattr(order, "pickup_no", None),
             "table_no": getattr(order, "table_no", None),
             **build_order_financial_capabilities(order),
