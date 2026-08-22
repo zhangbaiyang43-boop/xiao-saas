@@ -93,13 +93,25 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
 
     def test_frontend_checks_order_status_before_starting_payment_again(self):
         confirm_pay = function_source(CHECKOUT_SOURCE, "confirmPay")
-        self.assertIn("recoverPendingPaymentResult()", confirm_pay)
-        self.assertLess(confirm_pay.index("recoverPendingPaymentResult()"), confirm_pay.index("createWxPayOrder"))
-        self.assertLess(confirm_pay.index("recoverPendingPaymentResult()"), confirm_pay.index("uni.requestPayment"))
+        self.assertIn("recoverPendingPaymentResult({ presentSuccess: true })", confirm_pay)
+        self.assertLess(
+            confirm_pay.index("recoverPendingPaymentResult({ presentSuccess: true })"),
+            confirm_pay.index("await createWxPayOrder("),
+        )
+        self.assertLess(
+            confirm_pay.index("recoverPendingPaymentResult({ presentSuccess: true })"),
+            confirm_pay.index("await uni.requestPayment("),
+        )
 
     def test_frontend_recovers_after_request_payment_error_and_page_reentry(self):
         confirm_pay = function_source(CHECKOUT_SOURCE, "confirmPay")
-        self.assertIn("recoverPendingPaymentResult({ showDetail: true })", confirm_pay)
+        self.assertIn("let paymentOrderId = ''", confirm_pay)
+        self.assertIn("paymentOrderId = pendingOrderId.value", confirm_pay)
+        self.assertIn(
+            "recoverPaymentResultById(paymentOrderId, { showDetail: true, presentSuccess: true })",
+            confirm_pay,
+        )
+        self.assertNotIn("recoverPendingPaymentResult({ showDetail: true })", confirm_pay)
         self.assertIn("getOrderStatus", CHECKOUT_SOURCE)
         self.assertIn("restorePendingPaymentOrder,", MENU_SOURCE)
         self.assertIn("this.restorePendingPaymentOrder()", MENU_SOURCE)
@@ -108,9 +120,18 @@ class PaymentResultRecoveryContractsTest(unittest.TestCase):
 
     def test_paid_recovery_clears_pending_payment_id_to_prevent_repay(self):
         recover = function_source(CHECKOUT_SOURCE, "recoverPendingPaymentResult")
-        self.assertIn("isPaidOrSubmittedOrder(data)", recover)
-        self.assertIn("clearPendingPaymentOrder()", recover)
-        self.assertLess(recover.index("clearPendingPaymentOrder()"), recover.index("startStatusPoll(id)"))
+        by_id = function_source(CHECKOUT_SOURCE, "recoverPaymentResultById")
+        self.assertIn(
+            "return await recoverPaymentResultById(id, { showDetail, presentSuccess })",
+            recover,
+        )
+        self.assertIn("isPaidOrSubmittedOrder(data)", by_id)
+        self.assertIn("if (String(pendingOrderId.value) === String(id))", by_id)
+        self.assertIn("clearPendingPaymentOrder()", by_id)
+        self.assertLess(
+            by_id.index("if (String(pendingOrderId.value) === String(id))"),
+            by_id.index("clearPendingPaymentOrder()"),
+        )
 
 
 if __name__ == "__main__":
