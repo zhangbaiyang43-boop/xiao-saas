@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { clearSession, hasValidSession } from '../utils/session'
+import { clearSession, getToken, hasValidSession, isTokenExpired } from '../utils/session'
 import { useAuthStore } from '../stores/auth'
 
 const Login = () => import('../views/Login.vue')
@@ -133,6 +133,14 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // Captured before ensureSession() -- which may attempt a silent trusted-
+  // device refresh and, on failure, touch storage -- so the eventual
+  // "was this ever a real session" decision below reflects what was
+  // actually true when this navigation started, not a state ensureSession
+  // could have already changed underneath it (avoids a race).
+  const existingToken = getToken()
+  const tokenWasExpired = Boolean(existingToken) && isTokenExpired(existingToken)
+
   let validSession = hasValidSession()
   if (!validSession && !isLogin) {
     validSession = await auth.ensureSession()
@@ -145,7 +153,13 @@ router.beforeEach(async (to, from, next) => {
 
   if (!isLogin && !validSession) {
     clearSession()
-    next({ path: '/login', query: { reason: '登录已过期，请重新登录' } })
+    // Only claim "session expired" when a token actually existed and its
+    // own exp had passed -- an anonymous visitor who never had one (no
+    // token at all) is not told their nonexistent session "expired".
+    next({
+      path: '/login',
+      query: tokenWasExpired ? { reason: '登录已过期，请重新登录' } : {},
+    })
     return
   }
 
