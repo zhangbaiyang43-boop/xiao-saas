@@ -560,6 +560,12 @@ export default {
     const showCart = ref(false)
     const itemsExpanded = ref(false)
     const showSuccess = ref(false)
+    // P0-B2b: 恢复对账发现购物车已经跟已支付订单的提交快照不一样了（用户在
+    // "支付结果未知"之后接着点了新东西）——true 时关闭成功页不清空购物车，
+    // 只提示用户自己确认；false 是今天的正常行为（关闭就清）。只在
+    // applyRecoveryCartCleanup 里被设为 true，任何关闭成功页的入口都必须把它
+    // 重置回 false，防止污染下一单。
+    const successPreserveDraft = ref(false)
     const earnedCoupon = ref(null)
     const reminderRequested = ref(false)
     const requestingReminder = ref(false)
@@ -809,17 +815,30 @@ export default {
       startTablePresencePoll()
     }
 
+    // P0-B2b: successPreserveDraft=true 说明这张成功页是恢复对账弹出来的，
+    // 而且当前购物车已经不再是那笔已支付订单提交时的快照——用户很可能在
+    // "支付结果未知"期间又点了新东西，关闭成功页绝不能像今天这样无条件清空
+    // （P0-B2b 审计 section 16 的核心约束）。preserveDraft=false 时是今天的
+    // 正常行为，一字不变。
     const finishOrdering = () => {
       showSuccess.value = false
-      cart.value = {}
-      specCartItems.value = []
-      remark.value = ''
-      selectedCouponId.value = null
+      const preserved = successPreserveDraft.value
+      if (!preserved) {
+        cart.value = {}
+        specCartItems.value = []
+        remark.value = ''
+        selectedCouponId.value = null
+      }
       // P0-B2a: 关掉成功页就清掉这一单的会员价值/奖励券状态——不依赖"下一单
       // 反正会覆盖"，避免下一单打开成功页前的短暂间隙里闪现上一单的数字。
       successMemberValue.value = null
       earnedCoupon.value = null
-      uni.showToast({ title: successText.closed, icon: 'none', duration: 900 })
+      successPreserveDraft.value = false
+      uni.showToast({
+        title: preserved ? '当前购物车已保留，请确认后再结算' : successText.closed,
+        icon: 'none',
+        duration: preserved ? 1600 : 900,
+      })
       // Keep polling the paid order status in the background.
     }
 
@@ -829,18 +848,30 @@ export default {
 
     const continueOrdering = () => {
       showSuccess.value = false
-      cart.value = {}
-      specCartItems.value = []
-      remark.value = ''
-      selectedCouponId.value = null
+      const preserved = successPreserveDraft.value
+      if (!preserved) {
+        cart.value = {}
+        specCartItems.value = []
+        remark.value = ''
+        selectedCouponId.value = null
+      }
       successMemberValue.value = null
       earnedCoupon.value = null
+      successPreserveDraft.value = false
       activeTab.value = 'order'
-      uni.showToast({ title: successText.backToMenu, icon: 'none', duration: 900 })
+      uni.showToast({
+        title: preserved ? '当前购物车已保留，请确认后再结算' : successText.backToMenu,
+        icon: 'none',
+        duration: 900,
+      })
     }
 
     const viewOrderDetail = () => {
       showSuccess.value = false
+      // 查看订单详情不是"结束这次结账"，不动购物车——不管是不是 preserveDraft。
+      successMemberValue.value = null
+      earnedCoupon.value = null
+      successPreserveDraft.value = false
       refreshAllOrderStatuses()
       showOrders.value = true
     }
@@ -1182,7 +1213,7 @@ export default {
       orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
       showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
       payAmount, pendingOrderId, pendingSubmitRequestId,
-      myOrders, showOrders, showCart, showSuccess,
+      myOrders, showOrders, showCart, showSuccess, successPreserveDraft,
       ordering, tableSessionClosed, paymentMode,
       reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
       totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
@@ -1467,7 +1498,10 @@ export default {
         this.restoreCartIfSameContext()
         await this.syncDiningOrders()
         this.startTablePresencePollIfActive()
-        await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1' })
+        // P0-B2b: 冷启动是这个页面实例第一次跑，用户还没来得及做任何新操作——
+        // 服务端确认已支付就该直接完整展示成功页（会员本单已省/积分/奖励券），
+        // 这正是"闭环"这个词本身的意思。
+        await this.recoverPendingPaymentResult({ showDetail: options.openOrders === '1', presentSuccess: true })
         if (options.openOrders === '1') this.showOrders = true
         return true
       }
@@ -1508,7 +1542,14 @@ export default {
       uni.removeStorageSync('menu_focus_tab')
     }
     if (this.refreshCustomerAuthState) this.refreshCustomerAuthState()
-    if (this.orderingContextReady && this.recoverPendingPaymentResult) this.recoverPendingPaymentResult()
+    // P0-B2b: paymentResultUnknown===true 说明用户是带着"这笔支付结果不知道
+    // 怎样了"这个上下文切后台又回来的——仍然算主动等待，服务端确认已支付要
+    // 直接展示完整成功页。否则是泛化的后台迟到对账（用户早就不在这个上下文
+    // 里了），只做后台核对 + 非阻塞 toast，不强弹、不碰购物车（P0-B2b 审计
+    // section 22）。
+    if (this.orderingContextReady && this.recoverPendingPaymentResult) {
+      this.recoverPendingPaymentResult({ presentSuccess: this.paymentResultUnknown === true })
+    }
     if (this.orderingContextReady && (this.activeTab === 'card' || uni.getStorageSync('customer_token') || uni.getStorageSync('customer_phone'))) {
       this.loadMemberStatus({ authRedirect: false })
     }
