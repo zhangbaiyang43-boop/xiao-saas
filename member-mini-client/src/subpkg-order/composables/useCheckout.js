@@ -32,10 +32,12 @@ export function useCheckout({
   reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
   totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
   orderSuccessTemplateId, pickupReminderTemplateId,
+  showMemberCheckoutChoice, memberChoiceJoining, memberCheckoutBenefitsNeedRefresh, isCustomerLoggedIn,
   wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
   normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
-  clearDiningSessionStorage,
+  clearDiningSessionStorage, refreshAvailableCoupons,
 }) {
+  const memberBenefitsRefreshPending = memberCheckoutBenefitsNeedRefresh || { value: false }
   // P0-15-01: keyed the same way as pendingPaymentStorageKey below -- tenant +
   // table + dining_session_id, never just tenant+table (table_no gets reused
   // by unrelated guest generations). Returns null when there's no valid
@@ -280,8 +282,18 @@ export function useCheckout({
     createdAt: Date.now(),
   })
 
+  const resolveRequiredMemberBenefits = async () => {
+    memberBenefitsRefreshPending.value = true
+    await refreshAvailableCoupons({ required: true, forceBest: true })
+    memberBenefitsRefreshPending.value = false
+  }
+
+  // P0-A: 会员是否加入是可选项，MEMBERSHIP_IS_OPTIONAL=YES——只有还没登录会员
+  // 的顾客点结算，才弹出"加入会员并继续 / 直接支付"的选择层；已经是会员的、
+  // 或者已经有待支付订单要恢复的（P0-9：绝不能把新会员的券偷偷套到旧订单上），
+  // 都走原来的路径不受影响。
   const goCheckout = () => {
-    if (ordering.value || paying.value || authorizing.value) return
+    if (ordering.value || paying.value || authorizing.value || memberChoiceJoining.value) return
     if (!canSubmitOrder.value) {
       uni.showToast({
         title: tableSessionClosed.value
@@ -293,12 +305,107 @@ export function useCheckout({
     }
     clearStalePrepayOrderForPayLater()
     if (pendingOrderId.value) return confirmPay()
+    if (memberBenefitsRefreshPending.value) {
+      retryRequiredMemberBenefitsAndCheckout()
+      return
+    }
+    if (showMemberCheckoutChoice && !isCustomerLoggedIn.value) {
+      showMemberCheckoutChoice.value = true
+      return
+    }
     submitOrder()
   }
 
   const cancelCheckoutAuth = () => {
     if (authorizing.value) return
     showCheckoutAuth.value = false
+  }
+
+  // 关掉选择层，回到已经在下面展示着的购物车确认单——不创建订单、不清空购物
+  // 车、不强制注册，顾客随时能再点结算重新打开这一层。
+  const cancelMemberCheckoutChoice = () => {
+    if (memberChoiceJoining.value) return
+    showMemberCheckoutChoice.value = false
+  }
+
+  // 保留今天现有的匿名结算合同：不强制手机号、不强制注册、不强制会员协议。
+  const checkoutAsGuest = () => {
+    if (memberChoiceJoining.value || ordering.value || paying.value) return
+    if (memberBenefitsRefreshPending.value) {
+      retryRequiredMemberBenefitsAndCheckout()
+      return
+    }
+    showMemberCheckoutChoice.value = false
+    submitOrder()
+  }
+
+  const retryRequiredMemberBenefitsAndCheckout = async () => {
+    if (memberChoiceJoining.value || ordering.value || paying.value || authorizing.value) return false
+    memberChoiceJoining.value = true
+    try {
+      await resolveRequiredMemberBenefits()
+      showMemberCheckoutChoice.value = false
+      return await submitOrder()
+    } catch (err) {
+      uni.showToast({ title: err?.message || toastText.memberBenefitsLoadFailed, icon: 'none' })
+      return false
+    } finally {
+      memberChoiceJoining.value = false
+    }
+  }
+
+  // 结算前"加入会员并继续"——跟 handleCheckoutAuth（授权失效后的被动补救）
+  // 是两条不同的路径，不能合并：这里发生在 createOrder 之前，join 成功后必须
+  // 依次完成 保存会员会话 → 绑定拼桌身份 → 刷新会员登录态 → 刷新全部未用券 →
+  // 选出本单最优券，全部落定以后才调用 submitOrder()去冻结提交快照——一旦
+  // performSubmitOrder 里的 savePendingSubmitIntent 发生，payload 里的
+  // coupon_id 就再也不能被这条路径改变了，顺序不能反。
+  const joinMemberAndCheckout = async (event) => {
+    if (memberChoiceJoining.value || ordering.value || paying.value || authorizing.value) return
+    // 已经有一笔待支付订单在等着恢复，那是另一套安全合同（见 P0-10 的
+    // pendingPaymentStorageKey 场景）——绝不能把这次新加入会员选到的券，
+    // 悄悄套用到那笔已经建好的旧订单上，也不重新定价。
+    if (pendingOrderId.value) {
+      showMemberCheckoutChoice.value = false
+      return
+    }
+    const phoneCode = event?.detail?.code || event?.detail?.phoneCode || ''
+    if (!phoneCode) {
+      uni.showToast({ title: toastText.authIncomplete, icon: 'none' })
+      return
+    }
+    memberChoiceJoining.value = true
+    try {
+      const code = await wxLogin()
+      const res = await joinByEntranceCode({
+        scene: uni.getStorageSync('entrance_scene') || '',
+        tenant_id: shopId.value || uni.getStorageSync('tenant_id') || '',
+        table_no: tableNo.value || uni.getStorageSync('table_no') || '',
+        code,
+        phone_code: phoneCode,
+        agreement_accepted: true,
+        invite_code: uni.getStorageSync('invite_code') || '',
+      }, { authRedirect: false })
+      if (res.code !== 200) {
+        uni.showToast({ title: res?.msg || toastText.joinMemberFailed, icon: 'none', duration: 1200 })
+        return
+      }
+      uni.removeStorageSync('invite_code')
+      saveCustomerSession(res.data || {})
+      await bindCurrentDiningParticipant()
+      refreshCustomerAuthState()
+      // 老会员可能已经有好几张券、新人也可能已经被后端去重过——join 接口
+      // response 里那一张券不能当成唯一真相，必须重新拉一次全量未用券。
+      // couponPickerList（refreshAvailableCoupons 内部用的排序）已经改成按
+      // "实际能减多少钱"选最优，不是按券面值，PERCENT 类型也能选对。
+      await resolveRequiredMemberBenefits()
+      showMemberCheckoutChoice.value = false
+      await submitOrder()
+    } catch (err) {
+      uni.showToast({ title: err?.message || toastText.authIncomplete, icon: 'none' })
+    } finally {
+      memberChoiceJoining.value = false
+    }
   }
 
   const continuePendingPaymentIntent = async () => {
@@ -333,6 +440,13 @@ export function useCheckout({
       uni.removeStorageSync('invite_code')
       saveCustomerSession(res.data || {})
       await bindCurrentDiningParticipant()
+      refreshCustomerAuthState()
+      const scope = submitIntentScope()
+      const recoveringFrozenSubmitIntent = Boolean(scope && restorePendingSubmitIntent(scope).status === 'found')
+      // createOrder 尚未成功、只是旧 customer_token 被明确拒绝时，授权后的会员
+      // 身份可能带来不同的 UNUSED 券。必须先刷新并确定最终券，再让下面的提交
+      // 重新冻结；已有 pendingOrderId 的支付恢复则绝不能在这里改价。
+      if (!pendingOrderId.value && !recoveringFrozenSubmitIntent) await resolveRequiredMemberBenefits()
       authActionStatus.value = 'submitting'
       const ok = await continuePendingPaymentIntent()
       if (ok) {
@@ -374,6 +488,7 @@ export function useCheckout({
   // 递归调用自己而不撞上 submitOrder 自己的 ordering.value 重入锁（锁在整个下单+支付
   // 期间一直是 true，递归调用外层 submitOrder 会被这把锁直接挡回来）。
   const performSubmitOrder = async (isRetry = false) => {
+    let replayingFrozenIntent = false
     try {
       const sessionReady = await ensureDiningSession()
       if (!sessionReady || tableSessionClosed.value) {
@@ -384,6 +499,7 @@ export function useCheckout({
 
       const submitScope = submitIntentScope()
       const restoreResult = submitScope ? restorePendingSubmitIntent(submitScope) : { status: 'missing' }
+      replayingFrozenIntent = restoreResult.status === 'found'
 
       // P0-15 closure: a record exists for this scope but can't be read back
       // reliably (corrupt JSON, missing its requestId) -- this must NOT be
@@ -541,6 +657,14 @@ export function useCheckout({
         clearCurrentPendingSubmitIntent()
       }
       if (isCheckoutAuthError(err)) {
+        // 401/403/NEED_LOGIN 是服务端已经明确拒绝本次建单的确定性结果，不是
+        // "请求可能已经落库"的弱网未知态。旧 token 下冻结的 coupon_id 不能在
+        // 重新授权后继续重放；同时丢弃本次未被服务端接受的 request_id，让授权
+        // 成功后的提交重新冻结当时已刷新的券与购物车快照。
+        if (!replayingFrozenIntent) {
+          clearCurrentPendingSubmitIntent()
+          pendingSubmitRequestId.value = ''
+        }
         requireCheckoutAuth()
         return false
       }
@@ -777,6 +901,9 @@ export function useCheckout({
     createPaymentIntent,
     goCheckout,
     cancelCheckoutAuth,
+    cancelMemberCheckoutChoice,
+    checkoutAsGuest,
+    joinMemberAndCheckout,
     continuePendingPaymentIntent,
     handleCheckoutAuth,
     performSubmitOrder,

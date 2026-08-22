@@ -68,6 +68,12 @@ function setup(overrides = {}) {
     canSubmitOrder: ref(true),
     orderSuccessTemplateId: ref('tmpl-order-success'),
     pickupReminderTemplateId: ref('tmpl-pickup'),
+    // P0-A: 这份默认状态代表"已经是会员"的顾客——goCheckout 应该直接走原有
+    // 提交流程，不弹会员选择层。guest 分流本身的行为单独在
+    // useCheckout.p0-a-member-checkout-choice.test.js 里覆盖。
+    showMemberCheckoutChoice: ref(false),
+    memberChoiceJoining: ref(false),
+    isCustomerLoggedIn: ref(true),
   }
   const callbacks = {
     wxLogin: vi.fn(() => Promise.resolve('wx_code')),
@@ -79,6 +85,7 @@ function setup(overrides = {}) {
     saveMyOrders: vi.fn(),
     startStatusPoll: vi.fn(),
     consumeWelcomeCoupon: vi.fn(() => null),
+    refreshAvailableCoupons: vi.fn(() => Promise.resolve()),
   }
   const merged = { ...state, ...callbacks, ...overrides }
   const checkout = useCheckout(merged)

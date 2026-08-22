@@ -264,6 +264,20 @@
       @getphonenumber="handleCheckoutAuth"
     />
 
+    <MemberCheckoutChoice
+      v-if="showMemberCheckoutChoice"
+      :member-choice-text="memberChoiceText"
+      :confirmation-text="confirmationText"
+      :wechat-pay-amount="wechatPayAmount"
+      :joining="memberChoiceJoining"
+      :ordering="ordering"
+      :paying="paying"
+      @cancel="cancelMemberCheckoutChoice"
+      @getphonenumber="joinMemberAndCheckout"
+      @guest-pay="checkoutAsGuest"
+      @open-agreement="openMemberAgreement"
+    />
+
     <PaymentSuccessSheet
       v-if="showSuccess"
       :success-text="successText"
@@ -435,6 +449,7 @@ import OrderHistorySheet from '../components/OrderHistorySheet.vue'
 import PaymentSuccessSheet from '../components/PaymentSuccessSheet.vue'
 import CheckoutSheet from '../components/CheckoutSheet.vue'
 import CheckoutAuthSheet from '../components/CheckoutAuthSheet.vue'
+import MemberCheckoutChoice from '../components/MemberCheckoutChoice.vue'
 import DishList from '../components/DishList.vue'
 import CartBar from '../components/CartBar.vue'
 import CouponBar from '../components/CouponBar.vue'
@@ -465,7 +480,7 @@ import { incrementSimpleCart, decrementSimpleCart } from '@/utils/simpleCartMath
 import ShopHeader from '../components/ShopHeader.vue'
 import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
-import { orderModeText, confirmationText, successText, specText, authSheetText, toastText, modalText } from '../utils/orderText.js'
+import { orderModeText, confirmationText, successText, specText, authSheetText, memberChoiceText, toastText, modalText } from '../utils/orderText.js'
 
 const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
   try {
@@ -506,7 +521,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, DishList, CartBar, CouponBar, WelcomeCouponSheet, ShopHeader, BottomNav, LoadingStates },
+  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, MemberCheckoutChoice, DishList, CartBar, CouponBar, WelcomeCouponSheet, ShopHeader, BottomNav, LoadingStates },
   setup() {
     const {
       formatPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
@@ -586,6 +601,11 @@ export default {
     const successDiscount = ref(0)
     const showCheckoutAuth = ref(false)
     const authorizing = ref(false)
+    // P0-A: 结算前"加入会员/直接支付"的选择层——跟 showCheckoutAuth（授权失
+    // 效后的被动补救弹层）是两个独立状态，互不影响，同一时刻只会展示其中一个。
+    const showMemberCheckoutChoice = ref(false)
+    const memberChoiceJoining = ref(false)
+    const memberCheckoutBenefitsNeedRefresh = ref(false)
     const authActionStatus = ref('idle')
     const pendingPaymentIntent = ref(null)
     const paying = ref(false)
@@ -637,6 +657,8 @@ export default {
     // BottomNav「我的」：正常浏览仍可 navigateTo（ACTIVE 时返回旧 menu 合法）。
     // CLOSED 退出禁止用这条路径——必须走 finishSettledSession / acknowledgeClosedSession 的 reLaunch。
     const goMine = () => uni.navigateTo({ url: '/pages/mine/mine' })
+    // P0-A-15: 复用 mine.vue 里已经存在的会员协议入口，不新增法律文案。
+    const openMemberAgreement = () => uni.navigateTo({ url: '/subpkg-member/pages/agreement?type=user' })
     const SAFE_PAGE_AFTER_DINING_EXIT = '/pages/mine/mine'
 
     const availableCoupons = ref([])
@@ -827,7 +849,7 @@ export default {
     const {
       selectedCouponId, selectedCoupon, couponBarVisible, bestCouponValue,
       couponBarText, couponBarPrefix, couponBarAmount, discountAmount, finalPrice,
-      showCouponPicker, couponPickerList, openCouponPicker, closeCouponPicker, pickCoupon,
+      showCouponPicker, couponPickerList, openCouponPicker, closeCouponPicker, pickCoupon, selectBestEligibleCoupon,
     } = useCouponPicker({
       availableCoupons,
       getTotalPrice: () => totalPrice.value,
@@ -1088,13 +1110,20 @@ export default {
     // 第1批：优惠券列表原来只在 openCart 里现拉，拆成独立函数——进菜单页空闲时机先拉一次
     // 打底（见 onLoad 里的调用），openCart 不用等它了；同时还是 openCart 时机也顺手调用
     // 一次刷新（不 await），保证券状态不会因为顾客在菜单页停留太久而过期不准。
-    const refreshAvailableCoupons = async () => {
-      if (!uni.getStorageSync('customer_token')) return
+    const refreshAvailableCoupons = async ({ required = false, forceBest = false } = {}) => {
+      if (!uni.getStorageSync('customer_token')) {
+        if (required) throw new Error(toastText.memberBenefitsLoadFailed)
+        return
+      }
       try {
         const res = await getCustomerCoupons('UNUSED')
         const now = Date.now()
         const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
         availableCoupons.value = list
+        if (forceBest) {
+          selectBestEligibleCoupon()
+          return
+        }
         const keepExistingChoice = selectedCouponId.value && couponPickerList.value.some(c => c.id === selectedCouponId.value && c.eligible)
         if (!keepExistingChoice) {
           const best = couponPickerList.value.find(c => c.eligible)
@@ -1102,6 +1131,7 @@ export default {
         }
       } catch (e) {
         reportError('menu.refresh_coupons', e)
+        if (required) throw new Error(toastText.memberBenefitsLoadFailed)
       }
     }
 
@@ -1133,6 +1163,7 @@ export default {
 
     const {
       goCheckout, cancelCheckoutAuth, handleCheckoutAuth,
+      cancelMemberCheckoutChoice, checkoutAsGuest, joinMemberAndCheckout,
       confirmPay,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder,
       recoverPendingPaymentResult,
@@ -1146,9 +1177,10 @@ export default {
       reminderRequested, earnedCoupon, cart, specCartItems, remark, selectedCouponId,
       totalPrice, cartItems, finalPrice, wechatPayAmount, isPrepayMode, canSubmitOrder,
       orderSuccessTemplateId, pickupReminderTemplateId,
+      showMemberCheckoutChoice, memberChoiceJoining, memberCheckoutBenefitsNeedRefresh, isCustomerLoggedIn,
       wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
       normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
-      clearDiningSessionStorage,
+      clearDiningSessionStorage, refreshAvailableCoupons,
     })
 
     const { handleTableContinueOrder, handleTableCheckout } = useTableCheckout({
@@ -1329,6 +1361,7 @@ export default {
       couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
+      showMemberCheckoutChoice, memberChoiceJoining, memberChoiceText, cancelMemberCheckoutChoice, checkoutAsGuest, joinMemberAndCheckout, openMemberAgreement,
       paying, paymentConfirming, paymentResultUnknown, payAmount, confirmPay,
       orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, startTablePresencePollIfActive,

@@ -20,33 +20,45 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
     availableCoupons.value.find(c => c.id === selectedCouponId.value) || null
   )
   const couponBarVisible = computed(() => isCustomerLoggedIn.value && availableCoupons.value.length > 0)
+
+  const MAX_DISCOUNT_RATIO = 0.20
+  // 唯一的折扣计算口径，语义必须跟后端 orders.py 建单时的 _apply_coupon 一致：
+  // 门槛不达标直接判 0（跟后端"未达到优惠券使用门槛"拒单是同一件事，不是打折
+  // 打得少）；FIXED 用面值，PERCENT 用"订单实际金额 × 百分比"；最终统一套用
+  // 同一条 20% 封顶红线（对应后端 cap_discount_amount）。bestCouponValue/
+  // discountAmount/排序全部只认这一个函数算出来的"实际能减多少钱"，不再各自
+  // 拿 coupon.value 直接当金额比——那对 PERCENT 类型是错的。
+  const calculateCouponDiscount = (coupon, cartTotal) => {
+    if (!coupon) return 0
+    const min = Number(coupon.min_amount || coupon.threshold_amount || 0)
+    if (cartTotal < min) return 0
+    const value = Number(coupon.value || coupon.amount || 0)
+    const rawDiscount = coupon.type === 'PERCENT' ? cartTotal * value / 100 : value
+    return Math.min(rawDiscount, Math.round(cartTotal * MAX_DISCOUNT_RATIO * 100) / 100)
+  }
+
   const bestCouponValue = computed(() => {
     if (!availableCoupons.value.length) return 0
-    return Math.max(...availableCoupons.value.map(c => Number(c.value || c.amount || 0)))
+    return Math.max(...availableCoupons.value.map(c => calculateCouponDiscount(c, getTotalPrice())))
   })
   const couponBarText = computed(() => `您有${availableCoupons.value.length}张优惠券，最高减¥${formatPrice(bestCouponValue.value)}`)
   const couponBarPrefix = computed(() => `您有${availableCoupons.value.length}张优惠券，最高减`)
   const couponBarAmount = computed(() => `¥${formatPrice(bestCouponValue.value)}`)
 
-  const MAX_DISCOUNT_RATIO = 0.20
-  const discountAmount = computed(() => {
-    if (!selectedCoupon.value) return 0
-    const min = Number(selectedCoupon.value.min_amount || selectedCoupon.value.threshold_amount || 0)
-    if (getTotalPrice() < min) return 0
-    const rawDiscount = Number(selectedCoupon.value.value || selectedCoupon.value.amount || 0)
-    return Math.min(rawDiscount, Math.round(getTotalPrice() * MAX_DISCOUNT_RATIO * 100) / 100)
-  })
+  const discountAmount = computed(() => calculateCouponDiscount(selectedCoupon.value, getTotalPrice()))
   const finalPrice = computed(() => Math.max(getTotalPrice() - discountAmount.value, 0))
   const showCouponPicker = ref(false)
 
-  // 面额一样大的时候，谁排前面不能看后端接口凑巧返回的顺序——快过期的那张要是没被
+  // 实际折扣一样大的时候，谁排前面不能看后端接口凑巧返回的顺序——快过期的那张要是没被
   // 选中用掉，白白过期作废，就是纯浪费掉的营销成本。所以打平时改成比谁先过期。
   const compareCouponPriority = (a, b) => {
-    const valueDiff = Number(b.value || b.amount || 0) - Number(a.value || a.amount || 0)
-    if (valueDiff !== 0) return valueDiff
+    const discountDiff = calculateCouponDiscount(b, getTotalPrice()) - calculateCouponDiscount(a, getTotalPrice())
+    if (discountDiff !== 0) return discountDiff
     const aExpire = new Date(a.expire_time || a.valid_end_time || '2099-01-01').getTime()
     const bExpire = new Date(b.expire_time || b.valid_end_time || '2099-01-01').getTime()
-    return aExpire - bExpire
+    const expiryDiff = aExpire - bExpire
+    if (expiryDiff !== 0) return expiryDiff
+    return String(a.id || '').localeCompare(String(b.id || ''))
   }
   const couponPickerList = computed(() =>
     [...availableCoupons.value]
@@ -59,6 +71,11 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
     if (coupon && !coupon.eligible) return
     selectedCouponId.value = coupon ? coupon.id : null
     showCouponPicker.value = false
+  }
+  const selectBestEligibleCoupon = () => {
+    const best = couponPickerList.value.find(coupon => coupon.eligible) || null
+    selectedCouponId.value = best ? best.id : null
+    return best
   }
 
   return {
@@ -74,6 +91,8 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
     showCouponPicker,
     couponPickerList,
     compareCouponPriority,
+    calculateCouponDiscount,
+    selectBestEligibleCoupon,
     openCouponPicker,
     closeCouponPicker,
     pickCoupon,

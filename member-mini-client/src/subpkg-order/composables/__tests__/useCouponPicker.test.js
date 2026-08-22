@@ -104,6 +104,81 @@ describe('useCouponPicker', () => {
       const ids = picker.couponPickerList.value.map((c) => c.id)
       expect(ids).toEqual(['sooner', 'later'])
     })
+
+    it('required member refresh 会覆盖仍 eligible 的旧券 A，强制选择实际折扣更高的 B', () => {
+      const { picker } = setup({
+        coupons: [
+          { id: 'A', type: 'FIXED', value: 5, min_amount: 0 },
+          { id: 'B', type: 'FIXED', value: 10, min_amount: 0 },
+        ],
+        totalPrice: 100,
+      })
+      picker.pickCoupon(picker.couponPickerList.value.find((coupon) => coupon.id === 'A'))
+
+      const best = picker.selectBestEligibleCoupon()
+
+      expect(best.id).toBe('B')
+      expect(picker.selectedCouponId.value).toBe('B')
+    })
+
+    it('折扣与到期时间仍相同时按 id 稳定排序', () => {
+      const { picker } = setup({
+        coupons: [
+          { id: 'B', value: 10, min_amount: 0, expire_time: '2026-12-31' },
+          { id: 'A', value: 10, min_amount: 0, expire_time: '2026-12-31' },
+        ],
+      })
+
+      expect(picker.couponPickerList.value.map((coupon) => coupon.id)).toEqual(['A', 'B'])
+    })
+  })
+
+  describe('PERCENT 优惠券折扣计算（跟后端 orders.py 的 _apply_coupon 语义对齐）', () => {
+    it('PERCENT 类型按订单实际金额算折扣，不是直接拿 value 当金额', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', type: 'PERCENT', value: 10, min_amount: 0 }],
+        totalPrice: 200,
+      })
+      picker.pickCoupon(picker.couponPickerList.value.find((c) => c.id === 'c1'))
+      // 200 * 10% = 20，未触发 20% 封顶（40）
+      expect(picker.discountAmount.value).toBe(20)
+      expect(picker.finalPrice.value).toBe(180)
+    })
+
+    it('PERCENT 折扣同样受 20% 封顶限制，不会超过订单总价的 20%', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', type: 'PERCENT', value: 30, min_amount: 0 }],
+        totalPrice: 200,
+      })
+      picker.pickCoupon(picker.couponPickerList.value.find((c) => c.id === 'c1'))
+      // 200 * 30% = 60，超过封顶 40，应该按 40 算
+      expect(picker.discountAmount.value).toBe(40)
+    })
+
+    it('CASE 4: ¥200 订单，FIXED ¥15 vs PERCENT 10%，实际折扣 20 > 15，PERCENT 应排在前面被选中', () => {
+      const { picker } = setup({
+        coupons: [
+          { id: 'fixed', type: 'FIXED', value: 15, min_amount: 0 },
+          { id: 'percent', type: 'PERCENT', value: 10, min_amount: 0 },
+        ],
+        totalPrice: 200,
+      })
+      const ids = picker.couponPickerList.value.map((c) => c.id)
+      expect(ids).toEqual(['percent', 'fixed'])
+
+      const best = picker.couponPickerList.value.find((c) => c.eligible)
+      picker.pickCoupon(best)
+      expect(picker.selectedCouponId.value).toBe('percent')
+      expect(picker.discountAmount.value).toBe(20)
+    })
+
+    it('calculateCouponDiscount 对未达门槛的 PERCENT 券返回 0，不是打折打得少', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', type: 'PERCENT', value: 10, min_amount: 300 }],
+        totalPrice: 200,
+      })
+      expect(picker.calculateCouponDiscount({ type: 'PERCENT', value: 10, min_amount: 300 }, 200)).toBe(0)
+    })
   })
 
   describe('pickCoupon / openCouponPicker / closeCouponPicker', () => {
