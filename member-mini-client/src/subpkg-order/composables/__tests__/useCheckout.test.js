@@ -38,6 +38,7 @@ function setup(overrides = {}) {
     successItems: ref([]),
     successTotal: ref(0),
     successDiscount: ref(0),
+    successMemberValue: ref(null),
     showCheckoutAuth: ref(false),
     authorizing: ref(false),
     authActionStatus: ref('idle'),
@@ -84,7 +85,6 @@ function setup(overrides = {}) {
     refreshCustomerAuthState: vi.fn(),
     saveMyOrders: vi.fn(),
     startStatusPoll: vi.fn(),
-    consumeWelcomeCoupon: vi.fn(() => null),
     refreshAvailableCoupons: vi.fn(() => Promise.resolve()),
   }
   const merged = { ...state, ...callbacks, ...overrides }
@@ -384,13 +384,21 @@ describe('useCheckout', () => {
       expect(callbacks.startStatusPoll).toHaveBeenCalledWith('order_1')
     })
 
-    it('微信支付成功后进入成功页并清空购物车', async () => {
+    it('微信支付成功后进入成功页并清空购物车，并直接采用 GET /orders/my 里的权威 member_value（不额外请求）', async () => {
       const { state, checkout, callbacks } = setup()
       state.pendingOrderId.value = 'order_1'
       state.payAmount.value = 20
+      const memberValue = {
+        status: 'available',
+        member_savings: 5,
+        points_earned: 81,
+        points_balance: 326,
+        reward_coupon_status: 'issued',
+        reward_coupon: { id: 'coupon_9', amount: 5, min_amount: 20, expired_at: '2026-09-01T00:00:00', name: '专属券' },
+      }
       getOrderStatus
         .mockResolvedValueOnce({ data: {} })
-        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid' } })
+        .mockResolvedValueOnce({ data: { status: 'pending', payment_status: 'paid', member_value: memberValue } })
       createWxPayOrder.mockResolvedValue({
         data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
       })
@@ -402,6 +410,43 @@ describe('useCheckout', () => {
       expect(state.showSuccess.value).toBe(true)
       expect(state.pendingOrderId.value).toBe('')
       expect(callbacks.saveMyOrders).toHaveBeenCalled()
+      // P0-B2a authority: successMemberValue 就是服务端原样返回的那份 member_value。
+      expect(state.successMemberValue.value).toEqual(memberValue)
+      expect(state.earnedCoupon.value).toEqual(expect.objectContaining({ couponId: 'coupon_9', amount: 5 }))
+      // NORMAL_PREPAY_EXTRA_MEMBER_VALUE_REQUESTS=0：正好是"支付前核对一次 +
+      // 支付确认一次"这两次既有调用，没有为了拿 member_value 再多发请求。
+      expect(getOrderStatus).toHaveBeenCalledTimes(2)
+    })
+
+    it('server-paid gate：requestPayment 客户端回调成功，但服务端还没读到 paid 时不展示成功页、不写 successMemberValue', async () => {
+      vi.useFakeTimers()
+      try {
+        const { state, checkout } = setup()
+        state.pendingOrderId.value = 'order_1'
+        state.payAmount.value = 20
+        getOrderStatus
+          .mockResolvedValueOnce({ data: {} }) // recoverPendingPaymentResult 预检查：未支付，放行
+          .mockResolvedValue({ data: { status: 'pending', payment_status: 'unpaid' } }) // 之后每一次轮询都还没 paid
+        createWxPayOrder.mockResolvedValue({
+          data: { pay_params: { timeStamp: '1', nonceStr: 'n', package: 'p', paySign: 's' } },
+        })
+
+        const payPromise = checkout.confirmPay()
+        // 只放开微任务队列（requestPayment resolve + 第一次轮询），不推进任何
+        // 定时器——此时客户端支付回调已经"成功"过了，但服务端仍未确认 paid。
+        await vi.advanceTimersByTimeAsync(0)
+        expect(state.showSuccess.value).toBe(false)
+        expect(state.successMemberValue.value).toBe(null)
+
+        await vi.advanceTimersByTimeAsync(900 * 6)
+        const ok = await payPromise
+
+        expect(ok).toBe(false)
+        expect(state.showSuccess.value).toBe(false)
+        expect(state.successMemberValue.value).toBe(null)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('用户在微信支付面板主动取消时，提示"已取消支付"而不是通用失败文案', async () => {

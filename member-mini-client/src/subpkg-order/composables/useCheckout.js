@@ -20,11 +20,16 @@ import { confirmationText, toastText } from '../utils/orderText.js'
 // 所有逻辑跟原来在 menu.vue 里一字未改，只是把用到的页面状态都改成参数传入。
 // ensureDiningSession/bindCurrentDiningParticipant/syncDiningOrders/
 // normalizePaymentMode/persistDiningContext 相关的"拼桌身份"函数，以及
-// refreshCustomerAuthState/saveMyOrders/startStatusPoll/consumeWelcomeCoupon
+// refreshCustomerAuthState/saveMyOrders/startStatusPoll
 // 这些来自别的组合式函数的方法，都是回调传入，不在这里重新实现。
+//
+// P0-B2a: successMemberValue 是 GET /v1/orders/my 的 member_value 权威结果
+// （唯一 source，永远不在这里重新计算 savings/points），成功页奖励券也统一从
+// 这里的 reward_coupon_status 派生——不再消费入会欢迎券兜底，那是另一套跟
+// "本单支付奖励"无关的合同，保留在 WelcomeCouponSheet/useWelcomeCoupon 里。
 export function useCheckout({
   shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
-  orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,
+  orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
   showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
   payAmount, pendingOrderId, pendingSubmitRequestId,
   myOrders, showOrders, showCart, showSuccess,
@@ -34,7 +39,7 @@ export function useCheckout({
   orderSuccessTemplateId, pickupReminderTemplateId,
   showMemberCheckoutChoice, memberChoiceJoining, memberCheckoutBenefitsNeedRefresh, isCustomerLoggedIn,
   wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
-  normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+  normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll,
   clearDiningSessionStorage, refreshAvailableCoupons,
 }) {
   const memberBenefitsRefreshPending = memberCheckoutBenefitsNeedRefresh || { value: false }
@@ -736,7 +741,11 @@ export function useCheckout({
     saveMyOrders()
     syncDiningOrders().catch(() => {})
     reminderRequested.value = false
-    applyRewardCoupon(data.coupon || null)
+    // P0-B2a: member_value/奖励券只信 data.member_value（GET /v1/orders/my 的
+    // authority）。正常微信支付这里的 data 本身就是那次读取的结果，免单/
+    // postpay/table_account 的 data 来自别的响应形状、天然没有这个字段，
+    // 交给 applyAuthoritativeMemberReward 统一清空，不在这里特判。
+    applyAuthoritativeMemberReward(data.member_value || null)
     cart.value = {}
     specCartItems.value = []
     selectedCouponId.value = null
@@ -746,53 +755,55 @@ export function useCheckout({
     clearPendingPaymentOrder()
   }
 
-  // 把"后端返回的奖励券"拓成 earnedCoupon 的展示形状：有真实奖励券就用它，
-  // 没有（c 为 null）则回退到本地缓存的入会欢迎券，免得支付完成那一刻什么都不展示。
-  const applyRewardCoupon = (c) => {
-    if (c) {
-      earnedCoupon.value = {
-        couponId: c.id || '',
-        amount: Number(c.value ?? c.amount ?? 0),
-        threshold: Number(c.min_amount ?? c.threshold ?? 0),
-        // 后端给的是绝对过期时间 expired_at，不是相对天数，
-        // 直接存成 expire_time 方便复用下面的 couponValidityText。
-        expire_time: c.expired_at || '',
-        name: c.name || '优惠券',
-        isSecondOrder: Boolean(c.is_second_order),
-      }
-      return true
+  // P0-B2a: 成功页会员价值/奖励券唯一 authority 是 GET /v1/orders/my 的
+  // member_value——status/savings/points 原样透传给 successMemberValue，前端
+  // 不重新计算任何金额或积分。reward_coupon_status 只在 member_value.status
+  // 本身就是 "available" 时才有意义——status 是总闸门：not_applicable/
+  // pending/unavailable 下即使 reward_coupon_status 恰好是 "issued"（历史
+  // 快照残留、或该笔订单本身就有别的 invariant 问题），也一律不构造
+  // earnedCoupon，因为这笔订单的会员事实本身还没有被判定为可信。只有
+  // status === "available" 且 reward_coupon_status === "issued" 且真的带着
+  // 券对象，才展示服务端真实发放的券；其余一律清空 earnedCoupon，不回退本地
+  // 欢迎券（那是入会 onboarding 的合同，跟"这一单有没有拿到支付奖励"是两回
+  // 事，混用会把欢迎券冒充成本单奖励——P0-B2 审计发现的那个 bug）。
+  const applyAuthoritativeMemberReward = (memberValue) => {
+    if (successMemberValue) successMemberValue.value = memberValue || null
+    if (memberValue?.status !== 'available') {
+      earnedCoupon.value = null
+      return
     }
-    const welcome = consumeWelcomeCoupon()
-    earnedCoupon.value = welcome ? {
-      couponId: welcome.id || '',
-      amount: Number(welcome.amount ?? welcome.value ?? 0),
-      threshold: Number(welcome.min_amount ?? welcome.threshold ?? 0),
-      expire_time: welcome.expired_at || '',
-      name: welcome.name || '新人优惠券',
-    } : null
-    return false
+    const coupon = memberValue?.reward_coupon
+    if (memberValue?.reward_coupon_status !== 'issued' || !coupon) {
+      earnedCoupon.value = null
+      return
+    }
+    earnedCoupon.value = {
+      couponId: coupon.id || '',
+      amount: Number(coupon.value ?? coupon.amount ?? 0),
+      threshold: Number(coupon.min_amount ?? coupon.threshold ?? 0),
+      // 后端给的是绝对过期时间 expired_at，不是相对天数，
+      // 直接存成 expire_time 方便复用下面的 couponValidityText。
+      expire_time: coupon.expired_at || '',
+      name: coupon.name || '优惠券',
+      isSecondOrder: Boolean(coupon.is_second_order),
+    }
   }
 
-  // 真实微信支付的奖励券是异步发的（wxpay_notify 回调落库），客户端 requestPayment
-  // 刚成功那一刻后端未必已经处理完，所以先用回退文案展示，再在后台短轮询 /orders/my
-  // 拿到真实发放的奖励券后补上去——若用户已关闭成功面板或已去看其他订单就不再改。
-  const attachPaymentReward = async (id) => {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, 900))
-      try {
-        const res = await getOrderStatus(id, diningParticipantToken.value)
-        const d = res?.data || {}
-        if (['cancelled', 'rejected'].includes(d.status)) {
-          await reconcileTerminalOrder(id, d)
-          return
-        }
-        if (d.payment_status === 'paid') {
-          if (showSuccess.value && orderId.value === id && d.reward_coupon) {
-            applyRewardCoupon(d.reward_coupon)
-          }
-          return
-        }
-      } catch (e) { /* keep retrying */ }
+  // P0-B2a: free 订单的 pay 响应（createWxPayOrder 的 free 分支）复用
+  // serialize_order，没有 member_value 字段——支付/下单成功这个事实必须先
+  // 正常展示，再用已有的 GET /orders/my 补一次权威会员价值。查询失败/超时/
+  // 慢，或者顾客这期间已经关掉成功页、切去别的订单，都只是"不展示会员价值"，
+  // 绝不能让这次补充查询反过来影响已经成立的支付成功结果。
+  const fetchFreeOrderMemberValue = async (id) => {
+    try {
+      const res = await getOrderStatus(id, diningParticipantToken.value)
+      const d = res?.data || {}
+      if (showSuccess.value && String(orderId.value) === String(id)) {
+        applyAuthoritativeMemberReward(d.member_value || null)
+      }
+    } catch (e) {
+      // 保持 _handlePaySuccess 里已经置好的"暂不展示会员价值"安全态，不重试、
+      // 不报错到界面——免单这笔钱本身已经成功，不因为一次权益查询失败降级。
     }
   }
 
@@ -849,8 +860,12 @@ export function useCheckout({
       const data = res?.data || {}
 
       if (data.free) {
+        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去
+        // 补一次权威 member_value（见 fetchFreeOrderMemberValue 顶部说明）。
+        const paidOrderId = pendingOrderId.value
         _handlePaySuccess(data)
         pendingPaymentIntent.value = null
+        fetchFreeOrderMemberValue(paidOrderId)
         return true
       }
 
@@ -869,11 +884,13 @@ export function useCheckout({
       })
 
       const paidOrderId = pendingOrderId.value
+      // P0-B2a: waitForBackendPaymentConfirmation 读到的就是 GET /v1/orders/my
+      // 本身，member_value 已经在那次响应里——_handlePaySuccess 会直接消费它，
+      // 不需要再单独轮询一次奖励券（P0-B1 上线后 reward 快照与 member_value
+      // 已经同一次读取里权威可读，不再有"支付成功那一刻奖励还没落库"的旧合同）。
       const confirmed = await waitForBackendPaymentConfirmation(paidOrderId)
       if (confirmed) {
         pendingPaymentIntent.value = null
-        // _handlePaySuccess 内部会清空 pendingOrderId，这里用支付前存下的 id 去轮询。
-        attachPaymentReward(paidOrderId)
         return true
       }
       return false
@@ -908,8 +925,6 @@ export function useCheckout({
     handleCheckoutAuth,
     performSubmitOrder,
     submitOrder,
-    applyRewardCoupon,
-    attachPaymentReward,
     confirmPay,
     savePendingPaymentOrder,
     restorePendingPaymentOrder,
