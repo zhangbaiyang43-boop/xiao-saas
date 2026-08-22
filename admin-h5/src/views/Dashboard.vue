@@ -228,14 +228,35 @@ const topDishRankItems = computed(() => overview.value.topDishes7d.map(d => ({
   unit: '份',
 })))
 
+// database 也在这里参与健康判断（此前遗漏，数据库异常时永远不会触发待办），但它只
+// 影响 systemHealthy 这个布尔结果——具体给商家看的文案永远走下面 systemStatusUserText
+// 的结构化映射，从不直接暴露"数据库"这个词或后端诊断信息。这个数组本身不在模板里
+// 渲染，纯粹是内部健康判断用的。
 const systemStatusItems = computed(() => [
   { key: 'api', label: '系统服务', status: systemStatus.value.api || 'warning' },
   { key: 'order', label: '订单服务', status: systemStatus.value.order || 'warning' },
   { key: 'payment', label: '支付服务', status: systemStatus.value.payment || 'warning' },
   { key: 'printer', label: '打印服务', status: systemStatus.value.printer || 'warning' },
+  { key: 'database', label: '数据库', status: systemStatus.value.database || 'warning' },
 ])
 
 const systemHealthy = computed(() => systemStatusItems.value.every(item => item.status === 'ok'))
+
+// 商家能看到的文案权威来自结构化的 status 字段，绝不是后端 message 自由文本——message
+// 可能是"数据库连接正常"这类运维诊断信息，哪怕整体系统确实不健康（比如支付服务异常，
+// 但 message 字段仍然只描述数据库连接状态）也不能把它原样透传给商家。商家只需要知道
+// 业务影响：能不能接单/收款/打印，不需要知道数据库/API/服务内部诊断。
+const systemStatusUserText = computed(() => {
+  if (systemStatus.value.printer && systemStatus.value.printer !== 'ok') {
+    return '打印服务异常，请检查打印机或手动处理订单'
+  }
+  if (systemStatus.value.payment && systemStatus.value.payment !== 'ok') {
+    return '支付服务暂时异常，请稍后重试'
+  }
+  // api / order / database 中任意一个不健康，统一用这条通用文案——不区分具体是哪一个，
+  // 更不能把 database 这个词说出来。
+  return '系统服务暂时异常，请稍后重试'
+})
 
 // 系统状态最近一次检测的时间，跟结果类信息的"已更新"角标是同一个套路。
 const systemStatusCheckedLabel = computed(() => {
@@ -253,14 +274,20 @@ const todoItems = computed(() => {
     items.push({ key: 'pending', urgent: true, text: `有 ${orderStats.value.pending} 单待接单，请立即处理`, action: () => router.push('/orders') })
   }
   if (orderStats.value.canSettle > 0) {
-    items.push({ key: 'settle', urgent: false, text: `有 ${orderStats.value.canSettle} 桌待结账`, action: () => router.push('/orders') })
+    // 桌台视图默认不开启（接单/出餐更常用订单列表），从这里进来意图明确是去结账，
+    // 直接带 view=table 打开桌台卡，不要让商家点进去还要自己再切一次 tab。
+    items.push({
+      key: 'settle',
+      urgent: false,
+      text: `有 ${orderStats.value.canSettle} 桌待结账`,
+      action: () => router.push({ path: '/orders', query: { view: 'table' } }),
+    })
   }
   if (!systemHealthy.value) {
-    const printerBad = systemStatus.value.printer && systemStatus.value.printer !== 'ok'
     items.push({
       key: 'system',
       urgent: true,
-      text: systemStatusError.value || (printerBad ? '打印服务异常，请检查打印机或手动处理订单' : (systemStatus.value.message || '打印或支付服务需要处理，点击重新检测')),
+      text: systemStatusError.value || systemStatusUserText.value,
       subtext: systemStatusCheckedLabel.value,
       action: () => loadSystemStatus(),
     })
@@ -337,18 +364,33 @@ async function loadOrders(pollMeta = {}) {
   const raw = res?.data?.data || res?.data || []
   if (!Array.isArray(raw)) throw new Error('订单数据格式异常')
   let pending = 0, preparing = 0
-  const tableMap = {}
+  // 按 dining_session_id 分组统计可结账桌数——跟 OrderManage.vue 桌台视图完全相同的
+  // session isolation 合同（P0，PR #19）：没有 dining_session_id 的历史订单不构成一张
+  // 真实可结账的桌台，绝不能按 table_no 兜底聚合，否则历史 orphan 订单会在首页重新长出
+  // 一条"有 N 桌待结账"的假待办（生产真实发生过：A01 31 单没有 session 的历史 done
+  // 订单，被这里旧的按桌号分组逻辑误判成 1 桌可结账）。pending_payment 会挡住结账，
+  // 这里也必须跟 OrderManage 保持一致，单独统计、不计入 orders。
+  const sessionMap = {}
   for (const o of raw) {
-    const t = o.table_no || '-'
-    if (!tableMap[t]) tableMap[t] = { orders: [] }
-    tableMap[t].orders.push(o)
     if (o.status === 'pending') pending++
     else if (o.status === 'preparing') preparing++
+    if (['cancelled', 'rejected'].includes(o.status)) continue
+    if (!o.dining_session_id) continue
+    const key = o.dining_session_id
+    if (!sessionMap[key]) sessionMap[key] = { orders: [], pendingPaymentOrders: [] }
+    if (o.status === 'pending_payment') {
+      sessionMap[key].pendingPaymentOrders.push(o)
+      continue
+    }
+    sessionMap[key].orders.push(o)
   }
   orderStats.value = {
     pending, preparing,
-    canSettle: Object.values(tableMap).filter(t =>
-      t.orders.every(o => ['done', 'settled'].includes(o.status)) && t.orders.some(o => o.status === 'done')
+    canSettle: Object.values(sessionMap).filter(t =>
+      t.orders.length > 0 &&
+      t.orders.every(o => ['done', 'settled'].includes(o.status)) &&
+      t.orders.some(o => o.status === 'done') &&
+      t.pendingPaymentOrders.length === 0
     ).length,
   }
 }
