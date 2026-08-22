@@ -1,6 +1,6 @@
 <template>
-  <view class="mask member-choice-mask" @click="$emit('cancel')">
-    <view class="member-choice-sheet" @click.stop>
+  <base-overlay layer="blocking-top" @mask-click="$emit('cancel')">
+    <view class="member-choice-sheet">
       <view class="member-choice-handle"></view>
       <text class="member-choice-title">{{ memberChoiceText.title }}</text>
       <text class="member-choice-desc">{{ memberChoiceText.descGeneric }}</text>
@@ -27,10 +27,12 @@
       </view>
       <text class="member-choice-privacy">{{ memberChoiceText.privacy }}</text>
     </view>
-  </view>
+  </base-overlay>
 </template>
 
 <script>
+import BaseOverlay from '@/components/base-overlay/base-overlay.vue'
+
 // P0-A: 结算前"加入会员/直接支付"的决策层——纯展示组件，不带任何业务逻辑。
 // 会员是否加入完全由顾客在这里主动选择：点"加入会员并继续"才触发手机号授权
 // （由父组件 joinMemberAndCheckout 处理 join + 刷新优惠券 + 下单）；点"直接
@@ -39,6 +41,7 @@
 // 透传 $event，跟 CheckoutAuthSheet 的处理方式保持一致。
 export default {
   name: 'MemberCheckoutChoice',
+  components: { BaseOverlay },
   props: {
     memberChoiceText: { type: Object, required: true },
     confirmationText: { type: Object, required: true },
@@ -58,9 +61,7 @@ export default {
 </script>
 
 <style lang="scss">
-.member-choice-mask { align-items: flex-end; }
-
-.member-choice-sheet { width: 100%; max-height: 60vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: memberChoiceIn .2s ease-out; }
+.member-choice-sheet { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; max-height: 60vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: memberChoiceIn .2s ease-out; }
 
 .member-choice-handle { width: 72rpx; height: 8rpx; border-radius: 999rpx; background: #e5e7eb; align-self: center; margin-bottom: 20rpx; }
 

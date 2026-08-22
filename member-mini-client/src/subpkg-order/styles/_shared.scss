@@ -11,8 +11,8 @@
 .mask {
   position: fixed;
   inset: 0;
-  z-index: 3100;
-  background: rgba(0,0,0,0.5);
+  z-index: var(--z-blocking);
+  background: var(--overlay-dim);
   display: flex;
   align-items: flex-end;
 }

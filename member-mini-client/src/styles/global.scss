@@ -30,6 +30,12 @@ page {
   --btn-primary-radius:      50rpx;  /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
   --btn-primary-font-size:   32rpx;  /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
   --btn-primary-font-weight: 600;    /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
+  --z-chrome:        300;
+  --z-floating:      850;
+  --z-blocking:      3100;
+  --z-blocking-top:  3200;
+  --z-critical:      4000;
+  --overlay-dim:     rgba(0,0,0,0.5);
 
   background-color: var(--bg-page);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
