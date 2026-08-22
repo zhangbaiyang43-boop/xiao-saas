@@ -68,12 +68,33 @@ export const authSheetText = {
   privacy: '授权仅用于识别本次订单与会员身份，不会发布内容。',
 }
 
+// P0-A: 结算前"加入会员/直接支付"选择层的文案。跟 authSheetText 是两套不同
+// 的场景——authSheetText 是"已经在下单/支付中途遇到授权失效，必须重新授权
+// 才能继续"的被动补救话术；这里是顾客点结算时主动看到的、会员是可选项的引导
+// 话术，不能共用同一份文案（措辞、语气、允许的退出方式完全不同）。
+export const memberChoiceText = {
+  title: '加入会员，享受本单权益',
+  // P0-A-13: 未授权身份前不能断言"你是新会员"（可能是没登录的老会员），
+  // 也不能编造具体省了多少钱（没识别身份前拿不到顾客名下真实的券）。
+  descGeneric: '加入会员可领取本店会员权益，支付后还能获得积分',
+  joinAction: '加入会员并继续',
+  joining: '正在加入会员…',
+  // P0-A-14: 会员身份在手机号授权成功那一刻就建立了，不是"支付成功后"，
+  // 文案时序必须跟真实发生的顺序一致。
+  joinDesc: '授权成功后将加入/登录本店会员，并自动继续结算。',
+  guestPayPrefix: '直接支付',
+  agreementPrefix: '授权即表示同意',
+  agreementLink: '《会员协议》',
+  privacy: '授权仅用于识别本次订单与会员身份，不会发布内容。',
+}
+
 // Toast / Modal 反馈文案字典（ROI #4）。
 // 点餐子包内 showToast / showModal 的固定中文只从这里取，禁止业务文件再手写同义句。
 // 对照知识库：OPPO 禁用裸「失败」；客如云要求失败带下一步（重试 / 重新扫码 / 联系服务员）。
 export const toastText = {
   authIncomplete: '未完成授权，请重试',
   joinMemberFailed: '加入会员失败，请重试',
+  memberBenefitsLoadFailed: '会员权益加载失败，请重试',
   loggedIn: '已登录',
 
   tableBillEnded: '本桌账单已结束，不能继续加菜',
