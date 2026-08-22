@@ -7,9 +7,10 @@
     "build:h5": "uni build",
     "dev:mp-weixin": "uni -p mp-weixin",
     "build:mp-weixin": "uni build -p mp-weixin && node scripts/copy-vant.mjs && node scripts/postbuild-mp-weixin.mjs",
-    "test": "vitest run && npm run test:legacy",
+    "test": "vitest run && npm run test:legacy && npm run check:ui-contracts",
     "test:watch": "vitest",
     "test:legacy": "node --test tests/coupon-nudge.test.mjs",
+    "check:ui-contracts": "node scripts/check-ui-contracts.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

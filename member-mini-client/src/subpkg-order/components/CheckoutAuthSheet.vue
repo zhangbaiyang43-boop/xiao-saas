@@ -1,6 +1,6 @@
 <template>
-  <view class="mask checkout-auth-mask" @click="$emit('cancel')">
-    <view class="checkout-auth-sheet" @click.stop>
+  <base-overlay layer="blocking-top" @mask-click="$emit('cancel')">
+    <view class="checkout-auth-sheet">
       <view class="checkout-auth-handle"></view>
       <text class="checkout-auth-title">{{ authSheetText.title }}</text>
       <text class="checkout-auth-desc">{{ authSheetText.desc }}</text>
@@ -24,10 +24,12 @@
       <text class="checkout-auth-member">{{ authSheetText.member }}</text>
       <text class="checkout-auth-privacy">{{ authSheetText.privacy }}</text>
     </view>
-  </view>
+  </base-overlay>
 </template>
 
 <script>
+import BaseOverlay from '@/components/base-overlay/base-overlay.vue'
+
 // 从 menu.vue 拆出来的结算前手机号授权弹层（原来是 showCheckoutAuth 那一段模
 // 板）。纯展示组件，不带任何业务逻辑——取消、微信手机号授权都只 emit 出去，
 // 真正的处理函数还是原来 menu.vue 里的 cancelCheckoutAuth/handleCheckoutAuth，
@@ -36,6 +38,7 @@
 // 一致。
 export default {
   name: 'CheckoutAuthSheet',
+  components: { BaseOverlay },
   props: {
     authSheetText: { type: Object, required: true },
     shopName: { type: String, default: '' },
@@ -53,10 +56,7 @@ export default {
 </script>
 
 <style lang="scss">
-.checkout-auth-mask { align-items: flex-end; }
-
-
-.checkout-auth-sheet { width: 100%; max-height: 55vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
+.checkout-auth-sheet { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; max-height: 55vh; background: #fff; border-radius: 32rpx 32rpx 0 0; padding: 18rpx 36rpx calc(22rpx + env(safe-area-inset-bottom)); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; animation: authSheetIn .2s ease-out; }
 
 
 .checkout-auth-handle { width: 72rpx; height: 8rpx; border-radius: 999rpx; background: #e5e7eb; align-self: center; margin-bottom: 20rpx; }
