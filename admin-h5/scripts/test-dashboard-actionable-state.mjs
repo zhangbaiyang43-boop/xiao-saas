@@ -163,78 +163,164 @@ assert.ok(
   'OrderManage must default to list, opening table view only for the exact query.view === "table"',
 )
 
+// ---- CASE H: pending-order todo is untouched by this phase -----------------
+assert.ok(
+  dashboardSource.includes("items.push({ key: 'pending', urgent: true, text: `有 ${orderStats.value.pending} 单待接单，请立即处理`, action: () => router.push('/orders') })"),
+  'the pending-order todo (text, urgency, navigation) must be unchanged by this phase',
+)
+
 // ---------------------------------------------------------------------------
-// System status: no raw backend message reaching the user; healthy = silent.
+// P0 Dashboard Internal Health Silence: only a CONFIRMED printer problem may
+// ever produce a home-screen system todo. payment/api/order/database status
+// still feed the internal systemStatus/systemStatusItems/systemHealthy layer
+// (kept for future diagnostics) but must never independently surface --
+// payment=warning in particular reflects CONFIGURATION_NOT_READY (wx_mchid /
+// wx_pay_enabled not set up yet), not a RUNTIME_INCIDENT, and belongs on the
+// settings/activation page, not the owner's home screen.
 // ---------------------------------------------------------------------------
 
-// Healthy = silent: systemHealthy is a plain every('ok') check, so an all-ok
-// status object never reaches the systemStatusUserText branch at all -- proven
-// statically since todoItems only pushes the 'system' item when !systemHealthy.
-assert.ok(
-  dashboardSource.includes('const systemHealthy = computed(() => systemStatusItems.value.every(item => item.status === \'ok\'))'),
-  'systemHealthy must remain a strict all-ok check',
-)
-assert.ok(
-  dashboardSource.includes("if (!systemHealthy.value) {"),
-  'the system todo item must only ever be pushed when systemHealthy is false',
-)
-
-// database must now participate in the health check (previously silently ignored).
-assert.ok(
-  dashboardSource.includes("{ key: 'database', label: '数据库', status: systemStatus.value.database || 'warning' }"),
-  'database must be included in systemStatusItems so a database outage is not silently ignored',
-)
-// ...but the word must never appear in what a merchant actually reads.
-assert.ok(
-  !dashboardSource.includes("'数据库'") || dashboardSource.match(/'数据库'/g).length === 1,
-  'the literal "数据库" label must only exist once, as the internal systemStatusItems key -- never in user-facing todo text',
-)
-
-// The raw backend message must never be used as todo text anymore.
-assert.ok(
-  !dashboardSource.includes('systemStatus.value.message'),
-  'systemStatus.value.message (raw backend diagnostic text) must never be read into user-facing todo text',
-)
-
-// Priority-mapped copy, simulating systemStatusUserText's branches directly.
-function systemStatusUserText(status) {
-  if (status.printer && status.printer !== 'ok') return '打印服务异常，请检查打印机或手动处理订单'
-  if (status.payment && status.payment !== 'ok') return '支付服务暂时异常，请稍后重试'
-  return '系统服务暂时异常，请稍后重试'
+// Mirror of Dashboard.vue's printerActionable + the fixed todo text/gate --
+// pure function of the fetched status object, exactly what a real payload
+// from getMerchantSystemStatus() would look like.
+function computeSystemTodo(status) {
+  const printerActionable = Boolean(status.printer) && status.printer !== 'ok'
+  if (!printerActionable) return null
+  return '打印服务异常，请检查打印机或手动处理订单'
 }
 
-// ---- printer bad -----------------------------------------------------------
+// ---- CASE A: payment=warning, printer=ok -> no system todo at all ---------
 assert.equal(
-  systemStatusUserText({ printer: 'warning', payment: 'ok', message: '数据库连接正常' }),
+  computeSystemTodo({ api: 'ok', database: 'ok', order: 'ok', payment: 'warning', printer: 'ok', message: '数据库连接正常' }),
+  null,
+  'payment=warning alone must never produce a home-screen todo (CONFIGURATION_NOT_READY, not a runtime incident)',
+)
+
+// ---- CASE B: database=warning, printer=ok -> no technical todo ------------
+assert.equal(
+  computeSystemTodo({ api: 'ok', database: 'warning', order: 'ok', payment: 'ok', printer: 'ok', message: '数据库连接正常' }),
+  null,
+  'database=warning alone must never produce a home-screen todo',
+)
+
+// ---- CASE C: api=warning, printer=ok -> no technical todo -----------------
+assert.equal(
+  computeSystemTodo({ api: 'warning', database: 'ok', order: 'ok', payment: 'ok', printer: 'ok' }),
+  null,
+  'api=warning alone must never produce a home-screen todo',
+)
+
+// ---- CASE D: order=warning, printer=ok -> no technical todo ---------------
+assert.equal(
+  computeSystemTodo({ api: 'ok', database: 'ok', order: 'warning', payment: 'ok', printer: 'ok' }),
+  null,
+  'order=warning alone must never produce a home-screen todo',
+)
+
+// ---- CASE E: printer=warning -> exactly one printer-actionable todo -------
+assert.equal(
+  computeSystemTodo({ api: 'ok', database: 'ok', order: 'ok', payment: 'ok', printer: 'warning' }),
   '打印服务异常，请检查打印机或手动处理订单',
 )
 
-// ---- payment bad -------------------------------------------------------------
+// ---- CASE F: payment=warning + printer=warning -> printer todo only -------
+// (there is only ever at most one 'system' todo item -- computeSystemTodo
+// returning a single string/null already proves "only printer" structurally,
+// this case just pins the combined-failure fixture explicitly.)
 assert.equal(
-  systemStatusUserText({ printer: 'ok', payment: 'warning', message: '数据库连接正常' }),
-  '支付服务暂时异常，请稍后重试',
+  computeSystemTodo({ api: 'ok', database: 'ok', order: 'ok', payment: 'warning', printer: 'warning', message: '数据库连接正常' }),
+  '打印服务异常，请检查打印机或手动处理订单',
 )
 
-// ---- CASE I (the exact section-18 edge case): printer bad, backend message
-// happens to be the healthy-sounding database string -> must show the
-// printer copy, never the raw message ------------------------------------
-{
-  const text = systemStatusUserText({ printer: 'warning', payment: 'ok', message: '数据库连接正常' })
-  assert.equal(text, '打印服务异常，请检查打印机或手动处理订单')
-  assert.ok(!text.includes('数据库'), 'must never surface the word 数据库 to the merchant')
+// ---- CASE G: raw backend message must never be visible, in any fixture ----
+for (const status of [
+  { api: 'ok', database: 'ok', order: 'ok', payment: 'warning', printer: 'ok', message: '数据库连接正常' },
+  { api: 'ok', database: 'ok', order: 'ok', payment: 'ok', printer: 'warning', message: '数据库连接正常' },
+  { api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'ok', message: '数据库连接正常' },
+]) {
+  const todo = computeSystemTodo(status)
+  if (todo) assert.ok(!todo.includes('数据库'), 'the raw backend message must never leak into visible todo text')
 }
 
-// ---- generic (api/order/database) bad, printer+payment ok -> generic copy --
-{
-  const text = systemStatusUserText({ printer: 'ok', payment: 'ok', message: '数据库连接正常' })
-  assert.equal(text, '系统服务暂时异常，请稍后重试')
-  assert.ok(!text.includes('数据库'))
-}
+// ---- CASE (healthy): everything ok, including printer -> no system todo ---
+assert.equal(
+  computeSystemTodo({ api: 'ok', database: 'ok', order: 'ok', payment: 'ok', printer: 'ok', message: '数据库连接正常' }),
+  null,
+  'a fully healthy status must never produce a system todo',
+)
 
-// ---- request failure: existing safe copy is preserved, still no raw error --
+// ---------------------------------------------------------------------------
+// (b) Static contract pinning the real source.
+// ---------------------------------------------------------------------------
+
+// The todo gate itself must be printer-only, not the old blanket systemHealthy check.
 assert.ok(
-  dashboardSource.includes("systemStatusError.value = '系统状态获取失败，请稍后刷新'"),
-  'a failed system-status request must keep using a safe, non-technical product copy',
+  dashboardSource.includes('if (printerActionable.value) {'),
+  'the system todo must be gated on printerActionable, not the old blanket !systemHealthy check',
 )
+assert.ok(
+  !dashboardSource.includes('if (!systemHealthy.value)'),
+  'the old all-fields-must-be-ok gate must be gone -- payment/api/order/database can no longer trigger the home-screen todo',
+)
+assert.ok(
+  dashboardSource.includes("Boolean(systemStatus.value.printer) && systemStatus.value.printer !== 'ok'"),
+  'printerActionable must be derived solely from the printer field',
+)
+assert.ok(
+  dashboardSource.includes("text: '打印服务异常，请检查打印机或手动处理订单'"),
+  'the system todo text must be the fixed printer copy, not a structured priority-mapping of multiple fields',
+)
+
+// payment/database/api/order copy must be completely gone from the file --
+// there is no longer any code path that can produce them.
+for (const bannedCopy of ['支付服务暂时异常，请稍后重试', '系统服务暂时异常，请稍后重试', '支付未配置', '支付未启用']) {
+  assert.ok(!dashboardSource.includes(bannedCopy), `payment/generic system copy must not exist anywhere in Dashboard.vue: "${bannedCopy}"`)
+}
+
+// The raw backend message field must never be read into any user-facing text.
+assert.ok(
+  !dashboardSource.includes('systemStatus.value.message'),
+  'systemStatus.value.message (raw backend diagnostic text) must never be read anywhere in Dashboard.vue',
+)
+
+// getMerchantSystemStatus()/loadSystemStatus()/systemStatus itself must be
+// retained -- this phase silences the home-screen SURFACE, not the internal
+// health fetch (kept for future diagnostics/monitoring per the phase's
+// explicit instruction not to delete it).
+assert.ok(
+  dashboardSource.includes('getMerchantSystemStatus()'),
+  'the internal health-check fetch must be retained, not deleted',
+)
+assert.ok(
+  dashboardSource.includes('async function loadSystemStatus()'),
+  'loadSystemStatus() must be retained, not deleted',
+)
+assert.ok(
+  dashboardSource.includes("const systemStatus = ref({ api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'warning'"),
+  'the systemStatus ref must still carry the full backend payload shape (api/database/order/payment/printer), not just printer',
+)
+
+// Pre-Candidate-Certification cleanup: the "overall health" aggregation layer
+// (systemStatusItems/systemHealthy) had zero consumers after printerActionable
+// took over as the sole todo authority -- true dead code, removed rather than
+// kept "for future diagnostics" (that reasoning was rejected: it only invites
+// someone to wire database/payment/api/order warnings back into the home
+// screen later). Pinned here so a regression re-adding either name is caught.
+assert.ok(
+  !dashboardSource.includes('systemStatusItems'),
+  'systemStatusItems must be fully removed -- it was dead code with zero consumers',
+)
+assert.ok(
+  !dashboardSource.includes('systemHealthy'),
+  'systemHealthy must be fully removed -- it was dead code with zero consumers',
+)
+// The 数据库/系统服务/订单服务/支付服务 UI labels only ever existed as quoted
+// object-literal values inside systemStatusItems -- with that gone, those
+// exact quoted forms must be gone too. Checking the quoted form (not a bare
+// substring match) deliberately allows the word to still appear in an
+// explanatory code comment (it does, once, describing why the raw message
+// field is never read) without that being mistaken for a UI label.
+for (const removedLabel of ["label: '数据库'", "label: '系统服务'", "label: '订单服务'", "label: '支付服务'"]) {
+  assert.ok(!dashboardSource.includes(removedLabel), `label from the removed systemStatusItems array must not remain: "${removedLabel}"`)
+}
 
 console.log('test-dashboard-actionable-state: ok')
