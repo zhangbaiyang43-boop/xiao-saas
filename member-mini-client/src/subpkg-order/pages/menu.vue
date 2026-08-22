@@ -283,6 +283,7 @@
       :success-text="successText"
       :currency="confirmationText.currency"
       :success-total="successTotal"
+      :member-value="successMemberValue"
       :success-status-tone="successStatusTone"
       :success-status-text="successStatusText"
       :earned-coupon="earnedCoupon"
@@ -591,7 +592,7 @@ export default {
     }
     const {
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText,
-      consumeWelcomeCoupon, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
+      checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
     } = useWelcomeCoupon(() => { activeTab.value = 'order' })
     const orderNo = ref('')
     const orderId = ref('')
@@ -599,6 +600,9 @@ export default {
     const successItems = ref([])
     const successTotal = ref(0)
     const successDiscount = ref(0)
+    // P0-B2a: GET /v1/orders/my 的 member_value 权威结果原样存这里，成功页
+    // 会员本单已省/积分/奖励券都只读这一个对象，不在页面里另算。
+    const successMemberValue = ref(null)
     const showCheckoutAuth = ref(false)
     const authorizing = ref(false)
     // P0-A: 结算前"加入会员/直接支付"的选择层——跟 showCheckoutAuth（授权失
@@ -811,6 +815,10 @@ export default {
       specCartItems.value = []
       remark.value = ''
       selectedCouponId.value = null
+      // P0-B2a: 关掉成功页就清掉这一单的会员价值/奖励券状态——不依赖"下一单
+      // 反正会覆盖"，避免下一单打开成功页前的短暂间隙里闪现上一单的数字。
+      successMemberValue.value = null
+      earnedCoupon.value = null
       uni.showToast({ title: successText.closed, icon: 'none', duration: 900 })
       // Keep polling the paid order status in the background.
     }
@@ -825,6 +833,8 @@ export default {
       specCartItems.value = []
       remark.value = ''
       selectedCouponId.value = null
+      successMemberValue.value = null
+      earnedCoupon.value = null
       activeTab.value = 'order'
       uni.showToast({ title: successText.backToMenu, icon: 'none', duration: 900 })
     }
@@ -1169,7 +1179,7 @@ export default {
       recoverPendingPaymentResult,
     } = useCheckout({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
-      orderNo, orderId, orderStatus, successItems, successTotal, successDiscount,
+      orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
       showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
       payAmount, pendingOrderId, pendingSubmitRequestId,
       myOrders, showOrders, showCart, showSuccess,
@@ -1179,7 +1189,7 @@ export default {
       orderSuccessTemplateId, pickupReminderTemplateId,
       showMemberCheckoutChoice, memberChoiceJoining, memberCheckoutBenefitsNeedRefresh, isCustomerLoggedIn,
       wxLogin, ensureDiningSession, bindCurrentDiningParticipant, syncDiningOrders,
-      normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll, consumeWelcomeCoupon,
+      normalizePaymentMode, refreshCustomerAuthState, saveMyOrders, startStatusPoll,
       clearDiningSessionStorage, refreshAvailableCoupons,
     })
 
@@ -1373,7 +1383,7 @@ export default {
       couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
       openCart, refreshAvailableCoupons,
       activeCategory, scrollTarget, categoryScrollTop, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
-      successItems, successTotal,
+      successItems, successTotal, successMemberValue,
       categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
       imageLoadFailed, detailImageFailed, markDishImageFailed, openProductDetail,
       cartCount, addToCart, removeFromCart, increaseCartItem, clearCart, specButtonText, dishOptionKindCount, optionCountText, openSpecSheet,

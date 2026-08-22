@@ -17,6 +17,17 @@
           <text class="order-status-text">{{ successStatusText }}</text>
         </view>
 
+        <!-- P0-B2a: 唯一 authority 是 memberValue.status === 'available'——
+             not_applicable/pending/unavailable 一律不展示任何会员数字，
+             也不把合法的 0 值（真的没省钱/没积分）误判成异常。 -->
+        <view
+          v-if="memberValue && memberValue.status === 'available' && (memberValue.member_savings > 0 || memberValue.points_earned > 0)"
+          class="member-value-summary"
+        >
+          <text v-if="memberValue.member_savings > 0" class="mv-row">会员本单已省 ¥{{ formatPrice(memberValue.member_savings) }}</text>
+          <text v-if="memberValue.points_earned > 0" class="mv-row">本单 +{{ memberValue.points_earned }} 积分 · 现有 {{ memberValue.points_balance }} 积分</text>
+        </view>
+
         <view v-if="earnedCoupon" class="earned-coupon-card">
           <text class="ec-ribbon">{{ earnedCoupon.isSecondOrder ? '欢迎回来 · 专属奖励' : '支付成功 · 专属奖励' }}</text>
           <view class="ec-amount-row">
@@ -93,6 +104,10 @@ export default {
     successTotal: { type: Number, default: 0 },
     successStatusTone: { type: String, default: '' },
     successStatusText: { type: String, default: '' },
+    // P0-B2a: GET /v1/orders/my 的 member_value 权威结果，display-only——
+    // 组件只按 status/member_savings/points_earned/points_balance 判断展示
+    // 与否，不在这里计算、请求或猜测任何数值。
+    memberValue: { type: Object, default: null },
     earnedCoupon: { type: Object, default: null },
     couponReminderTemplateId: { type: String, default: '' },
     reminderRequested: { type: Boolean, default: false },
@@ -443,6 +458,24 @@ export default {
 
 .success-sheet .order-status-bar.warning .order-status-text {
   color: #9a6a21;
+}
+
+
+
+.member-value-summary {
+  margin-top: 18rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: #fff7ed;
+  text-align: center;
+}
+
+.mv-row {
+  display: block;
+  font-size: 25rpx;
+  font-weight: 700;
+  color: #9a3412;
+  line-height: 1.6;
 }
 
 
