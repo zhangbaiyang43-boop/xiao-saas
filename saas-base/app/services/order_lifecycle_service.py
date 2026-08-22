@@ -310,6 +310,42 @@ class OrderLifecycleService(BaseService):
         await self.db.commit()
         return success_response(data={"id": str(order.id), "status": "cancelled"}, msg="order cancelled")
 
+    async def _prove_order_read_owner(
+        self,
+        order: Order,
+        *,
+        customer_id: int | None,
+        participant_token: str | None,
+        derived_tenant_id: str,
+    ) -> ApiResponse | None:
+        """Same ownership contract as cancel_order. Returns 403 or None.
+
+        Tenant is never taken from the client. derived_tenant_id must already
+        be Order.tenant_id (JWT-scoped load or discovery-then-derive).
+        """
+        if order.customer_id:
+            if customer_id is None or int(customer_id) != int(order.customer_id):
+                return error_response(code=403, msg="forbidden")
+            return None
+        if order.participant_id:
+            if not participant_token:
+                return error_response(code=403, msg="forbidden")
+            from app.models.dining import DiningParticipant
+            from app.services.dining_session_service import hash_participant_token
+
+            participant_result = await self.db.execute(
+                select(DiningParticipant).where(
+                    DiningParticipant.id == order.participant_id,
+                    DiningParticipant.tenant_id == derived_tenant_id,
+                    DiningParticipant.guest_token_hash
+                    == hash_participant_token(participant_token),
+                )
+            )
+            if participant_result.scalar_one_or_none() is None:
+                return error_response(code=403, msg="forbidden")
+            return None
+        return None
+
     async def get_my_order(
         self,
         order_id: int,
@@ -317,32 +353,59 @@ class OrderLifecycleService(BaseService):
         customer_id: int | None,
         participant_token: str | None,
     ) -> ApiResponse:
-        tenant_id = self.require_tenant_id()
-        result = await self.db.execute(
-            select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
-        )
-        order = result.scalar_one_or_none()
-        if not order:
-            return error_response(code=404, msg="order not found")
-
-        if order.customer_id:
-            if not customer_id or int(customer_id) != int(order.customer_id):
+        # P0-01: guests have participant_token and no JWT, so TenantMiddleware
+        # never sets TenantContext. Do not call tenant require before ownership.
+        # Member JWT path still uses context tenant as the load filter.
+        context_tenant_id = self.tenant_id or TenantContext.get_current_tenant_id()
+        if context_tenant_id:
+            tenant_id = str(context_tenant_id)
+            result = await self.db.execute(
+                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+            )
+            order = result.scalar_one_or_none()
+            if not order:
+                return error_response(code=404, msg="order not found")
+            denied = await self._prove_order_read_owner(
+                order,
+                customer_id=customer_id,
+                participant_token=participant_token,
+                derived_tenant_id=tenant_id,
+            )
+            if denied is not None:
+                return denied
+        else:
+            # Guest path is participant-authority only. customer_id is never
+            # a tenant-less read key, and orphan orders are not readable.
+            if not participant_token:
                 return error_response(code=403, msg="forbidden")
-        elif order.participant_id:
+            result = await self.db.execute(select(Order).where(Order.id == order_id))
+            order = result.scalar_one_or_none()
+            if not order:
+                return error_response(code=404, msg="order not found")
+            if not order.participant_id:
+                return error_response(code=403, msg="forbidden")
+            derived_tenant_id = str(order.tenant_id)
             from app.models.dining import DiningParticipant
             from app.services.dining_session_service import hash_participant_token
 
-            owns_order = False
-            if participant_token:
-                participant_result = await self.db.execute(
-                    select(DiningParticipant).where(
-                        DiningParticipant.id == order.participant_id,
-                        DiningParticipant.guest_token_hash == hash_participant_token(participant_token),
-                    )
+            participant_result = await self.db.execute(
+                select(DiningParticipant).where(
+                    DiningParticipant.id == order.participant_id,
+                    DiningParticipant.tenant_id == derived_tenant_id,
+                    DiningParticipant.guest_token_hash
+                    == hash_participant_token(participant_token),
                 )
-                owns_order = participant_result.scalar_one_or_none() is not None
-            if not owns_order:
+            )
+            if participant_result.scalar_one_or_none() is None:
                 return error_response(code=403, msg="forbidden")
+            tenant_id = derived_tenant_id
+            result = await self.db.execute(
+                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+            )
+            order = result.scalar_one_or_none()
+            if not order:
+                return error_response(code=404, msg="order not found")
+        self.tenant_id = tenant_id
 
         # P1-WXPAY-RECOVERY-GATE / P0-MISSING-GREENLET: this used to call
         # _recover_wxpay_order_if_paid(order, ...) directly on self.db -- the same
@@ -377,9 +440,10 @@ class OrderLifecycleService(BaseService):
                     "[get_my_order] best-effort payment recovery failed order_id=%s", order_id,
                 )
         if recovered:
-            # Re-select through the display session instead of db.refresh()/relying on
-            # any cross-session identity-map state, so the response reflects whatever
-            # the isolated recovery gate call above just committed.
+            # The gate committed on an isolated session. End this session's
+            # snapshot and drop the unpaid identity so the next SELECT sees paid.
+            await self.db.commit()
+            self.db.expire(order)
             result = await self.db.execute(
                 select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
             )
