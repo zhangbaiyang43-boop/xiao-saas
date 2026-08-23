@@ -71,13 +71,21 @@ ORDER_TYPE_TEXT = {
 
 ORDER_STATUS_TEXT = {
     "pending_payment": "待支付",
-    "pending": "等待接单",
+    "pending": "待接单",
     "preparing": "制作中",
     "done": "已上餐",
-    "settled": "已完成",
+    "settled": "已结账",
     "rejected": "已拒单",
     "cancelled": "已取消",
 }
+UNKNOWN_ORDER_STATUS_TEXT = "处理中"
+
+
+def order_status_text(status: object) -> str:
+    """Business display copy for an order status. Never returns the raw token."""
+    return ORDER_STATUS_TEXT.get(str(status or ""), UNKNOWN_ORDER_STATUS_TEXT)
+
+
 ORDER_ALLOWED_TRANSITIONS = {
     "pending_payment": {"cancelled"},
     "pending": {"preparing", "rejected", "cancelled"},
@@ -197,7 +205,7 @@ def serialize_order(
         "phone": order.phone,
         "total": float(order.total),
         "status": order.status,
-        "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
+        "status_text": order_status_text(order.status),
         "remark": order.remark,
         **print_meta,
         "coupon_id": str(order.coupon_id) if order.coupon_id else None,
@@ -1703,7 +1711,7 @@ def serialize_fulfillment_order(
         "id": str(order.id),
         "display_order_no": str(order.id)[-4:],
         "status": order.status,
-        "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
+        "status_text": order_status_text(order.status),
         "table_no": order.table_no or "",
         "pickup_no": getattr(order, "pickup_no", None) or "",
         "served_at": order.served_at.isoformat() if getattr(order, "served_at", None) else None,

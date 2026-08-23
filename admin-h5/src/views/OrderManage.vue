@@ -156,7 +156,7 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
-                <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status) }}</a-tag>
+                <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status, order.status_text) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
                 <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
@@ -329,7 +329,7 @@
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
-              <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status) }}</a-tag>
+              <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status, order.status_text) }}</a-tag>
               <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
               <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
@@ -568,6 +568,7 @@ import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 import { sortMerchantOrders } from '../utils/orderListSort'
+import { formatOrderStatusText } from '../utils/orderStatusText'
 
 function decodeJwtPayload(token) {
   try {
@@ -889,6 +890,7 @@ function mapOwnerOrders(raw) {
       checkoutRequestedAt: o.checkout_requested_at || null,
       participantNo: o.participant_no || null,
       status: o.status || 'pending',
+      status_text: o.status_text || '',
       total: Number(o.total || 0),
       discount_amount: o.discount_amount ? Number(o.discount_amount) : null,
       remark: o.remark || '',
@@ -1018,7 +1020,7 @@ const todayRevenue = computed(() => {
 
 const statItems = computed(() => [
   { label: '待接单', value: pendingCount.value, color: pendingCount.value > 0 ? '#ef4444' : '#374151' },
-  { label: '备餐中', value: preparingCount.value, color: '#374151' },
+  { label: '制作中', value: preparingCount.value, color: '#374151' },
   { label: '待结账', value: doneCount.value, color: '#16a34a' },
   { label: '今日营收', value: '¥' + todayRevenue.value, color: '#07C160' },
 ])
@@ -1095,13 +1097,13 @@ async function loadHistoricalOrders({ append = false } = {}) {
 const statusFilter = ref('')
 const statusFilters = [
   { label: '全部', val: '' },
-  { label: '待接单', val: 'pending' },
-  { label: '备餐中', val: 'preparing' },
-  { label: '已完成', val: 'done' },
-  { label: '已结账', val: 'settled' },
-  { label: '待支付', val: 'pending_payment' },
-  { label: '已拒单', val: 'rejected' },
-  { label: '已取消', val: 'cancelled' },
+  { label: formatOrderStatusText('pending'), val: 'pending' },
+  { label: formatOrderStatusText('preparing'), val: 'preparing' },
+  { label: formatOrderStatusText('done'), val: 'done' },
+  { label: formatOrderStatusText('settled'), val: 'settled' },
+  { label: formatOrderStatusText('pending_payment'), val: 'pending_payment' },
+  { label: formatOrderStatusText('rejected'), val: 'rejected' },
+  { label: formatOrderStatusText('cancelled'), val: 'cancelled' },
 ]
 
 // 顾客来店里反馈"我这单有问题"时，能报出来的通常就是桌号、大概几点、点了什么菜——
@@ -1225,7 +1227,7 @@ function tableTagClass(t) {
 
 function tableStatusText(t) {
   if (t.pendingOrders?.length) return String(t.pendingOrders.length) + ' 单待接'
-  if (t.preparingOrders?.length) return '备餐中'
+  if (t.preparingOrders?.length) return formatOrderStatusText('preparing')
   if (t.canSettle) return t.checkoutRequestedAt ? '顾客催结账 ⏰' : '可结账'
   if (t.isSettled) return '已结账'
   if (t.pendingPaymentOrders?.length) return '有订单待支付'
@@ -1240,8 +1242,8 @@ function staffSourceLabel(order) {
   return '员工代加'
 }
 
-function statusLabel(s) {
-  return { pending_payment: '待支付', pending: '待接单', preparing: '备餐中', done: '已完成', settled: '已结账', rejected: '已拒单', cancelled: '已取消' }[s] || s
+function statusLabel(s, statusText) {
+  return formatOrderStatusText(s, statusText)
 }
 
 // 拼桌时标出"这一单是第几位点的"，跟顾客小程序端用同一套颜色循环，纯展示编号，

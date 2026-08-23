@@ -110,6 +110,7 @@ import { reprintOrder, updateOrderStatus } from '../api'
 import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
+import { formatOrderStatusText } from '../utils/orderStatusText'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -135,9 +136,9 @@ const busyId = ref('')
 const reprintId = ref('')
 const statusFilter = ref('pending')
 const filters = [
-  { label: '待制作', val: 'pending' },
-  { label: '制作中', val: 'preparing' },
-  { label: '已完成', val: 'done' },
+  { label: formatOrderStatusText('pending'), val: 'pending' },
+  { label: formatOrderStatusText('preparing'), val: 'preparing' },
+  { label: formatOrderStatusText('done'), val: 'done' },
 ]
 
 const counts = computed(() => ({

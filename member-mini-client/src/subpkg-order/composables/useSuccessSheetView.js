@@ -10,6 +10,7 @@ export function useSuccessSheetView({ successItems, orderNo, orderId, orderStatu
   )
   const successOrderNo = computed(() => orderNo.value || (orderId.value ? String(orderId.value).slice(-4) : '--'))
   const successStatusText = computed(() => ({
+    pending_payment: successText.statusPendingPayment,
     pending: successText.statusPending,
     paid: successText.statusPending,
     accepted: successText.statusPreparing,

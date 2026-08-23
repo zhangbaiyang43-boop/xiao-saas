@@ -30,6 +30,7 @@ export const successText = {
   continueOrdering: '继续加菜',
   viewDetail: '查看订单详情',
   safeTip: '订单状态会自动更新，无需重复提交或再次支付。',
+  statusPendingPayment: '订单待支付，请完成微信支付',
   statusPending: '商家已收到订单，正在等待接单',
   statusPreparing: '商家已接单，正在制作',
   statusDone: '餐品已完成，请留意取餐或服务员通知',

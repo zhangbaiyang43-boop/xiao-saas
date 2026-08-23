@@ -24,9 +24,8 @@ CONSUMER_LABEL_SOURCE = (
     ROOT.parent
     / "member-mini-client"
     / "src"
-    / "subpkg-order"
-    / "composables"
-    / "useOrderFormatters.js"
+    / "utils"
+    / "orderStatus.js"
 ).read_text(encoding="utf-8-sig")
 CONSUMER_POLL_SOURCE = (
     ROOT.parent
@@ -115,15 +114,15 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn('o.status = "settled"', source)
 
     def test_consumer_and_merchant_status_text_cover_backend_states(self):
+        self.assertIn("formatOrderStatusText", CONSUMER_LABEL_SOURCE)
+        self.assertIn("pending_payment:", CONSUMER_LABEL_SOURCE)
         self.assertIn("pending:", CONSUMER_LABEL_SOURCE)
         self.assertIn("preparing:", CONSUMER_LABEL_SOURCE)
         self.assertIn("done:", CONSUMER_LABEL_SOURCE)
         self.assertIn("settled:", CONSUMER_LABEL_SOURCE)
-        self.assertIn("function statusLabel(s)", ORDER_MANAGE_SOURCE)
-        self.assertIn("pending:", ORDER_MANAGE_SOURCE)
-        self.assertIn("preparing:", ORDER_MANAGE_SOURCE)
-        self.assertIn("done:", ORDER_MANAGE_SOURCE)
-        self.assertIn("settled:", ORDER_MANAGE_SOURCE)
+        self.assertIn("function statusLabel(s, statusText)", ORDER_MANAGE_SOURCE)
+        self.assertIn("formatOrderStatusText", ORDER_MANAGE_SOURCE)
+        self.assertIn("statusLabel(order.status", ORDER_MANAGE_SOURCE)
 
     def test_consumer_status_rendering_uses_backend_status_without_fake_progression(self):
         self.assertIn("if (['paid', 'pending'].includes(status)) return 'pending'", CONSUMER_STATUS_SOURCE)

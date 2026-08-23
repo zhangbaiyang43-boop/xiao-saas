@@ -1,4 +1,5 @@
 import { computed } from 'vue'
+import { formatOrderStatusText } from '@/utils/orderStatus'
 
 // 从 menu.vue 拆出来的"桌台账单/单笔订单进度"展示逻辑——本桌当前订单是哪一单、
 // 桌台账单（拼单/餐后付款）要不要显示结账按钮、订单进度条的文案图标——全都是
@@ -81,14 +82,7 @@ export function useTableBillView({
   const tableItemCount = computed(() =>
     validTableOrders.value.reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => itemSum + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0), 0)
   )
-  const tableGroupStatusText = (status) => ({
-    pending: '待确认',
-    preparing: '制作中',
-    done: '已上桌',
-    settled: '已结账',
-    cancelled: '已取消',
-    rejected: '已取消',
-  })[normalizeOrderStatus(status)] || '待确认'
+  const tableGroupStatusText = (status, statusText) => formatOrderStatusText(status, statusText)
   const tableGroupStatusTone = (status) => {
     const normalized = normalizeOrderStatus(status)
     if (['cancelled', 'rejected'].includes(normalized)) return 'muted'
@@ -107,7 +101,7 @@ export function useTableBillView({
     tableSessionOrders.value.map((order, index) => ({
       id: order.id || String(index),
       title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
-      statusText: tableGroupStatusText(order.status),
+      statusText: tableGroupStatusText(order.status, order.status_text),
       tone: tableGroupStatusTone(order.status),
       discountAmount: Number(order.discountAmount || 0),
       participantNo: order.participantNo || null,
@@ -191,13 +185,10 @@ export function useTableBillView({
     return 'paid'
   })
 
-  const tableOrderStatusBadge = computed(() => ({
-    canceled: '异常状态',
-    paid: '正常进行',
-    preparing: '正在备餐',
-    served: '已送达',
-    settled: '订单完成',
-  })[tableOrderStatusTone.value] || '正常进行')
+  const tableOrderStatusBadge = computed(() => formatOrderStatusText(
+    currentTableOrder.value?.status || orderStatus.value,
+    currentTableOrder.value?.status_text,
+  ))
 
   const tableOrderStatusIcon = computed(() => ({
     canceled: 'icon-warnfill',

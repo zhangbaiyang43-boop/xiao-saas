@@ -1,3 +1,5 @@
+import { formatOrderStatusText } from '@/utils/orderStatus'
+
 // 从 menu.vue 拆出来的纯格式化/展示函数——菜品图片、价格、规格判断、订单明细
 // 文案、优惠券文案。全部是纯函数（输入什么就算什么，不读、不改任何页面状态），
 // 逻辑跟原来在 menu.vue 里一字未改，只是搬了个位置。
@@ -91,7 +93,7 @@ export function useOrderFormatters() {
   const orderItemImage = (item) => item?.image || item?.image_url || item?.cover || item?.cover_url || ''
   const orderItemCount = (order) => (order?.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0)
 
-  const statusLabel = (s) => ({ pending: '等待接单', preparing: '备餐中', done: '已完成', rejected: '已拒单', cancelled: '已取消', settled: '已结账' })[s] || s
+  const statusLabel = (s, statusText) => formatOrderStatusText(s, statusText)
 
   const dishTags = (dish) => {
     if (Array.isArray(dish.tags) && dish.tags.length) return dish.tags.slice(0, 3)

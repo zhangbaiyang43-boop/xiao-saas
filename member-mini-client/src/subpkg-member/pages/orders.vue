@@ -21,7 +21,7 @@
       <view v-for="item in orders" :key="item.order_id" class="record-card">
         <view class="rc-left">
           <view class="rc-title-row">
-            <text class="rc-title">{{ item.status_text || item.status }}</text>
+            <text class="rc-title">{{ formatOrderStatusText(item.status, item.status_text) }}</text>
             <text v-if="item.refund_required" class="rc-refund">需商家退款</text>
           </view>
           <text class="rc-time">{{ formatDateTime(item.created_at) }}</text>
@@ -41,6 +41,7 @@
 import { computed, ref } from 'vue'
 import { getMyOrders } from '@/api/order'
 import { formatDateTime, formatMoney } from '@/utils'
+import { formatOrderStatusText } from '@/utils/orderStatus'
 import StateLoading from '@/components/state-loading/state-loading.vue'
 import StateError from '@/components/state-error/state-error.vue'
 import StateEmpty from '@/components/state-empty/state-empty.vue'
@@ -108,6 +109,7 @@ export default {
       loadMore,
       formatDateTime,
       formatMoney,
+      formatOrderStatusText,
     }
   },
   onShow() {

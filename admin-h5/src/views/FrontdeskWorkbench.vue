@@ -66,7 +66,7 @@
             <span> · {{ order.pickup_no }}号桌牌</span>
             <span class="muted"> · #{{ order.display_order_no }}</span>
           </div>
-          <a-tag>{{ statusText(order.status) }}</a-tag>
+          <a-tag>{{ statusText(order.status, order.status_text) }}</a-tag>
         </div>
         <div class="items">
           <div v-for="(item, idx) in order.items" :key="idx">{{ item.name }} ×{{ item.qty }}</div>
@@ -109,6 +109,7 @@ import PickupNoPicker from '../components/PickupNoPicker.vue'
 import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { needsPickupIdsFromOrders, useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
+import { formatOrderStatusText } from '../utils/orderStatusText'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 import { getSession } from '../utils/session'
 
@@ -165,8 +166,8 @@ async function logout() {
   router.replace('/login?mode=staff')
 }
 
-function statusText(s) {
-  return { pending: '待制作', preparing: '制作中', done: '已完成', settled: '已结账' }[s] || s
+function statusText(s, statusTextFromApi) {
+  return formatOrderStatusText(s, statusTextFromApi)
 }
 
 async function refreshOccupied() {

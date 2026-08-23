@@ -26,7 +26,8 @@
     "test:super-manual-payments": "node scripts/test-super-manual-payments.mjs",
     "test:super-api-origin-authority": "node scripts/test-super-api-origin-authority.mjs",
     "test:onboarding-continuation": "node scripts/test-onboarding-continuation.mjs",
-    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run test:super-channel-partners && npm run test:super-manual-payments && npm run test:super-api-origin-authority && npm run test:workbench-sync && npm run test:p0-08-sync && npm run test:p0-08-acceptance && npm run test:workbench-print-status && npm run test:payment-handoff-polling && npm run test:order-page-table-context && npm run test:subscription-ui-logic && npm run test:subscription-page-wiring && npm run test:subscription-home-and-entry && npm run test:subscription-manual-payment && npm run test:onboarding-continuation && npm run build"
+    "test:p1-03-order-status-text": "node scripts/test-p1-03-order-status-text.mjs",
+    "check": "npm run check:text && npm run test:pickup-ui && npm run test:order-list-sort && npm run test:staff-permissions && npm run test:staff-device-cookie && npm run test:staff-password-login-guard && npm run test:super-channel-partners && npm run test:super-manual-payments && npm run test:super-api-origin-authority && npm run test:workbench-sync && npm run test:p0-08-sync && npm run test:p0-08-acceptance && npm run test:workbench-print-status && npm run test:payment-handoff-polling && npm run test:order-page-table-context && npm run test:subscription-ui-logic && npm run test:subscription-page-wiring && npm run test:subscription-home-and-entry && npm run test:subscription-manual-payment && npm run test:onboarding-continuation && npm run test:p1-03-order-status-text && npm run build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

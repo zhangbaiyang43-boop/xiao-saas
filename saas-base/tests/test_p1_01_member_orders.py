@@ -119,7 +119,7 @@ class P1MemberOrderListTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page["total"], 2)
         self.assertNotIn("items", page["items"][0])
         self.assertEqual(page["items"][0]["dish_count"], 2)
-        self.assertEqual(page["items"][0]["status_text"], "等待接单")
+        self.assertEqual(page["items"][0]["status_text"], "待接单")
         self.assertEqual(page["items"][0]["pickup_no"], "07")
         self.assertIn("refund_required", page["items"][0])
         self.assertFalse(page["items"][0]["refund_required"])

@@ -112,8 +112,9 @@ class MerchantOrderLookupContractsTest(unittest.TestCase):
 
     def test_status_text_is_exposed_for_merchant_display(self):
         self.assertIn("ORDER_STATUS_TEXT", ORDERS_SOURCE)
-        self.assertIn('"status_text": ORDER_STATUS_TEXT.get(order.status, order.status)', ORDERS_SOURCE)
-        for text in ["待支付", "等待接单", "制作中", "已上餐", "已完成", "已取消"]:
+        self.assertIn('"status_text": order_status_text(order.status)', ORDERS_SOURCE)
+        self.assertIn("UNKNOWN_ORDER_STATUS_TEXT", ORDERS_SOURCE)
+        for text in ["待支付", "待接单", "制作中", "已上餐", "已结账", "已取消", "已拒单"]:
             self.assertIn(text, ORDERS_SOURCE)
 
     def test_default_order_list_response_remains_backward_compatible(self):

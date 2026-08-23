@@ -136,7 +136,7 @@ class PaymentModeContractsTest(unittest.TestCase):
 
     def test_admin_order_manage_can_see_pay_later_orders(self):
         self.assertIn("o.status === 'pending'", ADMIN_ORDER_MANAGE_SOURCE)
-        self.assertIn("statusLabel(order.status)", ADMIN_ORDER_MANAGE_SOURCE)
+        self.assertIn("statusLabel(order.status", ADMIN_ORDER_MANAGE_SOURCE)
         self.assertIn("pendingPaymentOrders", ADMIN_ORDER_MANAGE_SOURCE)
 
     def test_pay_later_add_on_uses_any_active_session_order_as_parent(self):

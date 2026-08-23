@@ -123,6 +123,7 @@ export function useDiningSession({
       id: String(order.id || ''),
       orderNo: String(order.order_no || order.id || '').slice(-4),
       status: order.status || 'pending',
+      status_text: order.status_text || '',
       paymentStatus: order.payment_status || '',
       paymentMode: normalizePaymentMode(order.payment_mode),
       diningSessionId: order.dining_session_id ? String(order.dining_session_id) : '',

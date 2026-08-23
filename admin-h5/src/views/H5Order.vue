@@ -145,6 +145,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import axios from 'axios'
+import { formatOrderStatusText } from '../utils/orderStatusText'
 
 const route = useRoute()
 const shopId = computed(() => route.params.shopId)
@@ -161,6 +162,7 @@ const paying = ref(false)
 const toast = ref('')
 const orderId = ref('')
 const orderStatus = ref('')
+const orderStatusText = ref('')
 const successCount = ref(0)
 const successTotal = ref('0.00')
 
@@ -207,14 +209,7 @@ const successTitle = computed(() => orderStatus.value === 'pending_payment' ? '�
 const successHint = computed(() => orderStatus.value === 'pending_payment' ? '请完成微信支付，支付成功后厨房才会收到订单' : '商家正在处理，请稍候…')
 const payHint = computed(() => orderStatus.value === 'pending_payment' ? '微信支付未完成，请点击继续支付' : '已完成支付，订单已进入商家接单流程')
 
-const statusLabel = computed(() => ({
-  pending_payment: '待支付',
-  pending: '待接单',
-  preparing: '备餐中',
-  done: '可取餐',
-  settled: '已完成',
-  cancelled: '已取消',
-}[orderStatus.value] || '处理中'))
+const statusLabel = computed(() => formatOrderStatusText(orderStatus.value, orderStatusText.value))
 
 function addToCart(dish) {
   if (!cart[dish.id]) cart[dish.id] = { id: dish.id, name: dish.name, price: Number(dish.price), qty: 0 }
@@ -281,6 +276,7 @@ async function submitOrder() {
       const data = res.data.data
       orderId.value = String(data.id)
       orderStatus.value = 'pending_payment'
+      orderStatusText.value = formatOrderStatusText('pending_payment', data.status_text)
       successCount.value = cartCount.value
       successTotal.value = cartTotal.value.toFixed(2)
       showCart.value = false
@@ -345,6 +341,7 @@ async function payCurrentOrder(targetOrderId = orderId.value) {
     const payData = payRes.data?.data || {}
     if (payData.free) {
       orderStatus.value = payData.status || 'pending'
+      orderStatusText.value = formatOrderStatusText(orderStatus.value, payData.status_text)
       showToast('支付成功')
       return
     }
@@ -363,7 +360,10 @@ async function refreshOrderStatus() {
   if (!orderId.value) return
   try {
     const res = await api.get('/v1/orders/my', { params: { order_id: orderId.value } })
-    if (res.data?.code === 200) orderStatus.value = res.data.data.status
+    if (res.data?.code === 200) {
+      orderStatus.value = res.data.data.status
+      orderStatusText.value = res.data.data.status_text || ''
+    }
   } catch {}
 }
 
@@ -375,6 +375,7 @@ function startPoll() {
       const res = await api.get('/v1/orders/my', { params: { order_id: orderId.value } })
       if (res.data?.code === 200) {
         orderStatus.value = res.data.data.status
+        orderStatusText.value = res.data.data.status_text || ''
         if (['settled', 'cancelled'].includes(orderStatus.value)) clearInterval(pollTimer)
       }
     } catch {}
@@ -385,6 +386,7 @@ function reorder() {
   showSuccess.value = false
   orderId.value = ''
   orderStatus.value = ''
+  orderStatusText.value = ''
   if (pollTimer) clearInterval(pollTimer)
 }
 

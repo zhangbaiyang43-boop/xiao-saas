@@ -90,7 +90,7 @@
         <text class="order-summary">{{ recentOrderSummary }}</text>
         <view class="order-bottom">
           <text class="order-amount">¥{{ formatMoney(recentOrder.total) }}</text>
-          <text class="order-status">{{ statusLabel(recentOrder.status) }}</text>
+          <text class="order-status">{{ statusLabel(recentOrder.status, recentOrder.status_text) }}</text>
         </view>
       </view>
 
@@ -167,7 +167,7 @@ import { getShopInfo, getOrderStatus } from '@/api/order'
 import { clearCustomerSession, saveCustomerSession } from '@/utils/auth'
 import { scanStoreCode } from '@/utils/scan'
 import { formatMoney, formatPhone } from '@/utils'
-import { normalizeOrderStatus, orderStatusTone, orderStatusIcon, orderStatusBadge, orderStatusNextAction } from '@/utils/orderStatus'
+import { normalizeOrderStatus, orderStatusTone, orderStatusIcon, orderStatusBadge, orderStatusNextAction, formatOrderStatusText } from '@/utils/orderStatus'
 import StateLoading from '@/components/state-loading/state-loading.vue'
 import StateError from '@/components/state-error/state-error.vue'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
@@ -308,7 +308,7 @@ export default {
     })
     const bubbleTone = computed(() => orderStatusTone(activeTableOrder.value?.status))
     const bubbleIcon = computed(() => orderStatusIcon(bubbleTone.value))
-    const bubbleBadge = computed(() => orderStatusBadge(bubbleTone.value))
+    const bubbleBadge = computed(() => formatOrderStatusText(activeTableOrder.value?.status, activeTableOrder.value?.status_text))
     const bubbleActionText = computed(() => orderStatusNextAction(bubbleTone.value))
 
     let orderBubblePollTimer = null
@@ -436,17 +436,7 @@ export default {
       }
     }
 
-    const statusLabel = (status) => ({
-      pending: '等待接单',
-      paid: '等待接单',
-      accepted: '备餐中',
-      preparing: '备餐中',
-      done: '已完成',
-      completed: '已完成',
-      rejected: '已拒单',
-      cancelled: '已取消',
-      settled: '已结账'
-    })[status] || '处理中'
+    const statusLabel = (status, statusText) => formatOrderStatusText(status, statusText)
 
     const go = (url) => uni.navigateTo({ url })
 

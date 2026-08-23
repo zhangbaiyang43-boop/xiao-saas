@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.consumptions import serialize_consumption
-from app.api.v1.orders import ORDER_STATUS_TEXT, build_order_financial_capabilities
+from app.api.v1.orders import build_order_financial_capabilities, order_status_text
 from app.core.database import get_db
 from app.core.logger import logger
 from app.core.pagination import build_page, normalize_pagination
@@ -458,7 +458,7 @@ async def list_member_orders(
             {
                 "order_id": str(order.id),
                 "status": order.status,
-                "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
+                "status_text": order_status_text(order.status),
                 "total": float(order.total or 0),
                 "created_at": created_at,
                 "pickup_no": getattr(order, "pickup_no", None) or "",
