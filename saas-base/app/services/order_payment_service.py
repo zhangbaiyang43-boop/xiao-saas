@@ -360,10 +360,14 @@ class OrderPaymentService(BaseService):
         except ImportError:  # compatibility for isolated legacy contract harnesses
             ensure_initial_print_intent = None
         if ensure_initial_print_intent is not None:
+            from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
+
+            pickup_settings = await load_pickup_settings(self.db, str(order.tenant_id))
+            defer = should_defer_kitchen_print(order, pickup_settings)
             await ensure_initial_print_intent(
                 order,
                 self.db,
-                eligible=True,
+                eligible=not defer,
                 reason="payment_success",
             )
         await self.db.flush()

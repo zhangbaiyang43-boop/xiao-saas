@@ -335,6 +335,9 @@ async def ensure_initial_print_intent(
         initial_status = db_status
     if not initial_status:
         initial_status = "PENDING" if eligible else "NOT_ELIGIBLE"
+    elif not eligible and initial_status == "PENDING":
+        # Column default PENDING is not a provider-eligible intent.
+        initial_status = "NOT_ELIGIBLE"
     initial = {
         "intent_created_at": now_iso,
         "eligible_at": now_iso if eligible and initial_status != "NOT_ELIGIBLE" else None,
