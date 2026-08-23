@@ -174,26 +174,23 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         }
         return req
 
-    async def test_callback_after_cancel_records_paid_attention_without_auto_refund(self):
+    async def test_callback_after_cancel_records_paid_then_auto_refunds(self):
         order = await self._make_order(status="cancelled")
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
         fake_wxpay.verify_notify = lambda headers, raw_body: self._resource
 
-        auto_refund = AsyncMock()
-
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
-             patch.object(OrderPaymentService, "_refund_orphaned_wxpay_payment", new=auto_refund), \
              patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock()) as on_success:
             response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
 
         self.assertEqual(response["code"], "SUCCESS")
-        auto_refund.assert_not_called()
         on_success.assert_not_called()  # must not run the "fulfil the order" side effects
         await self.db.refresh(order)
         self.assertEqual(order.status, "cancelled")  # not resurrected
         self.assertEqual(order.payment_status, "paid")
-        self.assertIsNone(order.refund_status)
+        self.assertEqual(order.refund_status, "success")
+        fake_wxpay.refund.assert_awaited_once()
 
     async def test_callback_skips_when_already_reconciled(self):
         order = await self._make_order(status="cancelled", refund_status="success")
