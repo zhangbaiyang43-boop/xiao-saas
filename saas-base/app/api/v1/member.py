@@ -1,15 +1,18 @@
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.consumptions import serialize_consumption
+from app.api.v1.orders import ORDER_STATUS_TEXT, build_order_financial_capabilities
 from app.core.database import get_db
 from app.core.logger import logger
-from app.core.pagination import normalize_pagination
+from app.core.pagination import build_page, normalize_pagination
 from app.core.response import RespVo, error_response, success_response
 from app.core.security import create_customer_access_token
 from app.core.tenant_context import TenantContext
 from app.models.consumption import Consumption
+from app.models.order import Order, OrderItem
 from app.schemas.member import MemberLoginOrCreateRequest
 from app.services.consumption_service import ConsumptionService
 from app.services.coupon_service import CouponService
@@ -401,6 +404,69 @@ async def consumption_detail(request: Request, consumption_id: int, db: AsyncSes
     data["coupon_issued"] = False
     
     return success_response(data=data, msg="ok")
+
+
+@router.get("/orders", response_model=RespVo)
+async def list_member_orders(
+    request: Request,
+    skip: int = 0,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """Logged-in member order list. Does not change GET /orders/my (single-id poll)."""
+    skip, limit = normalize_pagination(skip, limit)
+    tenant_id, customer_id, error = current_customer(request)
+    if error:
+        return error
+    TenantContext.set_tenant_id(tenant_id)
+
+    owned = (Order.tenant_id == tenant_id, Order.customer_id == customer_id)
+    total = int(
+        (
+            await db.execute(select(func.count()).select_from(Order).where(*owned))
+        ).scalar_one()
+        or 0
+    )
+    orders = (
+        (
+            await db.execute(
+                select(Order)
+                .where(*owned)
+                .order_by(Order.created_at.desc())
+                .offset(skip)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    dish_counts: dict[int, int] = {}
+    if orders:
+        qty_rows = await db.execute(
+            select(OrderItem.order_id, func.coalesce(func.sum(OrderItem.qty), 0))
+            .where(OrderItem.order_id.in_([order.id for order in orders]))
+            .group_by(OrderItem.order_id)
+        )
+        dish_counts = {int(order_id): int(qty or 0) for order_id, qty in qty_rows.all()}
+
+    rows = []
+    for order in orders:
+        caps = build_order_financial_capabilities(order)
+        created_at = order.created_at.isoformat() if order.created_at else None
+        rows.append(
+            {
+                "order_id": str(order.id),
+                "status": order.status,
+                "status_text": ORDER_STATUS_TEXT.get(order.status, order.status),
+                "total": float(order.total or 0),
+                "created_at": created_at,
+                "pickup_no": getattr(order, "pickup_no", None) or "",
+                "dish_count": dish_counts.get(int(order.id), 0),
+                "refund_required": caps.get("refund_required") is True,
+            }
+        )
+    return success_response(data=build_page(rows, total, skip, limit), msg="ok")
 
 
 @router.get("/coupons", response_model=RespVo)

@@ -65,6 +65,12 @@
           }
         },
         {
+          "path": "pages/orders",
+          "style": {
+            "navigationBarTitleText": "我的订单"
+          }
+        },
+        {
           "path": "pages/consumptions",
           "style": {
             "navigationBarTitleText": "消费记录"

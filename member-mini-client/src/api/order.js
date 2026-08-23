@@ -18,6 +18,9 @@ export const createOrder = (data, options = {}) =>
 export const getOrderStatus = (orderId, participantToken) =>
   request({ url: '/v1/orders/my', method: 'GET', data: { order_id: orderId, participant_token: participantToken || undefined }, authRedirect: false })
 
+export const getMyOrders = (skip = 0, limit = 20) =>
+  request({ url: `/v1/member/orders?skip=${skip}&limit=${limit}`, method: 'GET' })
+
 export const cancelOrder = (orderId, participantToken) => {
   const query = participantToken ? `?participant_token=${encodeURIComponent(participantToken)}` : ''
   return request({ url: `/v1/orders/${orderId}/cancel${query}`, method: 'POST' })

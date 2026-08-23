@@ -101,7 +101,17 @@
             <view class="service-icon"><text class="iconfont icon-order"></text></view>
             <view class="service-copy">
               <text class="service-name">我的订单</text>
-              <text class="service-desc">{{ !isLoggedIn ? '登录后查看历史订单' : (recentOrder ? '查看历史订单和消费明细' : '暂无订单记录') }}</text>
+              <text class="service-desc">{{ !isLoggedIn ? '登录后查看历史订单' : (recentOrder ? '查看本店历史订单' : '暂无订单记录') }}</text>
+            </view>
+            <text class="card-arrow">›</text>
+          </view>
+
+          <view v-if="isLoggedIn" class="service-divider"></view>
+          <view v-if="isLoggedIn" class="service-row" @click="goConsumptions">
+            <view class="service-icon"><text class="iconfont icon-form"></text></view>
+            <view class="service-copy">
+              <text class="service-name">消费记录</text>
+              <text class="service-desc">查看入账消费和核销明细</text>
             </view>
             <text class="card-arrow">›</text>
           </view>
@@ -524,6 +534,14 @@ export default {
       // 历史订单列表——不能因为本地缓存里存在 recentOrder 就顺手劫持成只看那一笔最新
       // 订单的详情。最近订单卡片（recent-order-card）自己已经单独绑了 openRecentOrder，
       // 这里不需要、也不应该重复那条分支。
+      go('/subpkg-member/pages/orders')
+    }
+
+    const goConsumptions = () => {
+      if (!isLoggedIn.value) {
+        goLogin()
+        return
+      }
       go('/subpkg-member/pages/consumptions')
     }
 
@@ -677,6 +695,7 @@ export default {
       handleLoginAuth,
       goBindPhone,
       goOrders,
+      goConsumptions,
       goQueueTake,
       openRecentOrder,
       showStoreInfo,
