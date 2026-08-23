@@ -13,8 +13,8 @@ Schema Gate (P0-16 B2 Schema Contract Gate Report) froze this contract:
     or "no client identity" (system) -- never a fabricated sentinel.
   - terminated_actor_role: only populated for actor_type=account.
   - termination_source: customer_cancel | participant_cancel |
-    merchant_cancel | merchant_reject | stale_order_cleanup |
-    synchronous_stale_cleanup.
+    merchant_cancel | merchant_reject | merchant_refund |
+    stale_order_cleanup | synchronous_stale_cleanup.
 """
 
 import asyncio
@@ -291,10 +291,13 @@ class ClientCannotSpoofActorTest(unittest.TestCase):
                 rhs = actor_id_match.group(1)
                 self.assertNotIn("body.", rhs)
                 self.assertNotIn("request.", rhs)
-        # 5 textual call sites: cancel_order's customer/participant branches
+        # 7 textual call sites: cancel_order's customer/participant branches
         # (2, only one executes per invocation), update_order_status (1),
-        # orders.py's synchronous sweep (1), main.py's background loop (1).
-        self.assertEqual(call_sites, 5, f"expected exactly 5 termination call sites, found {call_sites}")
+        # refund_paid_order's idempotent-already-refunded terminal write (1) and
+        # refund-success terminal transition (1) -- both source=merchant_refund,
+        # actor_id=account_id from the merchant principal -- orders.py's
+        # synchronous sweep (1), main.py's background loop (1).
+        self.assertEqual(call_sites, 7, f"expected exactly 7 termination call sites, found {call_sites}")
 
 
 if __name__ == "__main__":
