@@ -87,7 +87,7 @@ class UnauthenticatedBasicOrderContractsTest(unittest.TestCase):
         self.assertIn("let jsCode = ''", confirm_pay)
         self.assertIn("jsCode = await wxLogin()", confirm_pay)
         self.assertIn("js_code: jsCode", confirm_pay)
-        self.assertLess(confirm_pay.index("jsCode = await wxLogin()"), confirm_pay.index("createWxPayOrder"))
+        self.assertLess(confirm_pay.index("jsCode = await wxLogin()"), confirm_pay.index("await createWxPayOrder("))
         self.assertNotIn("joinByEntranceCode", confirm_pay)
         self.assertIn("js_code: options.js_code || undefined", ORDER_API_SOURCE)
 

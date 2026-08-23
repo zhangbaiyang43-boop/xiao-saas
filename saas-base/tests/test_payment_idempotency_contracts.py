@@ -66,22 +66,56 @@ def function_source(name: str, *, source: str | None = None) -> str:
 
 class PaymentIdempotencyContractsTest(unittest.TestCase):
     def test_frontend_payment_click_is_guarded_before_request(self):
-        self.assertIn("import { useCheckout } from '../composables/useCheckout.js'", MENU_SOURCE)
-        self.assertIn("} = useCheckout({", MENU_SOURCE)
-        self.assertIn("confirmPay,", MENU_SOURCE)
+        self.assertIn(
+            "import { useCheckout } from '../composables/useCheckout.js'",
+            MENU_SOURCE,
+        )
+        self.assertIn(
+            "} = useCheckout({",
+            MENU_SOURCE,
+        )
+        self.assertIn(
+            "confirmPay,",
+            MENU_SOURCE,
+        )
+
         confirm_pay = js_const_source(CHECKOUT_SOURCE, "confirmPay")
-        self.assertIn("if (paying.value || !pendingOrderId.value) return false", confirm_pay)
+
+        guard = "if (paying.value || !pendingOrderId.value) return false"
+        paying_lock = "paying.value = true"
+        freeze_order_id = "paymentOrderId = pendingOrderId.value"
+        create_pay = "await createWxPayOrder(paymentOrderId,"
+        request_pay = "await uni.requestPayment("
+
+        self.assertIn(guard, confirm_pay)
+        self.assertIn(paying_lock, confirm_pay)
+        self.assertIn(freeze_order_id, confirm_pay)
+        self.assertIn(create_pay, confirm_pay)
+        self.assertIn(request_pay, confirm_pay)
+
         self.assertLess(
-            confirm_pay.index("if (paying.value || !pendingOrderId.value) return false"),
-            confirm_pay.index("paying.value = true"),
+            confirm_pay.index(guard),
+            confirm_pay.index(paying_lock),
         )
+
         self.assertLess(
-            confirm_pay.index("paying.value = true"),
-            confirm_pay.index("createWxPayOrder(pendingOrderId.value"),
+            confirm_pay.index(paying_lock),
+            confirm_pay.index(freeze_order_id),
         )
+
         self.assertLess(
-            confirm_pay.index("createWxPayOrder(pendingOrderId.value"),
-            confirm_pay.index("uni.requestPayment"),
+            confirm_pay.index(freeze_order_id),
+            confirm_pay.index(create_pay),
+        )
+
+        self.assertLess(
+            confirm_pay.index(create_pay),
+            confirm_pay.index(request_pay),
+        )
+
+        self.assertNotIn(
+            "createWxPayOrder(pendingOrderId.value",
+            confirm_pay,
         )
 
     def test_wxpay_out_trade_no_uses_stable_order_id(self):

@@ -89,7 +89,17 @@ class PaymentModeIntegrationContractsTest(unittest.TestCase):
         self.assertIn('getattr(order, "payment_mode", "prepay") != "prepay"', pay_source)
         self.assertIn('"PAYMENT_NOT_REQUIRED"', pay_source)
         self.assertIn('if (data.need_payment !== false)', USE_CHECKOUT_SOURCE)
-        self.assertIn("_handlePaySuccess({ ...data, total: payAmount.value, status: data.status || 'pending' })", USE_CHECKOUT_SOURCE)
+        completed_id = "const completedOrderId = pendingOrderId.value"
+        success_call = (
+            "_handlePaySuccess(completedOrderId, "
+            "{ ...data, total: payAmount.value, status: data.status || 'pending' })"
+        )
+        self.assertIn(completed_id, USE_CHECKOUT_SOURCE)
+        self.assertIn(success_call, USE_CHECKOUT_SOURCE)
+        self.assertLess(
+            USE_CHECKOUT_SOURCE.index(completed_id),
+            USE_CHECKOUT_SOURCE.index(success_call),
+        )
 
 
 if __name__ == "__main__":
