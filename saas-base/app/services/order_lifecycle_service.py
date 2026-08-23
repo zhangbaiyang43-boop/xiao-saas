@@ -310,6 +310,96 @@ class OrderLifecycleService(BaseService):
         await self.db.commit()
         return success_response(data={"id": str(order.id), "status": "cancelled"}, msg="order cancelled")
 
+    async def refund_paid_order(
+        self,
+        order_id: int,
+        *,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
+        """Refund a paid order in-system, then terminalize it as cancelled.
+
+        Does not replace cancel_order / update_order_status: those still 409 on paid.
+        """
+        from app.api.v1.orders import ORDER_REFUND_TERMINAL_FROM
+        from app.services.order_payment_service import OrderPaymentService
+        from app.services.order_stock_service import _restore_order_stock
+
+        tenant_id = self.require_tenant_id()
+        locked_result = await self.db.execute(
+            select(Order)
+            .where(Order.id == order_id, Order.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        order = locked_result.scalar_one_or_none()
+        if not order:
+            return error_response(code=404, msg="order not found")
+        if getattr(order, "payment_status", None) != "paid":
+            return error_response(code=400, msg="订单未支付，无法退款")
+
+        if getattr(order, "refund_status", None) == "success":
+            if order.status not in {"cancelled", "rejected"}:
+                order.status = "cancelled"
+                set_termination_audit_if_unset(
+                    order, actor_type="account", actor_id=account_id, actor_role=role,
+                    source="merchant_refund",
+                )
+                await self.db.commit()
+            return success_response(
+                data={
+                    "id": str(order.id),
+                    "status": order.status,
+                    "refund_status": "success",
+                    "idempotent": True,
+                },
+                msg="退款已完成",
+            )
+
+        current_status = order.status or "pending"
+        if current_status not in ORDER_REFUND_TERMINAL_FROM and current_status not in {"cancelled", "rejected"}:
+            return error_response(code=409, msg=f"当前状态不能退款: {current_status}")
+
+        payment_svc = OrderPaymentService(self.db)
+        refund = await payment_svc._refund_order_payment(order, reason="merchant_paid_order_refund")
+        if not refund.get("success"):
+            await self.db.commit()
+            return error_response(
+                code=502,
+                msg="退款失败，请稍后重试",
+                data={
+                    "id": str(order.id),
+                    "status": order.status,
+                    "refund_status": getattr(order, "refund_status", None),
+                    "refund_error": getattr(order, "refund_error", None),
+                },
+            )
+
+        if current_status in ORDER_REFUND_TERMINAL_FROM:
+            await _restore_order_stock(order, self.db)
+            order.status = "cancelled"
+            set_termination_audit_if_unset(
+                order, actor_type="account", actor_id=account_id, actor_role=role,
+                source="merchant_refund",
+            )
+            if order.dining_session_id:
+                from app.models.dining import DiningSession
+                from app.services.pickup_no_service import PickupNoService
+
+                session = await self.db.get(DiningSession, order.dining_session_id)
+                await PickupNoService(self.db).release_if_no_holding_orders(
+                    str(order.tenant_id), session
+                )
+        await self.db.commit()
+        return success_response(
+            data={
+                "id": str(order.id),
+                "status": order.status,
+                "refund_status": getattr(order, "refund_status", None),
+                "refund_amount": float(order.refund_amount or 0),
+            },
+            msg="退款成功",
+        )
+
     async def _prove_order_read_owner(
         self,
         order: Order,

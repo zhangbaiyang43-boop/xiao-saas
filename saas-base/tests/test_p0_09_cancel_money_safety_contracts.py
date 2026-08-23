@@ -121,7 +121,7 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         self.assertEqual(order.status, "pending_payment")
 
-    async def test_r03_late_callback_records_payment_and_never_auto_refunds(self):
+    async def test_r03_late_callback_records_payment_then_orphaned_refund(self):
         order = await self.make_order(status="cancelled")
         resource = {
             "out_trade_no": str(order.id),
@@ -143,12 +143,13 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
             response = await OrderPaymentService(self.db).wxpay_notify(request)
 
         self.assertEqual(response["code"], "SUCCESS")
-        fake_wxpay.refund.assert_not_called()
+        fake_wxpay.refund.assert_awaited_once()
         fulfill.assert_not_called()
         await self.db.refresh(order)
         self.assertEqual(order.status, "cancelled")
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.wx_transaction_id, resource["transaction_id"])
+        self.assertEqual(order.refund_status, "success")
         self.assertTrue(serialize_order(order, [])["refund_required"])
 
     async def test_r04_terminal_query_success_uses_same_reconciliation(self):
@@ -169,7 +170,7 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
             recovered = await OrderPaymentService(self.db)._recover_wxpay_order_if_paid(order)
 
         self.assertTrue(recovered)
-        fake_wxpay.refund.assert_not_called()
+        fake_wxpay.refund.assert_awaited_once()
         fulfill.assert_not_called()
         await self.db.refresh(order)
         self.assertEqual((order.status, order.payment_status), ("rejected", "paid"))
@@ -245,7 +246,7 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await service.wxpay_notify(request()))["code"], "SUCCESS")
             self.assertTrue(await service._recover_wxpay_order_if_paid(callback_first))
 
-        fake_wxpay.refund.assert_not_called()
+        self.assertEqual(fake_wxpay.refund.await_count, 7)
         fulfill.assert_not_called()
         post_commit.assert_not_called()
         for order in (query_first, callback_first):

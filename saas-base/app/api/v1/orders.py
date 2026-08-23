@@ -84,6 +84,12 @@ ORDER_ALLOWED_TRANSITIONS = {
     "preparing": {"done"},
     "done": {"settled"},
 }
+# Paid refund (POST /orders/{id}/refund) may terminalize these states after
+# money is returned. PATCH /status still uses ORDER_ALLOWED_TRANSITIONS and
+# still 409s paid cancel.
+ORDER_REFUND_TERMINAL_FROM = frozenset({
+    "pending_payment", "pending", "preparing", "done", "settled",
+})
 ORDER_NEXT_ACTIONS = {
     "prepay": "pay",
     "postpay": "order_success",
@@ -1621,6 +1627,35 @@ async def reprint_order_ticket(
         data={"id": str(order.id), **_serialize_print_meta(order), "print_result": print_result},
         msg="reprint submitted" if print_result.get("success") else "reprint failed",
     )
+
+@router.post("/orders/{order_id}/refund")
+async def refund_paid_order(
+    order_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Merchant refund of a paid order. Does not change paid-cancel 409 on cancel/status."""
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_FINANCE_REFUND
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_FINANCE_REFUND):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(principal.tenant_id)
+    return await service.refund_paid_order(
+        int(order_id),
+        account_id=principal.account_id,
+        role=principal.role,
+    )
+
 
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(
