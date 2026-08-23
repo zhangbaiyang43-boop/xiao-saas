@@ -35,7 +35,9 @@ from app.services.order_payment_service import OrderPaymentService
 from app.services.order_print_service import (
     PRINT_RECONCILE_BATCH_LIMIT,
     PRINT_RECONCILE_GRACE_SECONDS,
+    PRINT_RETRY_COOLDOWN_SECONDS,
     _get_print_meta,
+    _set_print_meta,
     ensure_initial_print_intent,
     recover_pending_print_orders_once,
 )
@@ -530,6 +532,118 @@ class CaseAWaitingPickupDurableTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order_b.pickup_no, pickup_b)
         self.assertEqual(int(_initial(order_b).get("attempts") or 0), attempts_b)
 
+    async def _seed_historical_pending_waiting(self, tenant_id: str, table: str) -> Order:
+        """Pre-Case-A row: paid, pickup unset, durable PENDING intent."""
+        order = await self._insert_prepay_unpaid(tenant_id, table)
+        order.payment_status = "paid"
+        order.status = "pending"
+        order.payment_time = datetime.utcnow().isoformat()
+        await ensure_initial_print_intent(
+            order, self.db, eligible=True, reason="legacy_payment_success",
+        )
+        await self.db.commit()
+        await self.db.refresh(order)
+        self.assertEqual(order.print_status, "PENDING")
+        self.assertIsNone(order.pickup_no)
+        return order
+
+    # ------------------------------------------------------------------ P0-PRINT-003
+    async def test_p0_print_003_historical_pending_waiting_parks_to_not_eligible(self):
+        order = await self._seed_historical_pending_waiting(TENANT_A, "A01")
+        await self._backdate(order, seconds=PRINT_RECONCILE_GRACE_SECONDS + 45)
+        self.provider.reset_mock()
+
+        await recover_pending_print_orders_once(self.db)
+        await self.db.refresh(order)
+
+        initial = _initial(order)
+        self.assertEqual(order.print_status, "NOT_ELIGIBLE")
+        self.assertEqual(initial.get("status"), "NOT_ELIGIBLE")
+        self.assertEqual(int(initial.get("attempts") or 0), 0)
+        self.assertIsNone(initial.get("last_attempt_at"))
+        self.assertEqual(self.provider.await_count, 0)
+
+        await recover_pending_print_orders_once(self.db)
+        await self.db.refresh(order)
+        self.assertEqual(order.print_status, "NOT_ELIGIBLE")
+        self.assertEqual(self.provider.await_count, 0)
+
+    async def test_p0_print_003_failed_print_still_enters_recovery(self):
+        await self._set_pickup(TENANT_A, enabled=False, required_before_print=True)
+        order = await self._insert_prepay_unpaid(TENANT_A, "A01")
+        order.payment_status = "paid"
+        order.status = "pending"
+        order.payment_time = datetime.utcnow().isoformat()
+        await ensure_initial_print_intent(
+            order, self.db, eligible=True, reason="payment_success",
+        )
+        old_iso = (datetime.utcnow() - timedelta(seconds=PRINT_RETRY_COOLDOWN_SECONDS + 45)).isoformat()
+        meta = _get_print_meta(order)
+        initial = meta.get("initial_print") or {}
+        initial["status"] = "FAILED"
+        initial["attempts"] = 1
+        initial["last_attempt_at"] = old_iso
+        meta["initial_print"] = initial
+        _set_print_meta(order, meta)
+        order.print_status = "FAILED"
+        await self.db.commit()
+        await self._backdate(order, seconds=PRINT_RETRY_COOLDOWN_SECONDS + 45)
+        self.provider.reset_mock()
+
+        await recover_pending_print_orders_once(self.db)
+        await self.db.refresh(order)
+
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(order.print_status, "SUCCESS")
+        self.assertEqual(int(_initial(order).get("attempts") or 0), 2)
+
+    async def test_p0_print_003_pickup_assign_after_park_prints_once(self):
+        order = await self._seed_historical_pending_waiting(TENANT_A, "A01")
+        await self._backdate(order, seconds=PRINT_RECONCILE_GRACE_SECONDS + 45)
+        await recover_pending_print_orders_once(self.db)
+        await self.db.refresh(order)
+        self.assertEqual(order.print_status, "NOT_ELIGIBLE")
+        self.provider.reset_mock()
+
+        result = await self._assign(order, "12")
+        self.assertEqual(result.code, 200, result.msg)
+        initial = _initial(order)
+        self.assertEqual(order.pickup_no, "12")
+        self.assertEqual(order.print_status, "SUCCESS")
+        self.assertEqual(initial.get("status"), "SUCCESS")
+        self.assertEqual(int(initial.get("attempts") or 0), 1)
+        self.assertEqual(self.provider.await_count, 1)
+
+    async def test_p0_print_003_parking_tenant_a_does_not_mutate_tenant_b(self):
+        await self._set_pickup(TENANT_B, enabled=False, required_before_print=False)
+        order_b = await self._insert_prepay_unpaid(TENANT_B, "B01")
+        order_b.payment_status = "paid"
+        order_b.status = "pending"
+        order_b.payment_time = datetime.utcnow().isoformat()
+        await ensure_initial_print_intent(
+            order_b, self.db, eligible=True, reason="payment_success",
+        )
+        await self.db.commit()
+        await self.db.refresh(order_b)
+        self.assertEqual(order_b.print_status, "PENDING")
+        note_b = order_b.merchant_note
+        pickup_b = order_b.pickup_no
+        attempts_b = int(_initial(order_b).get("attempts") or 0)
+
+        order_a = await self._seed_historical_pending_waiting(TENANT_A, "A01")
+        await self._backdate(order_a, seconds=PRINT_RECONCILE_GRACE_SECONDS + 90)
+        # Keep B newer than the grace window so recovery does not print B.
+        await recover_pending_print_orders_once(self.db)
+
+        await self.db.refresh(order_a)
+        await self.db.refresh(order_b)
+        self.assertEqual(order_a.print_status, "NOT_ELIGIBLE")
+        self.assertEqual(order_b.print_status, "PENDING")
+        self.assertEqual(order_b.merchant_note, note_b)
+        self.assertEqual(order_b.pickup_no, pickup_b)
+        self.assertEqual(int(_initial(order_b).get("attempts") or 0), attempts_b)
+        self.assertEqual(self.provider.await_count, 0)
+
 
 def test_source_payment_success_uses_existing_pickup_defer_helpers():
     source = _function_source(PAYMENT_SERVICE, "_on_payment_success")
@@ -544,6 +658,8 @@ def test_source_recovery_sql_excludes_not_eligible_without_extra_filter():
     assert 'Order.print_status.in_(["PENDING", "FAILED", "SENDING"])' in source
     assert "NOT_ELIGIBLE" not in source
     assert source.count("print_status") >= 1
+    assert "_park_waiting_pickup_print_intent" in source
+    assert "WAITING_PICKUP_NO" in source
 
 
 def test_source_claim_still_commits_before_provider_io():
