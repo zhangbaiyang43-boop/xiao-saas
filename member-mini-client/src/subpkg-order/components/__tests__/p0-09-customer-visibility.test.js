@@ -10,6 +10,8 @@ describe('P0-09 customer financial attention', () => {
 
     expect(source).toContain('v-if="currentTableOrder.refundRequired"')
     expect(source).toContain('订单已取消，付款已成功，请联系商家处理退款')
+    expect(source).toContain('请保留订单信息并联系商家处理退款。')
+    expect(source).not.toContain('系统不会自动退款')
     expect(source).not.toContain('退款成功')
   })
 })

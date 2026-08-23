@@ -24,7 +24,8 @@ assert.match(
   /v-if="order\.refundRequired"[^>]*>需要退款处理</,
   'R07: terminal paid orders must remain visibly actionable to the owner',
 )
-assert.match(source, /系统不自动退款/)
+assert.doesNotMatch(source, /系统不自动退款/)
+assert.doesNotMatch(source, /微信商户平台/)
 assert.doesNotMatch(source, /确认已退款/)
 
 console.log('P0_09_ADMIN_PAID_ACTIONS=SERVER_CAPABILITY')

@@ -23,7 +23,7 @@
 
         <view v-if="currentTableOrder.refundRequired" class="refund-attention-card">
           <text class="refund-attention-title">订单已取消，付款已成功，请联系商家处理退款</text>
-          <text class="refund-attention-sub">系统不会自动退款，请保留订单信息并联系商家。</text>
+          <text class="refund-attention-sub">请保留订单信息并联系商家处理退款。</text>
         </view>
 
         <!-- 取餐牌号是顾客用来对上自己那份餐的实体凭证，比金额/时间更重要，之前跟其它

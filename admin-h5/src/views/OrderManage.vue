@@ -167,7 +167,7 @@
               </div>
             </div>
             <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
-            <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要人工处理退款。系统不自动退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。</div>
+            <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要处理退款。请点击下方退款，由系统向支付渠道发起退款。</div>
             <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
               {{ printDiagnostic(order) }}
             </div>
@@ -193,6 +193,7 @@
               <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
               <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
               <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
+              <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">退款</a-button>
             </div>
             <div v-if="reviewsMap[order.id]" class="review-row">
               <span class="review-stars-display">{{ '★'.repeat(reviewsMap[order.id].rating) }}{{ '☆'.repeat(5 - reviewsMap[order.id].rating) }}</span>
@@ -306,7 +307,7 @@
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">单号尾号 {{ orderTail(order) }}<template v-if="order.paymentMethodText"> · {{ order.paymentMethodText }}</template></div>
-          <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要人工处理退款。系统不自动退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。</div>
+          <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要处理退款。请点击下方退款，由系统向支付渠道发起退款。</div>
           <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
             {{ printDiagnostic(order) }}
           </div>
@@ -337,6 +338,7 @@
             <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
             <a-button v-if="order.canCancel" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
+            <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">退款</a-button>
             <button
               v-if="orderCanReplacePickup(order)"
               type="button"
@@ -518,7 +520,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
@@ -872,6 +874,7 @@ function mapOwnerOrders(raw) {
       paymentMethodText: paymentMethodText(o.payment_method, o.payment_status),
       updating: false,
       reprinting: false,
+      refunding: false,
     }))
 }
 
@@ -1133,7 +1136,7 @@ async function reconcileAfterOrderAction() {
 function showPaidCancelSop() {
   Modal.warning({
     title: '已付款订单不可直接取消',
-    content: '系统不自动退款。如需退款，请先在微信支付商户平台完成退款，并联系管理员处理订单记录。',
+    content: '已付款订单请点击退款，由系统向支付渠道发起退款，不能直接取消。',
     okText: '我知道了',
   })
 }
@@ -1225,6 +1228,32 @@ async function confirmServed(order) {
   } finally {
     order.updating = false
   }
+}
+
+function refundPaidOrderClick(order) {
+  Modal.confirm({
+    title: '确认退款？',
+    content: `¥${Number(order.total).toFixed(2)}，将由系统向支付渠道发起退款。已付款订单不能直接取消。`,
+    okText: '确认退款',
+    okType: 'danger',
+    cancelText: '再想想',
+    onOk: async () => {
+      order.refunding = true
+      try {
+        const res = await refundPaidOrder(order.id)
+        if (res.code === 200) message.success(res.msg || '已提交退款')
+        else message.error(res.msg || '退款失败，请稍后重试')
+        await reconcileAfterOrderAction()
+      } catch (err) {
+        if (err?.response?.status !== 403) {
+          message.error(err?.response?.data?.msg || '退款失败')
+        }
+        await reconcileAfterOrderAction()
+      } finally {
+        order.refunding = false
+      }
+    },
+  })
 }
 
 async function reprintOrderTicket(order) {
