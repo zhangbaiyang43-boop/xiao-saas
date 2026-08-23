@@ -247,6 +247,8 @@ class OrderPaymentService(BaseService):
                 return False
 
             if locked_order.status in ("cancelled", "rejected"):
+                terminal_tenant_id = str(locked_order.tenant_id)
+                terminal_order_id = int(locked_order.id)
                 transitioned, binding_changed = (
                     await self._reconcile_confirmed_payment_for_terminal_order(
                         locked_order, pay_resource
@@ -254,6 +256,8 @@ class OrderPaymentService(BaseService):
                 )
                 terminal_reconciliation = True
             else:
+                terminal_tenant_id = None
+                terminal_order_id = None
                 transitioned, _, binding_changed = await self._apply_confirmed_wx_payment(
                     locked_order,
                     pay_resource,
@@ -263,6 +267,11 @@ class OrderPaymentService(BaseService):
                 await self.db.commit()
             else:
                 await self.db.rollback()
+            if terminal_reconciliation and terminal_order_id is not None:
+                await self._refund_after_terminal_wx_capture(
+                    order_id=terminal_order_id,
+                    tenant_id=str(terminal_tenant_id),
+                )
             if transitioned and not terminal_reconciliation:
                 await self._run_post_commit_payment_effects(locked_order)
             safe_log(
@@ -649,6 +658,8 @@ class OrderPaymentService(BaseService):
 
         Must be called with `order` already locked (with_for_update) in the current transaction.
         """
+        if getattr(order, "refund_status", None) == "success":
+            return RefundResult(success=True, amount=float(order.refund_amount or 0), error=None)
         total_fen = max(1, round(float(order.total or 0) * 100))
         try:
             from app.models.tenant import Tenant
@@ -684,6 +695,29 @@ class OrderPaymentService(BaseService):
             order.id, order.refund_amount, order.status,
         )
         return RefundResult(success=True, amount=float(order.refund_amount or 0), error=None)
+
+    async def _refund_after_terminal_wx_capture(self, *, order_id: int, tenant_id: str) -> None:
+        """After a terminal paid fact is committed, send the orphaned WeChat capture back.
+
+        Re-locks the row so refund fields persist independently of the payment-fact
+        commit. Failures are recorded on the order; they must not raise into notify.
+        """
+        locked_result = await self.db.execute(
+            select(Order)
+            .where(Order.id == order_id, Order.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        order = locked_result.scalar_one_or_none()
+        if not order:
+            return
+        if order.status not in ("cancelled", "rejected"):
+            return
+        if order.payment_status != "paid":
+            return
+        if getattr(order, "refund_status", None) == "success":
+            return
+        await self._refund_orphaned_wxpay_payment(order)
+        await self.db.commit()
 
 
     async def mock_pay_order(
@@ -995,6 +1029,8 @@ class OrderPaymentService(BaseService):
 
             if order.status in ("cancelled", "rejected"):
                 terminal_status = str(order.status)
+                tenant_id = str(order.tenant_id)
+                order_pk = int(order.id)
                 transitioned, binding_changed = (
                     await self._reconcile_confirmed_payment_for_terminal_order(order, resource)
                 )
@@ -1002,6 +1038,10 @@ class OrderPaymentService(BaseService):
                     await self.db.commit()
                 else:
                     await self.db.rollback()
+                await self._refund_after_terminal_wx_capture(
+                    order_id=order_pk,
+                    tenant_id=tenant_id,
+                )
                 logger.error(
                     "[WXPAY_LATE_PAYMENT_REQUIRES_REFUND] order_id=%s order_status=%s",
                     out_trade_no,
