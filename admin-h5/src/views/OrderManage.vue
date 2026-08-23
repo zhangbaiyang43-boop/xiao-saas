@@ -28,7 +28,7 @@
     </div>
 
     <div
-      v-if="pendingPickupCount > 0"
+      v-if="isLiveToday && pendingPickupCount > 0"
       class="pickup-todo-banner tap-shrink"
       @click="focusFirstPendingPickup"
     >
@@ -51,8 +51,13 @@
       </a-card>
     </div>
 
+    <a-tabs v-model:activeKey="orderCenterMode" class="animate-in" style="padding:0 16px;margin-top:8px;animation-delay:.04s" :tab-bar-style="{ marginBottom: 0 }">
+      <a-tab-pane key="live" tab="当前订单" />
+      <a-tab-pane key="history" tab="历史订单" />
+    </a-tabs>
+
     <!-- 视图切换 -->
-    <a-tabs v-model:activeKey="view" class="animate-in" style="padding:0 16px;margin-top:8px;animation-delay:.04s" :tab-bar-style="{ marginBottom: 0 }">
+    <a-tabs v-if="isLiveToday" v-model:activeKey="view" class="animate-in" style="padding:0 16px;margin-top:0" :tab-bar-style="{ marginBottom: 0 }">
       <a-tab-pane key="table" tab="桌台视图" />
       <a-tab-pane key="list" tab="订单列表" />
     </a-tabs>
@@ -253,12 +258,12 @@
       <!-- 待支付订单不计入桌台账，"全部"筛选下不显示，但钱还没收到是商家最需要关注的
            信息（桌台视图有角标提醒），这里补一条同等力度的提示，避免只用列表视图的
            店员完全看不到这类订单。 -->
-      <div v-if="statusFilter !== 'pending_payment' && pendingPaymentCount > 0" style="padding:8px 16px 0">
+      <div v-if="isLiveToday && statusFilter !== 'pending_payment' && pendingPaymentCount > 0" style="padding:8px 16px 0">
         <div class="pending-payment-banner tap-shrink" @click="statusFilter = 'pending_payment'">
           <span>{{ pendingPaymentCount }} 笔订单待支付，点击查看</span>
         </div>
       </div>
-      <div style="padding:8px 16px 0">
+      <div v-if="isLiveToday" style="padding:8px 16px 0">
         <a-input
           v-model:value="searchQuery"
           placeholder="按桌号 / 订单尾号 / 菜品名搜索（顾客反馈问题时用这个快速定位）"
@@ -266,7 +271,35 @@
           size="large"
         />
       </div>
-      <div style="padding:8px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <div v-else style="padding:8px 16px 0">
+        <a-input
+          v-model:value="historyQuery"
+          placeholder="按桌号或订单尾号查询（回车请求服务器）"
+          allow-clear
+          size="large"
+          @pressEnter="loadHistoricalOrders({ append: false })"
+        />
+      </div>
+      <div v-if="!isLiveToday" style="padding:8px 16px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span
+          class="filter-chip"
+          :class="historyDateKey === todayDateInput ? 'filter-chip--active' : ''"
+          @click="setHistoryDate(todayDateInput)"
+        >今天</span>
+        <span
+          class="filter-chip"
+          :class="historyDateKey === 'yesterday' ? 'filter-chip--active' : ''"
+          @click="setHistoryDate('yesterday')"
+        >昨天</span>
+        <input
+          v-model="customDate"
+          type="date"
+          class="order-date-input"
+          :max="todayDateInput"
+          @change="onCustomDate"
+        />
+      </div>
+      <div v-if="isLiveToday" style="padding:8px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
         <span
           v-for="f in statusFilters"
           :key="f.val"
@@ -275,10 +308,14 @@
           @click="statusFilter = f.val"
         >{{ f.label }}</span>
       </div>
-      <div v-if="orders.length > 0 && sortedOrders.length === 0" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
+      <div v-if="sourceOrders.length > 0 && sortedOrders.length === 0" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
         <template v-if="searchQuery.trim()">没找到匹配"{{ searchQuery.trim() }}"的订单，换个桌号/尾号/菜名试试</template>
-        <template v-else-if="statusFilter">今天没有{{ statusFilters.find(f => f.val === statusFilter)?.label }}的订单</template>
-        <template v-else>今天的订单都还没到账，去"待支付"筛选看看</template>
+        <template v-else-if="statusFilter">{{ isLiveToday ? '今天' : '这一天' }}没有{{ statusFilters.find(f => f.val === statusFilter)?.label }}的订单</template>
+        <template v-else-if="isLiveToday">今天的订单都还没到账，去"待支付"筛选看看</template>
+        <template v-else>这一天没有订单</template>
+      </div>
+      <div v-else-if="!loading && !historicalLoading && sourceOrders.length === 0 && isLiveToday === false" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
+        这一天没有订单
       </div>
       <div
         v-for="order in visibleOrders"
@@ -352,9 +389,14 @@
           </div>
         </a-card>
       </div>
-      <div v-if="sortedOrders.length > visibleOrders.length" style="padding:8px 16px 0;text-align:center">
+      <div v-if="isLiveToday && sortedOrders.length > visibleOrders.length" style="padding:8px 16px 0;text-align:center">
         <a-button block @click="listVisibleCount += LIST_PAGE_SIZE">
           加载更多（还有 {{ sortedOrders.length - visibleOrders.length }} 单）
+        </a-button>
+      </div>
+      <div v-else-if="!isLiveToday && historicalOrders.length < historicalTotal" style="padding:8px 16px 0;text-align:center">
+        <a-button block :loading="historicalLoading" @click="loadHistoricalOrders({ append: true })">
+          加载更多（还有 {{ historicalTotal - historicalOrders.length }} 单）
         </a-button>
       </div>
       <div style="height:16px" />
@@ -520,7 +562,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
-import { getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
@@ -981,6 +1023,75 @@ const statItems = computed(() => [
   { label: '今日营收', value: '¥' + todayRevenue.value, color: '#07C160' },
 ])
 
+const orderCenterMode = ref('live')
+const customDate = ref('')
+const historyQuery = ref('')
+const todayDateInput = computed(() => {
+  const now = new Date()
+  const utc8 = new Date(now.getTime() + 8 * 60 * 60 * 1000)
+  return utc8.toISOString().slice(0, 10)
+})
+const isLiveToday = computed(() => orderCenterMode.value === 'live')
+const historyDateKey = ref('yesterday')
+const historicalOrders = ref([])
+const historicalTotal = ref(0)
+const historicalPage = ref(1)
+const historicalLoading = ref(false)
+const HISTORICAL_PAGE_SIZE = 20
+
+function setHistoryDate(key) {
+  historyDateKey.value = key
+  view.value = 'list'
+  if (key === 'yesterday') customDate.value = ''
+  else customDate.value = key
+}
+
+function onCustomDate() {
+  const value = String(customDate.value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return
+  historyDateKey.value = value
+  view.value = 'list'
+}
+
+const sourceOrders = computed(() => (isLiveToday.value ? orders.value : historicalOrders.value))
+
+function historySearchParams() {
+  const q = String(historyQuery.value || '').trim()
+  if (!q) return {}
+  if (/^\d+$/.test(q)) return { order_tail: q }
+  return { table_no: q }
+}
+
+async function loadHistoricalOrders({ append = false } = {}) {
+  if (isLiveToday.value) return
+  if (historicalLoading.value) return
+  historicalLoading.value = true
+  try {
+    const page = append ? historicalPage.value + 1 : 1
+    const res = await getOrders({
+      date_str: historyDateKey.value,
+      page,
+      page_size: HISTORICAL_PAGE_SIZE,
+      ...historySearchParams(),
+    })
+    if (res?.code && res.code !== 200) {
+      message.error(res.msg || '历史订单加载失败')
+      if (!append) historicalOrders.value = []
+      return
+    }
+    const payload = res?.data || {}
+    const rows = mapOwnerOrders(Array.isArray(payload.items) ? payload.items : [])
+    historicalTotal.value = Number(payload.total || 0)
+    historicalPage.value = Number(payload.page || page)
+    historicalOrders.value = append ? historicalOrders.value.concat(rows) : rows
+  } catch {
+    if (!append) historicalOrders.value = []
+    message.error('历史订单加载失败')
+  } finally {
+    historicalLoading.value = false
+  }
+}
+
 const statusFilter = ref('')
 const statusFilters = [
   { label: '全部', val: '' },
@@ -1009,9 +1120,10 @@ function paymentMethodText(method, paymentStatus) {
 }
 
 const sortedOrders = computed(() => {
+  if (!isLiveToday.value) return historicalOrders.value
   let list = statusFilter.value
-    ? orders.value.filter(o => o.status === statusFilter.value)
-    : orders.value.filter(o => o.status !== 'pending_payment')
+    ? sourceOrders.value.filter(o => o.status === statusFilter.value)
+    : sourceOrders.value.filter(o => o.status !== 'pending_payment')
   const q = searchQuery.value.trim()
   if (q) {
     list = list.filter(o =>
@@ -1026,8 +1138,19 @@ const sortedOrders = computed(() => {
 
 const LIST_PAGE_SIZE = 20
 const listVisibleCount = ref(LIST_PAGE_SIZE)
-const visibleOrders = computed(() => sortedOrders.value.slice(0, listVisibleCount.value))
+const visibleOrders = computed(() => (
+  isLiveToday.value ? sortedOrders.value.slice(0, listVisibleCount.value) : sortedOrders.value
+))
 watch([statusFilter, searchQuery], () => { listVisibleCount.value = LIST_PAGE_SIZE })
+watch(orderCenterMode, async (mode) => {
+  if (mode !== 'history') return
+  view.value = 'list'
+  await loadHistoricalOrders({ append: false })
+})
+watch(historyDateKey, async () => {
+  if (isLiveToday.value) return
+  await loadHistoricalOrders({ append: false })
+})
 
 const tableGroups = computed(() => {
   // 按 dining_session_id 分组，而不是按桌号：同一桌当天翻台会产生多个会话，
@@ -1768,6 +1891,15 @@ onMounted(async () => {
   color: #07C160;
   background: #f0fdf4;
   font-weight: 600;
+}
+.order-date-input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-2);
+  font-size: 13px;
+  background: var(--bg-card);
 }
 
 .review-row {

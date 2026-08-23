@@ -62,7 +62,7 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     "recovery commit; ownership was already verified above.",
     (
         "app/services/order_lifecycle_service.py",
-        762,
+        800,
         "create_review",
     ): "Order loaded by primary key then customer_id must match caller before review is created.",
     (

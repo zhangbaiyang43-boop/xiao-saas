@@ -1,7 +1,7 @@
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, TYPE_CHECKING, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any, TYPE_CHECKING, Optional, Literal
 
 from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,41 @@ ApiResponse = RespVo[Any]
 PAID_ORDER_CANCEL_ERROR = "PAID_ORDER_CANCEL_REQUIRES_REFUND"
 PAID_ORDER_CANCEL_MESSAGE = "该订单已付款，不能直接取消，请先处理退款"
 logger = logging.getLogger(__name__)
+
+
+MerchantListDateMode = Literal["live", "day"]
+
+
+def _utc8_calendar_day_bounds(day) -> tuple[datetime, datetime]:
+    """Naive UTC bounds for one UTC+8 calendar day (same formula as live today)."""
+    day_start_utc = datetime(day.year, day.month, day.day) - timedelta(hours=8)
+    return day_start_utc, day_start_utc + timedelta(hours=24)
+
+
+def resolve_merchant_list_date(
+    date_str: str | None,
+) -> tuple[MerchantListDateMode, datetime, datetime] | None:
+    """Parse merchant list date_str.
+
+    today/empty -> live fulfillment window (today + open statuses).
+    yesterday / YYYY-MM-DD -> that calendar day only.
+    Anything else -> invalid (caller must 400, never unscoped).
+    """
+    raw = (date_str or "").strip()
+    utc8_now = datetime.now(timezone.utc) + timedelta(hours=8)
+    today_local = utc8_now.date()
+    if raw == "" or raw == "today":
+        start, end = _utc8_calendar_day_bounds(today_local)
+        return "live", start, end
+    if raw == "yesterday":
+        start, end = _utc8_calendar_day_bounds(today_local - timedelta(days=1))
+        return "day", start, end
+    try:
+        day = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    start, end = _utc8_calendar_day_bounds(day)
+    return "day", start, end
 
 
 def _paid_order_cancel_response() -> ApiResponse:
@@ -577,8 +612,6 @@ class OrderLifecycleService(BaseService):
         page: Optional[int] = None,
         page_size: Optional[int] = None,
     ) -> ApiResponse:
-        from datetime import timedelta as _td
-
         from app.api.v1.orders import (
             TABLE_CLOSE_BLOCKING_STATUSES,
             serialize_order,
@@ -591,17 +624,22 @@ class OrderLifecycleService(BaseService):
 
         query = select(Order).where(Order.tenant_id == tenant_id)
 
-        if date_str == "today" or not date_str:
-            utc8_now = datetime.now(timezone.utc) + _td(hours=8)
-            today_local = utc8_now.date()
-            day_start_utc = datetime(today_local.year, today_local.month, today_local.day) - _td(hours=8)
-            day_end_utc = day_start_utc + _td(hours=24)
+        resolved = resolve_merchant_list_date(date_str)
+        if resolved is None:
+            return error_response(code=400, msg="日期无效，请使用 today、yesterday 或 YYYY-MM-DD")
+        date_mode, day_start_utc, day_end_utc = resolved
+        if date_mode == "live":
             query = query.where(
                 or_(
                     and_(Order.created_at >= day_start_utc, Order.created_at < day_end_utc),
                     Order.status.in_(TABLE_CLOSE_BLOCKING_STATUSES),
                     Order.status == "done",
                 )
+            )
+        else:
+            query = query.where(
+                Order.created_at >= day_start_utc,
+                Order.created_at < day_end_utc,
             )
 
         normalized_order_no = (order_no or "").strip()
@@ -631,7 +669,7 @@ class OrderLifecycleService(BaseService):
                 keyword_conditions.append(Order.id == int(normalized_keyword))
             query = query.where(or_(*keyword_conditions))
 
-        wants_pagination = page is not None or page_size is not None or any([
+        wants_pagination = date_mode != "live" or page is not None or page_size is not None or any([
             normalized_order_no,
             normalized_tail,
             normalized_table,

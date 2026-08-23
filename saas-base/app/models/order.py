@@ -90,6 +90,7 @@ class Order(BaseModel):
         Index("idx_orders_tenant_session", "tenant_id", "dining_session_id"),
         Index("idx_orders_tenant_participant", "tenant_id", "participant_id"),
         Index("idx_orders_tenant_session_status", "tenant_id", "dining_session_id", "status"),
+        Index("idx_orders_tenant_created_at", "tenant_id", "created_at"),
         Index("idx_orders_parent_order", "parent_order_id"),
         Index("ux_orders_tenant_client_request_id", "tenant_id", "client_request_id", unique=True),
         Index("ux_orders_wx_transaction_id", "wx_transaction_id", unique=True),

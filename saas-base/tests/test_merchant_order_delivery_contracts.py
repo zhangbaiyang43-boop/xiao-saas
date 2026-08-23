@@ -81,7 +81,8 @@ class MerchantOrderDeliveryContractsTest(unittest.TestCase):
         # used to provide.
         source = lifecycle_method_source("list_orders")
         self.assertIn("Order.tenant_id == tenant_id", source)
-        self.assertIn("date_str == \"today\"", source)
+        self.assertIn("resolve_merchant_list_date(date_str)", source)
+        self.assertIn("date_mode == \"live\"", source)
         self.assertNotIn("_recover_wxpay_order_if_paid(", source)
         self.assertIn("reconcile_print_orders(", source)
         self.assertIn("recon_db, recon_orders, trigger=", source)
