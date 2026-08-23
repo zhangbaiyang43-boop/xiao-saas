@@ -374,6 +374,49 @@ def mark_initial_print_eligible(order: Order, *, reason: str) -> bool:
     return True
 
 
+async def _park_waiting_pickup_print_intent(
+    db: AsyncSession,
+    *,
+    order_id: int,
+    tenant_id: str,
+) -> bool:
+    """Move a still-waiting PENDING intent to the durable wait state.
+
+    Historical Case A rows were written PENDING while pickup was required and
+    unset. Recovery must not keep them as provider candidates. This does not
+    claim, increment attempts, or call the provider. Pickup assignment still
+    unlocks via mark_initial_print_eligible.
+    """
+    from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
+
+    result = await db.execute(
+        select(Order)
+        .where(Order.id == order_id, Order.tenant_id == tenant_id)
+        .with_for_update()
+    )
+    order = result.scalar_one_or_none()
+    if not order:
+        return False
+    await db.refresh(order)
+    if str(getattr(order, "print_status", "") or "").upper() != "PENDING":
+        return False
+    pickup_settings = await load_pickup_settings(db, tenant_id)
+    if not should_defer_kitchen_print(order, pickup_settings):
+        return False
+    meta = _get_print_meta(order)
+    initial = _initial_print_meta(meta)
+    initial_status = str(initial.get("status") or "PENDING").upper()
+    if initial_status not in {"PENDING", "NOT_ELIGIBLE"}:
+        return False
+    initial["status"] = "NOT_ELIGIBLE"
+    initial["last_reason"] = "startup_recovery_waiting_pickup"
+    _mark_order_print_state(order, "NOT_ELIGIBLE")
+    _sync_legacy_initial_fields(meta)
+    _set_print_meta(order, meta)
+    await db.commit()
+    return True
+
+
 def _db_print_status_to_meta_status(order: Order) -> str | None:
     status = str(getattr(order, "print_status", "") or "").upper()
     if status == "SUCCESS":
@@ -1011,6 +1054,16 @@ async def recover_pending_print_orders_once(db: AsyncSession | None = None) -> i
                 handled += 1
             continue
         result_data = await _print_paid_order_ticket(order, db, reason="startup_recovery")
+        if (
+            result_data.get("skipped")
+            and result_data.get("code") == "WAITING_PICKUP_NO"
+            and status == "PENDING"
+        ):
+            await _park_waiting_pickup_print_intent(
+                db,
+                order_id=int(order.id),
+                tenant_id=str(order.tenant_id),
+            )
         if not result_data.get("skipped"):
             handled += 1
     return handled
