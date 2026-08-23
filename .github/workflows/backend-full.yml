@@ -25,7 +25,9 @@ concurrency:
 
 defaults:
   run:
-    working-directory: saas-base
+    # Do NOT set working-directory here. A workflow-level saas-base cwd makes
+    # `if: always()` run steps fail to start bash when checkout did not create
+    # that directory (exact runner error: No such file or directory).
     shell: bash
 
 jobs:
@@ -48,14 +50,30 @@ jobs:
       JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
 
     steps:
+      - name: Normalize target ref
+        id: target
+        env:
+          RAW_REF: ${{ inputs.target_ref }}
+        run: |
+          raw="$(printf '%s' "$RAW_REF" | tr -d '[:space:]')"
+          if echo "$raw" | grep -Eq '^[0-9a-fA-F]{80}$'; then
+            first="$(printf '%s' "$raw" | cut -c1-40)"
+            second="$(printf '%s' "$raw" | cut -c41-80)"
+            if [ "$first" = "$second" ]; then
+              echo "Normalized doubled SHA paste to $first"
+              raw="$first"
+            fi
+          fi
+          echo "ref=$raw" >> "$GITHUB_OUTPUT"
+
       - name: Checkout target ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ steps.target.outputs.ref }}
 
       - name: Identity proof
         env:
-          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_REF: ${{ steps.target.outputs.ref }}
         run: |
           echo "WORKFLOW_REF=${GITHUB_REF}"
           echo "WORKFLOW_SHA=${GITHUB_SHA}"
@@ -66,6 +84,10 @@ jobs:
           git status --porcelain
           if [ -n "$(git status --porcelain)" ]; then
             echo "FAIL: checkout of target_ref is not clean"
+            exit 1
+          fi
+          if [ ! -d saas-base ]; then
+            echo "FAIL: checkout is missing saas-base/"
             exit 1
           fi
 
@@ -79,14 +101,17 @@ jobs:
             saas-base/requirements-dev.txt
 
       - name: Install dependencies
+        working-directory: saas-base
         run: pip install -r requirements-dev.txt
 
       - name: Collect (inventory + fail-fast gate)
+        working-directory: saas-base
         run: |
           set -o pipefail
           python -m pytest tests/ --collect-only -q 2>&1 | tee collect-output.log
 
       - name: Backend authoritative Full
+        working-directory: saas-base
         run: |
           set -o pipefail
           python -m pytest tests/ -q -W error::RuntimeWarning 2>&1 | tee full-output.log
@@ -94,16 +119,17 @@ jobs:
       - name: Write certification metadata
         if: always()
         env:
-          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_REF: ${{ steps.target.outputs.ref || inputs.target_ref }}
         run: |
+          mkdir -p saas-base
           {
             echo "WORKFLOW_SHA=${GITHUB_SHA}"
             echo "TARGET_REF=${TARGET_REF}"
-            echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
-            echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+            echo "TARGET_HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo CHECKOUT_FAILED)"
+            echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree} 2>/dev/null || echo CHECKOUT_FAILED)"
             echo "COLLECT_COMMAND=python -m pytest tests/ --collect-only -q"
             echo "FULL_COMMAND=python -m pytest tests/ -q -W error::RuntimeWarning"
-          } > certification-metadata.txt
+          } > saas-base/certification-metadata.txt
 
       - name: Upload logs
         if: always()
