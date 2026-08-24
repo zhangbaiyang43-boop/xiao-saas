@@ -31,6 +31,7 @@ xiao/
 │   │   ├── ADMIN_FRONTEND_DESIGN_AUDIT.md 商家后台前端设计审计（只读）
 │   │   ├── ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md 商家后台高频页面治理符合度审计（只读）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md 商家后台前端系统 Phase-01 审计与蓝图（只读）
+│   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE02_RULES.md 商家后台前端系统 Phase-02 最小可执行规则（Must，扩展 Constitution）
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）
 │   │   ├── HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md CTA/CartBar 决策（OPEN）
@@ -122,7 +123,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 | Git / 生产部署命令 | `Claude.md` | Obsidian `12_部署运维` 只写判断，不覆盖命令 |
 | 点餐确认与支付产品 | `PRODUCT_RULES.md` | Obsidian `01_产品规则` |
 | 小程序 Overlay / primitive / touch-and-migrate | `FRONTEND_CONSTITUTION.md` | Obsidian `04_前端规范` 管拆分约定，不替代 Constitution |
-| 商家后台前端治理 / touch-and-migrate | `docs/frontend/ADMIN_FRONTEND_CONSTITUTION.md` | `ADMIN_FRONTEND_DESIGN_AUDIT.md`、`ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md`、`ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md` 提供现状证据，不替代 Constitution |
+| 商家后台前端治理 / touch-and-migrate | `docs/frontend/ADMIN_FRONTEND_CONSTITUTION.md` + `ADMIN_FRONTEND_SYSTEM_PHASE02_RULES.md` | `ADMIN_FRONTEND_DESIGN_AUDIT.md`、`ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md`、`ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md` 提供现状证据，不替代 Constitution |
 | 视觉现状 | `docs/frontend/DESIGN_SYSTEM_CURRENT.md` | 无第二权威 |
 | 数据库迁移 | `saas-base/MIGRATIONS.md` | Obsidian `06_数据库规范` |
 | 租户隔离 | `saas-base/tests/test_tenant_isolation_scan.py` + Obsidian 工程规范 | |
@@ -153,6 +154,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 - `docs/frontend/ADMIN_FRONTEND_DESIGN_AUDIT.md`（商家后台治理依据，只读）
 - `docs/frontend/ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md`（商家后台高频页面符合度审计，只读）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md`（商家后台前端系统 Phase-01 审计与蓝图，只读）
+- `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE02_RULES.md`（商家后台前端系统 Phase-02 最小可执行规则，Must，扩展 Constitution）
 - `docs/frontend/DESIGN_SYSTEM_CURRENT.md`（视觉现状）
 - `docs/frontend/MENU_PERFORMANCE_AUDIT.md`（菜单首屏性能，只读）
 - Obsidian `04_前端规范/前端规范.md`（拆分与端侧约定）
