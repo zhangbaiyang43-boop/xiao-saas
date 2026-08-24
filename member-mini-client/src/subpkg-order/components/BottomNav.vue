@@ -46,7 +46,7 @@ export default {
   border-top: 1rpx solid var(--border);
   display: flex;
   align-items: stretch;
-  z-index: 300;
+  z-index: var(--z-chrome);
 }
 
 

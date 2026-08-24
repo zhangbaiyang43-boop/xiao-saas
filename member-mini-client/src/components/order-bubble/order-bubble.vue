@@ -272,7 +272,7 @@ export default {
   position: fixed;
   left: 0;
   width: 100%;
-  z-index: 850;
+  z-index: var(--z-floating);
   pointer-events: none;
   overflow: visible;
 }

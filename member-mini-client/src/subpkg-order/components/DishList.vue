@@ -46,10 +46,16 @@
       </view>
 
       <view v-if="!loading && !loadError && !allDishes.length" class="empty-menu">
-        <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
-        <text class="empty-title">暂无菜品</text>
-        <text class="empty-desc">菜单加载失败</text>
-        <view class="empty-retry" @click="$emit('retry-load')"><text>重新加载</text></view>
+        <state-empty
+          title="暂无菜品"
+          desc="当前没有可点的菜品"
+          action-text="重新加载"
+          @action="$emit('retry-load')"
+        >
+          <template #icon>
+            <image class="empty-menu-img" src="/static/order/empty-menu.png" mode="aspectFit" />
+          </template>
+        </state-empty>
       </view>
       <view v-for="cat in categories" :key="cat" :id="categoryAnchorId(cat)">
         <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
@@ -91,11 +97,13 @@
               <text v-if="showDishSales(dish)" class="dish-sales">月售{{ dish.sales_count }}</text>
             </view>
             <view class="dish-bottom-row">
-              <view class="dish-price-wrap">
-                <text class="dish-price-currency">¥</text>
-                <text class="dish-price-amount">{{ dishPriceText(dish) }}</text>
-                <text v-if="dishPriceSuffix(dish)" class="dish-price-suffix">{{ dishPriceSuffix(dish) }}</text>
-              </view>
+              <price-text
+                class="dish-price-wrap"
+                size="md"
+                block
+                :amount="dishPriceText(dish)"
+                :suffix="dishPriceSuffix(dish)"
+              />
               <view class="dish-counter" @click.stop>
                 <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>已售罄</text></view>
                 <template v-else-if="hasSpecs(dish)">
@@ -127,6 +135,8 @@
 
 <script>
 import { categoryAnchorId } from '../composables/useDishCategories.js'
+import StateEmpty from '@/components/state-empty/state-empty.vue'
+import PriceText from './PriceText.vue'
 
 // 从 menu.vue 拆出来的菜品列表 + 分类导航区块（原来是 activeTab==='order' 那部
 // 分模板：category-nav + dish-scroll，含"再来一单"、空菜单态、菜品卡片）。基本
@@ -150,6 +160,7 @@ import { categoryAnchorId } from '../composables/useDishCategories.js'
 // 迷你条显隐」；门店大头部不在本列表里，这里不做高度/透明度动画。
 export default {
   name: 'DishList',
+  components: { StateEmpty, PriceText },
   props: {
     categories: { type: Array, default: () => [] },
     activeCategory: { type: String, default: '' },
@@ -603,16 +614,7 @@ export default {
 .dish-bottom-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0; margin-top: auto; min-width: 0; }
 
 
-.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; display: flex; align-items: baseline; color: var(--brand); }
-
-
-.dish-price-currency { flex-shrink: 0; font-size: 24rpx; font-weight: 700; line-height: 1; }
-
-
-.dish-price-amount { min-width: 0; font-size: 40rpx; font-weight: 700; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-
-.dish-price-suffix { flex-shrink: 0; margin-left: 2rpx; font-size: 22rpx; font-weight: 500; line-height: 1; color: var(--brand); }
+.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; }
 
 
 .dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; margin-left: 6rpx; min-width: 60rpx; max-width: 176rpx; padding-right: 0; box-sizing: border-box; }
@@ -670,39 +672,6 @@ export default {
   width: 280rpx;
   height: 280rpx;
   margin: 0 auto 8rpx;
-}
-
-
-
-.empty-title {
-  display: block;
-  color: var(--text-1);
-  font-size: 34rpx;
-  font-weight: 800;
-}
-
-
-
-.empty-desc {
-  display: block;
-  margin-top: 14rpx;
-  color: var(--text-3);
-  font-size: 26rpx;
-  line-height: 1.6;
-}
-
-
-
-.empty-retry {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 28rpx;
-  padding: 0 36rpx;
-  height: 72rpx;
-  border-radius: 36rpx;
-  background: var(--brand);
-  text { color: #fff; font-size: 28rpx; font-weight: 700; }
 }
 
 

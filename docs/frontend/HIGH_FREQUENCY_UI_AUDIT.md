@@ -4,6 +4,7 @@
 MODE=READ_ONLY_AUDIT
 DATE=2026-08-24
 BASELINE=b90ccb5
+PHASE-02=P1-HIGH-FREQUENCY-UI-ADOPTION-PHASE-02 已采用：菜单空/错 → StateEmpty/StateError；菜卡价 → PriceText md；BottomNav/OrderBubble 层 token。CTA/CartBar 见 HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md（OPEN）。
 SCOPE=顾客端高频路径：首页 / 菜单 / 购物车 / 结算 / 支付成功
 CODE_CHANGE=NO
 NEW_COMPONENT=NO
