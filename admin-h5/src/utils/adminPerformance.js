@@ -325,6 +325,29 @@ export function createAdminPerformanceCollector(options = {}) {
   })
 }
 
+export function installAdminPerformanceDebugOutlet(target, getSnapshot) {
+  if (!target || typeof getSnapshot !== 'function') return false
+
+  try {
+    if (Object.getOwnPropertyDescriptor(target, '__ADMIN_PERF_EVENTS__')) return false
+    Object.defineProperty(target, '__ADMIN_PERF_EVENTS__', {
+      configurable: false,
+      enumerable: false,
+      get() {
+        try {
+          const snapshot = getSnapshot()
+          return Array.isArray(snapshot) ? snapshot : []
+        } catch {
+          return []
+        }
+      },
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const viteEnvironment = import.meta.env?.VITE_ADMIN_ENVIRONMENT || import.meta.env?.MODE
 const defaultEnvironment = normalizeEnvironment(viteEnvironment)
 const defaultVersion = typeof __ADMIN_BUILD_VERSION__ !== 'undefined'
@@ -337,6 +360,10 @@ const defaultCollector = createAdminPerformanceCollector({
     ? (...args) => console.info(...args)
     : () => {},
 })
+
+if (typeof window !== 'undefined') {
+  installAdminPerformanceDebugOutlet(window, () => defaultCollector.getEvents())
+}
 
 export const beginPageNavigation = route => defaultCollector.beginPageNavigation(route)
 export const completePageNavigation = (route, failure) => defaultCollector.completePageNavigation(route, failure)

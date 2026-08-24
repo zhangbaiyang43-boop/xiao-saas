@@ -7,6 +7,7 @@ import {
   classifyAdminApiFailure,
   classifyAdminApiResponse,
   createAdminPerformanceCollector,
+  installAdminPerformanceDebugOutlet,
   readResponsePayloadSize,
 } from '../src/utils/adminPerformance.js'
 
@@ -90,6 +91,58 @@ test('bounded queue evicts oldest events and subscribers can unsubscribe', () =>
   assert.equal(observed.length, 4)
   assert.equal(collector.getEvents().length, 3)
   assert.equal(collector.getEvents()[0].route, '/orders/2')
+})
+
+test('production debug outlet exposes detached read-only queue snapshots', () => {
+  const collector = createAdminPerformanceCollector({
+    environment: 'production',
+    version: VERSION,
+    now: () => 1_800_000_000_000,
+    clock: () => 100,
+    scheduleAfterRender: callback => callback(),
+    devLog: () => {},
+  })
+  collector.recordEvent({
+    event_name: 'admin_page_enter',
+    route: '/orders',
+    page: 'OrderManage',
+    status: 'success',
+    token: 'must-not-leak',
+    cookie: 'must-not-leak',
+    request_body: { secret: true },
+    response_body: { secret: true },
+    user: { phone: 'must-not-leak' },
+    merchant: { name: 'must-not-leak' },
+  })
+
+  const target = {}
+  assert.equal(
+    installAdminPerformanceDebugOutlet(target, () => collector.getEvents()),
+    true,
+  )
+
+  const descriptor = Object.getOwnPropertyDescriptor(target, '__ADMIN_PERF_EVENTS__')
+  assert.equal(typeof descriptor.get, 'function')
+  assert.equal(descriptor.set, undefined)
+  assert.equal(descriptor.enumerable, false)
+  assert.equal(descriptor.configurable, false)
+
+  const firstSnapshot = target.__ADMIN_PERF_EVENTS__
+  assert.ok(Array.isArray(firstSnapshot))
+  assert.equal(firstSnapshot.length, 1)
+  assert.equal(firstSnapshot[0].environment, 'production')
+  assert.equal(firstSnapshot[0].version, VERSION)
+
+  firstSnapshot[0].page = 'tampered'
+  firstSnapshot.push({ event_name: 'tampered' })
+  const freshSnapshot = target.__ADMIN_PERF_EVENTS__
+  assert.equal(freshSnapshot.length, 1)
+  assert.equal(freshSnapshot[0].page, 'OrderManage')
+
+  for (const forbidden of ['token', 'cookie', 'request_body', 'response_body', 'user', 'merchant']) {
+    assert.equal(Object.hasOwn(freshSnapshot[0], forbidden), false)
+  }
+  assert.doesNotMatch(JSON.stringify(freshSnapshot), /must-not-leak/)
 })
 
 test('all four target pages emit enter, first content and ready once per visit', () => {
@@ -220,6 +273,7 @@ test('collector has no network outlet and build injects actual checkout SHA', ()
   )
 
   assert.doesNotMatch(perfSource, /\b(?:fetch|sendBeacon|XMLHttpRequest)\s*\(/)
+  assert.doesNotMatch(perfSource, /\baxios\s*\.\s*post\s*\(/)
   assert.match(viteSource, /execFileSync\(['"]git['"],\s*\[['"]rev-parse['"],\s*['"]HEAD['"]\]/)
   assert.match(viteSource, /__ADMIN_BUILD_VERSION__/)
 })
