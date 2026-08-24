@@ -322,11 +322,17 @@ function ConvertFrom-SingleJsonObject {
 
 function ConvertTo-WhitelistedJson {
     param(
-        [Parameter(Mandatory = $true)][System.Management.Automation.PSCustomObject]$Report,
+        [Parameter(Mandatory = $true)][psobject]$Report,
         [Parameter(Mandatory = $true)][string[]]$AllowedFields
     )
 
+    if ($null -eq $Report -or $null -eq $Report.PSObject) {
+        throw 'Performance tool JSON report must be an object with properties'
+    }
     $actualFields = @($Report.PSObject.Properties.Name)
+    if ($actualFields.Count -eq 0) {
+        throw 'Performance tool JSON report must contain properties'
+    }
     $unexpected = @($actualFields | Where-Object { $_ -notin $AllowedFields })
     if ($unexpected.Count -ne 0) {
         throw 'Performance tool JSON contains a non-whitelisted field'

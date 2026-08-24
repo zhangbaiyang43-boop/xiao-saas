@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -269,6 +273,48 @@ def test_saved_evidence_is_parsed_validated_and_whitelisted_json() -> None:
     assert "@('status', 'dataset_version', 'tenant_id', 'phone', 'purpose')" in lifecycle
     assert "ConvertTo-Json" in lifecycle
     assert "Save-SafeEvidence -Name $EvidenceName -Lines $result" not in lifecycle
+
+
+def test_evidence_sanitizer_avoids_the_windows_powershell_pscustomobject_binder() -> None:
+    lifecycle = _read("lifecycle")
+    assert "[System.Management.Automation.PSCustomObject]$Report" not in lifecycle
+    assert "[psobject]$Report" in lifecycle
+
+
+def test_dataset_evidence_sanitizer_executes_in_windows_powershell_5() -> None:
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+
+    lifecycle_path = str(FILES["lifecycle"]).replace("'", "''")
+    command = rf"""
+$ErrorActionPreference = 'Stop'
+$text = [System.IO.File]::ReadAllText('{lifecycle_path}')
+$start = $text.IndexOf('function ConvertFrom-SingleJsonObject')
+$end = $text.IndexOf('function Invoke-DatasetCommand')
+if ($start -lt 0 -or $end -le $start) {{ throw 'sanitizer extraction failed' }}
+Invoke-Expression $text.Substring($start, $end - $start)
+$DatasetVersion = 'PERF_DATASET_V1'
+$raw = @(
+    'compose diagnostic line',
+    '{{"status":"PASS","dataset_version":"PERF_DATASET_V1","tenant_id":"perf_test_only_v1","counts":{{"dishes":500}}}}'
+)
+$safe = ConvertTo-SafeDatasetEvidence -Output $raw
+$report = $safe | ConvertFrom-Json
+if ($report.status -ne 'PASS' -or $report.counts.dishes -ne 500) {{
+    throw 'sanitized evidence mismatch'
+}}
+Write-Output 'WINDOWS_PS5_SANITIZER=PASS'
+"""
+    completed = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "WINDOWS_PS5_SANITIZER=PASS" in completed.stdout
 
 
 def test_destroy_is_exactly_scoped_and_requires_explicit_confirmation() -> None:
