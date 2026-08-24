@@ -85,6 +85,7 @@
       :has-specs="hasSpecs"
       @switch-category="switchCategory"
       @active-category-change="handleActiveCategoryChange"
+      @programmatic-scroll-settled="handleProgrammaticScrollSettled"
       @reorder-item="reorderItem"
       @reorder-all="reorderAll"
       @retry-load="retryMenuInitialization"
@@ -1138,6 +1139,7 @@ export default {
     }
     const {
       categoryScrollTop, ignoreScroll, switchCategory, handleActiveCategoryChange,
+      handleProgrammaticScrollSettled,
     } = useCategoryScroll({ categories, activeCategory, scrollTarget })
 
     const switchOrderMode = (mode) => {
@@ -1349,12 +1351,17 @@ export default {
       }
     }
 
+    const applyDefaultCategoryIfNeeded = () => {
+      if (activeCategory.value && categories.value.includes(activeCategory.value)) return
+      if (categories.value.length) activeCategory.value = categories.value[0]
+    }
+
     const loadMenu = async () => {
       const cached = readMenuCache()
       const hadCacheHit = Boolean(cached && cached.items.length)
       if (hadCacheHit) {
         allDishes.value = cached.items
-        if (categories.value.length) activeCategory.value = categories.value[0]
+        applyDefaultCategoryIfNeeded()
       }
       loading.value = !hadCacheHit
       loadError.value = false
@@ -1371,7 +1378,7 @@ export default {
         const mapped = Array.isArray(rawItems) ? rawItems.map(d => ({ ...d, desc: d.desc || d.description || '' })) : []
         if (!hadCacheHit || version !== cached.version) {
           allDishes.value = mapped
-          if (categories.value.length) activeCategory.value = categories.value[0]
+          applyDefaultCategoryIfNeeded()
         }
         markEvent('menu_data_processed', { item_count: mapped.length, cache_hit: hadCacheHit })
         recordSample('menu_processing', Date.now() - processingStartedAt, {
@@ -1385,7 +1392,7 @@ export default {
         return hadCacheHit
       } finally {
         loading.value = false
-        if (categories.value.length) activeCategory.value = categories.value[0]
+        applyDefaultCategoryIfNeeded()
       }
     }
 
@@ -1439,7 +1446,7 @@ export default {
       isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, selectedSpecFullSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured,
       lastOrderItems, reorderItem, reorderAll,
-      handleActiveCategoryChange, ignoreScroll,
+      handleActiveCategoryChange, handleProgrammaticScrollSettled, ignoreScroll,
       headerVisible, onDishScrollPosition,
     }
   },

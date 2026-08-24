@@ -1,6 +1,18 @@
 import { computed } from 'vue'
 import { specText } from '../utils/orderText.js'
 
+// WeChat scroll-into-view ids must start with a letter and cannot contain
+// special characters. Encode the category string so the same name always
+// maps to the same id regardless of sidebar order.
+export function categoryAnchorId(cat) {
+  const raw = String(cat || '')
+  let hex = ''
+  for (let i = 0; i < raw.length; i += 1) {
+    hex += raw.charCodeAt(i).toString(16).padStart(4, '0')
+  }
+  return `cat-sec-${hex || 'empty'}`
+}
+
 // 从 menu.vue 拆出来的分类展示逻辑——分类排序/去重、分类名和图标归一化、
 // 按分类取菜品——都是只读的纯派生计算，不改任何页面状态。
 //
@@ -18,11 +30,8 @@ export function useDishCategories({ allDishes, categoryOrder, specCartItems, has
     const order = categoryOrder.value
     let sorted
     if (order.length) {
-      // 分类锚点 id（cat-nav-N / cat-sec-N）都是按数组下标生成的，如果 order 里同一个分类
-      // 出现了两次（商家后台保存过脏数据，或旧版本排序抽屉没做去重），这里再用 filter 不去重
-      // 的话，categories 数组会带着重复项：indexOf(cat) 永远只会命中第一次出现的下标，
-      // 点击排在后面的那个重名分类会跳到前面那个的位置——这正是点分类跳错、滚动时中间
-      // 分类被跳过的根因，跟去重后 sidebar/正文两个 v-for 是否还共用同一份数组无关。
+      // 分类锚点按 category 名生成稳定 id（categoryAnchorId），不再用数组下标。
+      // 仍去重：同名分类只保留一次，避免两个区块抢同一个 scroll-into-view id。
       const seen = new Set()
       sorted = order.filter(c => raw.includes(c) && !seen.has(c) && seen.add(c))
     } else {

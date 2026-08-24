@@ -3,9 +3,9 @@
 
     <scroll-view class="category-nav" scroll-y scroll-with-animation :scroll-top="categoryScrollTop">
       <view
-        v-for="(cat, catIdx) in categories"
+        v-for="cat in categories"
         :key="cat"
-        :id="`cat-nav-${catIdx}`"
+        :id="`cat-nav-${categoryAnchorId(cat)}`"
         class="cat-item"
         :class="{ active: activeCategory === cat }"
         @click="$emit('switch-category', cat)"
@@ -51,7 +51,7 @@
         <text class="empty-desc">菜单加载失败</text>
         <view class="empty-retry" @click="$emit('retry-load')"><text>重新加载</text></view>
       </view>
-      <view v-for="(cat, catIdx) in categories" :key="cat" :id="`cat-sec-${catIdx}`">
+      <view v-for="cat in categories" :key="cat" :id="categoryAnchorId(cat)">
         <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
         <view
           v-for="dish in dishesByCategory(cat)"
@@ -126,6 +126,8 @@
 </template>
 
 <script>
+import { categoryAnchorId } from '../composables/useDishCategories.js'
+
 // 从 menu.vue 拆出来的菜品列表 + 分类导航区块（原来是 activeTab==='order' 那部
 // 分模板：category-nav + dish-scroll，含"再来一单"、空菜单态、菜品卡片）。基本
 // 是纯展示组件——切换分类（点击）、再来一单、加购物车、选规格、图片失败等动作
@@ -192,6 +194,7 @@ export default {
     'open-product-detail',
     'remove-from-cart',
     'add-to-cart',
+    'programmatic-scroll-settled',
   ],
   data() {
     return { scrollThrottleTimer: null }
@@ -203,6 +206,7 @@ export default {
     }
   },
   methods: {
+    categoryAnchorId,
     // 方案1：门店大头部在 menu.vue 全宽区，不在本列表里。这里只把 scrollTop
     // 抛给父组件决定何时收起头部/露出迷你条；分类高亮仍走下面的节流逻辑。
     onDishScroll(e) {
@@ -213,7 +217,6 @@ export default {
       this.handleScroll()
     },
     handleScroll() {
-      if (this.ignoreScroll) return
       if (this.scrollThrottleTimer) return
       this.scrollThrottleTimer = setTimeout(() => {
         this.scrollThrottleTimer = null
@@ -221,7 +224,7 @@ export default {
         if (!cats.length) return
         const query = uni.createSelectorQuery().in(this)
         query.select('.dish-scroll').boundingClientRect()
-        cats.forEach((_, i) => query.select('#cat-sec-' + i).boundingClientRect())
+        cats.forEach((cat) => query.select('#' + categoryAnchorId(cat)).boundingClientRect())
         query.exec((res) => {
           const svRect = res[0]
           if (!svRect || svRect.height <= 0) return
@@ -229,6 +232,12 @@ export default {
           for (let i = 0; i < cats.length; i++) {
             const r = res[i + 1]
             if (r && typeof r.top === 'number' && (r.top - svRect.top) <= 30) current = cats[i]
+          }
+          if (this.scrollTarget || this.ignoreScroll) {
+            if (this.scrollTarget && categoryAnchorId(current) === this.scrollTarget) {
+              this.$emit('programmatic-scroll-settled', current)
+            }
+            return
           }
           if (current !== this.activeCategory) {
             this.$emit('active-category-change', current)

@@ -1,18 +1,16 @@
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
+import { categoryAnchorId } from './useDishCategories.js'
 
-// 从 menu.vue 拆出来的分类侧栏滚动同步逻辑——点分类跳转到对应菜品区块、
-// 菜品区滚动时侧栏跟着高亮当前分类并把可见区域滚到对应位置。跟 DishList.vue
-// 之间通过 activeCategory/scrollTarget 两个 ref 及 active-category-change
-// 事件配合，逻辑跟原来在 menu.vue 里的一字未改，只是搬了个位置。
-//
-// 移动时顺手去掉了两个只声明未使用的死状态：dishScrollTopVal、
-// categoryScrollTarget——搬到 menu.vue 的 return 里之后一路没有任何模板或
-// 组件读过它们，是更早一轮重构留下的残留。
+// 分类侧栏与右侧菜品区块联动：点击用稳定锚点 scroll-into-view；
+// 程序滚动期间 scroll-spy 不得覆盖用户点中的分类。
 export function useCategoryScroll({ categories, activeCategory, scrollTarget }) {
   const categoryScrollTop = ref(0)
   const categoryItemHeight = 108
   const categoryVisibleRows = 6
   let categoryVisibleStart = 0
+  const programmaticCategory = ref('')
+  const ignoreScroll = ref(false)
+
   const syncCategoryVisible = (cat) => {
     const idx = categories.value.indexOf(cat)
     if (idx < 0) return
@@ -21,32 +19,82 @@ export function useCategoryScroll({ categories, activeCategory, scrollTarget }) 
     categoryVisibleStart = Math.max(0, idx - 2)
     categoryScrollTop.value = categoryVisibleStart * categoryItemHeight
   }
-  const ignoreScroll = ref(false)
+
+  const retargetScroll = (cat) => {
+    if (!cat) {
+      scrollTarget.value = ''
+      return
+    }
+    const id = categoryAnchorId(cat)
+    scrollTarget.value = ''
+    nextTick(() => {
+      scrollTarget.value = id
+    })
+  }
 
   const switchCategory = (cat) => {
     activeCategory.value = cat
+    programmaticCategory.value = cat
     ignoreScroll.value = true
-    setTimeout(() => { ignoreScroll.value = false }, 600)
-    const idx = categories.value.indexOf(cat)
     syncCategoryVisible(cat)
-    scrollTarget.value = ''
-    nextTick(() => { scrollTarget.value = 'cat-sec-' + idx })
+    retargetScroll(cat)
   }
 
-  // 滚动时"实时查 DOM 现在滚到哪个分类锚点"这段查询逻辑现在在 DishList.vue 组件内部
-  // 自己做（因为要查的 .dish-scroll/#cat-sec-N 节点现在是它自己的模板节点，必须用
-  // .in(this) 绑定到组件实例才能可靠查到，不能从页面这一层隔着组件边界去查）。这里
-  // 只负责接收子组件查完之后报上来的"当前应该高亮哪个分类"结论，然后跟 switchCategory
-  // 点击分类时做的事一样：赋值 + 同步左侧分类栏可见区域。
+  // Spy 在程序滚动期间只接受「已经滚到用户点的那一类」；其它分类一律丢掉。
   const handleActiveCategoryChange = (cat) => {
+    if (programmaticCategory.value) {
+      if (cat !== programmaticCategory.value) return
+      programmaticCategory.value = ''
+      ignoreScroll.value = false
+      scrollTarget.value = ''
+      syncCategoryVisible(cat)
+      return
+    }
     activeCategory.value = cat
     syncCategoryVisible(cat)
   }
+
+  const handleProgrammaticScrollSettled = (cat) => {
+    if (!programmaticCategory.value) return
+    if (cat !== programmaticCategory.value) return
+    programmaticCategory.value = ''
+    ignoreScroll.value = false
+    scrollTarget.value = ''
+    syncCategoryVisible(cat)
+  }
+
+  watch(categories, (next, prev) => {
+    const list = Array.isArray(next) ? next : []
+    const prevList = Array.isArray(prev) ? prev : []
+    const sameOrder = list.length === prevList.length && list.every((c, i) => c === prevList[i])
+    const current = activeCategory.value
+    if (current && list.includes(current)) {
+      if (sameOrder) return
+      programmaticCategory.value = current
+      ignoreScroll.value = true
+      syncCategoryVisible(current)
+      retargetScroll(current)
+      return
+    }
+    const fallback = list[0] || ''
+    activeCategory.value = fallback
+    if (!fallback) {
+      programmaticCategory.value = ''
+      ignoreScroll.value = false
+      scrollTarget.value = ''
+      return
+    }
+    programmaticCategory.value = fallback
+    ignoreScroll.value = true
+    syncCategoryVisible(fallback)
+    retargetScroll(fallback)
+  })
 
   return {
     categoryScrollTop,
     ignoreScroll,
     switchCategory,
     handleActiveCategoryChange,
+    handleProgrammaticScrollSettled,
   }
 }
