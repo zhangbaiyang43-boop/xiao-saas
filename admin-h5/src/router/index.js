@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { clearSession, getToken, hasValidSession, isTokenExpired } from '../utils/session'
 import { useAuthStore } from '../stores/auth'
+import { beginPageNavigation, completePageNavigation } from '../utils/adminPerformance'
 
 const Login = () => import('../views/Login.vue')
 const ActivationHome = () => import('../views/ActivationHome.vue')
@@ -118,6 +119,15 @@ function homeForRole(role) {
   if (role === 'kitchen') return '/kitchen'
   return '/'
 }
+
+router.beforeEach((to) => {
+  beginPageNavigation(to)
+  return true
+})
+
+router.afterEach((to, _from, failure) => {
+  completePageNavigation(to, failure)
+})
 
 router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'

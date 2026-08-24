@@ -540,6 +540,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, EditOutlined, CopyOutlined, EllipsisOutlined } from '@ant-design/icons-vue'
 import { getMenuItems, createMenuItem, updateMenuItem, deleteMenuItem, uploadDishImage, getTenantSettings, updateTenantSettings, updateMenuItemStock, parseMenuText, importMenuBatch, generateDishDesc, searchDishLibrary, contributeDishToLibrary, importDishLibraryBatch } from '../api'
+import { markPageContentReady } from '../utils/adminPerformance'
 
 const route = useRoute()
 const router = useRouter()
@@ -847,12 +848,23 @@ async function toggleCategory(cat) {
 
 async function loadMenu() {
   loadingMenu.value = true
+  let resultStatus = 'success'
   try {
     const res = await getMenuItems()
     const raw = res?.data?.data?.items || res?.data?.items || res?.data || []
     allDishes.value = Array.isArray(raw) ? raw.map(d => ({ ...d, desc: d.desc ?? d.description ?? '', sort_order: d.sort_order ?? 0 })) : []
-  } catch { allDishes.value = [] }
-  finally { loadingMenu.value = false }
+    resultStatus = allDishes.value.length ? 'success' : 'empty'
+  } catch {
+    allDishes.value = []
+    resultStatus = 'error'
+  } finally {
+    loadingMenu.value = false
+    markPageContentReady({
+      page: 'DishManage',
+      status: resultStatus,
+      data_count: allDishes.value.length,
+    })
+  }
 }
 
 // 分类排序：加载已保存的顺序

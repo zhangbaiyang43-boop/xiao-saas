@@ -168,6 +168,7 @@ import { SettingOutlined, BellOutlined, ThunderboltOutlined, RiseOutlined } from
 import { getDashboardStats, getTenantProfile, getOrders, updateTenantSettings, getMerchantSystemStatus, getMarketingPreview, getTableCouponActivity, getCurrentSubscription } from '../api'
 import { homeStatusStripCopy } from '../utils/subscriptionUi'
 import pollingManager from '../utils/pollingManager'
+import { markPageContentReady } from '../utils/adminPerformance'
 import { useCountUp } from '../composables/useCountUp'
 import StatCard from '../components/StatCard.vue'
 import InsightCard from '../components/InsightCard.vue'
@@ -440,6 +441,11 @@ async function loadStats(pollMeta = {}) {
     statsError.value = true
   } finally {
     statsLoaded.value = true
+    markPageContentReady({
+      page: 'Dashboard',
+      status: statsError.value ? 'error' : 'success',
+      data_count: overview.value.todayOrderCount,
+    })
   }
 }
 

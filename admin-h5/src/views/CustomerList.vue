@@ -87,6 +87,7 @@ import { message, Modal } from 'ant-design-vue'
 import { UserOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
 import { deleteCustomer, getCustomers, restoreCustomer } from '../api'
+import { markPageContentReady } from '../utils/adminPerformance'
 
 const router = useRouter()
 const customers = ref([])
@@ -113,11 +114,17 @@ async function loadCustomers() {
   loading.value = true
   loadError.value = false
   pageSize.value = 30
+  let resultStatus = 'success'
   try {
     const params = { page: 1, page_size: 100, skip: 0, limit: 100 }
     if (keyword.value) { params.search = keyword.value; params.keyword = keyword.value }
     const res = await getCustomers(params)
-    if (res.code !== 200) { message.error(res.msg || '会员加载失败'); customers.value = []; return }
+    if (res.code !== 200) {
+      resultStatus = 'error'
+      message.error(res.msg || '会员加载失败')
+      customers.value = []
+      return
+    }
     const rows = extractRows(apiData(res))
     customers.value = rows.map(item => ({
       id: item.id,
@@ -127,8 +134,19 @@ async function loadCustomers() {
       last_consume_time: item.last_consume_time,
       status: item.status,
     }))
-  } catch { customers.value = []; loadError.value = true }
-  finally { loading.value = false }
+    resultStatus = customers.value.length ? 'success' : 'empty'
+  } catch {
+    customers.value = []
+    loadError.value = true
+    resultStatus = 'error'
+  } finally {
+    loading.value = false
+    markPageContentReady({
+      page: 'MemberManage',
+      status: resultStatus,
+      data_count: customers.value.length,
+    })
+  }
 }
 
 function goToDetail(id) { router.push(`/customers/${id}`) }

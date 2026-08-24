@@ -585,6 +585,7 @@ import PickupNoPicker from '../components/PickupNoPicker.vue'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 import { sortMerchantOrders } from '../utils/orderListSort'
 import { formatOrderStatusText } from '../utils/orderStatusText'
+import { markPageContentReady } from '../utils/adminPerformance'
 
 function decodeJwtPayload(token) {
   try {
@@ -1003,6 +1004,15 @@ const lastRefreshed = computed(() => {
   const now = new Date(lastSuccessfulSyncAt.value)
   return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
 })
+
+watch(initialLoading, (current, previous) => {
+  if (previous !== true || current !== false) return
+  markPageContentReady({
+    page: 'OrderManage',
+    status: syncFailed.value ? 'error' : (orders.value.length ? 'success' : 'empty'),
+    data_count: orders.value.length,
+  })
+}, { flush: 'post' })
 
 async function loadOrders() {
   return syncNow()

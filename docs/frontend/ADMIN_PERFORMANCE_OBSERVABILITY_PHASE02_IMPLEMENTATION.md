@@ -1,7 +1,7 @@
 # admin-h5 最小性能观测 Phase 02 实施记录
 
 > 阶段：P0-ADMIN-PERFORMANCE-OBSERVABILITY-PHASE-02  
-> 状态：设计已确认，等待 TDD 实施  
+> 状态：实施完成，已通过本地验收
 > 基线：`f7464e83efeab28f9360a9d6149cadae116d2e27`  
 > 设计确认日期：2026-08-24
 
@@ -26,7 +26,7 @@
 
 覆盖 API 业务域：orders、menu/dish、members、marketing。
 
-## 2. 已确认实施设计
+## 2. 新增能力
 
 ### 2.1 事件核心
 
@@ -77,7 +77,7 @@
 - 构建版本从实际 checkout 的 `git rev-parse HEAD` 注入；显式构建变量可以覆盖，但不得优先使用可能与指定 Release SHA 不同的 workflow `GITHUB_SHA`。
 - 每条事件必须包含 environment 与完整 commit SHA，无法识别时明确记录 `unknown`，不得沿用旧版本值。
 
-## 3. 统一事件字段
+## 3. 事件模型与数据字段
 
 | 字段 | 规则 |
 | --- | --- |
@@ -87,7 +87,7 @@
 | `page` | 必填，受控页面名；非目标页面 API 可为 `unknown` |
 | `request_name` | API 事件必填；页面事件为 `null` |
 | `request_id` | API 事件必填，本地关联使用，不发送给服务端 |
-| `duration` | 完成事件必填；瞬时 start/enter 事件为 `null` |
+| `duration` | API start 为 `null`；page enter 记录导航起点至进入耗时；其余完成事件记录相对当前页面访问或请求起点的耗时 |
 | `status` | 必填，受控状态枚举 |
 | `payload_size` | API end 字段；不可获得时为 `null` |
 | `environment` | 必填：`local`、`staging`、`production` 或 `unknown` |
@@ -95,7 +95,18 @@
 
 允许增加不含隐私的关联字段，如 `visit_id`、`api_group`、`size_source`、`data_count`，但不得改变上述核心字段含义。
 
-## 4. 数据流
+## 4. 采集位置与数据流
+
+| 位置 | 采集职责 |
+| --- | --- |
+| `src/utils/adminPerformance.js` | 统一 schema、页面访问上下文、API 匹配、状态分类、200 条队列、订阅与开发态 console |
+| `src/router/index.js` | 在鉴权 guard 之前记录导航起点，在导航成功后记录 `admin_page_enter` |
+| `src/views/Dashboard.vue` | 主统计和今日订单第一次结束后标记 content/ready |
+| `src/views/OrderManage.vue` | 首次订单同步 `initialLoading: true -> false` 后标记 content/ready，不增加请求 |
+| `src/views/MenuManage.vue` | 首次菜品加载结束后标记 DishManage content/ready |
+| `src/views/CustomerList.vue` | 首次会员加载结束后标记 MemberManage content/ready |
+| `src/api/request.js` | 核心 API 的 start/end、耗时、状态和 Content-Length |
+| `vite.config.js` | 注入实际 checkout commit SHA |
 
 ```text
 router before/after
@@ -115,7 +126,9 @@ page visit context ---- page explicit marker
           no network output
 ```
 
-## 5. 错误与隔离规则
+## 5. 数据出口与错误隔离
+
+数据出口只有三个：当前进程内有界队列、开发环境 console、代码订阅函数。实现中没有性能事件网络请求，不调用后端 `/api/v1/perf/report`，不使用第三方平台。
 
 - 性能采集函数必须捕获自身错误并返回失败结果，不允许改变原 Promise 的 resolve/reject 行为。
 - Axios 原有去重、鉴权清理、403 提示、raw response 和 ID 兼容逻辑必须保持。
@@ -123,25 +136,30 @@ page visit context ---- page explicit marker
 - 页面卸载后的迟到请求可以记录 API end，但不得被绑定到新的页面访问。
 - 事件队列达到上限时只淘汰最旧事件，不允许无限增长。
 
-## 6. TDD 测试设计
+## 6. 测试结果
 
-1. 事件结构：验证核心字段完整、环境/版本存在、非法输入安全降级。
-2. 队列与订阅：验证 200 条上限、先进先出淘汰、订阅与取消订阅。
-3. 页面采集：验证四个目标路由会生成 enter，首次内容和 ready 每次访问各一次。
-4. API 成功：验证核心 API 产生 start/end、正数耗时、success 和可用的 payload size 来源。
-5. API 失败：验证 business、HTTP、network、timeout、cancelled 与 duplicate skipped 可区分。
-6. 接线检查：验证 router、request 和四个真实页面均连接统一采集入口，且源码中不存在性能网络发送。
-7. 回归：运行新增测试、完整 `npm run check` 和 production build。
+| 验证 | 真实结果 |
+| --- | --- |
+| TDD RED 1 | 首次执行因 `adminPerformance.js` 不存在失败，符合预期 |
+| TDD GREEN 1 | 核心合同 6 项先通过，router/Vite/package 接线 3 项保持失败 |
+| TDD RED 2 | 新增“API start duration 必须为 null”断言后得到 `0 !== null` 的预期失败 |
+| TDD RED 3 | 异常 URL 输入最初会抛出 `unreadable url`，证明采集隔离仍有缺口；最小保护后关闭 |
+| 性能观测合同 | `node --test scripts/test-performance-observability.mjs`：10 passed、0 failed |
+| Vue SFC 编译 | Dashboard、OrderManage、MenuManage、CustomerList：4/4 parse、script、template 通过 |
+| admin-h5 完整检查 | `npm run check`：退出码 0；包含原有合同测试、新增性能观测合同和 production build |
+| production build | 3684 modules transformed，构建成功；保留既有 Sass legacy API 和大 chunk warning |
 
-## 7. 预期文件范围
+测试证明的是事件模型与采集接线，不是页面、API 或数据库已经达到任何性能目标。本阶段没有生成或填写虚构运行时性能值。
 
-计划新增：
+## 7. 修改文件
+
+新增：
 
 - `admin-h5/src/utils/adminPerformance.js`
 - `admin-h5/scripts/test-performance-observability.mjs`
 - `docs/frontend/ADMIN_PERFORMANCE_OBSERVABILITY_PHASE02_IMPLEMENTATION.md`
 
-计划修改：
+修改：
 
 - `admin-h5/src/router/index.js`
 - `admin-h5/src/api/request.js`
@@ -154,9 +172,17 @@ page visit context ---- page explicit marker
 
 不修改 `saas-base`、数据库、API 路径/字段、业务组件结构和生产部署脚本。
 
-## 8. 实施结果
+## 8. 验收结论
 
-本节在完成 TDD 实施与真实命令验证后填写，不提前记录通过数或性能数据。
+1. **用户打开订单页面是否可以记录进入时间？** 可以。Router 在目标导航开始建立 visit，并在成功进入后生成带 timestamp、duration、route、page、environment、version 的 `admin_page_enter`。
+2. **订单首次展示时间是否可测？** 可以。首次同步的 `initialLoading` 从 true 变为 false 后，在渲染调度边界生成 `admin_first_content_visible`。
+3. **接口请求耗时是否可测？** 可以。核心 API 在统一 Axios 拦截器生成关联的 start/end，并用单调时钟记录 duration。
+4. **接口失败是否可区分？** 可以。支持 business、HTTP、network、timeout、cancelled 与 duplicate skipped 分类。
+5. **不同版本性能数据是否可以区分？** 可以。每个事件包含 environment 和由实际 checkout 注入的完整 commit SHA。
+
+API 合同检查结论：没有修改请求路径、请求字段、响应字段、请求头或后端处理；只在 Axios 本地 `config.meta` 保存性能 trace。
+
+当前性能成熟度：**L1 -> L2**。L2 表示四个重点页面和核心 API 已能在当前进程产生统一、可订阅、可区分版本的性能事实；不表示已经具备生产持久化或趋势分析。
 
 ## 9. 当前限制
 
@@ -164,6 +190,8 @@ page visit context ---- page explicit marker
 - 没有生产持久化、跨会话查询、趋势分析、商家维度分析或告警。
 - 本阶段只验证模型和采集边界，不能据此宣称任何性能瓶颈或优化结果。
 
-## 10. 下一阶段原则
+## 10. 下一阶段建议
 
-Phase 03 只能基于真实采集样本决定是否需要持久化以及是否调查 bundle、API、大列表或组件渲染；不得在没有样本前指定优化方向。
+下一阶段为 `P0-ADMIN-PERFORMANCE-OBSERVABILITY-PHASE-03`。
+
+Phase 03 应先在受控真实环境订阅并核验事件顺序、字段完整性、样本有效性和版本归属，再决定是否需要持久化。只有真实数据能够回答后，才能分别决定是否调查 bundle、API、大列表或组件渲染；不得在没有样本前指定优化方向。

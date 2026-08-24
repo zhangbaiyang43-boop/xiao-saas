@@ -1,6 +1,13 @@
 import axios from 'axios'
 import { message } from 'ant-design-vue'
 import { resolveApiBaseURL } from './apiBaseUrl'
+import {
+  classifyAdminApiFailure,
+  classifyAdminApiResponse,
+  finishAdminApiRequest,
+  readResponsePayloadSize,
+  startAdminApiRequest,
+} from '../utils/adminPerformance'
 
 const baseURL = resolveApiBaseURL()
 const pendingRequests = new Map()
@@ -80,11 +87,13 @@ instance.interceptors.request.use(
     const meta = config.meta || {}
     const shouldDedupe = Boolean(meta.fromPolling || meta.dedupe)
     const key = meta.dedupeKey || requestKey(config)
+    const performanceTrace = startAdminApiRequest(config)
     config.meta = {
       ...meta,
       requestKey: key,
       startedAt: performance.now(),
       page: window.location.pathname,
+      performanceTrace,
     }
     if (shouldDedupe && pendingRequests.has(key)) {
       const error = new Error('duplicate request skipped')
@@ -108,6 +117,10 @@ instance.interceptors.response.use(
     const meta = response.config?.meta || {}
     if (meta.requestKey) pendingRequests.delete(meta.requestKey)
     const duration = Math.round(performance.now() - (meta.startedAt || performance.now()))
+    finishAdminApiRequest(meta.performanceTrace, {
+      status: classifyAdminApiResponse(response.data),
+      ...readResponsePayloadSize(response.headers),
+    })
     devLog('[request] completed', {
       url: response.config?.url,
       duration,
@@ -121,6 +134,10 @@ instance.interceptors.response.use(
   error => {
     const meta = error.config?.meta || {}
     if (meta.requestKey) pendingRequests.delete(meta.requestKey)
+    finishAdminApiRequest(meta.performanceTrace, {
+      status: classifyAdminApiFailure(error),
+      ...readResponsePayloadSize(error.response?.headers),
+    })
     if (error.__duplicateSkipped) {
       return Promise.reject(error)
     }
