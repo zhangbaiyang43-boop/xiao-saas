@@ -49,7 +49,7 @@
       </view>
 
       <view class="member-main-action-card">
-        <text class="member-action-title">您有{{ bannerInfo.couponCount }}张优惠券可用</text>
+        <text class="member-action-title">{{ memberActionTitle }}</text>
         <view class="member-action-btn" @click="$emit('go-order')"><text>去点餐</text></view>
       </view>
 
@@ -140,6 +140,13 @@ export default {
     couponValidityText: { type: Function, required: true },
   },
   emits: ['go-order', 'reload', 'use-coupon', 'phone-auth'],
+  computed: {
+    memberActionTitle() {
+      const count = Number(this.bannerInfo && this.bannerInfo.couponCount || 0)
+      if (count > 0) return '您有' + count + '张优惠券可用'
+      return '去点餐，结算自动用优惠'
+    },
+  },
 }
 </script>
 

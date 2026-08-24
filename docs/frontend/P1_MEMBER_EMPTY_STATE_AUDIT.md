@@ -6,6 +6,7 @@ DATE=2026-08-24
 BASELINE=3a729d4
 SCOPE=优惠券 / 积分 / 消费记录 / 订单空态 + 会员 Tab「您有0张优惠券可用」
 CODE_CHANGE=NO
+PHASE-02=P1-MINI-UX-POLISH-IMPLEMENTATION-PHASE-02 已改：订单空态 desc + 去点餐；券可用 Tab 空态去点餐；会员 0 张券改标题。未加「我的」入口。
 NEW_COMPONENT=NO
 NEW_TOKEN=NO
 ADD_MINE_ENTRY=NO

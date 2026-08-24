@@ -29,7 +29,12 @@
 
     <!-- 空态 -->
     <view v-else-if="!coupons.length" class="state-wrap">
-      <state-empty :title="emptyTitle" desc="入会、消费或商家发券后，这里会自动显示。">
+      <state-empty
+        :title="emptyTitle"
+        :desc="emptyDesc"
+        :action-text="emptyActionText"
+        @action="goOrder"
+      >
         <template #icon><view class="empty-ticket-icon"><view class="eti-circle"></view></view></template>
       </state-empty>
     </view>
@@ -92,6 +97,11 @@ export default {
       if (activeTab.value === 'EXPIRED') return '没有过期优惠券'
       return '暂无可用优惠券'
     })
+    const emptyDesc = computed(() => {
+      if (activeTab.value === 'UNUSED') return '去点餐后，结算会自动用上最划算的一张。'
+      return '入会、消费或商家发券后，这里会自动显示。'
+    })
+    const emptyActionText = computed(() => (activeTab.value === 'UNUSED' ? '去点餐' : ''))
 
     const normalizeList = (data, status) => {
       if (Array.isArray(data)) return data
@@ -163,6 +173,8 @@ export default {
       error,
       tabs,
       emptyTitle,
+      emptyDesc,
+      emptyActionText,
       loadCoupons,
       switchTab,
       goDetail,

@@ -2,7 +2,7 @@
   <view class="page">
     <view class="page-header">
       <text class="ph-title">我的订单</text>
-      <text class="ph-desc">登录后可查看本店历史订单状态。</text>
+      <text class="ph-desc">这里显示本店已完成的历史订单。</text>
     </view>
 
     <view v-if="loading && !orders.length" class="state-wrap">
@@ -14,7 +14,13 @@
     </view>
 
     <view v-else-if="!orders.length" class="state-wrap">
-      <state-empty icon="🧾" title="暂无订单" desc="登录后在本店点餐，这里会显示历史订单。" />
+      <state-empty
+        icon="🧾"
+        title="暂无订单"
+        desc="在本店完成点餐后，历史订单会显示在这里。"
+        action-text="去点餐"
+        @action="goOrder"
+      />
     </view>
 
     <view v-else class="record-list">
@@ -110,6 +116,16 @@ export default {
         duration: 2000,
       })
     }
+    const goOrder = () => {
+      try { uni.setStorageSync('menu_focus_tab', 'order') } catch (_) {}
+      const pages = getCurrentPages()
+      const idx = pages.findIndex(p => (p.route || '').indexOf('subpkg-order/pages/menu') !== -1)
+      if (idx >= 0) {
+        uni.navigateBack({ delta: pages.length - 1 - idx })
+        return
+      }
+      uni.showToast({ title: '请先扫桌台二维码点餐', icon: 'none' })
+    }
 
     return {
       loading,
@@ -120,6 +136,7 @@ export default {
       reload,
       loadMore,
       explainNoDetail,
+      goOrder,
       formatDateTime,
       formatMoney,
       formatOrderStatusText,
