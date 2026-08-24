@@ -113,7 +113,7 @@ Constitution Deferred 已点名：AppButton、AppCard、typography/spacing/radiu
 | 硬编码 | 次数量级 | 典型去向 |
 |---|---|---|
 | `#fff` | 134 | 按钮字、卡片 |
-| `#07c160` / `#07C160` | 50 | 会员子包、券详情、核销页、部分未改 token 的页面 |
+| `#07c160` / `#07C160` | 剩余 | `pages/index`、`payment-handoff`、`verify-qr`；会员/券页 PHASE-03 已改 `--brand` |
 | `#111827` | 27 | 本可走 `--text-1` |
 | `#999` | 20 | 旧灰 |
 | `#f7f8fa` / `#f5f7fb` / `#edf0f2` | 10–15 | 接近 `--bg-page` / `--border` 的变体 |
@@ -490,7 +490,7 @@ CHROME 300  <  FLOATING 850  <  BLOCKING 3100  <  BLOCKING_TOP 3200  <  CRITICAL
 5. PriceText / AddBtn 注释写成「全站唯一」，实际只有 SpecSheet 用。
 6. 商家 `variables.scss` indigo 与线上绿品牌并存；死组件还在吃 indigo。
 7. 商家 Ant `borderRadius: 8` 与 `--radius-card: 12px` 不一致。
-8. 会员/券等业务页仍硬编码 `#07C160`；State* 已在 PHASE-02 改用 token。
+8. 会员/券页品牌绿已在 PHASE-03 改为 `--brand`。仍硬编码绿的包括 `pages/index`、`payment-handoff`、`verify-qr`。
 9. 小程序 Vant Weapp 注册但不用；商家 Vant + Ant 混用。
 10. Toast / Dialog 没有产品层组件，全是微信/浏览器原生，无法统一时长、位置、按钮文案样式。
 11. 无 spacing / type scale，字号至少 20 档，字重 600–900 无角色。

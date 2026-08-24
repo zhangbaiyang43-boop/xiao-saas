@@ -189,7 +189,7 @@ export default {
 /* ── 顶部绿色区 ───────────────────────────── */
 .page-header {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .ph-title {
@@ -232,7 +232,7 @@ export default {
 }
 
 .tab-item.active {
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-weight: 600;
 }
@@ -366,7 +366,7 @@ export default {
   line-height: 60rpx;
   margin-top: 16rpx;
   padding: 0 24rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 26rpx;
   font-weight: 600;
@@ -407,7 +407,7 @@ export default {
   width: 48rpx;
   height: 48rpx;
   border-radius: 50%;
-  border: 6rpx dashed #07C160;
+  border: 6rpx dashed var(--brand);
 }
 </style>
 

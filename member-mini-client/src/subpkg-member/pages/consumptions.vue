@@ -94,7 +94,7 @@ export default {
 /* ── 顶部绿色区 ───────────────────────────── */
 .page-header {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .ph-title {
@@ -174,7 +174,7 @@ export default {
 
 .rc-amount {
   flex-shrink: 0;
-  color: #07C160;
+  color: var(--brand);
   font-size: 36rpx;
   font-weight: bold;
 }

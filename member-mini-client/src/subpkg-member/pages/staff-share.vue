@@ -57,7 +57,7 @@ export default {
 
 .hero-card {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .hc-title {
@@ -97,7 +97,7 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 34rpx;
   font-weight: 600;

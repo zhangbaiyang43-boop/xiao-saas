@@ -205,7 +205,7 @@ export default {
 /* ── 英雄卡 ──────────────────────────────── */
 .hero-card {
   padding: 48rpx 32rpx 40rpx;
-  background: #07C160;
+  background: var(--brand);
 }
 
 .hc-title {
@@ -306,7 +306,7 @@ export default {
 }
 
 .refresh-btn {
-  color: #07C160;
+  color: var(--brand);
   font-size: 28rpx;
 }
 
@@ -345,7 +345,7 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 34rpx;
   font-weight: 600;
@@ -428,7 +428,7 @@ export default {
 }
 
 .visited-text {
-  color: #07C160;
+  color: var(--brand);
 }
 
 .ri-right {
@@ -450,7 +450,7 @@ export default {
 
 .badge-visited {
   background: #e8f9ef;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .badge-pending {
@@ -464,7 +464,7 @@ export default {
 }
 
 .reward-done {
-  color: #07C160;
+  color: var(--brand);
 }
 
 .reward-pending {

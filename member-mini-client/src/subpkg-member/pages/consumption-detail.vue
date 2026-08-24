@@ -139,7 +139,7 @@ export default {
 }
 
 .header-card {
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
   border-radius: 20rpx;
   padding: 60rpx 40rpx;
   text-align: center;

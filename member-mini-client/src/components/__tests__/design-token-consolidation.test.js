@@ -21,6 +21,27 @@ describe('P1 design token consolidation', () => {
     })
   })
 
+  it('moves member and coupon page brand greens onto --brand', () => {
+    const files = [
+      'subpkg-member/pages/card.vue',
+      'subpkg-member/pages/orders.vue',
+      'subpkg-member/pages/consumptions.vue',
+      'subpkg-member/pages/consumption-detail.vue',
+      'subpkg-member/pages/profile-edit.vue',
+      'subpkg-member/pages/invite.vue',
+      'subpkg-member/pages/points.vue',
+      'subpkg-member/pages/growth.vue',
+      'subpkg-member/pages/staff-share.vue',
+      'subpkg-coupon/pages/list.vue',
+      'subpkg-coupon/pages/detail.vue',
+    ]
+    files.forEach((rel) => {
+      const source = read(rel)
+      expect(source, rel).not.toMatch(/#07C160|#07c160|#059f4f/)
+      expect(source, rel).toContain('var(--brand)')
+    })
+  })
+
   it('moves State* colors onto existing tokens', () => {
     const empty = read('components/state-empty/state-empty.vue')
     const error = read('components/state-error/state-error.vue')

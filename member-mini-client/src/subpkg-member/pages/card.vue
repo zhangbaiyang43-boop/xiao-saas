@@ -111,7 +111,7 @@ export default {
 
 .member-card {
   color: #fff;
-  background: #07C160;
+  background: var(--brand);
   box-shadow: 0 10rpx 28rpx rgba(7, 193, 96, 0.24);
 }
 

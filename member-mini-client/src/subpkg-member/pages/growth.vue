@@ -258,7 +258,7 @@ export default {
 
 .points-value {
   font-size: 30rpx;
-  color: #07C160;
+  color: var(--brand);
   font-weight: 800;
 }
 
@@ -282,7 +282,7 @@ export default {
 }
 
 .benefits-title-icon {
-  color: #07C160;
+  color: var(--brand);
   font-size: 32rpx;
 }
 
@@ -318,7 +318,7 @@ export default {
 }
 
 .benefit-icon-glyph {
-  color: #07C160;
+  color: var(--brand);
   font-size: 40rpx;
 }
 

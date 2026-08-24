@@ -409,7 +409,7 @@ export default {
 }
 
 .form-input:focus {
-  border-color: #07C160;
+  border-color: var(--brand);
 }
 
 .avatar-section {
@@ -464,7 +464,7 @@ export default {
 
 .phone-btn {
   padding: 12rpx 24rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 24rpx;
   border-radius: 8rpx;
@@ -485,7 +485,7 @@ export default {
 
 .save-btn {
   height: 96rpx;
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
   color: #fff;
   font-size: 32rpx;
   font-weight: 600;
@@ -557,7 +557,7 @@ export default {
 
 .modal-confirm-btn {
   height: 88rpx;
-  background: linear-gradient(135deg, #07C160 0%, #059f4f 100%);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-dark) 100%);
   color: #fff;
   font-size: 30rpx;
   font-weight: 600;
@@ -576,7 +576,7 @@ export default {
 .code-btn {
   width: 200rpx;
   height: 88rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 26rpx;
   border-radius: 12rpx;

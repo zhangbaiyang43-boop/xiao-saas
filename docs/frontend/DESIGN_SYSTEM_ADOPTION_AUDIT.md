@@ -191,7 +191,7 @@ CI：`scripts/check-ui-contracts.mjs` L13–19。
 
 **P1 — 多页重复、触摸即可收**
 
-1. 会员/券页硬编码 `#07C160` → `--brand`
+1. 会员/券页硬编码 `#07C160` → `--brand` — **已在 PHASE-03 完成**
 2. 同构 `.page-header` / `.state-wrap`：改其中一页时抄已采用 token 的写法，不抽新 layout 组件（本阶段禁止设计新组件）
 3. DishList 加减：若改到该文件，加号改用已有 AddBtn
 4. `--btn-primary-*`：改到某个主 CTA 时用现有 token，不要第三种高度

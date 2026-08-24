@@ -262,7 +262,7 @@ export default {
 
 .badge-active {
   background: #e8f9ef;
-  color: #07C160;
+  color: var(--brand);
 }
 
 .badge-inactive {
@@ -305,7 +305,7 @@ export default {
   width: 48rpx;
   height: 48rpx;
   border-radius: 50%;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 26rpx;
   font-weight: bold;
@@ -369,7 +369,7 @@ export default {
   width: 100%;
   height: 96rpx;
   line-height: 96rpx;
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
   font-size: 36rpx;
   font-weight: 700;

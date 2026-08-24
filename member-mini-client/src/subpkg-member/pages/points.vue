@@ -124,7 +124,7 @@ export default {
 }
 
 .header {
-  background: #07C160;
+  background: var(--brand);
   padding: 60rpx 40rpx 48rpx;
   display: flex;
   flex-direction: column;
@@ -206,7 +206,7 @@ export default {
   font-size: 36rpx;
   font-weight: 800;
 
-  &.plus { color: #07C160; }
+  &.plus { color: var(--brand); }
   &.minus { color: #6b7280; }
 }
 </style>
