@@ -60,7 +60,7 @@
       :category-scroll-top="categoryScrollTop"
       :scroll-target="scrollTarget"
       :last-order-items="lastOrderItems"
-      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
+      :loading="loading"
       :load-error="loadError"
       :all-dishes="allDishes"
       :image-load-failed="imageLoadFailed"
@@ -418,7 +418,7 @@
 
     <LoadingStates
       :load-error="loadError"
-      :loading="loading || (!orderingContextReady && !orderingContextFailed)"
+      :loading="loading"
       @retry-load="retryMenuInitialization"
     />
 
@@ -427,7 +427,7 @@
 </template>
 
 <script>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, getCurrentInstance } from 'vue'
 import { getMenuItems, getShopInfo } from '@/api/order'
 import { getCustomerCoupons, remindMeForCoupon } from '@/api/coupon'
 import { buildCouponNudgeState } from '../utils/couponNudge.mjs'
@@ -484,7 +484,7 @@ import BottomNav from '../components/BottomNav.vue'
 import LoadingStates from '../components/LoadingStates.vue'
 import { orderModeText, confirmationText, successText, specText, authSheetText, memberChoiceText, toastText, modalText } from '../utils/orderText.js'
 
-const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
+const observeMenuFirstContent = (page, pagePerfKey) => new Promise((resolve) => {
   try {
     nextTick(() => {
       if (!page?.menuInitializationActive || !page?.$refs?.dishList) return resolve(false)
@@ -500,12 +500,6 @@ const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
           }, firstContentAt)
           markStart('first_content_to_interactive', firstContentAt)
         }
-        if (markEventOnce('interactive', `${pagePerfKey}:interactive`, { basic_ordering_actions_ready: true }, firstContentAt)) {
-          recordDurationFromStart('menu_onload_to_interactive', 'menu_onload_to_interactive', {
-            definition: 'category_and_dish_actions_available',
-          }, firstContentAt)
-          recordDurationFromStart('first_content_to_interactive', 'first_content_to_interactive', undefined, firstContentAt)
-        }
         resolve(true)
       })
     })
@@ -514,6 +508,17 @@ const observeMenuContent = (page, pagePerfKey) => new Promise((resolve) => {
     resolve(false)
   }
 })
+const recordMenuInteractive = (page, pagePerfKey) => {
+  if (!page?.orderingContextReady) return false
+  const interactiveAt = Date.now()
+  if (markEventOnce('interactive', `${pagePerfKey}:interactive`, { basic_ordering_actions_ready: true }, interactiveAt)) {
+    recordDurationFromStart('menu_onload_to_interactive', 'menu_onload_to_interactive', {
+      definition: 'ordering_context_ready',
+    }, interactiveAt)
+    recordDurationFromStart('first_content_to_interactive', 'first_content_to_interactive', undefined, interactiveAt)
+  }
+  return true
+}
 const wxLogin = () => new Promise((resolve, reject) => {
   uni.login({
     provider: 'weixin',
@@ -551,6 +556,7 @@ export default {
     const loadError = ref(false)
     const orderingContextReady = ref(false)
     const orderingContextFailed = ref(false)
+    const menuPagePerfKey = ref('')
     const criticalInitializationRetry = ref(null)
     const retryMenuInitialization = () => criticalInitializationRetry.value?.()
     const ordering = ref(false)
@@ -1329,7 +1335,7 @@ export default {
       } catch (e) {
         console.warn('[loadShopSettings] failed', e)
       }
-      return false
+      return Boolean(cachedData)
     }
 
     // 第2批：菜单按 tenant_id 存本地缓存，带一个 version（后端用这批菜品自己的 updated_at
@@ -1356,12 +1362,21 @@ export default {
       if (categories.value.length) activeCategory.value = categories.value[0]
     }
 
+    const pageInstance = getCurrentInstance()
+    const observeFirstContentNow = () => {
+      const page = pageInstance?.proxy
+      const key = menuPagePerfKey.value
+      if (!page || !key) return Promise.resolve(false)
+      return observeMenuFirstContent(page, key)
+    }
+
     const loadMenu = async () => {
       const cached = readMenuCache()
       const hadCacheHit = Boolean(cached && cached.items.length)
       if (hadCacheHit) {
         allDishes.value = cached.items
         applyDefaultCategoryIfNeeded()
+        observeFirstContentNow()
       }
       loading.value = !hadCacheHit
       loadError.value = false
@@ -1379,6 +1394,7 @@ export default {
         if (!hadCacheHit || version !== cached.version) {
           allDishes.value = mapped
           applyDefaultCategoryIfNeeded()
+          observeFirstContentNow()
         }
         markEvent('menu_data_processed', { item_count: mapped.length, cache_hit: hadCacheHit })
         recordSample('menu_processing', Date.now() - processingStartedAt, {
@@ -1405,7 +1421,7 @@ export default {
 
     return {
       tableNo, shopId, shopName, shopLogo, memberSinceText, tableDisplayText, orderModeDisplayText, showTableHint, todayActivity, orderMode, orderModeText, confirmationText, confirmPaymentLabel, authAmountLabel, successText, specText,
-      loading, loadError, orderingContextReady, orderingContextFailed, retryMenuInitialization, criticalInitializationRetry, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
+      loading, loadError, orderingContextReady, orderingContextFailed, menuPagePerfKey, retryMenuInitialization, criticalInitializationRetry, ordering, showCart, showSuccess, earnedCoupon, itemsExpanded, toggleItemsExpanded, closeOrderConfirm,
       couponReminderTemplateId, reminderRequested, requestingReminder, requestCouponReminder,
       showWelcomeCoupon, welcomeCouponData, welcomeCouponCondText, checkWelcomeCoupon, closeWelcomeCoupon, goOrderFromWelcomeCoupon,
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
@@ -1454,6 +1470,7 @@ export default {
   onLoad: function (options) {
     return (async () => {
       const pagePerfKey = `menu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      this.menuPagePerfKey = pagePerfKey
       // A direct share/deep-link to menu must not leave a cold-launch mark for a later entry page.
       discardStart('launch_to_entry')
       markEvent('menu_onload')
@@ -1524,7 +1541,8 @@ export default {
           loadCriticalContext: () => this.loadShopSettings(),
           onCriticalReady: async () => {
             this.orderingContextReady = true
-            return observeMenuContent(this, pagePerfKey)
+            await observeMenuFirstContent(this, pagePerfKey)
+            recordMenuInteractive(this, pagePerfKey)
           },
           onCriticalFailure: (error) => {
             this.orderingContextFailed = true

@@ -1,12 +1,13 @@
 # MENU PERFORMANCE AUDIT
 
 ```
-MODE=READ_ONLY_AUDIT
+MODE=AUDIT_PLUS_PHASE_02
 DATE=2026-08-24
-PHASE=P0-MENU-PERFORMANCE-AUDIT-PHASE-01
-BASELINE=eae3469 当前 release candidate
-SCOPE=member-mini-client（菜单首屏）。后端只作分类证据，不改代码。
-CODE_CHANGE=NO
+PHASE=P0-MENU-PERFORMANCE-IMPLEMENTATION-PHASE-02
+AUDIT_PHASE=P0-MENU-PERFORMANCE-AUDIT-PHASE-01
+BASELINE=fe7f6e0（审计稿）；实施前 HEAD 同
+SCOPE=member-mini-client 菜单首屏展示时序。后端 / 支付 / 加购规则 / 图片 / DishList 结构未改。
+CODE_CHANGE=YES（仅 menu.vue 编排 + 契约测试）
 NEW_FRAMEWORK=NO
 BUSINESS_LOGIC_CHANGE=NO
 AUTHORITY=
@@ -17,7 +18,7 @@ AUTHORITY=
   member-mini-client/src/api/request.js
 ```
 
-只审计，不重构，不引入框架，不改业务逻辑。
+PHASE-01 只审计。PHASE-02 只改前端展示时序，不重构菜单组件，不引入框架，不改加购/支付业务逻辑。
 
 生产监控（本阶段给定，未再查库）：
 
@@ -303,3 +304,43 @@ P50 1.4s 的主体应是 `max(menu_api.client_ms, shop_info_api.client_ms)` + �
 已经写了菜单/店铺缓存，但骨架屏和打点仍等网络，所以重复进店也快不了。
 
 下一刀最小：让缓存真正露出列表，并分开两条指标。然后再用已经在报的 `menu_api` / `shop_info_api` 拆 A 和 B。
+
+---
+
+## 11. PHASE-02 已落地（展示时序）
+
+落地文件：`member-mini-client/src/subpkg-order/pages/menu.vue`。契约：`composables/__tests__/menu-first-content-timing.test.js`。`useMenuInitialization.js` 未改：两次关键请求仍必须成功才 `onCriticalReady`。
+
+| 项 | 实施 |
+|---|---|
+| 缓存揭骨架 | DishList / LoadingStates 的 `:loading` 只跟 `loading`（菜单是否还没有可展示数据）。不再 OR `!orderingContextReady` |
+| first_content | 缓存写入 `allDishes` 后立刻 `observeMenuFirstContent`（不 await 网络）。冷启动在菜单 JSON 写入后再观察。定义仍是分类+菜卡节点 |
+| interactive | `orderingContextReady = true` 之后才 `recordMenuInteractive`。加购 / 选规格 / 提交闸门未改 |
+| shop 缓存 | `loadShopSettings` 网络失败时 `return Boolean(cachedData)`：有已应用的店铺缓存则 critical 成功，没有则仍失败、不能加购 |
+| 后台刷新 | `loadMenu` 仍 `await getMenuItems`；version 变化才替换列表 |
+
+新加载流程：
+
+```
+onLoad markStart
+  loadMenu()
+    有缓存 → 写 allDishes，loading=false，observe first_content（不挡网络）
+    GET /v1/menu/items 后台刷新
+  loadShopSettings()
+    有缓存 → applyShopInfoState
+    GET /v1/shop/info 刷新；失败且无缓存 → 不能加购
+  Promise.all 都 true
+    → orderingContextReady = true（可加购）
+    → record interactive
+```
+
+### 指标预期（生产需等下一轮采样，本阶段没有新 P50/P95）
+
+| 指标 | PHASE-01 基线 | PHASE-02 预期 |
+|---|---|---|
+| `menu_onload_to_first_content` 重复进店（有菜单缓存） | P50 1396 / P95 3749 | 降到读 storage + 一帧（约 100–300ms 视机型） |
+| `menu_onload_to_first_content` 冷启动无缓存 | 同上 | 约等于菜单接口客户端耗时 + 一帧，不再等 shop/info |
+| `menu_onload_to_interactive` | 与 first_content 几乎相等 | 仍约 `max(menu_api, shop_info_api)`；与 first_content 分开 |
+| `first_content_to_interactive` | ≈ 0 | 重复进店应为正值（看见列表到可点餐） |
+
+未做：后端、虚拟列表、图片、加购规则。PHASE-03 仍是先查 `menu_api` / `shop_info_api` 的 `server_ms` vs `network_approx_ms`。
