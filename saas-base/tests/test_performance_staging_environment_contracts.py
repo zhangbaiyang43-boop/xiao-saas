@@ -182,9 +182,23 @@ def test_lifecycle_freezes_source_and_uses_argument_array_process_calls() -> Non
     assert "Get-Content -Raw $LocalEnv" not in lifecycle
 
 
+def test_lifecycle_rejects_untracked_and_ignored_admin_build_inputs() -> None:
+    lifecycle = _read("lifecycle")
+    assert "git status --porcelain" in lifecycle
+    assert "--untracked-files=all" in lifecycle
+    assert "--ignored=matching" in lifecycle
+    assert "-- admin-h5" in lifecycle
+
+
 def test_lifecycle_uses_cryptographic_randomness_and_preserves_valid_env() -> None:
     lifecycle = _read("lifecycle")
-    assert "RandomNumberGenerator" in lifecycle
+    assert "RandomNumberGenerator]::Create()" in lifecycle
+    assert ".GetBytes(" in lifecycle
+    assert "BitConverter]::ToString" in lifecycle
+    assert "::Fill(" not in lifecycle
+    assert "::GetInt32(" not in lifecycle
+    assert "UInt32" in lifecycle
+    assert "4294000000" in lifecycle
     assert "Get-Random" not in lifecycle
     assert "git check-ignore" in lifecycle
     assert "PERF_OWNER_LOGIN_CODE" in lifecycle
@@ -200,6 +214,54 @@ def test_lifecycle_contains_the_exact_dataset_and_health_sequence() -> None:
     assert "http://127.0.0.1:18989/release.json" in lifecycle
     assert "alembic" in lifecycle.lower()
     assert "heads" in lifecycle.lower()
+
+
+def test_start_builds_every_current_application_image_before_starting() -> None:
+    lifecycle = _read("lifecycle")
+    assert "build', '--pull', 'migrate', 'dataset', 'owner-code', 'backend', 'admin" in lifecycle
+    build_index = lifecycle.index("build', '--pull'")
+    first_up_index = lifecycle.index("up', '-d', 'mysql', 'redis")
+    assert build_index < first_up_index
+
+
+def test_missing_compose_ports_are_treated_as_zero_not_one_null_entry() -> None:
+    lifecycle = _read("lifecycle")
+    assert "Where-Object { $null -ne $_ }" in lifecycle
+
+
+def test_port_preflight_is_scoped_to_each_corresponding_service() -> None:
+    lifecycle = _read("lifecycle")
+    assert "function Test-ServiceOwnsPublishedPort" in lifecycle
+    assert "-Service 'admin' -Port 18989" in lifecycle
+    assert "-Service 'backend' -Port 19898" in lifecycle
+    assert "existingContainers" not in lifecycle
+
+
+def test_saved_evidence_is_parsed_validated_and_whitelisted_json() -> None:
+    lifecycle = _read("lifecycle")
+    assert "function ConvertTo-SafeDatasetEvidence" in lifecycle
+    assert "function ConvertTo-SafeOwnerCodeEvidence" in lifecycle
+    assert "ConvertFrom-Json" in lifecycle
+    assert "Expected exactly one JSON object" in lifecycle
+    for allowed in (
+        "status",
+        "dataset_version",
+        "tenant_id",
+        "counts",
+        "dataset_scale",
+        "semantic_checksum",
+        "category_count",
+        "order_statuses",
+        "member_levels",
+        "invalid_print_statuses",
+        "orphan_member_accounts",
+        "menu_item_spec_count",
+        "deleted",
+    ):
+        assert f"'{allowed}'" in lifecycle
+    assert "@('status', 'dataset_version', 'tenant_id', 'phone', 'purpose')" in lifecycle
+    assert "ConvertTo-Json" in lifecycle
+    assert "Save-SafeEvidence -Name $EvidenceName -Lines $result" not in lifecycle
 
 
 def test_destroy_is_exactly_scoped_and_requires_explicit_confirmation() -> None:

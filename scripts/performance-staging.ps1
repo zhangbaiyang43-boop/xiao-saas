@@ -47,6 +47,13 @@ function Assert-AdminSourceIdentity {
         if ($LASTEXITCODE -ne 0) {
             throw 'admin-h5 differs from the frozen source identity'
         }
+        $uncommittedBuildInputs = & git status --porcelain --untracked-files=all --ignored=matching -- admin-h5
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to inspect admin-h5 build inputs'
+        }
+        if (-not [string]::IsNullOrWhiteSpace(($uncommittedBuildInputs -join ''))) {
+            throw 'admin-h5 contains untracked or ignored build inputs'
+        }
     }
     finally {
         Pop-Location
@@ -105,13 +112,30 @@ function New-CryptoHex {
     param([int]$ByteCount = 24)
 
     $bytes = [byte[]]::new($ByteCount)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    return [System.Convert]::ToHexString($bytes).ToLowerInvariant()
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    }
+    finally {
+        $generator.Dispose()
+    }
+    return ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
 }
 
 function New-CryptoSixDigitCode {
-    $value = [System.Security.Cryptography.RandomNumberGenerator]::GetInt32(0, 1000000)
-    return $value.ToString('D6', [System.Globalization.CultureInfo]::InvariantCulture)
+    $bytes = [byte[]]::new(4)
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        do {
+            $generator.GetBytes($bytes)
+            $value = [System.BitConverter]::ToUInt32($bytes, 0)
+        } while ($value -ge [UInt64]4294000000)
+    }
+    finally {
+        $generator.Dispose()
+    }
+    $code = [UInt32]($value % 1000000)
+    return $code.ToString('D6', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
 function Initialize-LocalEnvironment {
@@ -173,14 +197,14 @@ function Assert-ResolvedComposeIsolation {
     }
 
     foreach ($dataService in ('mysql', 'redis')) {
-        $ports = @($resolved.services.$dataService.ports)
+        $ports = @($resolved.services.$dataService.ports | Where-Object { $null -ne $_ })
         if ($ports.Count -ne 0) {
             throw "$dataService must not publish a host port"
         }
     }
     $expectedPorts = @{ admin = '18989'; backend = '19898' }
     foreach ($entry in $expectedPorts.GetEnumerator()) {
-        $ports = @($resolved.services.($entry.Key).ports)
+        $ports = @($resolved.services.($entry.Key).ports | Where-Object { $null -ne $_ })
         if ($ports.Count -ne 1) {
             throw "$($entry.Key) must publish exactly one loopback port"
         }
@@ -194,16 +218,35 @@ function Assert-ResolvedComposeIsolation {
     }
 }
 
-function Assert-LoopbackPortsAvailable {
-    $existingContainers = Invoke-Compose @('ps', '--quiet')
-    if ($existingContainers.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace(($existingContainers -join ''))) {
-        return
+function Test-ServiceOwnsPublishedPort {
+    param(
+        [Parameter(Mandatory = $true)][string]$Service,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][int]$ContainerPort
+    )
+
+    $published = & docker compose --project-name $ProjectName --env-file $LocalEnv -f $ComposeFile port $Service $ContainerPort 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
     }
-    foreach ($port in (18989, 19898)) {
-        $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
-        if ($null -ne $listener) {
-            throw "Loopback port $port is already occupied"
-        }
+    return (($published -join '').Trim() -eq "127.0.0.1:$Port")
+}
+
+function Assert-LoopbackPortsAvailable {
+    $adminListener = Get-NetTCPConnection -State Listen -LocalPort 18989 -ErrorAction SilentlyContinue
+    if (
+        $null -ne $adminListener -and
+        -not (Test-ServiceOwnsPublishedPort -Service 'admin' -Port 18989 -ContainerPort 80)
+    ) {
+        throw 'Loopback port 18989 is occupied outside the admin staging service'
+    }
+
+    $backendListener = Get-NetTCPConnection -State Listen -LocalPort 19898 -ErrorAction SilentlyContinue
+    if (
+        $null -ne $backendListener -and
+        -not (Test-ServiceOwnsPublishedPort -Service 'backend' -Port 19898 -ContainerPort 8000)
+    ) {
+        throw 'Loopback port 19898 is occupied outside the backend staging service'
     }
 }
 
@@ -251,6 +294,98 @@ function Save-SafeEvidence {
     )
 }
 
+function ConvertFrom-SingleJsonObject {
+    param([Parameter(Mandatory = $true)][object[]]$Output)
+
+    $candidates = @()
+    foreach ($item in $Output) {
+        $line = ([string]$item).Trim()
+        if (-not ($line.StartsWith('{') -and $line.EndsWith('}'))) {
+            continue
+        }
+        try {
+            $parsed = $line | ConvertFrom-Json
+        }
+        catch {
+            throw 'Performance tool emitted an invalid JSON object'
+        }
+        if ($null -eq $parsed -or $parsed -isnot [System.Management.Automation.PSCustomObject]) {
+            throw 'Performance tool JSON must be an object'
+        }
+        $candidates += ,$parsed
+    }
+    if ($candidates.Count -ne 1) {
+        throw 'Expected exactly one JSON object from the performance tool'
+    }
+    return $candidates[0]
+}
+
+function ConvertTo-WhitelistedJson {
+    param(
+        [Parameter(Mandatory = $true)][System.Management.Automation.PSCustomObject]$Report,
+        [Parameter(Mandatory = $true)][string[]]$AllowedFields
+    )
+
+    $actualFields = @($Report.PSObject.Properties.Name)
+    $unexpected = @($actualFields | Where-Object { $_ -notin $AllowedFields })
+    if ($unexpected.Count -ne 0) {
+        throw 'Performance tool JSON contains a non-whitelisted field'
+    }
+    $safe = [ordered]@{}
+    foreach ($field in $AllowedFields) {
+        if ($field -in $actualFields) {
+            $safe[$field] = $Report.$field
+        }
+    }
+    return ($safe | ConvertTo-Json -Compress -Depth 8)
+}
+
+function ConvertTo-SafeDatasetEvidence {
+    param([Parameter(Mandatory = $true)][object[]]$Output)
+
+    $report = ConvertFrom-SingleJsonObject -Output $Output
+    if (
+        $report.status -ne 'PASS' -or
+        $report.dataset_version -ne $DatasetVersion -or
+        $report.tenant_id -ne 'perf_test_only_v1'
+    ) {
+        throw 'Dataset evidence does not match the fixed performance identity'
+    }
+    $allowed = @(
+        'status',
+        'dataset_version',
+        'tenant_id',
+        'counts',
+        'dataset_scale',
+        'semantic_checksum',
+        'category_count',
+        'order_statuses',
+        'member_levels',
+        'invalid_print_statuses',
+        'orphan_member_accounts',
+        'menu_item_spec_count',
+        'deleted'
+    )
+    return ConvertTo-WhitelistedJson -Report $report -AllowedFields $allowed
+}
+
+function ConvertTo-SafeOwnerCodeEvidence {
+    param([Parameter(Mandatory = $true)][object[]]$Output)
+
+    $report = ConvertFrom-SingleJsonObject -Output $Output
+    if (
+        $report.status -ne 'PASS' -or
+        $report.dataset_version -ne $DatasetVersion -or
+        $report.tenant_id -ne 'perf_test_only_v1' -or
+        $report.phone -notmatch '^199\*{4}0000$' -or
+        $report.purpose -ne 'login'
+    ) {
+        throw 'Owner-code evidence does not match the fixed safe identity'
+    }
+    $allowed = @('status', 'dataset_version', 'tenant_id', 'phone', 'purpose')
+    return ConvertTo-WhitelistedJson -Report $report -AllowedFields $allowed
+}
+
 function Invoke-DatasetCommand {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('create','verify','cleanup')][string]$DatasetAction,
@@ -262,7 +397,8 @@ function Invoke-DatasetCommand {
         $arguments += @('--manifest-out', '/tmp/PERF_DATASET_V1.json')
     }
     $result = Invoke-Compose $arguments
-    Save-SafeEvidence -Name $EvidenceName -Lines $result
+    $safeJson = ConvertTo-SafeDatasetEvidence -Output $result
+    Save-SafeEvidence -Name $EvidenceName -Lines @($safeJson)
 }
 
 function Invoke-DatasetLifecycle {
@@ -275,7 +411,8 @@ function Invoke-DatasetLifecycle {
 
 function Invoke-OwnerCodePreparation {
     $result = Invoke-Compose @('run', '--rm', 'owner-code')
-    Save-SafeEvidence -Name 'owner-code-safe-report.json' -Lines $result
+    $safeJson = ConvertTo-SafeOwnerCodeEvidence -Output $result
+    Save-SafeEvidence -Name 'owner-code-safe-report.json' -Lines @($safeJson)
 }
 
 function Wait-HttpHealthy {
@@ -350,6 +487,7 @@ function Invoke-Prepare {
 
 function Invoke-StagingStart {
     Invoke-Prepare
+    [void](Invoke-Compose @('build', '--pull', 'migrate', 'dataset', 'owner-code', 'backend', 'admin'))
     [void](Invoke-Compose @('up', '-d', 'mysql', 'redis'))
     Wait-ContainerHealthy -Service 'mysql'
     Wait-ContainerHealthy -Service 'redis'
