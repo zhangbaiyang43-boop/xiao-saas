@@ -28,6 +28,9 @@ test.db
 .DS_Store
 Thumbs.db
 
+# Isolated agent worktrees
+.worktrees/
+
 # Env files (may contain secrets)
 .env
 .env.*
