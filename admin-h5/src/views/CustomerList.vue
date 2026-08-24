@@ -15,6 +15,15 @@
       />
     </div>
 
+    <!-- 已有会员数据仍在展示，仅提示这次同步失败；不清空上一次真实加载的结果 -->
+    <div v-if="loadError && customers.length > 0 && loadedKeyword === keyword" class="section-block" style="padding:0 16px 12px">
+      <a-alert type="warning" show-icon message="会员同步失败，当前显示的是上次数据" style="border-radius:10px">
+        <template #action>
+          <a-button size="small" :loading="loading" @click="loadCustomers">重试</a-button>
+        </template>
+      </a-alert>
+    </div>
+
     <!-- 内容 -->
     <div class="page-body">
       <template v-if="loading && customers.length === 0">
@@ -23,7 +32,9 @@
         <a-skeleton active avatar :paragraph="{ rows: 2 }" class="customer-skeleton" style="margin-bottom:0" />
       </template>
 
-      <div v-else-if="loadError" class="error-state">
+      <!-- 没有旧数据可退回（首次加载失败），或者旧数据是上一个关键词的结果（不能
+           冒充成这次搜索的结果）：两种情况都必须显式失败，不能落入空会员列表。 -->
+      <div v-else-if="loadError && (customers.length === 0 || loadedKeyword !== keyword)" class="error-state">
         <ExclamationCircleOutlined style="font-size:40px;color:#d1d5db" />
         <div>加载失败，请检查网络</div>
         <a-button type="primary" ghost @click="loadCustomers">重新加载</a-button>
@@ -35,7 +46,7 @@
 
       <template v-else>
         <div class="customer-list animate-in" style="animation-delay:.04s">
-          <div v-for="customer in visibleCustomers" :key="customer.id" class="customer-card tap-shrink" @click="goToDetail(customer.id)">
+          <div v-for="customer in customers" :key="customer.id" class="customer-card tap-shrink" @click="goToDetail(customer.id)">
             <div class="avatar">
               <UserOutlined style="font-size:20px;color:var(--brand)" />
             </div>
@@ -68,12 +79,12 @@
             </div>
           </div>
         </div>
-        <!-- 加载更多 -->
-        <div v-if="customers.length > pageSize" style="text-align:center;padding:12px 0">
-          <a-button v-if="visibleCustomers.length < customers.length" ghost type="primary" @click="pageSize += 30">
-            加载更多（还有 {{ customers.length - visibleCustomers.length }} 位）
+        <!-- 加载更多：真实翻页，向后端请求下一页，不是展开本地已拉取数据 -->
+        <div v-if="customers.length > 0" style="text-align:center;padding:12px 0">
+          <a-button v-if="customers.length < total" ghost type="primary" :loading="loadingMore" @click="loadMore">
+            加载更多（共 {{ total }} 位，还有 {{ total - customers.length }} 位）
           </a-button>
-          <span v-else style="font-size:12px;color:var(--text-3)">已显示全部 {{ customers.length }} 位会员</span>
+          <span v-else style="font-size:12px;color:var(--text-3)">已显示全部 {{ total }} 位会员</span>
         </div>
       </template>
     </div>
@@ -81,7 +92,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { UserOutlined, EllipsisOutlined, ExclamationCircleOutlined } from '@ant-design/icons-vue'
@@ -90,12 +101,20 @@ import { deleteCustomer, getCustomers, restoreCustomer } from '../api'
 import { markPageContentReady } from '../utils/adminPerformance'
 
 const router = useRouter()
+// 真实分页状态：page/total 来自后端，不是前端切片。PAGE_SIZE 是每次真实请求
+// 后端的行数，不是"从已拉取数据里展示多少条"的本地上限。
+const PAGE_SIZE = 30
 const customers = ref([])
+const total = ref(0)
+const page = ref(1)
 const keyword = ref('')
+// customers.value 是为哪个关键词加载的——搜索失败时用它判断能不能把旧数据当作
+// "当前查询的上次结果"继续展示，还是必须整块进入错误态（不能把上一次搜索的结果
+// 冒充成这次搜索的结果）。null 表示还没有任何成功加载过。
+const loadedKeyword = ref(null)
 const loading = ref(false)
+const loadingMore = ref(false)
 const loadError = ref(false)
-const pageSize = ref(30)
-const visibleCustomers = computed(() => customers.value.slice(0, pageSize.value))
 
 function apiData(res) { return res?.data || res || {} }
 function extractRows(data) {
@@ -109,36 +128,40 @@ function sourceText(item) {
 function isActive(c) { return Number(c.status) === 1 }
 function formatPhone(p) { if (!p) return '未留手机号'; return String(p).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') }
 function formatMemberNo(no) { return String(no).padStart(6, '0') }
+function mapCustomer(item) {
+  return {
+    id: item.id,
+    name: item.name || item.nickname || '微信会员',
+    phone: item.phone,
+    source: sourceText(item),
+    last_consume_time: item.last_consume_time,
+    status: item.status,
+  }
+}
 
+// 首次加载 / 刷新 / 换关键词搜索：始终请求真实第 1 页。失败时不清空 customers，
+// 交给模板的 loadError 分支决定是保留旧数据加横幅，还是（关键词已经变了）整块
+// 进入错误态——两种情况都不能显示成"没有会员"。
 async function loadCustomers() {
   loading.value = true
-  loadError.value = false
-  pageSize.value = 30
+  page.value = 1
   let resultStatus = 'success'
   try {
-    const params = { page: 1, page_size: 100, skip: 0, limit: 100 }
-    if (keyword.value) { params.search = keyword.value; params.keyword = keyword.value }
+    const params = { page: 1, page_size: PAGE_SIZE }
+    if (keyword.value) params.search = keyword.value
     const res = await getCustomers(params)
-    if (res.code !== 200) {
-      resultStatus = 'error'
-      message.error(res.msg || '会员加载失败')
-      customers.value = []
-      return
-    }
-    const rows = extractRows(apiData(res))
-    customers.value = rows.map(item => ({
-      id: item.id,
-      name: item.name || item.nickname || '微信会员',
-      phone: item.phone,
-      source: sourceText(item),
-      last_consume_time: item.last_consume_time,
-      status: item.status,
-    }))
+    if (res.code !== 200) throw new Error(res.msg || '会员加载失败')
+    const data = apiData(res)
+    const rows = extractRows(data)
+    customers.value = rows.map(mapCustomer)
+    total.value = Number(data?.total ?? customers.value.length)
+    loadedKeyword.value = keyword.value
+    loadError.value = false
     resultStatus = customers.value.length ? 'success' : 'empty'
-  } catch {
-    customers.value = []
+  } catch (e) {
     loadError.value = true
     resultStatus = 'error'
+    if (e?.message) message.error(e.message)
   } finally {
     loading.value = false
     markPageContentReady({
@@ -146,6 +169,31 @@ async function loadCustomers() {
       status: resultStatus,
       data_count: customers.value.length,
     })
+  }
+}
+
+// 翻页：真实请求后端下一页，追加到已有列表；失败不回退已加载的行、不推进
+// page，方便原地重试，且已经正确显示的会员不受影响。
+async function loadMore() {
+  if (loadingMore.value || loading.value) return
+  if (customers.value.length >= total.value) return
+  const nextPage = page.value + 1
+  loadingMore.value = true
+  try {
+    const params = { page: nextPage, page_size: PAGE_SIZE }
+    if (keyword.value) params.search = keyword.value
+    const res = await getCustomers(params)
+    if (res.code !== 200) throw new Error(res.msg || '加载更多失败')
+    const data = apiData(res)
+    const rows = extractRows(data)
+    customers.value = customers.value.concat(rows.map(mapCustomer))
+    total.value = Number(data?.total ?? total.value)
+    page.value = nextPage
+    loadError.value = false
+  } catch (e) {
+    message.error(e?.message || '加载更多失败，请重试')
+  } finally {
+    loadingMore.value = false
   }
 }
 

@@ -35,6 +35,7 @@ xiao/
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE03A_ORDER_STATE_MIGRATION.md OrderManage 状态真实性 Touch And Migrate（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE03B_DASHBOARD_MIGRATION.md Dashboard 经营视图 Touch And Migrate（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE03C_DISH_STATE_MIGRATION.md 菜品管理（MenuManage.vue）状态真实性 Touch And Migrate（只读，验收证据）
+│   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE03D_MEMBER_DATA_MIGRATION.md 会员管理（CustomerList.vue）数据可达性 Touch And Migrate（只读，验收证据）
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）
 │   │   ├── HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md CTA/CartBar 决策（OPEN）
@@ -161,6 +162,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03A_ORDER_STATE_MIGRATION.md`（OrderManage 状态真实性 Touch And Migrate，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03B_DASHBOARD_MIGRATION.md`（Dashboard 经营视图 Touch And Migrate，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03C_DISH_STATE_MIGRATION.md`（菜品管理 MenuManage.vue 状态真实性 Touch And Migrate，只读，验收证据）
+- `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03D_MEMBER_DATA_MIGRATION.md`（会员管理 CustomerList.vue 数据可达性 Touch And Migrate，只读，验收证据）
 - `docs/frontend/DESIGN_SYSTEM_CURRENT.md`（视觉现状）
 - `docs/frontend/MENU_PERFORMANCE_AUDIT.md`（菜单首屏性能，只读）
 - Obsidian `04_前端规范/前端规范.md`（拆分与端侧约定）
