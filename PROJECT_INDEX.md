@@ -35,6 +35,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - **顾客端结构合同（必须）**：[member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md](./member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md)
 - 视觉现状审计（只读，不是新规范）：[docs/frontend/DESIGN_SYSTEM_CURRENT.md](./docs/frontend/DESIGN_SYSTEM_CURRENT.md)
 - 小程序功能可见性审计：[docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md](./docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md)
+- 小程序订单入口审计：[docs/frontend/ORDER_ENTRY_AUDIT.md](./docs/frontend/ORDER_ENTRY_AUDIT.md)
 - 本机前端约定：`...\04_前端规范\前端规范.md`
 - 小程序样式 token：`member-mini-client/src/styles/global.scss`
 - 商家样式 token：`admin-h5/src/styles/global.scss`
