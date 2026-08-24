@@ -71,7 +71,7 @@
       </div>
 
       <!-- 会员极简看板：weekly 扫一眼会员体系是否在跑 -->
-      <div class="section-block animate-in" style="animation-delay:.045s">
+      <div v-if="!statsError" class="section-block animate-in" style="animation-delay:.045s">
         <StatCard
           title="会员总数"
           :value="memberPulse.total"
@@ -83,12 +83,12 @@
       </div>
 
       <!-- 近7天营业额趋势 -->
-      <div class="section-block animate-in" style="animation-delay:.05s">
+      <div v-if="!statsError" class="section-block animate-in" style="animation-delay:.05s">
         <TrendChart title="近7天营业额" :data="overview.trend7d" :loading="!statsLoaded" />
       </div>
 
       <!-- 首单→二单转化率：新客愿不愿意第二次付钱，比注册数/领券数更能说明门店的真实吸引力 -->
-      <div class="section-block animate-in" style="animation-delay:.06s">
+      <div v-if="!statsError" class="section-block animate-in" style="animation-delay:.06s">
         <InsightCard :icon="RiseOutlined" title="首单→二单转化率" :loading="!statsLoaded">
           <div class="second-order-desc">{{ secondOrderConversionText }}</div>
           <div class="second-order-hint">统计口径：首单满 {{ stats.secondOrderConversion?.window_days || 30 }} 天的顾客中，有多少在这个窗口内完成了第二单</div>
@@ -98,7 +98,20 @@
       <!-- 智能营销：算法在后台帮商家做的事，商家在这里只看结果；要调档位去详情页郑重做决定 -->
       <div class="section-block animate-in" style="animation-delay:.08s">
         <InsightCard :icon="ThunderboltOutlined" title="智能营销" to="/coupons" :loading="!marketingLoaded">
-          <template v-if="!marketingEnabled">
+          <template v-if="marketingError">
+            <a-alert
+              type="error"
+              show-icon
+              message="营销状态加载失败"
+              description="当前无法确认自动营销是否运行"
+            >
+              <template #action>
+                <a-button size="small" :loading="!marketingLoaded" @click.stop="loadMarketingPreview">重试</a-button>
+              </template>
+            </a-alert>
+          </template>
+
+          <template v-else-if="marketingEnabled === false">
             <div class="marketing-off-desc">自动营销已关闭，系统不会自动给新客 / 老客发券</div>
             <a-button
               block
@@ -109,7 +122,7 @@
             >开启自动营销</a-button>
           </template>
 
-          <template v-else>
+          <template v-else-if="marketingEnabled === true">
             <div class="marketing-tier-row">
               <span class="marketing-tier-badge"><span class="live-dot"></span>{{ currentIntensityLabel }}档运行中</span>
               <span v-if="hasEnoughData" class="marketing-aov">客单价 ¥{{ marketingPreview.aov }}</span>
@@ -130,7 +143,7 @@
       </div>
 
       <!-- 近7天热销榜 -->
-      <div v-if="topDishRankItems.length || !statsLoaded" class="section-block animate-in" style="animation-delay:.12s">
+      <div v-if="!statsError && (topDishRankItems.length || !statsLoaded)" class="section-block animate-in" style="animation-delay:.12s">
         <RankList title="近7天热销榜" :items="topDishRankItems" :loading="!statsLoaded" />
       </div>
 
@@ -183,7 +196,8 @@ const refreshing = ref(false)
 const revenueDisplay = useCountUp(computed(() => overview.value.todayRevenue))
 const flaggedTables = ref([])
 const subscriptionStrip = ref(null)
-const systemStatus = ref({ api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'warning', checked_at: '', message: '正在检测系统状态' })
+const systemStatus = ref({ api: null, database: null, order: null, payment: null, printer: null, checked_at: '', message: '' })
+const systemStatusState = ref('loading')
 const systemStatusLoading = ref(false)
 
 const todayLabel = computed(() => {
@@ -244,6 +258,7 @@ const topDishRankItems = computed(() => overview.value.topDishes7d.map(d => ({
 // 聚合状态。后端 message 字段（可能是"数据库连接正常"这类运维诊断信息）从未被
 // 读取到这里，文案是固定的产品文案，不是结构化状态到文本的映射。
 const printerActionable = computed(() =>
+  systemStatusState.value === 'success' &&
   Boolean(systemStatus.value.printer) && systemStatus.value.printer !== 'ok'
 )
 
@@ -280,6 +295,13 @@ const todoItems = computed(() => {
       subtext: systemStatusCheckedLabel.value,
       action: () => loadSystemStatus(),
     })
+  } else if (systemStatusState.value === 'error') {
+    items.push({
+      key: 'system-unknown',
+      urgent: false,
+      text: '打印机状态暂未确认，请点击重试',
+      action: () => loadSystemStatus(),
+    })
   }
   // 拆单套券这类问题没有做自动拦截（容易误伤正常大桌聚餐），改成这里"异常才说话"：
   // 同一桌同一天扎堆出现好几个"首单新客"才提示，正常情况完全不出现。
@@ -297,14 +319,14 @@ const todoItems = computed(() => {
 
 async function loadSystemStatus() {
   systemStatusLoading.value = true
+  systemStatusState.value = 'loading'
   try {
     const res = await getMerchantSystemStatus()
     if (res?.code !== 200 || !res.data) throw new Error(res?.msg || 'status unavailable')
     systemStatus.value = { ...systemStatus.value, ...res.data }
+    systemStatusState.value = 'success'
   } catch {
-    // 静默失败：首页 todo 现在只认 printer 这一个已确认的状态字段，拿不到最新探测
-    // 结果时保留上一次已知值就够了，不需要再单独展示一条"系统状态获取失败"这种
-    // 纯技术提示——这本身也是本 phase 要静默掉的同一类噪音。
+    systemStatusState.value = 'error'
   } finally {
     systemStatusLoading.value = false
   }
@@ -391,7 +413,7 @@ async function loadStats(pollMeta = {}) {
   try {
     await Promise.all([
       getDashboardStats().then(r => {
-        if (r?.code !== 200) return
+        if (r?.code !== 200 || !r.data) throw new Error(r?.msg || 'dashboard stats unavailable')
         const d = r.data || {}
         stats.value = { todayNewMembers: d.today_new_members || 0, secondOrderConversion: d.second_order_conversion || null }
         memberPulse.value = {
@@ -429,11 +451,15 @@ async function onPullRefresh() {
 
 // 智能营销卡片
 const marketingLoaded = ref(false)
+const marketingError = ref(false)
 const marketingPreview = ref({})
 const enablingMarketing = ref(false)
 const intensityLabels = { conservative: '保守', standard: '标准', aggressive: '激进' }
 
-const marketingEnabled = computed(() => marketingPreview.value?.consumption_coupon?.enabled !== false)
+const marketingEnabled = computed(() => {
+  const enabled = marketingPreview.value?.consumption_coupon?.enabled
+  return typeof enabled === 'boolean' ? enabled : null
+})
 const currentIntensity = computed(() => marketingPreview.value?.intensity_outcomes?.current_intensity || 'standard')
 const currentIntensityLabel = computed(() => intensityLabels[currentIntensity.value] || '标准')
 const hasEnoughData = computed(() => marketingPreview.value?.intensity_outcomes?.has_enough_data ?? false)
@@ -449,11 +475,15 @@ const redemptionRateLabel = computed(() => {
 })
 
 async function loadMarketingPreview() {
+  marketingLoaded.value = false
+  marketingError.value = false
   try {
     const res = await getMarketingPreview()
-    if (res?.code === 200) marketingPreview.value = res.data || {}
+    if (res?.code !== 200 || !res.data) throw new Error(res?.msg || 'marketing status unavailable')
+    if (typeof res.data?.consumption_coupon?.enabled !== 'boolean') throw new Error('marketing status missing')
+    marketingPreview.value = res.data
   } catch {
-    // 静默失败：营销卡片不是关键操作路径，失败了就保持骨架屏，不打扰商家
+    marketingError.value = true
   } finally {
     marketingLoaded.value = true
   }

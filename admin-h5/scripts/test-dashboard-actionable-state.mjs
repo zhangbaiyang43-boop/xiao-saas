@@ -170,10 +170,9 @@ assert.ok(
 )
 
 // ---------------------------------------------------------------------------
-// P0 Dashboard Internal Health Silence: only a CONFIRMED printer problem may
-// ever produce a home-screen system todo. payment/api/order/database status
-// still feed the internal systemStatus/systemStatusItems/systemHealthy layer
-// (kept for future diagnostics) but must never independently surface --
+// P0 Dashboard printer-state truth: a CONFIRMED printer problem may produce
+// an abnormal todo, while a failed status request may only produce an explicit
+// unknown todo. payment/api/order/database status must never independently surface --
 // payment=warning in particular reflects CONFIGURATION_NOT_READY (wx_mchid /
 // wx_pay_enabled not set up yet), not a RUNTIME_INCIDENT, and belongs on the
 // settings/activation page, not the owner's home screen.
@@ -182,11 +181,20 @@ assert.ok(
 // Mirror of Dashboard.vue's printerActionable + the fixed todo text/gate --
 // pure function of the fetched status object, exactly what a real payload
 // from getMerchantSystemStatus() would look like.
-function computeSystemTodo(status) {
+function computeSystemTodo(status, requestState = 'success') {
+  if (requestState === 'error') return '打印机状态暂未确认，请点击重试'
+  if (requestState !== 'success') return null
   const printerActionable = Boolean(status.printer) && status.printer !== 'ok'
   if (!printerActionable) return null
   return '打印服务异常，请检查打印机或手动处理订单'
 }
+
+assert.equal(computeSystemTodo({ printer: null }, 'loading'), null, 'loading printer state must not be treated as healthy or abnormal')
+assert.equal(
+  computeSystemTodo({ printer: null }, 'error'),
+  '打印机状态暂未确认，请点击重试',
+  'failed printer status fetch must render an explicit unknown state',
+)
 
 // ---- CASE A: payment=warning, printer=ok -> no system todo at all ---------
 assert.equal(
@@ -262,8 +270,9 @@ assert.ok(
   'the old all-fields-must-be-ok gate must be gone -- payment/api/order/database can no longer trigger the home-screen todo',
 )
 assert.ok(
-  dashboardSource.includes("Boolean(systemStatus.value.printer) && systemStatus.value.printer !== 'ok'"),
-  'printerActionable must be derived solely from the printer field',
+  dashboardSource.includes("systemStatusState.value === 'success' &&") &&
+    dashboardSource.includes("Boolean(systemStatus.value.printer) && systemStatus.value.printer !== 'ok'"),
+  'printerActionable must require a successful status response and a confirmed non-ok printer field',
 )
 assert.ok(
   dashboardSource.includes("text: '打印服务异常，请检查打印机或手动处理订单'"),
@@ -295,9 +304,36 @@ assert.ok(
   'loadSystemStatus() must be retained, not deleted',
 )
 assert.ok(
-  dashboardSource.includes("const systemStatus = ref({ api: 'warning', database: 'warning', order: 'warning', payment: 'warning', printer: 'warning'"),
+  dashboardSource.includes("const systemStatus = ref({ api: null, database: null, order: null, payment: null, printer: null"),
   'the systemStatus ref must still carry the full backend payload shape (api/database/order/payment/printer), not just printer',
 )
+assert.ok(
+  dashboardSource.includes("const systemStatusState = ref('loading')"),
+  'printer status fetch must start in an explicit loading state',
+)
+assert.ok(
+  dashboardSource.includes("text: '打印机状态暂未确认，请点击重试'"),
+  'failed printer status fetch must surface unknown, never abnormal or normal',
+)
+
+// Dashboard statistics must reject business-level failures instead of
+// presenting the initial numeric zeroes as successfully refreshed facts.
+assert.ok(
+  dashboardSource.includes("if (r?.code !== 200 || !r.data) throw new Error(r?.msg || 'dashboard stats unavailable')"),
+  'dashboard stats non-200 response must enter the existing error state',
+)
+assert.ok(
+  dashboardSource.includes('v-if="!statsError"'),
+  'secondary statistics must not render default zero values while the dashboard stats request is failed',
+)
+
+// Marketing is tri-state. Missing/failed data cannot default to enabled.
+assert.ok(dashboardSource.includes('const marketingError = ref(false)'))
+assert.ok(dashboardSource.includes('v-if="marketingError"'))
+assert.ok(dashboardSource.includes('营销状态加载失败'))
+assert.ok(dashboardSource.includes('marketingEnabled === false'))
+assert.ok(dashboardSource.includes('marketingEnabled === true'))
+assert.ok(!dashboardSource.includes('consumption_coupon?.enabled !== false'))
 
 // Pre-Candidate-Certification cleanup: the "overall health" aggregation layer
 // (systemStatusItems/systemHealthy) had zero consumers after printerActionable

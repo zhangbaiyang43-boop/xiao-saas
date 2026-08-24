@@ -322,6 +322,44 @@ await test('Owner initial full remains ordered after payment-mode initialization
   assert.ok(mounted.indexOf('await loadPaymentMode()') < mounted.indexOf('startSync()'))
 })
 
+await test('Order page distinguishes sync error from an empty successful result', () => {
+  const source = read('src/views/OrderManage.vue')
+  assert.ok(source.includes('syncFailed,'), 'OrderManage must consume the existing syncFailed state')
+  assert.ok(source.includes('const orderLoadError = computed('), 'OrderManage must derive an explicit initial sync error state')
+  const errorState = source.indexOf('v-if="orderLoadError"')
+  const emptyState = source.indexOf('v-else-if="!loading && !syncFailed && orders.length === 0"')
+  assert.ok(errorState !== -1, 'initial sync failure must render a persistent error state')
+  assert.ok(emptyState !== -1, 'empty must require a successful, non-failed sync')
+  assert.ok(errorState < emptyState, 'error must be evaluated before empty')
+})
+
+await test('Owner order adapters reject fulfilled business errors instead of normalizing them to empty', () => {
+  const source = read('src/views/OrderManage.vue')
+  const fullAdapter = source.split('async function fetchOwnerFull() {', 2)[1].split('async function fetchOwnerChanges(cursor)', 1)[0]
+  const deltaAdapter = source.split('async function fetchOwnerChanges(cursor) {', 2)[1].split('const {', 1)[0]
+  assert.ok(fullAdapter.includes('body?.code !== 200 || !Array.isArray(body.data)'), 'full adapter must reject non-success and malformed envelopes')
+  assert.ok(deltaAdapter.includes('res?.code !== 200 || !res.data || !Array.isArray(res.data.items)'), 'delta adapter must reject non-success and malformed envelopes')
+  assert.ok(!fullAdapter.includes('res?.data?.data || []'), 'full business errors must not fall back to an empty order list')
+  assert.ok(!deltaAdapter.includes('const data = res?.data || {}'), 'delta business errors must not fall back to an empty change set')
+})
+
+await test('Manual order refresh only reports success for an acknowledged successful sync', () => {
+  const source = read('src/views/OrderManage.vue')
+  const manualRefresh = source.split('async function manualRefresh() {', 2)[1].split('const pendingCount', 1)[0]
+  assert.ok(manualRefresh.includes('const result = await loadOrders()'))
+  assert.ok(manualRefresh.includes('if (result?.ok !== true)'))
+  assert.ok(manualRefresh.indexOf("if (result?.ok !== true)") < manualRefresh.indexOf("message.success('已刷新'"))
+})
+
+await test('Historical order request failure has an error state and cannot fall through to empty', () => {
+  const source = read('src/views/OrderManage.vue')
+  assert.ok(source.includes('const historicalError = ref(false)'))
+  assert.ok(source.includes('v-if="!isLiveToday && historicalError"'))
+  assert.ok(source.includes('!historicalError && sourceOrders.length === 0'))
+  assert.ok(source.includes('res?.code !== 200 || !res.data || !Array.isArray(res.data.items)'))
+  assert.ok(!source.includes('if (res?.code && res.code !== 200)'))
+})
+
 if (failures.length) {
   console.error(`P0-08 RED failures: ${failures.length}`)
   process.exit(1)

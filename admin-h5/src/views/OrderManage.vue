@@ -68,22 +68,31 @@
     </div>
 
     <!-- 网络警告 -->
-    <div v-if="pollFailCount >= 3" class="section-block" style="padding-top:8px">
-      <a-alert type="warning" show-icon message="网络连接异常，数据可能不是最新的" style="border-radius:10px">
+    <div v-if="syncFailed && orders.length > 0" class="section-block" style="padding-top:8px">
+      <a-alert type="warning" show-icon message="订单同步失败，当前显示的是上次数据" style="border-radius:10px">
         <template #action>
           <a-button size="small" @click="manualRefresh">重试</a-button>
         </template>
       </a-alert>
     </div>
 
+    <!-- 首次同步失败不是空订单；必须保留独立错误状态和重试入口。 -->
+    <div v-if="orderLoadError" class="section-block" style="padding-top:8px">
+      <a-alert type="error" show-icon message="订单加载失败，请检查网络后重试" style="border-radius:10px">
+        <template #action>
+          <a-button size="small" :loading="loading" @click="manualRefresh">重试</a-button>
+        </template>
+      </a-alert>
+    </div>
+
     <!-- 骨架屏 -->
-    <div v-if="loading && orders.length === 0" class="section-block">
+    <div v-else-if="loading && orders.length === 0" class="section-block">
       <a-skeleton active :paragraph="{ rows: 4 }" style="background:var(--bg-card);border-radius:12px;padding:16px;margin-bottom:12px" />
       <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:12px;padding:16px" />
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="!loading && orders.length === 0" style="padding:48px 0">
+    <div v-else-if="!loading && !syncFailed && orders.length === 0" style="padding:48px 0">
       <a-empty description="今天还没有订单，去桌码页面打印桌贴码，贴到桌上后顾客即可扫码点餐">
         <template #image><OrderedListOutlined style="font-size:60px;color:#d1d5db" /></template>
       </a-empty>
@@ -308,13 +317,20 @@
           @click="statusFilter = f.val"
         >{{ f.label }}</span>
       </div>
+      <div v-if="!isLiveToday && historicalError" style="padding:8px 16px 0">
+        <a-alert type="error" show-icon message="历史订单加载失败" description="请检查网络后重试，失败不代表这一天没有订单" style="border-radius:10px">
+          <template #action>
+            <a-button size="small" :loading="historicalLoading" @click="loadHistoricalOrders({ append: false })">重试</a-button>
+          </template>
+        </a-alert>
+      </div>
       <div v-if="sourceOrders.length > 0 && sortedOrders.length === 0" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
         <template v-if="searchQuery.trim()">没找到匹配"{{ searchQuery.trim() }}"的订单，换个桌号/尾号/菜名试试</template>
         <template v-else-if="statusFilter">{{ isLiveToday ? '今天' : '这一天' }}没有{{ statusFilters.find(f => f.val === statusFilter)?.label }}的订单</template>
         <template v-else-if="isLiveToday">今天的订单都还没到账，去"待支付"筛选看看</template>
         <template v-else>这一天没有订单</template>
       </div>
-      <div v-else-if="!loading && !historicalLoading && sourceOrders.length === 0 && isLiveToday === false" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
+      <div v-else-if="!loading && !historicalLoading && !historicalError && sourceOrders.length === 0 && isLiveToday === false" style="padding:32px 16px;text-align:center;color:var(--text-3);font-size:13px">
         这一天没有订单
       </div>
       <div
@@ -932,7 +948,11 @@ async function fetchOwnerFull() {
     { date_str: 'today' },
     { meta: { fromPolling: true, dedupe: true, dedupeKey: 'admin:orders:today:manage' } },
   )
-  return { orders: res?.data?.data || [], cursor: readOwnerCursor(res?.headers) }
+  const body = res?.data
+  if (body?.code !== 200 || !Array.isArray(body.data)) {
+    throw new Error(body?.msg || '订单加载失败')
+  }
+  return { orders: body.data, cursor: readOwnerCursor(res?.headers) }
 }
 
 async function fetchOwnerChanges(cursor) {
@@ -940,7 +960,10 @@ async function fetchOwnerChanges(cursor) {
     { cursor },
     { meta: { fromPolling: true, dedupe: true, dedupeKey: 'admin:orders:today:changes' } },
   )
-  const data = res?.data || {}
+  if (res?.code !== 200 || !res.data || !Array.isArray(res.data.items)) {
+    throw new Error(res?.msg || '订单同步失败')
+  }
+  const data = res.data
   return {
     items: Array.isArray(data.items) ? data.items : [],
     removed_ids: Array.isArray(data.removed_ids) ? data.removed_ids : [],
@@ -954,7 +977,7 @@ const {
   orders,
   initialLoading,
   backgroundSyncing,
-  syncFailureCount,
+  syncFailed,
   lastSuccessfulSyncAt,
   alertEnabled,
   audioNeedsUnlock,
@@ -974,7 +997,7 @@ const {
 })
 
 const loading = computed(() => initialLoading.value || backgroundSyncing.value)
-const pollFailCount = syncFailureCount
+const orderLoadError = computed(() => syncFailed.value && orders.value.length === 0)
 const lastRefreshed = computed(() => {
   if (!lastSuccessfulSyncAt.value) return ''
   const now = new Date(lastSuccessfulSyncAt.value)
@@ -997,7 +1020,11 @@ async function loadReviews() {
 
 async function manualRefresh() {
   await loadPaymentMode()
-  await loadOrders()
+  const result = await loadOrders()
+  if (result?.ok !== true) {
+    message.error('刷新失败，请检查网络后重试')
+    return
+  }
   message.success('已刷新', 1)
 }
 
@@ -1039,6 +1066,7 @@ const historicalOrders = ref([])
 const historicalTotal = ref(0)
 const historicalPage = ref(1)
 const historicalLoading = ref(false)
+const historicalError = ref(false)
 const HISTORICAL_PAGE_SIZE = 20
 
 function setHistoryDate(key) {
@@ -1068,6 +1096,8 @@ async function loadHistoricalOrders({ append = false } = {}) {
   if (isLiveToday.value) return
   if (historicalLoading.value) return
   historicalLoading.value = true
+  historicalError.value = false
+  if (!append) historicalOrders.value = []
   try {
     const page = append ? historicalPage.value + 1 : 1
     const res = await getOrders({
@@ -1076,18 +1106,18 @@ async function loadHistoricalOrders({ append = false } = {}) {
       page_size: HISTORICAL_PAGE_SIZE,
       ...historySearchParams(),
     })
-    if (res?.code && res.code !== 200) {
-      message.error(res.msg || '历史订单加载失败')
-      if (!append) historicalOrders.value = []
+    if (res?.code !== 200 || !res.data || !Array.isArray(res.data.items)) {
+      historicalError.value = true
+      message.error(res?.msg || '历史订单加载失败')
       return
     }
-    const payload = res?.data || {}
-    const rows = mapOwnerOrders(Array.isArray(payload.items) ? payload.items : [])
+    const payload = res.data
+    const rows = mapOwnerOrders(payload.items)
     historicalTotal.value = Number(payload.total || 0)
     historicalPage.value = Number(payload.page || page)
     historicalOrders.value = append ? historicalOrders.value.concat(rows) : rows
   } catch {
-    if (!append) historicalOrders.value = []
+    historicalError.value = true
     message.error('历史订单加载失败')
   } finally {
     historicalLoading.value = false
