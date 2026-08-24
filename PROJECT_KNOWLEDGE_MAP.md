@@ -24,6 +24,8 @@ xiao/
 ├── Claude.md / CLAUDE.md            项目总纲·工程操作（git/部署）
 ├── PRODUCT_RULES.md                 产品硬约束（点餐确认/支付）
 ├── docs/
+│   ├── marketing/
+│   │   └── MARKETING_AUTOMATION_COUPON_BACKEND_AUDIT.md 自动发券能力审计
 │   ├── frontend/
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）

@@ -45,6 +45,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 高频路径采用审计 PHASE-03（PriceText / 金额层级 / layer）：[docs/frontend/HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md](./docs/frontend/HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md)
 - 顾客端上线前 UX 体验审计：[docs/frontend/MINI_UX_POLISH_AUDIT.md](./docs/frontend/MINI_UX_POLISH_AUDIT.md)
 - 会员/空状态体验审计：[docs/frontend/P1_MEMBER_EMPTY_STATE_AUDIT.md](./docs/frontend/P1_MEMBER_EMPTY_STATE_AUDIT.md)
+- 营销自动化发券后端审计：[docs/marketing/MARKETING_AUTOMATION_COUPON_BACKEND_AUDIT.md](./docs/marketing/MARKETING_AUTOMATION_COUPON_BACKEND_AUDIT.md)
 - 本机前端约定：`...\04_前端规范\前端规范.md`
 - 小程序样式 token：`member-mini-client/src/styles/global.scss`
 - 商家样式 token：`admin-h5/src/styles/global.scss`
