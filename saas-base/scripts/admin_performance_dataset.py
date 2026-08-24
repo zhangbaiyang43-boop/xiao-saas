@@ -41,6 +41,7 @@ from app.utils.id_generator import generate_snowflake_id
 
 DATASET_VERSION = "PERF_DATASET_V1"
 PERF_TENANT_ID = "perf_test_only_v1"
+PERF_OWNER_PHONE = "19900000000"
 PERF_TENANT_NAME = "[PERFORMANCE TEST ONLY] PERF_DATASET_V1"
 PERF_USERNAME = "perf_operator"
 FIXED_ANCHOR = datetime(2026, 1, 1, 12, 0, 0)
@@ -436,7 +437,7 @@ async def _insert_dataset(
             tenant_id=PERF_TENANT_ID,
             name=PERF_TENANT_NAME,
             password_hash=get_password_hash(password),
-            phone="00000000000",
+            phone=PERF_OWNER_PHONE,
             status=True,
             is_open=True,
             payment_mode="postpay",

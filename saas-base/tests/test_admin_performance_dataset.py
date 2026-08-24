@@ -23,6 +23,7 @@ from app.models.tenant_config import TenantConfig
 from scripts.admin_performance_dataset import (
     DATASET_VERSION,
     DEFAULT_SCALE,
+    PERF_OWNER_PHONE,
     PERF_TENANT_ID,
     DatasetSafetyError,
     DatasetScale,
@@ -46,6 +47,9 @@ SMALL_SCALE = DatasetScale(dishes=21, members=12, orders=14, categories=3)
 def test_dataset_identity_is_fixed() -> None:
     assert DATASET_VERSION == "PERF_DATASET_V1"
     assert PERF_TENANT_ID == "perf_test_only_v1"
+    assert PERF_OWNER_PHONE == "19900000000"
+    assert len(PERF_OWNER_PHONE) == 11
+    assert PERF_OWNER_PHONE[:2] in {f"1{digit}" for digit in range(3, 10)}
 
 
 @pytest.mark.parametrize("app_env", ["production", "development", "local", "", "unknown"])
@@ -221,6 +225,11 @@ def test_dataset_lifecycle_is_repeatable_isolated_and_cleanable() -> None:
                 "orders": 14,
                 "order_items": expected_order_item_count(14),
             }
+
+            async with factory() as session:
+                tenant = await session.scalar(select(Tenant).where(Tenant.tenant_id == PERF_TENANT_ID))
+                assert tenant is not None
+                assert tenant.phone == PERF_OWNER_PHONE
 
             cleanup = await cleanup_dataset(factory)
             assert cleanup["status"] == "PASS"
