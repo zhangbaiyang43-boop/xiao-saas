@@ -47,6 +47,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 会员/空状态体验审计：[docs/frontend/P1_MEMBER_EMPTY_STATE_AUDIT.md](./docs/frontend/P1_MEMBER_EMPTY_STATE_AUDIT.md)
 - 小程序菜单首屏性能审计（只读）：[docs/frontend/MENU_PERFORMANCE_AUDIT.md](./docs/frontend/MENU_PERFORMANCE_AUDIT.md)
 - 菜单首屏 PHASE-03 度量（只读）：[docs/frontend/MENU_PERFORMANCE_PHASE03_MEASURE.md](./docs/frontend/MENU_PERFORMANCE_PHASE03_MEASURE.md)
+- 菜单首屏 PHASE-04 生产验证（只读，meta 未取到）：[docs/frontend/MENU_PERFORMANCE_PHASE04_VERIFY.md](./docs/frontend/MENU_PERFORMANCE_PHASE04_VERIFY.md)
 - 营销自动化发券后端审计：[docs/marketing/MARKETING_AUTOMATION_COUPON_BACKEND_AUDIT.md](./docs/marketing/MARKETING_AUTOMATION_COUPON_BACKEND_AUDIT.md)
 - 本机前端约定：`...\04_前端规范\前端规范.md`
 - 小程序样式 token：`member-mini-client/src/styles/global.scss`
