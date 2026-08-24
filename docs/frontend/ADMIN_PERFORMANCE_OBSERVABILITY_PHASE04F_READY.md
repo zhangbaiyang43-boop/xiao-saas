@@ -113,11 +113,13 @@ API 事件检查结果：0 个未配对事件、0 个负 duration、0 个非法 
 | 数据来源 | `PERF_DATASET_V1` / `source=test` | PASS |
 | 清理边界 | cleanup 仅删除性能租户数据且数量可核对 | PASS |
 | 前端边界 | `git diff 823708c1cbac8ba7c730715afafbecd27d641f09 -- admin-h5` 无差异 | PASS |
-| 生产边界 | 未连接生产数据库，生产 counts=`NOT_QUERIED` | PASS |
+| 生产边界 | 未连接生产数据库；`PRODUCTION_COUNTS=NOT_QUERIED` | PASS |
 
 边界审计确认没有修改 admin-h5 业务代码、业务 API、model、数据库 schema、migration、CI workflow、依赖或生产部署流程。`.env.local` 被忽略且未跟踪；测试中出现的 `user:secret` 是合成测试字面量，不是实际提交的凭据。
 
 Source A（production）与 Source B（本报告的 staging）必须独立统计，严禁混合计算 P50、P95 或错误率。本阶段仅建立 Source B，不补足生产样本，也不满足 Phase-05 性能归因或性能优化的进入条件。
+
+浏览器证据仅来自一台本地设备上的一次 Chrome 会话，只能证明该受控本地访问链路可产生事件；它不证明跨设备、跨浏览器或外部网络环境行为。
 
 ### 验证命令与结果
 
@@ -130,14 +132,33 @@ powershell -NoProfile -File scripts/performance-staging.ps1 -Action Verify
 powershell -NoProfile -File scripts/performance-staging.ps1 -Action Cleanup
 powershell -NoProfile -File scripts/performance-staging.ps1 -Action Start
 powershell -NoProfile -File scripts/performance-staging.ps1 -Action Verify
-py -3.10 -m pytest saas-base/tests/test_performance_staging_environment_contracts.py -q
+Push-Location saas-base
+$env:JWT_SECRET_KEY = 'phase04f-test-only-secret-32-bytes-minimum'
+py -3.10 -m pytest tests/test_performance_staging_environment_contracts.py -q
+
+# lifecycle 相关组合测试（69 个测试；包含上述 24 个 environment contracts）
+py -3.10 -m pytest -p no:cacheprovider `
+  tests/test_admin_performance_dataset.py `
+  tests/test_admin_performance_owner_code.py `
+  tests/test_performance_staging_environment_contracts.py -q
+
+# 最终相关 regression（106 个测试；包含上述 69 个测试）
+py -3.10 -m pytest -p no:cacheprovider `
+  tests/test_admin_performance_dataset.py `
+  tests/test_admin_performance_owner_code.py `
+  tests/test_performance_staging_environment_contracts.py `
+  tests/test_performance_contracts.py `
+  tests/test_menu_performance_contracts.py `
+  tests/test_tenant_account_contracts.py `
+  tests/test_merchant_staff_security_gate.py -q
+Pop-Location
 ```
 
 命令输出中的密码、验证码等敏感值不进入本报告；浏览器事件通过既有只读内存快照导出，没有新增网络上报。
 
-- staging environment contracts：23 passed
-- lifecycle 相关组合测试：68 passed
-- 最终相关 regression：105 passed，12 条既有 deprecation warnings，151.88s
+- staging environment contracts：24 passed
+- lifecycle 相关组合测试：69 passed（包含上述 24 个测试），2 条既有 deprecation warnings，50.35s
+- 最终相关 regression：106 passed（包含上述 69 个测试），12 条既有 deprecation warnings，150.36s
 - 浏览器读取事件后 dataset verify：PASS
 
 警告均为既有弃用警告，没有新增失败。具体设计与实现背景见：

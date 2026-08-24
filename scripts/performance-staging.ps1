@@ -18,8 +18,19 @@ $EvidenceRoot = Join-Path ([System.IO.Path]::GetTempPath()) "xiao-performance-st
 function Invoke-Compose {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $output = & docker compose --project-name $ProjectName --env-file $LocalEnv -f $ComposeFile @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Docker Compose writes normal progress messages to stderr. Windows
+        # PowerShell 5 turns those records into terminating errors when the
+        # script-wide preference is Stop, even when Compose exits successfully.
+        $ErrorActionPreference = 'Continue'
+        $output = & docker compose --project-name $ProjectName --env-file $LocalEnv -f $ComposeFile @Arguments 2>&1
+        $composeExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($composeExitCode -ne 0) {
         throw "docker compose failed for action: $($Arguments[0])"
     }
     return @($output)

@@ -186,6 +186,17 @@ def test_lifecycle_freezes_source_and_uses_argument_array_process_calls() -> Non
     assert "Get-Content -Raw $LocalEnv" not in lifecycle
 
 
+def test_compose_progress_on_stderr_does_not_become_a_false_failure() -> None:
+    lifecycle = _read("lifecycle")
+    invoke_compose = lifecycle.split("function Invoke-Compose", 1)[1].split(
+        "function Assert-DockerReady", 1
+    )[0]
+    assert "$ErrorActionPreference = 'Continue'" in invoke_compose
+    assert "$composeExitCode = $LASTEXITCODE" in invoke_compose
+    assert "$ErrorActionPreference = $previousErrorActionPreference" in invoke_compose
+    assert "if ($composeExitCode -ne 0)" in invoke_compose
+
+
 def test_lifecycle_rejects_untracked_and_ignored_admin_build_inputs() -> None:
     lifecycle = _read("lifecycle")
     assert "git status --porcelain" in lifecycle
