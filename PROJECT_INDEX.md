@@ -33,6 +33,10 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 ## 前端规则
 
 - **顾客端结构合同（必须）**：[member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md](./member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md)
+- **商家后台前端治理合同（必须）**：[docs/frontend/ADMIN_FRONTEND_CONSTITUTION.md](./docs/frontend/ADMIN_FRONTEND_CONSTITUTION.md)
+- 商家后台前端设计审计（治理合同依据，只读）：[docs/frontend/ADMIN_FRONTEND_DESIGN_AUDIT.md](./docs/frontend/ADMIN_FRONTEND_DESIGN_AUDIT.md)
+- 商家后台高频页面治理符合度审计（只读）：[docs/frontend/ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md](./docs/frontend/ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md)
+- 商家后台前端系统 Phase-01 审计与蓝图（只读，Phase-02 规则设计依据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md)
 - 视觉现状审计（只读，不是新规范）：[docs/frontend/DESIGN_SYSTEM_CURRENT.md](./docs/frontend/DESIGN_SYSTEM_CURRENT.md)
 - 设计系统采用审计：[docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md](./docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md)
 - 小程序功能可见性审计：[docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md](./docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md)
