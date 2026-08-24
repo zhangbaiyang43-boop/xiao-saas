@@ -271,6 +271,8 @@ P50 1.4s 的主体应是 `max(menu_api.client_ms, shop_info_api.client_ms)` + �
 
 ### PHASE-03（先查数，再决定动谁）
 
+度量结论见 [MENU_PERFORMANCE_PHASE03_MEASURE.md](./MENU_PERFORMANCE_PHASE03_MEASURE.md)。现网仍是 PHASE-01 分位；PHASE-02 小程序尚未进入 `perf_sample`。
+
 从同一套 `perf_samples` 拉：
 
 | 指标 | 要用的 meta |
