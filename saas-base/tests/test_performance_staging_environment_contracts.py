@@ -216,6 +216,13 @@ def test_lifecycle_contains_the_exact_dataset_and_health_sequence() -> None:
     assert "heads" in lifecycle.lower()
 
 
+def test_alembic_heads_runs_as_a_python_module_with_the_project_on_sys_path() -> None:
+    lifecycle = _read("lifecycle")
+    invocation = "run', '--rm', 'migrate', 'python', '-m', 'alembic', 'heads"
+    assert lifecycle.count(invocation) == 2
+    assert "--entrypoint', 'alembic', 'migrate', 'heads" not in lifecycle
+
+
 def test_start_builds_every_current_application_image_before_starting() -> None:
     lifecycle = _read("lifecycle")
     assert "build', '--pull', 'migrate', 'dataset', 'owner-code', 'backend', 'admin" in lifecycle

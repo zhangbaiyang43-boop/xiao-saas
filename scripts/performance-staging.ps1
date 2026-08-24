@@ -272,7 +272,7 @@ function Wait-ContainerHealthy {
 
 function Invoke-MigrationGate {
     [void](Invoke-Compose @('run', '--rm', 'migrate'))
-    $heads = Invoke-Compose @('run', '--rm', '--entrypoint', 'alembic', 'migrate', 'heads')
+    $heads = Invoke-Compose @('run', '--rm', 'migrate', 'python', '-m', 'alembic', 'heads')
     $headLines = @($heads | Where-Object { $_ -match '\(head\)' })
     if ($headLines.Count -ne 1) {
         throw 'Alembic must resolve to exactly one head'
@@ -465,7 +465,7 @@ function Invoke-StagingVerify {
     Initialize-LocalEnvironment
     Assert-ResolvedComposeIsolation
     Assert-ServicesHealthy
-    $heads = Invoke-Compose @('run', '--rm', '--entrypoint', 'alembic', 'migrate', 'heads')
+    $heads = Invoke-Compose @('run', '--rm', 'migrate', 'python', '-m', 'alembic', 'heads')
     if (@($heads | Where-Object { $_ -match '\(head\)' }).Count -ne 1) {
         throw 'Alembic must resolve to exactly one head'
     }
