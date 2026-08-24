@@ -1,3 +1,9 @@
+# AI entry
+
+Before any task in this repo, read `AI_ENTRYPOINT.md`, then `PROJECT_INDEX.md`.
+Do not invent a parallel spec. Frontend overlay/UI work must also read
+`member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md`.
+
 # Git workflow — standing authorization
 
 After finishing a code change in this repo, commit and push to `origin main` on GitHub
