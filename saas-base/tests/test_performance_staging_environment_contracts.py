@@ -93,7 +93,7 @@ def test_job_secrets_are_scoped_to_only_their_consuming_services() -> None:
     assert "PERF_OWNER_LOGIN_CODE: ${PERF_OWNER_LOGIN_CODE}" in owner_code
     assert "PERF_TEST_PASSWORD" not in owner_code
 
-    for service in ("migrate", "backend"):
+    for service in ("mysql", "redis", "migrate", "backend", "admin"):
         block = _service_block(compose, service)
         assert "PERF_TEST_PASSWORD" not in block
         assert "PERF_OWNER_LOGIN_CODE" not in block
