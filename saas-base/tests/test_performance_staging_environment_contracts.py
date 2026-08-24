@@ -1,0 +1,112 @@
+"""Static safety contracts for the local performance-staging environment."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+DEPLOY_ROOT = ROOT / "deploy" / "performance-staging"
+FILES = {
+    "compose": DEPLOY_ROOT / "compose.yml",
+    "dockerfile": DEPLOY_ROOT / "admin.Dockerfile",
+    "nginx": DEPLOY_ROOT / "nginx.conf",
+    "env": DEPLOY_ROOT / ".env.example",
+}
+FROZEN_SHA = "823708c1cbac8ba7c730715afafbecd27d641f09"
+EXPECTED_SERVICES = {
+    "mysql",
+    "redis",
+    "migrate",
+    "dataset",
+    "owner-code",
+    "backend",
+    "admin",
+}
+
+
+def _read(name: str) -> str:
+    return FILES[name].read_text(encoding="utf-8")
+
+
+def _service_names(compose: str) -> set[str]:
+    services_block = compose.split("services:", 1)[1].split("\nvolumes:", 1)[0]
+    return set(re.findall(r"^  ([a-z][a-z0-9-]*):\s*$", services_block, re.MULTILINE))
+
+
+def test_required_environment_files_exist() -> None:
+    missing = [str(path.relative_to(ROOT)) for path in FILES.values() if not path.is_file()]
+    assert not missing, f"missing performance-staging files: {missing}"
+
+
+def test_compose_has_only_the_fixed_service_topology() -> None:
+    compose = _read("compose")
+    assert "name: xiao-performance-staging" in compose
+    assert _service_names(compose) == EXPECTED_SERVICES
+
+
+def test_compose_is_loopback_only_and_data_services_are_private() -> None:
+    compose = _read("compose")
+    assert '"127.0.0.1:18989:80"' in compose
+    assert '"127.0.0.1:19898:8000"' in compose
+    assert '"3306:' not in compose
+    assert '"6379:' not in compose
+    assert "xiao_performance_staging" in compose
+    assert 'command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--lifespan", "off"]' in compose
+
+
+def test_compose_jobs_use_existing_guarded_tools() -> None:
+    compose = _read("compose")
+    assert "scripts/admin_performance_dataset.py" in compose
+    assert "scripts/admin_performance_owner_code.py" in compose
+    assert "PERF_DATASET_ACK" in compose
+    assert "PERF_DATASET_V1" in compose
+    assert "PERF_OWNER_LOGIN_CODE" in compose
+
+
+def test_admin_artifact_freezes_version_and_staging_environment() -> None:
+    compose = _read("compose")
+    dockerfile = _read("dockerfile")
+    assert f"ADMIN_RELEASE_SHA: ${{ADMIN_RELEASE_SHA:-{FROZEN_SHA}}}" in compose
+    assert "VITE_ADMIN_ENVIRONMENT: staging" in compose
+    assert "VITE_API_BASE_URL: /api" in compose
+    assert "FROM node:20-alpine" in dockerfile
+    assert "FROM nginx:1.27-alpine" in dockerfile
+    assert "npm ci" in dockerfile
+    assert "npm run build" in dockerfile
+    assert "^[0-9a-f]{40}$" in dockerfile
+    assert '"environment":"staging"' in dockerfile
+    assert '"builder":"local-docker-performance-staging"' in dockerfile
+
+
+def test_nginx_preserves_api_prefix_and_supports_spa_fallback() -> None:
+    nginx = _read("nginx")
+    assert "location /api/" in nginx
+    assert "proxy_pass http://backend:8000;" in nginx
+    assert "try_files $uri $uri/ /index.html;" in nginx
+
+
+def test_committed_environment_contains_no_usable_secrets() -> None:
+    env = _read("env")
+    assert "COMPOSE_PROJECT_NAME=xiao-performance-staging" in env
+    assert "APP_ENV=staging" in env
+    assert "PERFORMANCE_DB_NAME=xiao_performance_staging" in env
+    assert f"ADMIN_RELEASE_SHA={FROZEN_SHA}" in env
+    for key in (
+        "MYSQL_ROOT_PASSWORD",
+        "MYSQL_APP_PASSWORD",
+        "JWT_SECRET_KEY",
+        "PERF_TEST_PASSWORD",
+        "PERF_OWNER_LOGIN_CODE",
+    ):
+        assert re.search(rf"^{key}=$", env, re.MULTILINE)
+
+
+def test_environment_contract_has_no_production_endpoint_or_deploy_path() -> None:
+    combined = "\n".join(_read(name) for name in FILES)
+    lowered = combined.lower()
+    assert "saas.zhangbaiyang.com" not in lowered
+    assert "api.zhangbaiyang.com" not in lowered
+    assert "deploy-production" not in lowered
+    assert "docker system prune" not in lowered

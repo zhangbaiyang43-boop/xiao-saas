@@ -1,0 +1,152 @@
+name: xiao-performance-staging
+
+x-backend-build: &backend-build
+  context: ../../saas-base
+  dockerfile: Dockerfile
+
+x-backend-environment: &backend-environment
+  APP_ENV: staging
+  DEBUG: "false"
+  AUTO_CREATE_TABLES: "false"
+  DATABASE_URL: mysql+asyncmy://${PERFORMANCE_DB_USER:-perf_app}:${MYSQL_APP_PASSWORD}@mysql:3306/${PERFORMANCE_DB_NAME:-xiao_performance_staging}?charset=utf8mb4
+  REDIS_URL: redis://redis:6379/0
+  REDIS_ENABLED: "true"
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+  PERF_DATASET_ACK: ${PERF_DATASET_ACK:-PERF_DATASET_V1}
+  PERF_TEST_PASSWORD: ${PERF_TEST_PASSWORD}
+  PERF_OWNER_LOGIN_CODE: ${PERF_OWNER_LOGIN_CODE}
+  ALLOW_MOCK_MONEY_ENDPOINTS: "false"
+  ALLOW_MOCK_WECHAT_SESSION: "false"
+  SAAS_REAL_PAYMENT_ENABLED: "false"
+  SAAS_MANUAL_PAYMENT_ENABLED: "false"
+  TENCENTCLOUD_SECRET_ID: ""
+  TENCENTCLOUD_SECRET_KEY: ""
+  TENCENT_SMS_APP_ID: ""
+  TENCENT_SMS_SIGN_NAME: ""
+  TENCENT_SMS_LOGIN_TEMPLATE_ID: ""
+  WECHAT_APP_ID: ""
+  WECHAT_APP_SECRET: ""
+  WX_SP_MCHID: ""
+  WX_SP_APPID: ""
+  WX_SP_API_KEY_V3: ""
+  WX_SP_CERT_SERIAL: ""
+  WX_SP_PRIVATE_KEY: ""
+  FEIEYUN_USER: ""
+  FEIEYUN_UKEY: ""
+  PUBLIC_BASE_URL: http://127.0.0.1:18989
+  H5_ORDER_BASE_URL: http://127.0.0.1:18989
+  CORS_ORIGINS: http://127.0.0.1:18989
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${PERFORMANCE_DB_NAME:-xiao_performance_staging}
+      MYSQL_USER: ${PERFORMANCE_DB_USER:-perf_app}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_staging_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - performance_staging_private
+
+  redis:
+    image: redis:7.0-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_staging_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - performance_staging_private
+
+  migrate:
+    build: *backend-build
+    environment: *backend-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - performance_staging_private
+
+  dataset:
+    build: *backend-build
+    environment: *backend-environment
+    entrypoint: ["python", "scripts/admin_performance_dataset.py"]
+    command: ["verify", "--dataset-version", "PERF_DATASET_V1"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - performance_staging_private
+
+  owner-code:
+    build: *backend-build
+    environment: *backend-environment
+    entrypoint: ["python", "scripts/admin_performance_owner_code.py"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - performance_staging_private
+
+  backend:
+    build: *backend-build
+    environment: *backend-environment
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--lifespan", "off"]
+    ports:
+      - "127.0.0.1:19898:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - performance_staging_private
+
+  admin:
+    build:
+      context: ../..
+      dockerfile: deploy/performance-staging/admin.Dockerfile
+      args:
+        ADMIN_RELEASE_SHA: ${ADMIN_RELEASE_SHA:-823708c1cbac8ba7c730715afafbecd27d641f09}
+        VITE_ADMIN_ENVIRONMENT: staging
+        VITE_API_BASE_URL: /api
+        VITE_API_ORIGIN: http://127.0.0.1:18989
+    ports:
+      - "127.0.0.1:18989:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - performance_staging_private
+
+volumes:
+  mysql_staging_data:
+  redis_staging_data:
+
+networks:
+  performance_staging_private:
+    driver: bridge
