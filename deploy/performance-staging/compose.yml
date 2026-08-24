@@ -13,8 +13,6 @@ x-backend-environment: &backend-environment
   REDIS_ENABLED: "true"
   JWT_SECRET_KEY: ${JWT_SECRET_KEY}
   PERF_DATASET_ACK: ${PERF_DATASET_ACK:-PERF_DATASET_V1}
-  PERF_TEST_PASSWORD: ${PERF_TEST_PASSWORD}
-  PERF_OWNER_LOGIN_CODE: ${PERF_OWNER_LOGIN_CODE}
   ALLOW_MOCK_MONEY_ENDPOINTS: "false"
   ALLOW_MOCK_WECHAT_SESSION: "false"
   SAAS_REAL_PAYMENT_ENABLED: "false"
@@ -80,7 +78,9 @@ services:
 
   dataset:
     build: *backend-build
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      PERF_TEST_PASSWORD: ${PERF_TEST_PASSWORD}
     entrypoint: ["python", "scripts/admin_performance_dataset.py"]
     command: ["verify", "--dataset-version", "PERF_DATASET_V1"]
     depends_on:
@@ -93,7 +93,9 @@ services:
 
   owner-code:
     build: *backend-build
-    environment: *backend-environment
+    environment:
+      <<: *backend-environment
+      PERF_OWNER_LOGIN_CODE: ${PERF_OWNER_LOGIN_CODE}
     entrypoint: ["python", "scripts/admin_performance_owner_code.py"]
     depends_on:
       mysql:

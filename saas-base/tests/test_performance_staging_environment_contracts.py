@@ -35,6 +35,17 @@ def _service_names(compose: str) -> set[str]:
     return set(re.findall(r"^  ([a-z][a-z0-9-]*):\s*$", services_block, re.MULTILINE))
 
 
+def _service_block(compose: str, service: str) -> str:
+    services_block = compose.split("services:\n", 1)[1].split("\nvolumes:", 1)[0]
+    match = re.search(
+        rf"^  {re.escape(service)}:\s*$\n(?P<body>.*?)(?=^  [a-z][a-z0-9-]*:\s*$|\Z)",
+        services_block,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"service block is missing: {service}"
+    return match.group("body")
+
+
 def test_required_environment_files_exist() -> None:
     missing = [str(path.relative_to(ROOT)) for path in FILES.values() if not path.is_file()]
     assert not missing, f"missing performance-staging files: {missing}"
@@ -63,6 +74,29 @@ def test_compose_jobs_use_existing_guarded_tools() -> None:
     assert "PERF_DATASET_ACK" in compose
     assert "PERF_DATASET_V1" in compose
     assert "PERF_OWNER_LOGIN_CODE" in compose
+
+
+def test_job_secrets_are_scoped_to_only_their_consuming_services() -> None:
+    compose = _read("compose")
+    shared_environment = compose.split(
+        "x-backend-environment: &backend-environment\n", 1
+    )[1].split("\nservices:", 1)[0]
+    assert "PERF_TEST_PASSWORD" not in shared_environment
+    assert "PERF_OWNER_LOGIN_CODE" not in shared_environment
+
+    dataset = _service_block(compose, "dataset")
+    owner_code = _service_block(compose, "owner-code")
+    assert "environment:" in dataset and "<<: *backend-environment" in dataset
+    assert "PERF_TEST_PASSWORD: ${PERF_TEST_PASSWORD}" in dataset
+    assert "PERF_OWNER_LOGIN_CODE" not in dataset
+    assert "environment:" in owner_code and "<<: *backend-environment" in owner_code
+    assert "PERF_OWNER_LOGIN_CODE: ${PERF_OWNER_LOGIN_CODE}" in owner_code
+    assert "PERF_TEST_PASSWORD" not in owner_code
+
+    for service in ("migrate", "backend"):
+        block = _service_block(compose, service)
+        assert "PERF_TEST_PASSWORD" not in block
+        assert "PERF_OWNER_LOGIN_CODE" not in block
 
 
 def test_admin_artifact_freezes_version_and_staging_environment() -> None:
