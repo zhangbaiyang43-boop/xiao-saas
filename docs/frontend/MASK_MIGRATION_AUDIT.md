@@ -172,7 +172,7 @@ Constitution：「特殊 blocking overlay 可以只用 BaseOverlay」；「禁�
 2. **CheckoutSheet** → BaseSheet `blocking` + `#footer`。**PHASE-05A 已完成。**
 3. 从 `LEGACY_MASK_ALLOWLIST` 去掉已迁路径。**PHASE-05A 已完成**（剩 Spec / Success / Welcome）。
 4. Spec / Welcome：保持 allowlist；TOUCH 时只迁 BaseOverlay。
-5. Success：等 §2.4 两问。
+5. Success：产品合同已冻结，见 [PAYMENT_SUCCESS_OVERLAY_DECISION.md](./PAYMENT_SUCCESS_OVERLAY_DECISION.md)。不允许点遮罩关闭；形态为底部 Sheet；主动作「关闭并等待」。因此 **不能**迁现有 BaseSheet。
 
 禁止：五张同一 PR；顺手改 CTA / CartBar / 加号尺寸；扩 BaseSheet 变成万能壳。
 

@@ -28,7 +28,8 @@ xiao/
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）
 │   │   ├── HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md CTA/CartBar 决策（OPEN）
-│   │   └── MASK_MIGRATION_AUDIT.md legacy .mask 迁移审计（只读）
+│   │   ├── MASK_MIGRATION_AUDIT.md legacy .mask 迁移审计（只读）
+│   │   └── PAYMENT_SUCCESS_OVERLAY_DECISION.md 支付成功 overlay 产品合同
 │   ├── engineering/
 │   │   ├── HOTFIX-LEDGER.md         小程序 hotfix 账本
 │   │   └── release-process/         发布架构与 SOP（5 篇）
