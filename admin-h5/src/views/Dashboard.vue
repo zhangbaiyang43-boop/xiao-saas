@@ -452,7 +452,8 @@ async function loadStats(pollMeta = {}) {
 async function onPullRefresh() {
   await Promise.all([loadStats(), loadMarketingPreview(), loadSystemStatus(), loadTableCouponActivity(), loadSubscriptionStrip()])
   refreshing.value = false
-  if (!statsError.value) message.success('已刷新')
+  if (statsError.value) message.error('刷新失败，请检查网络后重试')
+  else message.success('已刷新')
 }
 
 // 智能营销卡片
