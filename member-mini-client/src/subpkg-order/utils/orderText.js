@@ -28,7 +28,7 @@ export const successText = {
   itemUnit: '件',
   closeAndWait: '关闭并等待',
   continueOrdering: '继续加菜',
-  viewDetail: '查看订单详情',
+  viewDetail: '查看本桌订单',
   safeTip: '订单状态会自动更新，无需重复提交或再次支付。',
   statusPendingPayment: '订单待支付，请完成微信支付',
   statusPending: '商家已收到订单，正在等待接单',

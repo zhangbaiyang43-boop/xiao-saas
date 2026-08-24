@@ -9,7 +9,7 @@
       :count="activeTableOrders.length"
       :top-rpx="200"
       :bottom-clear-rpx="160"
-      @click="openRecentOrder"
+      @click="openLiveTableOrders"
     />
 
     <view v-if="loading" class="state-card">
@@ -78,7 +78,7 @@
         <text class="card-arrow">›</text>
       </view>
 
-      <view v-if="isLoggedIn && recentOrder" class="recent-order-card" @click="openRecentOrder">
+      <view v-if="isLoggedIn && recentOrder" class="recent-order-card" @click="goOrders">
         <view class="section-head">
           <text class="section-title">最近订单</text>
           <text class="card-arrow">›</text>
@@ -520,10 +520,7 @@ export default {
         goLogin()
         return
       }
-      // "我的订单" 这一行本身就写着"查看历史订单和消费明细"，点进去应该永远是完整的
-      // 历史订单列表——不能因为本地缓存里存在 recentOrder 就顺手劫持成只看那一笔最新
-      // 订单的详情。最近订单卡片（recent-order-card）自己已经单独绑了 openRecentOrder，
-      // 这里不需要、也不应该重复那条分支。
+      // 历史订单只进会员订单列表。最近订单卡片也走这里，禁止再带 openOrders=1 去点餐页。
       go('/subpkg-member/pages/orders')
     }
 
@@ -565,19 +562,19 @@ export default {
       })
     }
 
-    const openRecentOrder = () => {
-      // 最近订单是跨门店扫全设备 my_orders_* 缓存拿到的（见 loadRecentOrder），
-      // 不一定是当前这次会话所在的门店/桌台——必须用订单自己记的 shop/table
-      // 跳转，不能用 currentTableNo/tenant_id 这类"当前会话"状态，否则查到的
-      // 是这次会话的桌台历史，跟顾客点开的那笔订单对不上，点了没反应。
-      const table = recentOrder.value?.table || currentTableNo.value
-      const shop = recentOrder.value?.shop || uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+    const openLiveTableOrders = () => {
+      const table = currentTableNo.value
+      const shop = uni.getStorageSync('tenant_id') || customer.value.tenant_id || ''
+      if (!shop || !table) {
+        goOrders()
+        return
+      }
       const query = [
-        table ? `table=${encodeURIComponent(table)}` : '',
-        shop ? `shop=${encodeURIComponent(shop)}` : '',
-        'openOrders=1'
-      ].filter(Boolean).join('&')
-      uni.navigateTo({ url: `/subpkg-order/pages/menu${query ? `?${query}` : ''}` })
+        `table=${encodeURIComponent(table)}`,
+        `shop=${encodeURIComponent(shop)}`,
+        'openOrders=1',
+      ].join('&')
+      uni.navigateTo({ url: `/subpkg-order/pages/menu?${query}` })
     }
 
     const showStoreInfo = () => {
@@ -687,7 +684,7 @@ export default {
       goOrders,
       goConsumptions,
       goQueueTake,
-      openRecentOrder,
+      openLiveTableOrders,
       showStoreInfo,
       callStore,
       logout,
