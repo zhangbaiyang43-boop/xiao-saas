@@ -50,15 +50,9 @@ Constitution 已声明：它不是视觉目录；NEW 必须遵守；TOUCHED 只�
 - `pages/index/index.vue` L139/L184
 - `subpkg-order/pages/payment-handoff.vue` L165/L169
 
-第三条绿 `#16c76f`（Constitution 禁止新 CTA 再复制）：
+第三条绿 `#16c76f`：P1-DESIGN-TOKEN-CONSOLIDATION-PHASE-02 已从 entry / MemberCheckoutChoice / CheckoutAuthSheet 改为 `var(--brand)`。Constitution 仍禁止再复制该值。
 
-- `pages/entry/index.vue` L301/L306
-- `MemberCheckoutChoice.vue` L72
-- `CheckoutAuthSheet.vue` L89
-
-后两者已用 BaseOverlay，按钮色仍未走 `--brand`。
-
-`--text-1/2/3`：BaseSheet、MemberCard 等在用。StateEmpty 仍写 `#333` / `#9ca3af`（`state-empty.vue` L40/L47），与 `--text-3: #6b7280` 冲突。
+`--text-1/2/3`：BaseSheet、MemberCard、State* 在用。会员/券等业务页仍有硬编码灰。
 
 ### 2. Typography
 
@@ -96,10 +90,10 @@ Constitution 已声明：它不是视觉目录；NEW 必须遵守；TOUCHED 只�
 |---|---|---|---|
 | CartBar `.checkout-btn` | 92rpx | 46rpx | `--brand` |
 | CheckoutSheet `.checkout-btn-full` | 104rpx | 28rpx | `--brand` |
-| MemberCheckoutChoice 加入 | 96rpx | `--radius-card` | `#16c76f` |
-| entry `.entry-btn` | 88rpx | 22rpx | `#16c76f` |
+| MemberCheckoutChoice 加入 | 96rpx | `--radius-card` | `--brand` |
+| entry `.entry-btn` | 88rpx | 22rpx | `--brand` |
 | payment-handoff `.pay-btn` | 92rpx | 999rpx | `#07c160` |
-| StateEmpty/Error 按钮 | 88rpx | 24rpx | `#07C160` |
+| StateEmpty/Error 按钮 | 88rpx | 24rpx | `--brand` |
 
 AddBtn 是「绿圆加号」primitive，消费者只有 SpecSheet；DishList 仍用 `_shared.scss` `.counter-btn.plus`。
 
@@ -121,7 +115,7 @@ AddBtn 是「绿圆加号」primitive，消费者只有 SpecSheet；DishList 仍
 - 核销：`verify-qr.vue` 自绘 spinner
 - `_shared.scss` `.table-status-empty` 与 StateEmpty 并存（OrderHistory/TableBill 空态 class 仍叫 table-status-empty，内部已嵌 StateEmpty）
 
-State* 自身未吃 token（绿按钮 `#07C160`、空态灰 `#9ca3af`）。
+State* 自身已改用 `--brand` / `--text-*` / `--brand-light`（PHASE-02）。
 
 ### 8. Overlay / Sheet（对照基线）
 
@@ -191,8 +185,8 @@ CI：`scripts/check-ui-contracts.mjs` L13–19。
 
 **P0 — 合同已写、现存违反或双轨**
 
-1. `#16c76f` 三处改 `--brand`（entry、MemberCheckoutChoice、CheckoutAuthSheet）
-2. State* 自身改用 token（标准组件自己不标准）
+1. `#16c76f` 三处改 `--brand`（entry、MemberCheckoutChoice、CheckoutAuthSheet）— **已在 PHASE-02 完成**
+2. State* 自身改用 token（标准组件自己不标准）— **已在 PHASE-02 完成**
 3. 新代码禁止再新增 `.mask`（CI 已拦）；触摸 Checkout/Spec/Coupon/Success/Welcome 时迁 BaseSheet 外壳
 
 **P1 — 多页重复、触摸即可收**
@@ -222,7 +216,7 @@ CI：`scripts/check-ui-contracts.mjs` L13–19。
 | State* | `src/components/state-*` |
 | Legacy mask | CheckoutSheet / CouponPicker / SpecSheet / PaymentSuccessSheet / WelcomeCouponSheet |
 | 已迁 Sheet | OrderHistorySheet.vue、TableBillSheet.vue |
-| `#16c76f` | entry/index.vue、MemberCheckoutChoice.vue、CheckoutAuthSheet.vue |
+| `#16c76f` 已收口 | 业务样式 0 处；Constitution 仍禁止再引入 |
 | `--btn-primary-*` | SpecSheet.vue、queue-take.vue |
 
 未改业务代码。影响端：无运行时影响。

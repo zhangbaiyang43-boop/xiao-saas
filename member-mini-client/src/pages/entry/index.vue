@@ -298,11 +298,11 @@ export default {
 .entry-page { min-height: 100vh; background: #f5f7fa; display: flex; align-items: center; justify-content: center; padding: 48rpx; box-sizing: border-box; }
 .entry-card { width: 100%; min-height: 360rpx; border-radius: 28rpx; background: #fff; box-shadow: 0 18rpx 48rpx rgba(15, 23, 42, .08); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48rpx 36rpx; text-align: center; box-sizing: border-box; }
 .entry-card--loading { color: #111827; }
-.loading-ring { width: 72rpx; height: 72rpx; border: 6rpx solid #e5e7eb; border-top-color: #16c76f; border-radius: 50%; animation: spin .8s linear infinite; }
+.loading-ring { width: 72rpx; height: 72rpx; border: 6rpx solid #e5e7eb; border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .entry-error { width: 76rpx; height: 76rpx; border-radius: 50%; background: #fff1f2; color: #e11d48; display: flex; align-items: center; justify-content: center; font-size: 42rpx; font-weight: 900; }
 .entry-title { margin-top: 28rpx; color: #111827; font-size: 34rpx; font-weight: 900; }
 .entry-desc { margin-top: 14rpx; color: #64748b; font-size: 26rpx; line-height: 1.5; }
-.entry-btn { margin-top: 36rpx; width: 100%; height: 88rpx; border-radius: 22rpx; background: #16c76f; color: #fff; font-size: 30rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; }
+.entry-btn { margin-top: 36rpx; width: 100%; height: 88rpx; border-radius: 22rpx; background: var(--brand); color: #fff; font-size: 30rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; }
 </style>
 

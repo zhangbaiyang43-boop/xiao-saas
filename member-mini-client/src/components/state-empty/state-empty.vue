@@ -37,14 +37,14 @@ export default {
   margin-top: 16rpx;
   font-size: 30rpx;
   font-weight: 600;
-  color: #333;
+  color: var(--text-1);
 }
 
 .state-empty-desc {
   display: block;
   margin-top: 10rpx;
   font-size: 26rpx;
-  color: #9ca3af;
+  color: var(--text-3);
   line-height: 1.6;
 }
 
@@ -54,8 +54,8 @@ export default {
   height: 88rpx;
   line-height: 88rpx;
   border-radius: 24rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 30rpx;
   font-weight: 600;
   border: none;

@@ -31,15 +31,7 @@ CODE_CHANGE=NO
 | 商家后台 Ant Design `App.vue` `colorPrimary` | `#07C160` |
 | 点餐页 / 付款页微信导航栏 | `#07C160` + 白字 |
 
-同时仍有第三条绿，没有收进 token：
-
-| 位置 | 实际值 |
-|---|---|
-| `pages/entry/index.vue` 主按钮 / loading 环 | `#16c76f` |
-| `MemberCheckoutChoice.vue` 加入会员按钮 | `#16c76f` |
-| `CheckoutAuthSheet.vue` 授权主按钮 | `#16c76f` |
-
-Constitution 已写明：新 CTA 必须用 `--brand`，不要再复制 `#16c76f`。这三条是现存例外。
+第三条绿 `#16c76f` 已在 P1-DESIGN-TOKEN-CONSOLIDATION-PHASE-02 从业务样式移除（entry 主按钮/loading 环、MemberCheckoutChoice、CheckoutAuthSheet 改为 `var(--brand)`）。Constitution 仍禁止再引入该值。
 
 ## 1.2 两端视觉家族
 
@@ -125,8 +117,8 @@ Constitution Deferred 已点名：AppButton、AppCard、typography/spacing/radiu
 | `#111827` | 27 | 本可走 `--text-1` |
 | `#999` | 20 | 旧灰 |
 | `#f7f8fa` / `#f5f7fb` / `#edf0f2` | 10–15 | 接近 `--bg-page` / `--border` 的变体 |
-| `#9ca3af` | 13 | StateEmpty 说明色；Constitution 特意把 `--text-3` 从这档加深过 |
-| `#16c76f` | 4 | entry / 结算授权 CTA |
+| `#9ca3af` | 会员/券等页 | 浅灰；`--text-3` 已加深到 `#6b7280`。StateEmpty 已改用 `--text-3` |
+| `#16c76f` | 0 in live styles | PHASE-02 已改为 `--brand`；Constitution 仍禁止再引入 |
 | `#ff5a3c` / `#ff2f1f` / `#d81717` | 券面红 | 优惠券业务色 |
 | `#F04444` | CartBar badge | 接近但不是 `--danger` |
 | `#4B5362` | CartBar 空车按钮 | 无 token |
@@ -491,14 +483,14 @@ CHROME 300  <  FLOATING 850  <  BLOCKING 3100  <  BLOCKING_TOP 3200  <  CRITICAL
 
 只列代码里已经发生的事，不发明新视觉。
 
-1. 品牌绿双轨：`--brand #07C160` 与 `#16c76f` 同时在主 CTA 上。
+1. 品牌绿：主 CTA 的 `#16c76f` 已收口到 `--brand`；会员/券页仍有硬编码 `#07C160`。
 2. 没有 Button primitive，主按钮高度 72–104rpx、圆角 22 / 24 / 28 / 32 / 46 / 50 / 999 全存在。
 3. `.card-base` 定义了却零引用；卡片圆角 20 / 24 / 32 / 36rpx 并存。
 4. BaseSheet 是弹层外壳标准，但结账 / 规格 / 券 / 支付成功仍是 `.mask` 各自画壳，圆角和动画已经分叉。
 5. PriceText / AddBtn 注释写成「全站唯一」，实际只有 SpecSheet 用。
 6. 商家 `variables.scss` indigo 与线上绿品牌并存；死组件还在吃 indigo。
 7. 商家 Ant `borderRadius: 8` 与 `--radius-card: 12px` 不一致。
-8. StateEmpty / StateLoading / StateError 自身仍硬编码 `#07C160`、`#333`、`#9ca3af`，没有吃 token。
+8. 会员/券等业务页仍硬编码 `#07C160`；State* 已在 PHASE-02 改用 token。
 9. 小程序 Vant Weapp 注册但不用；商家 Vant + Ant 混用。
 10. Toast / Dialog 没有产品层组件，全是微信/浏览器原生，无法统一时长、位置、按钮文案样式。
 11. 无 spacing / type scale，字号至少 20 档，字重 600–900 无角色。
@@ -516,7 +508,7 @@ CHROME 300  <  FLOATING 850  <  BLOCKING 3100  <  BLOCKING_TOP 3200  <  CRITICAL
 ## P0 — 影响整体一致性的基础问题
 
 1. **收口品牌绿**  
-   现存权威值是 `#07C160` / `--brand`。`#16c76f` 只出现在进店和结算授权 CTA。这是用户能看见的「是不是同一家产品」。
+   现存权威值是 `#07C160` / `--brand`。进店与结算授权 CTA 的 `#16c76f` 已改为 `--brand`。剩余债务是会员/券页硬编码同色绿。
 
 2. **主按钮只允许现状里已经出现的少数几种形状，停止再发明第四种高度/圆角**  
    不是现在做 AppButton。P0 是承认没有 Button 系统，禁止再在新代码里写第 8 种 CTA。Constitution 已要求新 CTA 走 `--brand` + `--btn-primary-*`；`--btn-primary-*` 目前只被 SpecSheet 真正使用。
@@ -528,7 +520,7 @@ CHROME 300  <  FLOATING 850  <  BLOCKING 3100  <  BLOCKING_TOP 3200  <  CRITICAL
    运行中的权威是 `global.scss` + Ant `colorPrimary #07C160`。`variables.scss` 的 indigo 是过期源。死组件（DataCard / ListState / NavBar）继续让人误以为还有第二套品牌色。
 
 5. **State* 自己先吃 token**  
-   页级加载/空/错已经被 Constitution 指定为标准。组件内部还写 `#07C160` / `#9ca3af` / `#333`，标准组件自己就不标准。
+   页级加载/空/错已经被 Constitution 指定为标准。State* 已改用 token；菜单空态 PNG 等仍是另一套。
 
 ## P1 — 多个页面重复出现的问题
 

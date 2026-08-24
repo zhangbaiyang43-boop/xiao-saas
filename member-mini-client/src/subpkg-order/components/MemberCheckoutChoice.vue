@@ -69,7 +69,7 @@ export default {
 
 .member-choice-desc { margin-top: 12rpx; color: var(--text-2); font-size: 27rpx; line-height: 1.55; text-align: center; }
 
-.member-choice-join { margin-top: 28rpx; height: 96rpx; border-radius: var(--radius-card); background: #16c76f; color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
+.member-choice-join { margin-top: 28rpx; height: 96rpx; border-radius: var(--radius-card); background: var(--brand); color: #fff; font-size: 31rpx; font-weight: 900; display: flex; align-items: center; justify-content: center; box-shadow: 0 14rpx 34rpx rgba(16, 196, 105, .22); }
 
 .member-choice-join[disabled] { opacity: .72; box-shadow: none; }
 

@@ -101,7 +101,8 @@ describe('overlay authority contract (static)', () => {
     expect(choice).toContain("'cancel'")
     expect(choice).toContain("'open-agreement'")
     expect(choice).toContain('@getphonenumber="$emit(\'getphonenumber\', $event)"')
-    expect(choice).toContain('#16c76f')
+    expect(choice).toContain('background: var(--brand)')
+    expect(choice).not.toContain('#16c76f')
   })
 
   it('TEST I: CheckoutAuthSheet keeps getPhoneNumber and emit contracts', () => {

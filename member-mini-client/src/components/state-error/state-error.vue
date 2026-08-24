@@ -27,14 +27,14 @@ export default {
   display: block;
   font-size: 30rpx;
   font-weight: 700;
-  color: #111827;
+  color: var(--text-1);
 }
 
 .state-error-desc {
   display: block;
   margin-top: 10rpx;
   font-size: 26rpx;
-  color: #6b7280;
+  color: var(--text-3);
 }
 
 .state-error-btn {
@@ -43,8 +43,8 @@ export default {
   height: 88rpx;
   line-height: 88rpx;
   border-radius: 24rpx;
-  background: #07C160;
-  color: #fff;
+  background: var(--brand);
+  color: var(--text-inverse);
   font-size: 30rpx;
   font-weight: 600;
   border: none;
