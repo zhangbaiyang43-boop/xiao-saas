@@ -30,7 +30,8 @@ xiao/
 │   │   ├── HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md CTA/CartBar 决策（OPEN）
 │   │   ├── MASK_MIGRATION_AUDIT.md legacy .mask 迁移审计（只读）
 │   │   ├── PAYMENT_SUCCESS_OVERLAY_DECISION.md 支付成功 overlay 产品合同
-│   │   └── CARTBAR_VISUAL_CONTRACT.md CartBar 视觉合同（只读）
+│   │   ├── CARTBAR_VISUAL_CONTRACT.md CartBar 视觉合同（只读）
+│   │   └── HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md 高频采用审计 PHASE-03
 │   ├── engineering/
 │   │   ├── HOTFIX-LEDGER.md         小程序 hotfix 账本
 │   │   └── release-process/         发布架构与 SOP（5 篇）

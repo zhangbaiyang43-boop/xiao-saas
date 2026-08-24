@@ -42,6 +42,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - legacy `.mask` 迁移审计（Checkout/Spec/Coupon/Success/Welcome，只读）：[docs/frontend/MASK_MIGRATION_AUDIT.md](./docs/frontend/MASK_MIGRATION_AUDIT.md)
 - 支付成功 overlay 产品合同（已冻结）：[docs/frontend/PAYMENT_SUCCESS_OVERLAY_DECISION.md](./docs/frontend/PAYMENT_SUCCESS_OVERLAY_DECISION.md)
 - CartBar 视觉合同（只读审计）：[docs/frontend/CARTBAR_VISUAL_CONTRACT.md](./docs/frontend/CARTBAR_VISUAL_CONTRACT.md)
+- 高频路径采用审计 PHASE-03（PriceText / 金额层级 / layer）：[docs/frontend/HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md](./docs/frontend/HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md)
 - 本机前端约定：`...\04_前端规范\前端规范.md`
 - 小程序样式 token：`member-mini-client/src/styles/global.scss`
 - 商家样式 token：`admin-h5/src/styles/global.scss`
