@@ -9,6 +9,7 @@ CODE_CHANGE=NO
 NEW_COMPONENT=NO
 NEW_TOKEN=NO
 DELETE=NO
+PHASE-05A=P1-OVERLAY-MIGRATION-PHASE-05A 已迁 CheckoutSheet（BaseSheet blocking）与 CouponPicker（BaseSheet blocking-top）。Spec / Success / Welcome 仍为 legacy .mask。
 AUTHORITY=
   member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md
   docs/frontend/DESIGN_SYSTEM_CURRENT.md
@@ -33,13 +34,13 @@ AUTHORITY=
 
 ## 0. 遗产名单（机器合同）
 
-`member-mini-client/scripts/check-ui-contracts.mjs` `LEGACY_MASK_ALLOWLIST`（正好五条，与本范围一致）：
+`member-mini-client/scripts/check-ui-contracts.mjs` `LEGACY_MASK_ALLOWLIST`（PHASE-05A 之后剩三条）：
 
-1. `subpkg-order/components/CheckoutSheet.vue`
-2. `subpkg-order/components/CouponPicker.vue`
-3. `subpkg-order/components/PaymentSuccessSheet.vue`
-4. `subpkg-order/components/SpecSheet.vue`
-5. `subpkg-order/components/WelcomeCouponSheet.vue`
+1. `subpkg-order/components/PaymentSuccessSheet.vue`（仍在名单）
+2. `subpkg-order/components/SpecSheet.vue`（仍在名单）
+3. `subpkg-order/components/WelcomeCouponSheet.vue`（仍在名单）
+
+已迁出名单：`CheckoutSheet.vue`、`CouponPicker.vue`（BaseSheet，见 PHASE-05A）。
 
 `.mask` 定义：`subpkg-order/styles/_shared.scss` L11–L17。`position:fixed; inset:0; z-index: var(--z-blocking); background: var(--overlay-dim); align-items: flex-end`。
 
@@ -53,8 +54,8 @@ DishList / CartBar / OrderHistory / TableBill 也 `@import _shared.scss`，但�
 
 | 表面 | 形态 | mask 点击 | 标准头（标题+关闭） | 分类 |
 |---|---|---|---|---|
-| CheckoutSheet | 底栏 sheet，有 footer CTA | 关闭 | 有 | **必须迁 BaseSheet** |
-| CouponPicker | 底栏 sheet，列表 | 关闭（emit `cancel`） | 有 | **必须迁 BaseSheet** |
+| CheckoutSheet | 底栏 sheet，有 footer CTA | 关闭 | 有 | **PHASE-05A 已迁 BaseSheet `blocking`** |
+| CouponPicker | 底栏 sheet，列表 | 关闭（emit `cancel`） | 有 | **PHASE-05A 已迁 BaseSheet `blocking-top`** |
 | SpecSheet | 底栏 sheet + 全宽英雄图 | 关闭（emit `cancel`） | 无（关闭钮叠在图上） | **暂时保留** |
 | PaymentSuccessSheet | 底栏 sheet 套仪式卡；文件里还有一套居中 modal 死 CSS | **无** | 无（只有 handle） | **需要产品决策** |
 | WelcomeCouponSheet（券卡） | **居中**营销卡，不是底栏 | 关闭 | 无 | **暂时保留**（不要迁 BaseSheet） |
@@ -63,7 +64,7 @@ DishList / CartBar / OrderHistory / TableBill 也 `@import _shared.scss`，但�
 
 ## 2. 逐张
 
-### 2.1 CheckoutSheet — 必须迁 BaseSheet
+### 2.1 CheckoutSheet — PHASE-05A 已迁 BaseSheet `blocking`
 
 路径：`member-mini-client/src/subpkg-order/components/CheckoutSheet.vue`
 
@@ -91,7 +92,7 @@ order-confirm-bottom →  #footer
 
 不要在这次迁 CTA 高度（104rpx）——那是 `HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md` 的 OPEN 项。
 
-### 2.2 CouponPicker — 必须迁 BaseSheet
+### 2.2 CouponPicker — PHASE-05A 已迁 BaseSheet `blocking-top`
 
 路径：`CouponPicker.vue`
 
@@ -165,11 +166,11 @@ Constitution：「特殊 blocking overlay 可以只用 BaseOverlay」；「禁�
 
 ---
 
-## 3. 建议迁移顺序（仍不实施）
+## 3. 建议迁移顺序
 
-1. **CouponPicker** → BaseSheet `blocking-top`（先修「压在结算上却同 3100」）。
-2. **CheckoutSheet** → BaseSheet `blocking` + `#footer`。
-3. 从 `LEGACY_MASK_ALLOWLIST` 去掉已迁路径；CI `base-sheet.contract.test.js` TEST G 会要求改期望数组。
+1. **CouponPicker** → BaseSheet `blocking-top`。**PHASE-05A 已完成。**
+2. **CheckoutSheet** → BaseSheet `blocking` + `#footer`。**PHASE-05A 已完成。**
+3. 从 `LEGACY_MASK_ALLOWLIST` 去掉已迁路径。**PHASE-05A 已完成**（剩 Spec / Success / Welcome）。
 4. Spec / Welcome：保持 allowlist；TOUCH 时只迁 BaseOverlay。
 5. Success：等 §2.4 两问。
 

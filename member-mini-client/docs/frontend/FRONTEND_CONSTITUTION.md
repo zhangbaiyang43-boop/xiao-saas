@@ -83,12 +83,14 @@ Consumers:
 
 | Surface | Authority | Layer |
 |---|---|---|
-| CheckoutSheet and remaining `_shared.scss` `.mask` users | legacy `.mask` | BLOCKING (`var(--z-blocking)` = 3100) |
+| CheckoutSheet | BaseSheet → BaseOverlay | BLOCKING (`3100`) |
+| CouponPicker | BaseSheet → BaseOverlay | BLOCKING_TOP (`3200`) |
+| Remaining `_shared.scss` `.mask` users (SpecSheet, PaymentSuccessSheet, WelcomeCouponSheet) | legacy `.mask` | BLOCKING (`var(--z-blocking)` = 3100) |
 | OrderHistorySheet, TableBillSheet | BaseSheet → BaseOverlay | BLOCKING (`3100`) |
 | MemberCheckoutChoice | BaseOverlay | BLOCKING_TOP (`3200`) |
 | CheckoutAuthSheet | BaseOverlay | BLOCKING_TOP (`3200`) |
 
-When CheckoutSheet is open and MemberCheckoutChoice or CheckoutAuthSheet is also open, the latter MUST sit above CheckoutSheet because **3200 > 3100**. DOM order in `menu.vue` is not the stack authority.
+When CheckoutSheet is open and MemberCheckoutChoice, CheckoutAuthSheet, or CouponPicker is also open, the latter MUST sit above CheckoutSheet because **3200 > 3100**. DOM order in `menu.vue` is not the stack authority.
 
 Concurrent blocking surfaces MUST either replace or explicitly stack. Unspecified dual-boolean stacking is forbidden.
 

@@ -1,11 +1,10 @@
 <template>
-  <view class="mask" @click="$emit('close')">
-    <view class="cart-sheet order-confirm-sheet" @click.stop>
-      <view class="order-confirm-head">
-        <text class="order-confirm-title">{{ confirmationText.title }}</text>
-        <text class="order-confirm-close iconfont icon-close" @click="$emit('close')"></text>
-      </view>
-
+  <base-sheet
+    class="order-confirm-sheet"
+    layer="blocking"
+    :title="confirmationText.title"
+    @close="$emit('close')"
+  >
       <scroll-view class="order-confirm-content" scroll-y>
         <view class="order-summary-card" :class="{ 'order-summary-card--missing': !tableNo }" @click="$emit('show-table-hint')">
           <view class="summary-mode-pill"><text>{{ orderModeText.dineIn }}</text></view>
@@ -91,16 +90,19 @@
         </view>
       </scroll-view>
 
-      <view class="order-confirm-bottom">
-        <view class="checkout-btn-full" :class="{ 'checkout-btn-full--disabled': !canSubmitOrder || ordering || paying }" @click="$emit('checkout')">
-          <text class="checkout-btn-icon iconfont icon-pay"></text><text>{{ payButtonText }}</text>
+      <template #footer>
+        <view class="order-confirm-bottom">
+          <view class="checkout-btn-full" :class="{ 'checkout-btn-full--disabled': !canSubmitOrder || ordering || paying }" @click="$emit('checkout')">
+            <text class="checkout-btn-icon iconfont icon-pay"></text><text>{{ payButtonText }}</text>
+          </view>
         </view>
-      </view>
-    </view>
-  </view>
+      </template>
+  </base-sheet>
 </template>
 
 <script>
+import BaseSheet from '@/components/base-sheet/base-sheet.vue'
+
 // 从 menu.vue 拆出来的购物车/结算确认弹层（原来是 showCart 那一段模板）。纯展
 // 示组件，不带任何业务逻辑——所有需要改父组件状态的动作（关闭、桌台提示、展开
 // /收起已选菜品、加减数量、清空购物车、备注展开/切换/输入、打开优惠券选择器、
@@ -110,8 +112,10 @@
 // openCouponPicker/goCheckout），一行都没有改。CouponPicker 本身仍然是
 // menu.vue 里的兄弟组件（因为顶部优惠券横幅等其它入口也会打开它），这里只负责
 // emit 打开事件，不拥有 showCouponPicker 状态。
+// 外壳已从 legacy .mask 迁到 BaseSheet blocking；主 CTA 仍走 #footer，高度未改。
 export default {
   name: 'CheckoutSheet',
+  components: { BaseSheet },
   props: {
     confirmationText: { type: Object, required: true },
     orderModeText: { type: Object, required: true },
@@ -166,31 +170,14 @@ export default {
 <style lang="scss">
 @import '../styles/_shared.scss';
 
-.cart-sheet {
-  width: 100%;
+.order-confirm-sheet {
   background: #f5f7f8;
-  border-radius: 32rpx 32rpx 0 0;
-  box-sizing: border-box;
-  max-height: 88vh;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
-
-
-.order-confirm-head { flex-shrink: 0; display: grid; grid-template-columns: 1fr 64rpx; align-items: center; padding: 30rpx 28rpx 22rpx; background: #fff; border-bottom: 1rpx solid #edf0f2; }
-
-
-.order-confirm-title { font-size: 36rpx; font-weight: 900; color: var(--text-1); }
-
-
-.order-confirm-close { width: 64rpx; height: 64rpx; display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 34rpx; line-height: 64rpx; text-align: center; }
-
 
 .order-confirm-content { flex: 1; min-height: 0; padding: 20rpx 24rpx 18rpx; box-sizing: border-box; }
 
 
-.order-confirm-bottom { flex-shrink: 0; padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom)); background: rgba(255,255,255,0.96); border-top: 1rpx solid #edf0f2; }
+.order-confirm-bottom { flex-shrink: 0; padding: 16rpx 24rpx 0; background: rgba(255,255,255,0.96); border-top: 1rpx solid #edf0f2; }
 
 
 .order-summary-card { padding: 18rpx 24rpx; border-radius: var(--radius-card); background: #ecfbf3; border: 1rpx solid #cbeedb; margin-bottom: 18rpx; display: flex; align-items: center; gap: 14rpx; }

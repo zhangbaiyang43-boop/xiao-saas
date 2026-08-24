@@ -1,10 +1,11 @@
 <template>
-  <view class="mask" @click="$emit('cancel')">
-    <view class="coupon-picker-sheet" @click.stop>
-      <view class="cp-head">
-        <text class="cp-title">优惠券</text>
-        <text v-if="summaryText" class="cp-summary">{{ summaryText }}</text>
-        <text class="cp-close iconfont icon-close" @click="$emit('cancel')"></text>
+  <base-sheet
+    layer="blocking-top"
+    title="优惠券"
+    @close="$emit('cancel')"
+  >
+      <view v-if="summaryText" class="cp-summary-wrap">
+        <text class="cp-summary">{{ summaryText }}</text>
       </view>
       <scroll-view class="cp-list" scroll-y>
         <view
@@ -59,18 +60,22 @@
           <text class="cp-skip-link" @click="$emit('select-coupon', null)">不使用优惠券</text>
         </view>
       </scroll-view>
-    </view>
-  </view>
+  </base-sheet>
 </template>
 
 <script>
+import BaseSheet from '@/components/base-sheet/base-sheet.vue'
+
 // 从 menu.vue 拆出来的优惠券选择弹层（原来是 showCouponPicker 那一段模板）。
 // 纯展示组件，不带任何业务逻辑——点击关闭/选券都只 emit 出去，真正的处理函数
 // 还是原来 menu.vue 里的 closeCouponPicker/pickCoupon，一行都没有改。可用性
 // 判断（c.eligible）、金额和条件文案的计算，全部留在父组件，这里只读取父组件
 // 算好的结果。
+// 外壳已从 legacy .mask 迁到 BaseSheet blocking-top：叠在结算确认之上时必须
+// 高于 CheckoutSheet 的 blocking（3200 > 3100），不能再靠 DOM 顺序。
 export default {
   name: 'CouponPicker',
+  components: { BaseSheet },
   props: {
     selectedCouponId: { type: [Number, String], default: null },
     couponPickerList: { type: Array, default: () => [] },
@@ -106,43 +111,13 @@ export default {
 </script>
 
 <style lang="scss">
-@import '../styles/_shared.scss';
-
-.coupon-picker-sheet {
-  width: 100%;
-  max-height: 76vh;
-  background: #fff;
-  border-radius: 32rpx 32rpx 0 0;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  animation: slide-up 0.25s ease;
-}
-
-
-
-.cp-head {
-  position: relative;
+.cp-summary-wrap {
   flex-shrink: 0;
-  padding: 28rpx 32rpx 18rpx;
-  text-align: center;
+  padding: 0 36rpx 12rpx;
 }
-
-
-
-.cp-title {
-  display: block;
-  font-size: 32rpx;
-  font-weight: 900;
-  color: var(--text-1);
-}
-
-
 
 .cp-summary {
   display: block;
-  margin-top: 8rpx;
-  padding: 0 48rpx;
   font-size: 24rpx;
   color: var(--text-3);
   line-height: 1.4;
@@ -150,27 +125,10 @@ export default {
 
 
 
-.cp-close {
-  position: absolute;
-  right: 20rpx;
-  top: 16rpx;
-  width: 64rpx;
-  height: 64rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-3);
-  font-size: 34rpx;
-  line-height: 64rpx;
-  text-align: center;
-}
-
-
-
 .cp-list {
   flex: 1;
   min-height: 0;
-  padding: 0 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  padding: 0 24rpx 24rpx;
   box-sizing: border-box;
 }
 

@@ -81,12 +81,12 @@ describe('F2 BaseSheet first-family contract (static)', () => {
   })
 
   it('TEST G: both files removed from LEGACY_MASK_ALLOWLIST', () => {
-    expect(LEGACY_MASK_ALLOWLIST).toHaveLength(5)
+    expect(LEGACY_MASK_ALLOWLIST).toHaveLength(3)
     expect(LEGACY_MASK_ALLOWLIST).not.toContain('subpkg-order/components/OrderHistorySheet.vue')
     expect(LEGACY_MASK_ALLOWLIST).not.toContain('subpkg-order/components/TableBillSheet.vue')
+    expect(LEGACY_MASK_ALLOWLIST).not.toContain('subpkg-order/components/CheckoutSheet.vue')
+    expect(LEGACY_MASK_ALLOWLIST).not.toContain('subpkg-order/components/CouponPicker.vue')
     expect(LEGACY_MASK_ALLOWLIST).toEqual([
-      'subpkg-order/components/CheckoutSheet.vue',
-      'subpkg-order/components/CouponPicker.vue',
       'subpkg-order/components/PaymentSuccessSheet.vue',
       'subpkg-order/components/SpecSheet.vue',
       'subpkg-order/components/WelcomeCouponSheet.vue',
