@@ -38,6 +38,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 商家后台高频页面治理符合度审计（只读）：[docs/frontend/ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md](./docs/frontend/ADMIN_HIGH_FREQUENCY_PAGE_AUDIT.md)
 - 商家后台前端系统 Phase-01 审计与蓝图（只读，Phase-02 规则设计依据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE01_AUDIT.md)
 - **商家后台前端系统 Phase-02 最小可执行规则（必须，与 Constitution 同为准入依据）**：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE02_RULES.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE02_RULES.md)
+- 商家后台前端系统 Phase-03A：OrderManage 状态真实性 Touch And Migrate（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03A_ORDER_STATE_MIGRATION.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03A_ORDER_STATE_MIGRATION.md)
 - 视觉现状审计（只读，不是新规范）：[docs/frontend/DESIGN_SYSTEM_CURRENT.md](./docs/frontend/DESIGN_SYSTEM_CURRENT.md)
 - 设计系统采用审计：[docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md](./docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md)
 - 小程序功能可见性审计：[docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md](./docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md)
