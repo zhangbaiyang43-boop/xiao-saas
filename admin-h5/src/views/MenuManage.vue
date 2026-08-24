@@ -51,13 +51,31 @@
       <span class="cat-tag cat-sort-btn" @click="openCatSort" title="调整分类顺序">⇅ 排序</span>
     </div>
 
+    <!-- 已有菜品仍在展示，仅提示本次同步失败；不清空已确认正确的旧数据 -->
+    <div v-if="loadError && allDishes.length > 0" class="section-block" style="padding-top:8px">
+      <a-alert type="warning" show-icon message="菜品同步失败，当前显示的是上次数据" style="border-radius:10px">
+        <template #action>
+          <a-button size="small" :loading="loadingMenu" @click="loadMenu">重试</a-button>
+        </template>
+      </a-alert>
+    </div>
+
+    <!-- 首次加载失败：没有旧数据可退回，必须独立错误态，不能落入空菜单 -->
+    <div v-if="loadError && allDishes.length === 0" class="section-block" style="padding-top:8px">
+      <a-alert type="error" show-icon message="菜品加载失败，请检查网络后重试" style="border-radius:10px">
+        <template #action>
+          <a-button size="small" :loading="loadingMenu" @click="loadMenu">重试</a-button>
+        </template>
+      </a-alert>
+    </div>
+
     <!-- 骨架屏 -->
-    <div v-if="loadingMenu" class="section-block">
+    <div v-else-if="loadingMenu && allDishes.length === 0" class="section-block">
       <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:12px;padding:16px;margin-bottom:12px" />
       <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:12px;padding:16px" />
     </div>
 
-    <!-- 空状态 -->
+    <!-- 空状态：只有请求成功且确认没有菜品才展示 -->
     <div v-else-if="allDishes.length === 0" style="padding:60px 0">
       <a-empty description="还没有菜品，点右上角「加菜品」开始上架——上架的菜会出现在顾客点餐页，下架/售罄后顾客点不到">
         <a-button type="primary" @click="openAdd" style="margin-top:12px">添加第一道菜</a-button>
@@ -480,6 +498,10 @@
           >{{ f.label }}</span>
         </div>
         <div v-if="librarySearching" style="padding:32px 0;text-align:center;color:var(--text-3)">搜索中…</div>
+        <div v-else-if="libraryError" style="padding:32px 0;text-align:center;color:var(--text-3);font-size:13px">
+          搜索失败，请检查网络后重试
+          <div style="margin-top:10px"><a-button size="small" @click="doLibrarySearch">重试</a-button></div>
+        </div>
         <div v-else-if="libraryItems.length === 0" style="padding:32px 0;text-align:center;color:var(--text-3);font-size:13px">
           还没有商户分享过这道菜，先自己上传吧——下次别的店就能直接用你这张图了
         </div>
@@ -551,6 +573,7 @@ const router = useRouter()
 const isOnboarding = computed(() => route.query.onboarding === '1')
 
 const loadingMenu = ref(false)
+const loadError = ref(false)
 const saving = ref(false)
 const showForm = ref(false)
 const allDishes = ref([])
@@ -851,11 +874,16 @@ async function loadMenu() {
   let resultStatus = 'success'
   try {
     const res = await getMenuItems()
+    if (res?.code !== 200) throw new Error(res?.msg || '菜品加载失败')
     const raw = res?.data?.data?.items || res?.data?.items || res?.data || []
-    allDishes.value = Array.isArray(raw) ? raw.map(d => ({ ...d, desc: d.desc ?? d.description ?? '', sort_order: d.sort_order ?? 0 })) : []
+    if (!Array.isArray(raw)) throw new Error('菜品数据格式异常')
+    allDishes.value = raw.map(d => ({ ...d, desc: d.desc ?? d.description ?? '', sort_order: d.sort_order ?? 0 }))
+    loadError.value = false
     resultStatus = allDishes.value.length ? 'success' : 'empty'
   } catch {
-    allDishes.value = []
+    // 失败不清空已确认正确的旧菜单——加载失败不等于没有菜，保留旧数据由模板的
+    // loadError 横幅去标记"可能过期"，而不是让老板以为菜品真的被清空了。
+    loadError.value = true
     resultStatus = 'error'
   } finally {
     loadingMenu.value = false
@@ -961,6 +989,7 @@ const libraryCuisineFilters = [
 ]
 const libraryItems = ref([])
 const librarySearching = ref(false)
+const libraryError = ref(false)
 const librarySelected = ref(new Set())
 const libraryPreviewItems = ref([])
 const libraryImporting = ref(false)
@@ -977,6 +1006,7 @@ function resetLibraryImport() {
   libraryKeyword.value = ''
   libraryCuisineFilter.value = ''
   libraryItems.value = []
+  libraryError.value = false
   librarySelected.value = new Set()
   libraryPreviewItems.value = []
 }
@@ -985,8 +1015,15 @@ async function doLibrarySearch() {
   librarySearching.value = true
   try {
     const res = await searchDishLibrary({ keyword: libraryKeyword.value.trim() || undefined, cuisine_type: libraryCuisineFilter.value || undefined })
-    libraryItems.value = res?.data?.data || res?.data || []
-  } catch { libraryItems.value = [] }
+    if (res?.code !== 200) throw new Error(res?.msg || '搜索失败')
+    const raw = res?.data?.data || res?.data || []
+    if (!Array.isArray(raw)) throw new Error('搜索结果格式异常')
+    libraryItems.value = raw
+    libraryError.value = false
+  } catch {
+    // 搜索失败不清空上一次的正确结果——避免把"网络抖了一下"误显成"这道菜没人分享过"。
+    libraryError.value = true
+  }
   finally { librarySearching.value = false }
 }
 
