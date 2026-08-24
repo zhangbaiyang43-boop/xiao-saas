@@ -39,6 +39,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 小程序订单入口审计：[docs/frontend/ORDER_ENTRY_AUDIT.md](./docs/frontend/ORDER_ENTRY_AUDIT.md)
 - 顾客端高频路径视觉审计（首页/菜单/购物车/结算/支付成功，只读）：[docs/frontend/HIGH_FREQUENCY_UI_AUDIT.md](./docs/frontend/HIGH_FREQUENCY_UI_AUDIT.md)
 - 高频路径 CTA / CartBar 设计决策（OPEN，未实现）：[docs/frontend/HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md](./docs/frontend/HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md)
+- legacy `.mask` 迁移审计（Checkout/Spec/Coupon/Success/Welcome，只读）：[docs/frontend/MASK_MIGRATION_AUDIT.md](./docs/frontend/MASK_MIGRATION_AUDIT.md)
 - 本机前端约定：`...\04_前端规范\前端规范.md`
 - 小程序样式 token：`member-mini-client/src/styles/global.scss`
 - 商家样式 token：`admin-h5/src/styles/global.scss`
