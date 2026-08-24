@@ -93,7 +93,8 @@ VITE_ADMIN_ENVIRONMENT || Vite MODE
 
 The current production workflow runs a production-mode build without `VITE_ADMIN_ENVIRONMENT=staging`, so its artifact correctly records `environment=production`. Reusing that byte-identical artifact in staging would mislabel Source B events and is forbidden.
 
-The local staging artifact is therefore built from exact source SHA:
+The local staging artifact is therefore built from an `admin-h5/**` tree that
+must be byte-identical to the tree at exact source SHA:
 
 ```text
 823708c1cbac8ba7c730715afafbecd27d641f09
@@ -107,7 +108,15 @@ VITE_ADMIN_ENVIRONMENT=staging
 VITE_API_BASE_URL=/api
 ```
 
-The result has the same source version but is an environment-specific staging artifact, not the production Artifact and not byte-identical to it. Its `release.json` records the full SHA, `environment=staging`, and a local staging builder identity. The report must preserve this distinction.
+The environment implementation itself will create later commits outside
+`admin-h5/**`. Before building, the lifecycle checks that `git diff
+823708c1cbac8ba7c730715afafbecd27d641f09 -- admin-h5` is empty. This permits
+environment-only commits while proving that the frontend source still matches
+the frozen version. The result has the same frontend source version but is an
+environment-specific staging artifact, not the production Artifact and not
+byte-identical to it. Its `release.json` records the frozen full SHA,
+`environment=staging`, and a local staging builder identity. The report must
+preserve this distinction.
 
 Nginx serves the static artifact and preserves `/api/...` when proxying to `backend:8000`, matching the repository's FastAPI route prefixes.
 
@@ -301,7 +310,7 @@ The lifecycle fails closed and reports `NOT_READY` if any of the following occur
 
 - Docker engine unavailable.
 - Required loopback port already in use.
-- worktree SHA differs from the requested full SHA.
+- the requested full SHA is not a commit, or the current `admin-h5/**` tree differs from that commit.
 - secret environment file is missing, tracked, malformed or contains unsafe defaults.
 - resolved Compose configuration exposes MySQL/Redis or contains production hosts.
 - Alembic has multiple heads or upgrade fails.
