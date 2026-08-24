@@ -35,7 +35,8 @@ xiao/
 │   │   ├── CARTBAR_VISUAL_CONTRACT.md CartBar 视觉合同（只读）
 │   │   ├── HIGH_FREQUENCY_ADOPTION_PHASE03_AUDIT.md 高频采用审计 PHASE-03
 │   │   ├── MINI_UX_POLISH_AUDIT.md 顾客端上线前 UX 审计
-│   │   └── P1_MEMBER_EMPTY_STATE_AUDIT.md 会员空状态审计
+│   │   ├── P1_MEMBER_EMPTY_STATE_AUDIT.md 会员空状态审计
+│   │   └── MENU_PERFORMANCE_AUDIT.md 菜单首屏性能审计（只读）
 │   ├── engineering/
 │   │   ├── HOTFIX-LEDGER.md         小程序 hotfix 账本
 │   │   └── release-process/         发布架构与 SOP（5 篇）
@@ -141,6 +142,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 
 - `member-mini-client/docs/frontend/FRONTEND_CONSTITUTION.md`（结构 / Overlay，Must）
 - `docs/frontend/DESIGN_SYSTEM_CURRENT.md`（视觉现状）
+- `docs/frontend/MENU_PERFORMANCE_AUDIT.md`（菜单首屏性能，只读）
 - Obsidian `04_前端规范/前端规范.md`（拆分与端侧约定）
 - `member-mini-client/scripts/check-ui-contracts.mjs`（机器门禁）
 
