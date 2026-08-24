@@ -18,7 +18,12 @@
     </view>
 
     <view v-else class="record-list">
-      <view v-for="item in orders" :key="item.order_id" class="record-card">
+      <view
+        v-for="item in orders"
+        :key="item.order_id"
+        class="record-card tap-shrink"
+        @click="explainNoDetail"
+      >
         <view class="rc-left">
           <view class="rc-title-row">
             <text class="rc-title">{{ formatOrderStatusText(item.status, item.status_text) }}</text>
@@ -98,6 +103,13 @@ export default {
       if (loading.value || loadingMore.value || !hasMore.value) return
       load({ append: true })
     }
+    const explainNoDetail = () => {
+      uni.showToast({
+        title: '菜品明细请在本桌订单里查看',
+        icon: 'none',
+        duration: 2000,
+      })
+    }
 
     return {
       loading,
@@ -107,6 +119,7 @@ export default {
       hasMore,
       reload,
       loadMore,
+      explainNoDetail,
       formatDateTime,
       formatMoney,
       formatOrderStatusText,

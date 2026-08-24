@@ -30,11 +30,25 @@ export function useHistoryReorder({
   }
 
   const handleHomeStartOrder = () => {
-    if (!canStartOrdering.value) return
+    if (!canStartOrdering.value) {
+      uni.showToast({
+        title: storeClosed.value ? '门店休息中' : '暂无菜品',
+        icon: 'none',
+        duration: 1400,
+      })
+      return
+    }
     activeTab.value = 'order'
   }
   const handleFeaturedAdd = () => {
-    if (!canHomeAdd.value) return
+    if (!canHomeAdd.value) {
+      uni.showToast({
+        title: storeClosed.value ? '门店休息中' : '暂无法加入购物车',
+        icon: 'none',
+        duration: 1400,
+      })
+      return
+    }
     if (hasSpecs(featuredDish.value)) openSpecSheet(featuredDish.value)
     else addToCart(featuredDish.value)
   }

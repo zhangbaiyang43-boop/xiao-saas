@@ -6,6 +6,7 @@ DATE=2026-08-24
 BASELINE=d7249cf
 SCOPE=member-mini-client 顾客端上线前体验
 CODE_CHANGE=NO
+PHASE-01=P1-MINI-UX-POLISH-IMPLEMENTATION-PHASE-01 已补：打烊/空菜单 toast；历史订单卡 toast。未做详情页。
 NEW_COMPONENT=NO
 NEW_TOKEN=NO
 AUTHORITY=
@@ -65,7 +66,11 @@ BottomNav 会员 → MemberCard → 成长 / 积分 / 优惠券列表
 
 影响上线主任务完成，或点了像坏掉。
 
-### P0-1 历史订单列表点了没反应
+### P0-1 历史订单列表点了没反应 — PHASE-01 已加 toast
+
+点卡片会 `uni.showToast('菜品明细请在本桌订单里查看')`，仍无详情页、不改 API。见 `orders.vue` `explainNoDetail`。
+
+### P0-1（原文，已实施）
 
 **分类：** A  
 **问题：** 「我的订单」是任务 2 的终点，卡片展示了状态和金额，但 **没有点击**。用户会当详情入口去点，页面完全无反馈。  
@@ -75,7 +80,11 @@ BottomNav 会员 → MemberCard → 成长 / 积分 / 优惠券列表
 **建议方向：** 最小改动二选一：卡片加 toast「菜品明细请在本桌订单里查看」；或产品拍板做只读详情（不在本审计实施）。不要把列表劫持回本桌弹层（会打乱已收口的实时/历史分流）。  
 **是否需要产品决策：** 是。列表暂时当摘要，还是必须能看到菜名。
 
-### P0-2 打烊或空菜单时，首页主卡可点但静默失败
+### P0-2 打烊或空菜单时，首页主卡可点但静默失败 — PHASE-01 已加 toast
+
+`handleHomeStartOrder` 休息中 toast「门店休息中」，空菜单 toast「暂无菜品」；`handleFeaturedAdd` 同样有提示。仍不切 Tab、不加购。
+
+### P0-2（原文，已实施）
 
 **分类：** A  
 **问题：** 按钮已写成「门店休息中 / 暂无菜品」，但整张 Hero 仍 `@click` 发出 `start-order`。处理函数直接 `return`，无 toast。  
