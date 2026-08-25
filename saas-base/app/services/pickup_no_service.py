@@ -114,13 +114,32 @@ class PickupNoService:
             select(PickupNoAssignment).where(PickupNoAssignment.tenant_id == tenant_id)
         )
         rows = list(result.scalars().all())
-        return [
+        occupied = [
             {
                 "pickup_no": row.pickup_no,
                 "dining_session_id": str(row.dining_session_id),
             }
             for row in rows
         ]
+        # 无 session 的孤儿订单（见 assign_for_order 的 session is None 分支）不写
+        # PickupNoAssignment 租约表，选号器之前完全看不到它们占了哪个号——店员会把
+        # 同一个号又发给另一桌不相关的顾客。这里把它们也纳入"使用中"列表，
+        # dining_session_id 留空（前端 PickupNoPicker.vue 的 occupiedSet 对空
+        # dining_session_id 就是当成"别人占的"处理，不需要改前端）。
+        orphan_result = await self.db.execute(
+            select(Order.pickup_no)
+            .where(
+                Order.tenant_id == tenant_id,
+                Order.dining_session_id.is_(None),
+                Order.pickup_no.is_not(None),
+                Order.status.in_(list(ORDER_STATUSES_HOLDING_PICKUP)),
+            )
+            .distinct()
+        )
+        for (pickup_no,) in orphan_result.all():
+            if pickup_no:
+                occupied.append({"pickup_no": pickup_no, "dining_session_id": ""})
+        return occupied
 
     async def release_session_assignment(
         self,
@@ -261,9 +280,17 @@ class PickupNoService:
 
         try:
             if session is None:
-                # 无会话：只更新本单；启用桌牌时仍要求有会话才能占用租约（避免无会话抢号）
+                # 无会话（孤儿订单，见 2026-08-25 P0 审计：postpay/prepay 建单时如果
+                # 客户端没带 dining_session_id，后端不会拒单，订单就会长期没有
+                # session）。这类订单原来在这里被一律拒绝分配桌牌，导致顾客已经在
+                # 现场却始终发不出桌牌。这里改成允许占用，但要跟真实 session 租约
+                # 和其它孤儿订单做同号冲突检查——旧逻辑走的是"直接拒绝"，从没做过
+                # 这个检查，不能假装反正没人会用到这条路径。
                 if settings.get("enabled") and pickup_no:
-                    return error_response(code=422, msg="当前订单没有就餐会话，无法占用桌牌")
+                    occupied_nos = {row["pickup_no"] for row in await self.list_occupied(tenant_id)}
+                    occupied_nos.discard(normalize_pickup_no(order.pickup_no))  # 换号：自己原来占的号不算冲突
+                    if pickup_no in occupied_nos:
+                        return error_response(code=409, msg=f"{pickup_no}号桌牌正在使用中，请选择其他号码")
                 order.pickup_no = pickup_no
             else:
                 if pickup_no is None:

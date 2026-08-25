@@ -152,6 +152,26 @@ class PickupNoAssignmentsP0Test(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         return order
 
+    async def _insert_orphan_order(self, table="A05", *, pickup_no=None, payment_mode="postpay"):
+        """无 dining_session_id 的孤儿订单——2026-08-25 P0 审计的根因场景：postpay/
+        prepay 建单时客户端没带 dining_session_id，后端不拒单，订单就长期没有 session。
+        """
+        order = Order(
+            tenant_id=TENANT_A,
+            dining_session_id=None,
+            table_no=table,
+            total=25,
+            status="preparing",
+            payment_status="unpaid",
+            payment_mode=payment_mode,
+            pickup_no=pickup_no,
+            source="miniprogram",
+        )
+        self.db.add(order)
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order
+
     async def test_p0_01_same_tenant_cannot_share_pickup_no(self):
         r1 = await create_order(self._body(table="A01", pickup_no="30"), make_merchant_request(), self.db)
         self.assertEqual(r1.code, 200)
@@ -168,6 +188,70 @@ class PickupNoAssignmentsP0Test(unittest.IsolatedAsyncioTestCase):
             self.db,
         )
         self.assertEqual(r2.code, 200, r2.msg)
+
+    async def test_p0_11_orphan_order_can_be_assigned_pickup_no(self):
+        """2026-08-25 P0 修复：孤儿订单（无 dining_session_id）以前一律 422 拒绝，
+        现在应该能正常占用桌牌——顾客已经在现场，不能永远发不出牌。"""
+        order = await self._insert_orphan_order(table="A01")
+        result = await update_order_pickup_no(
+            order.id, OrderPickupNoUpdate(pickup_no="12"), make_merchant_request(), self.db
+        )
+        self.assertEqual(result.code, 200, result.msg)
+        await self.db.refresh(order)
+        self.assertEqual(order.pickup_no, "12")
+
+    async def test_p0_12_orphan_order_conflicts_with_real_session_lease(self):
+        """孤儿订单不能抢一个正被真实 session 占用的号——旧代码完全没有这层检查。"""
+        r1 = await create_order(self._body(table="A01", pickup_no="7"), make_merchant_request(), self.db)
+        self.assertEqual(r1.code, 200, r1.msg)
+        order = await self._insert_orphan_order(table="A09")
+        result = await update_order_pickup_no(
+            order.id, OrderPickupNoUpdate(pickup_no="7"), make_merchant_request(), self.db
+        )
+        self.assertEqual(result.code, 409)
+        self.assertIn("正在使用", result.msg)
+
+    async def test_p0_13_orphan_order_conflicts_with_another_orphan_order(self):
+        """两笔孤儿订单不能拿到同一个号——这条冲突以前完全没人检查。"""
+        first = await self._insert_orphan_order(table="A01")
+        r1 = await update_order_pickup_no(
+            first.id, OrderPickupNoUpdate(pickup_no="8"), make_merchant_request(), self.db
+        )
+        self.assertEqual(r1.code, 200, r1.msg)
+
+        second = await self._insert_orphan_order(table="A09")
+        r2 = await update_order_pickup_no(
+            second.id, OrderPickupNoUpdate(pickup_no="8"), make_merchant_request(), self.db
+        )
+        self.assertEqual(r2.code, 409)
+        self.assertIn("正在使用", r2.msg)
+
+    async def test_p0_14_orphan_order_can_replace_its_own_number(self):
+        """孤儿订单换号：自己原来占的那个号不算冲突，能顺利换到新号。"""
+        order = await self._insert_orphan_order(table="A01", pickup_no="9")
+        result = await update_order_pickup_no(
+            order.id, OrderPickupNoUpdate(pickup_no="9"), make_merchant_request(), self.db
+        )
+        self.assertEqual(result.code, 200, result.msg)
+        await self.db.refresh(order)
+        self.assertEqual(order.pickup_no, "9")
+
+    async def test_p0_15_orphan_order_holding_shows_up_in_occupied_list(self):
+        """选号器（PickupNoPicker.vue）靠 list_occupied 灰掉已占用号码——孤儿订单
+        占用的号必须出现在这里，否则店员在界面上完全看不出这个号已经被用了。"""
+        order = await self._insert_orphan_order(table="A01", pickup_no="15")
+        occupied = await PickupNoService(self.db).list_occupied(TENANT_A)
+        self.assertIn({"pickup_no": "15", "dining_session_id": ""}, occupied)
+
+    async def test_p0_16_orphan_order_release_is_implicit_on_terminal_status(self):
+        """孤儿订单没有租约表可释放，但一旦终态就不该再出现在 occupied 列表里——
+        这条路径靠 ORDER_STATUSES_HOLDING_PICKUP 过滤活订单自然释放，不需要额外的
+        释放动作，这里锁定这个行为不是巧合。"""
+        order = await self._insert_orphan_order(table="A01", pickup_no="21")
+        order.status = "settled"
+        await self.db.commit()
+        occupied = await PickupNoService(self.db).list_occupied(TENANT_A)
+        self.assertNotIn({"pickup_no": "21", "dining_session_id": ""}, occupied)
 
     async def test_p0_04_replace_releases_old_assignment(self):
         r1 = await create_order(self._body(table="A01", pickup_no="30"), make_merchant_request(), self.db)
