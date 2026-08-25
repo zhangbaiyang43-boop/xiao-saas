@@ -370,6 +370,8 @@
       :table-order-timeline="tableOrderTimeline"
       :current-order-item-count="currentOrderItemCount"
       :current-order-main-item-text="currentOrderMainItemText"
+      :order-history-total="orderHistoryTotal"
+      :order-history-item-count="orderHistoryItemCount"
       :table-order-primary-button-text="tableOrderPrimaryButtonText"
       :table-no="tableNo"
       :order-mode-text="orderModeText"
@@ -761,7 +763,7 @@ export default {
       currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
       tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle,
       tableOrderStatusHint, tableOrderTimeline, currentOrderItemCount, currentOrderItems,
-      currentOrderMainItemText, pendingOrderCount,
+      currentOrderMainItemText, pendingOrderCount, orderHistoryTotal, orderHistoryItemCount,
     } = useTableBillView({
       myOrders, orderId, orderStatus, paymentMode, diningSessionId,
       tableSessionTotal, tableSessionClosed, tableSessionStatus, checkoutRequestedAt,
@@ -1452,7 +1454,7 @@ export default {
       goCheckout, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, tablePickupNo, tableStatusView, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
-      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText,
+      currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderProgressSub, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, tableOrderTimeline, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText, orderHistoryTotal, orderHistoryItemCount,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders, restoreCartIfSameContext,
       savePendingPaymentOrder, restorePendingPaymentOrder, clearPendingPaymentOrder, recoverPendingPaymentResult,

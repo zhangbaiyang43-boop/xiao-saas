@@ -50,6 +50,12 @@ export function useTableBillView({
     myOrders.value.filter(order => !currentTableOrder.value || order.id !== currentTableOrder.value.id)
   )
 
+  // P1 修复：menu.vue 之前把 `tablePickupNo` 当 useTableBillView 的返回值解构，
+  // 但这个组合式函数从来没有产出过这个字段——传给 TableBillSheet 的桌牌号
+  // 从源头就是 undefined，不只是子组件没声明 prop 的问题。桌牌号是按桌台会话
+  // 发一次（哪个批次拿到号不重要），取第一笔带了 pickup_no 的订单即可，
+  // 跟 admin-h5 OrderManage.vue 里 `orders.find(o => o.pickup_no)` 同一套算法。
+  const tablePickupNo = computed(() => tableSessionOrders.value.find(order => order.pickupNo)?.pickupNo || '')
   const isTableAccountMode = computed(() => paymentMode.value === "table_account")
   const isPostpayMode = computed(() => paymentMode.value === "postpay")
   // 餐后付款和桌台账单，后端其实是同一套机制：同一桌多次下单共用同一个 dining_session，
@@ -100,6 +106,7 @@ export function useTableBillView({
   const tableOrderGroups = computed(() =>
     tableSessionOrders.value.map((order, index) => ({
       id: order.id || String(index),
+      orderNo: order.orderNo || String(order.id || '').slice(-4),
       title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
       statusText: tableGroupStatusText(order.status, order.status_text),
       tone: tableGroupStatusTone(order.status),
@@ -262,6 +269,23 @@ export function useTableBillView({
     myOrders.value.filter(o => !['settled', 'cancelled', 'rejected'].includes(normalizeOrderStatus(o.status))).length
   )
 
+  // P1：非分账模式（prepay）下 OrderHistorySheet 只展示"当前这一笔"的金额/份数，
+  // 多次加菜后顾客要自己心算历史订单加总——tableTotal/tableItemCount 是分账模式
+  // 专属的（后端 table_total 本身就按 payment_mode in (table_account, postpay)
+  // 过滤，prepay 订单永远不计入），不能直接复用。这里是纯前端对"这一桌已经点过
+  // 的、还在展示范围内的订单"（currentTableOrder + historyTableOrders，
+  // 跟 OrderHistorySheet 实际渲染的历史列表同一份数据）做加总，只是一个展示性的
+  // "已点了多少"小结，不是"应付金额"——prepay 每笔订单已经各自付清，不存在欠款。
+  const orderHistoryOrders = computed(() => (
+    currentTableOrder.value ? [currentTableOrder.value, ...historyTableOrders.value] : historyTableOrders.value
+  ))
+  const orderHistoryTotal = computed(() =>
+    orderHistoryOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
+  )
+  const orderHistoryItemCount = computed(() =>
+    orderHistoryOrders.value.reduce((sum, order) => sum + orderItemCount(order), 0)
+  )
+
   return {
     normalizeOrderStatus,
     currentTableOrder,
@@ -275,6 +299,7 @@ export function useTableBillView({
     validTableOrders,
     tableTotal,
     tableItemCount,
+    tablePickupNo,
     tableOrderGroups,
     isTableSettled,
     canContinueOrder,
@@ -298,5 +323,7 @@ export function useTableBillView({
     currentOrderItems,
     currentOrderMainItemText,
     pendingOrderCount,
+    orderHistoryTotal,
+    orderHistoryItemCount,
   }
 }

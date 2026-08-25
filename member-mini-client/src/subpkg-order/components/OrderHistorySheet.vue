@@ -94,6 +94,13 @@
         </view>
 
         <view v-if="historyTableOrders.length" class="history-orders-card">
+          <!-- P1：这里之前只能一笔笔点开心算加总，桌台账单模式一进来就有本桌合计，
+          这里补一份等价信息——纯前端把当前这一笔和历史订单加总展示，不是"应付
+          金额"（这里每一笔都已经各自付清，不存在欠款/待结算）。 -->
+          <view class="history-orders-summary">
+            <text>本桌共点 {{ orderHistoryItemCount }} 份</text>
+            <text>¥{{ formatPrice(orderHistoryTotal) }}</text>
+          </view>
           <view class="history-orders-head" @click="$emit('toggle-history')">
             <text>历史订单</text>
             <text>{{ showAllOrders ? '收起' : '查看全部 ' + historyTableOrders.length }}</text>
@@ -159,6 +166,10 @@ export default {
     tableOrderTimeline: { type: Array, default: () => [] },
     currentOrderItemCount: { type: Number, default: 0 },
     currentOrderMainItemText: { type: String, default: '' },
+    // P1 修复：本桌合计（当前这一笔 + 历史订单加总），纯展示性小结，不是应付
+    // 金额——prepay 每一笔都已经各自付清，不存在欠款。
+    orderHistoryTotal: { type: Number, default: 0 },
+    orderHistoryItemCount: { type: Number, default: 0 },
     tableOrderPrimaryButtonText: { type: String, default: '' },
     tableNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
@@ -684,6 +695,17 @@ export default {
 }
 
 
+
+.history-orders-summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 14rpx;
+  margin-bottom: 14rpx;
+  border-bottom: 2rpx solid #f1f5f9;
+  text:first-child { font-size: 25rpx; color: var(--text-3); font-weight: 700; }
+  text:last-child { font-size: 32rpx; color: var(--brand); font-weight: 900; }
+}
 
 .history-orders-head {
   text:first-child { font-size: 28rpx; font-weight: 800; color: var(--text-1); }

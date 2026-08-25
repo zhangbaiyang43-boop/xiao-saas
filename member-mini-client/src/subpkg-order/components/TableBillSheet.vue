@@ -20,6 +20,11 @@
           <text v-if="tableStatusView.note" class="table-account-status-note">{{ tableStatusView.note }}</text>
         </view>
 
+        <view v-if="pickupNoEnabled && tablePickupNo" class="table-account-pickup-banner">
+          <text class="table-account-pickup-icon iconfont icon-form"></text>
+          <text class="table-account-pickup-text">桌牌 {{ tablePickupNo }} 号</text>
+        </view>
+
         <view class="table-account-summary">
           <view class="table-account-summary-left">
             <text class="table-account-table">{{ tableNo || orderModeText.unknownTable }}桌</text>
@@ -43,6 +48,7 @@
                   <view v-if="group.participantNo" class="participant-badge" :style="{ background: group.participantColor }">{{ group.participantNo }}</view>
                   <text v-if="group.isStaff" class="table-account-staff-badge">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
                   <text class="table-account-group-time">{{ group.title }}</text>
+                  <text class="table-account-group-no">#{{ group.orderNo }}</text>
                   <text v-if="group.discountAmount > 0" class="table-account-group-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
                 <text class="table-account-group-status" :class="'table-account-group-status--' + group.tone">{{ group.statusText }}</text>
@@ -151,6 +157,10 @@ export default {
     loadError: { type: Boolean, default: false },
     tableStatusView: { type: Object, required: true },
     tableNo: { type: [String, Number], default: '' },
+    // P1 修复：menu.vue 一直在传这两个 prop，但组件之前没声明，桌牌号从来没在
+    // 这个弹层里渲染过（跟 OrderHistorySheet 的 pickup-no-banner 不对等）。
+    pickupNoEnabled: { type: Boolean, default: false },
+    tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
@@ -300,6 +310,32 @@ export default {
 
 
 
+/* 桌牌号复用 PaymentSuccessSheet.pickup-hero / OrderHistorySheet.pickup-no-banner
+   同一套已有的取餐凭证配色（橙色系），不新建 token。 */
+.table-account-pickup-banner {
+  margin-top: 8rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+}
+
+.table-account-pickup-icon {
+  color: #c2410c;
+  font-size: 30rpx;
+  line-height: 1;
+}
+
+.table-account-pickup-text {
+  color: #c2410c;
+  font-size: 32rpx;
+  font-weight: 900;
+  letter-spacing: 1rpx;
+}
+
 .table-account-summary {
   display: flex;
   align-items: center;
@@ -432,6 +468,14 @@ export default {
   color: var(--text-2);
   font-size: 28rpx;
   font-weight: 800;
+}
+
+/* 顾客反馈问题时能报的号——跟商家后台 OrderManage.vue 的"按订单尾号搜索"
+   口径对上，之前这里只有下单时间，没有任何可报的单号。 */
+.table-account-group-no {
+  color: var(--text-3);
+  font-size: 22rpx;
+  font-weight: 700;
 }
 
 
