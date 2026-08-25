@@ -1,6 +1,12 @@
 <template>
   <div class="coupon-page">
+    <!-- 与同一营销流程内的 MarketingEffectiveness.vue、CouponRecords.vue 保持一致的
+         导航层：这三个页面深度相同、都是从"更多"或 Dashboard 卡片进入的二级页，
+         之前唯独这一页没有返回入口（Phase-04 PART_05 PageHeader 治理）。PageHeader
+         必须在 .page-content 的内边距之外，跟两个姊妹页的结构完全一致。 -->
+    <PageHeader title="智能营销" />
 
+    <div class="page-content">
     <!-- 顶部：强度选择器，跟"今日"页是同一个决策，不是另一套系统 -->
     <section class="hero-card animate-in">
       <!-- "自动运行中"只在真正确认成功后才展示；加载中/失败必须说真话，不能预先
@@ -36,7 +42,7 @@
       </div>
       <div v-else-if="previewError" class="hero-error-row">
         <span>营销状态加载失败</span>
-        <button type="button" class="hero-retry-btn tap-shrink" @click="loadPreview">重试</button>
+        <van-button size="small" plain class="hero-retry-btn" @click="loadPreview">重试</van-button>
       </div>
     </section>
 
@@ -98,7 +104,7 @@
           <div v-if="loadingTemplates" class="empty-state">加载中…</div>
           <div v-else-if="templatesError" class="empty-state empty-state--error">
             加载失败，请重试
-            <div style="margin-top:8px"><button type="button" class="hero-retry-btn hero-retry-btn--light tap-shrink" @click="loadTemplates">重试</button></div>
+            <div style="margin-top:8px"><van-button size="small" plain type="primary" @click="loadTemplates">重试</van-button></div>
           </div>
           <div v-else-if="templates.length === 0" class="empty-state">还没有手动建券，需要时随时可以建一张。</div>
           <div v-else class="template-list">
@@ -118,6 +124,7 @@
         </div>
       </van-collapse-item>
     </van-collapse>
+    </div>
 
     <!-- 手动建券弹窗 -->
     <van-popup v-model:show="showForm" round position="bottom" :style="{ maxHeight: '90vh' }">
@@ -143,6 +150,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showFailToast, showSuccessToast } from 'vant'
+import PageHeader from '../components/PageHeader.vue'
 import {
   createCouponTemplate,
   getCouponTemplates,
@@ -354,9 +362,11 @@ onMounted(() => { loadPreview(); loadTemplates() })
 <style scoped>
 .coupon-page {
   min-height: 100vh;
-  padding: 12px 12px 84px;
   background: var(--bg-page);
   color: var(--text-1);
+}
+.page-content {
+  padding: 12px 12px 84px;
 }
 
 /* ── 顶部状态卡 ─────────────────── */
@@ -389,20 +399,7 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-size: 13px;
   opacity: .95;
 }
-.hero-retry-btn {
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.5);
-  background: rgba(255,255,255,.12);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-}
-.hero-retry-btn--light {
-  border-color: var(--border);
-  background: transparent;
-  color: var(--brand);
-}
+.hero-retry-btn { flex-shrink: 0; }
 .empty-state--error { color: #dc2626; }
 
 .intensity-switch {

@@ -43,6 +43,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 商家后台前端系统 Phase-03C：菜品管理（MenuManage.vue）状态真实性 Touch And Migrate（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03C_DISH_STATE_MIGRATION.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03C_DISH_STATE_MIGRATION.md)
 - 商家后台前端系统 Phase-03D：会员管理（CustomerList.vue）数据可达性 Touch And Migrate（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03D_MEMBER_DATA_MIGRATION.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03D_MEMBER_DATA_MIGRATION.md)
 - 商家后台前端系统 Phase-03E：营销（CouponCenter/MarketingEffectiveness/CouponRecords）状态真实性 Touch And Migrate，Phase-03 收口（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03E_MARKETING_STATE_MIGRATION.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE03E_MARKETING_STATE_MIGRATION.md)
+- 商家后台前端系统 Phase-04：页面一致性与组件采用治理（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE04_COMPONENT_ADOPTION_GOVERNANCE.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE04_COMPONENT_ADOPTION_GOVERNANCE.md)
 - 视觉现状审计（只读，不是新规范）：[docs/frontend/DESIGN_SYSTEM_CURRENT.md](./docs/frontend/DESIGN_SYSTEM_CURRENT.md)
 - 设计系统采用审计：[docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md](./docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md)
 - 小程序功能可见性审计：[docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md](./docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md)
