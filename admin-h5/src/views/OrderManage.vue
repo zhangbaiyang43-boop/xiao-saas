@@ -110,7 +110,7 @@
           v-for="table in visibleTableGroups"
           :key="table.groupKey"
           class="table-tile"
-          :class="[`table-tile--${tableTagClass(table)}`, { 'table-tile--urgent': table.canSettle && table.checkoutRequestedAt }]"
+          :class="[`table-tile--${tableTagClass(table)}`, { 'table-tile--urgent': table.canSettle && table.checkoutRequestedAt, 'table-tile--new': table.orders.some((o) => isHighlighted(o.id)) }]"
           @click="openTableDetail(table)"
         >
           <div class="table-tile-top">
@@ -165,6 +165,7 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
+                <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status, order.status_text) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
@@ -340,9 +341,10 @@
         :data-needs-pickup="orderNeedsPickup(order) ? '1' : '0'"
         style="padding:8px 16px 0"
       >
-        <a-card :bordered="false" :body-style="{ padding: '12px 16px' }">
+        <a-card :bordered="false" :body-style="{ padding: '12px 16px' }" :class="{ 'order-card--new': isHighlighted(order.id) }">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
               <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status, order.status_text) }}</a-tag>
@@ -985,6 +987,7 @@ const {
   enableAlert,
   disableAlert,
   unlockAudio,
+  isHighlighted,
   syncNow,
   startSync,
 } = useWorkbenchSync({
@@ -1349,19 +1352,33 @@ function applyPickupNoToOrders(pickupNo, orderIds) {
   }
 }
 
-async function rejectOrder(order) {
-  order.updating = true
-  try {
-    const res = await updateOrderStatus(order.id, 'rejected')
-    if (res.code === 200) {
-      message.warning('已拒单，请联系顾客说明原因')
-      await reconcileAfterOrderAction()
-    } else if (res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND') {
-      showPaidCancelSop()
-      await reconcileAfterOrderAction()
-    } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
-  }
-  catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
+// 拒单直接拒绝一个真实顾客订单，且紧挨着"接单"主按钮——同文件里语义相近的
+// cancelPendingPaymentOrder 早就有二次确认，拒单一直没有，是 Phase-05 审计出的
+// 真实误操作风险。这里照抄 cancelPendingPaymentOrder 的 Modal.confirm 结构，
+// 业务请求本身（updateOrderStatus/reconcileAfterOrderAction）原样不动，只是挪进
+// onOk 里，取消分支不触发任何请求。
+function rejectOrder(order) {
+  Modal.confirm({
+    title: '确认拒绝该订单？',
+    content: `¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
+    okText: '拒绝订单',
+    okType: 'danger',
+    cancelText: '再想想',
+    onOk: async () => {
+      order.updating = true
+      try {
+        const res = await updateOrderStatus(order.id, 'rejected')
+        if (res.code === 200) {
+          message.warning('已拒单，请联系顾客说明原因')
+          await reconcileAfterOrderAction()
+        } else if (res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND') {
+          showPaidCancelSop()
+          await reconcileAfterOrderAction()
+        } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
+      }
+      catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
+    },
+  })
 }
 
 async function finishOrder(order) {
@@ -1635,6 +1652,13 @@ onMounted(async () => {
   box-shadow: 0 0 0 2px rgba(245, 158, 11, .25);
 }
 .table-tile--urgent .table-tile-state { color: #92400e; font-weight: 700; }
+/* 新订单到达时的短期注意力提示——不是订单状态，跟 FrontdeskWorkbench 等三个
+   工作台已经验证过的 isHighlighted 用同一套语义、同一种琥珀色，只是换成这个
+   文件已有的 table-tile--urgent 视觉语言，而不是照搬另一份 CSS。 */
+.table-tile--new {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, .25);
+}
 .table-tile--selected {
   border-color: var(--brand);
   box-shadow: 0 0 0 2px var(--brand);
@@ -1683,6 +1707,14 @@ onMounted(async () => {
 .order-row {
   padding: 16px;
   border-top: 1px solid var(--border);
+}
+
+/* 新订单短期注意力提示（列表视图卡片），与 .table-tile--new 同一套语义和配色，
+   见上方 .table-tile--urgent 附近的说明。桌台抽屉里的 .order-row 是无侧边框的
+   连续行，不套这个描边效果，只用同一行内的"新"标签，避免在紧贴的行之间出现
+   突兀的描边。 */
+.order-card--new {
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, .35);
 }
 
 /* 拼桌时标出"这一单是第几位点的"，纯展示编号，不关联真实身份 */
