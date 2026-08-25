@@ -42,6 +42,7 @@ xiao/
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md OrderManage 新订单高亮+拒单二次确认（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md MenuManage 菜品名称搜索（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05C_CUSTOMER_CONTEXT_PRESERVATION.md CustomerList 工作上下文保持，Phase-05 收口（只读，验收证据）
+│   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md 下一优先级审计，Security Preflight 中止——CustomerList 上下文含原始 token，待整改（Must 先读）
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）
 │   │   ├── HIGH_FREQUENCY_CTA_CARTBAR_DECISION.md CTA/CartBar 决策（OPEN）
@@ -175,6 +176,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md`（OrderManage 新订单高亮+拒单二次确认，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md`（MenuManage 菜品名称搜索，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05C_CUSTOMER_CONTEXT_PRESERVATION.md`（CustomerList 工作上下文保持，Phase-05 收口，只读，验收证据）
+- `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md`（**Must**：CustomerList 会话上下文含原始 Bearer Token 明文，待专门整改 Phase 解决，Phase-06 体验审计未开始）
 - `docs/frontend/DESIGN_SYSTEM_CURRENT.md`（视觉现状）
 - `docs/frontend/MENU_PERFORMANCE_AUDIT.md`（菜单首屏性能，只读）
 - Obsidian `04_前端规范/前端规范.md`（拆分与端侧约定）
