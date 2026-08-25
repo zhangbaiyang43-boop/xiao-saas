@@ -104,6 +104,11 @@ const router = useRouter()
 // 真实分页状态：page/total 来自后端，不是前端切片。PAGE_SIZE 是每次真实请求
 // 后端的行数，不是"从已拉取数据里展示多少条"的本地上限。
 const PAGE_SIZE = 30
+// 从详情页返回时，一次性把"已经翻到第几页"补回来，用一个更大的 page_size 单次
+// 请求真实数据（依然是后端分页合同，只是这一次的行数更大），而不是连续发起
+// N 次"加载更多"。后端 PAGE_MAX_LIMIT=200（saas-base app/config.py），这里封顶，
+// 超出部分只能少恢复几页，好过恢复失败或干脆不恢复。
+const RESTORE_PAGE_SIZE_CAP = 200
 const customers = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -139,15 +144,61 @@ function mapCustomer(item) {
   }
 }
 
+// ── 会员详情往返的工作上下文保持（Phase-05C）──────────────────────────
+// 只保存"老板刚才在找什么"（关键词 + 翻到第几页），不保存会员数据本身——
+// 返回后永远用这两个值发起一次真实请求重新拿数据，不复用旧数组、不假装
+// 详情页里可能做的停用/恢复不存在。sessionStorage 不写手机号进 URL（不进
+// 浏览器历史/服务端日志/Referer/截图），且天然只活在这个标签页内，比
+// localStorage 生命周期短。identity 用 tenant_id+token 拼接（跟
+// useWorkbenchSync.js 的 currentIdentity() 同一种做法），读取时必须完全
+// 匹配当前登录身份才采信——换租户、退出登录后重新登录，identity 必然不同，
+// 旧上下文永远不会被错误恢复。
+const CUSTOMER_LIST_CONTEXT_KEY = 'admin_customer_list_context'
+
+function currentContextIdentity() {
+  return `${localStorage.getItem('tenant_id') || ''}:${localStorage.getItem('token') || ''}`
+}
+
+function saveListContext() {
+  try {
+    sessionStorage.setItem(CUSTOMER_LIST_CONTEXT_KEY, JSON.stringify({
+      identity: currentContextIdentity(),
+      keyword: keyword.value,
+      page: page.value,
+    }))
+  } catch { /* sessionStorage 不可用时静默降级为不保存，不影响正常导航 */ }
+}
+
+// 消费型读取：读到就立刻删除。只有"从详情页返回"这一条路径会写入这个
+// key，读到即代表这次是回程；读完清空可以保证下一次普通进入（点底部
+// 导航、从 Dashboard 进来）不会被更早一次的查询劫持。
+function consumeSavedListContext() {
+  let raw = null
+  try {
+    raw = sessionStorage.getItem(CUSTOMER_LIST_CONTEXT_KEY)
+    sessionStorage.removeItem(CUSTOMER_LIST_CONTEXT_KEY)
+  } catch { return null }
+  if (!raw) return null
+  let saved
+  try { saved = JSON.parse(raw) } catch { return null }
+  if (!saved || saved.identity !== currentContextIdentity()) return null
+  return saved
+}
+
 // 首次加载 / 刷新 / 换关键词搜索：始终请求真实第 1 页。失败时不清空 customers，
 // 交给模板的 loadError 分支决定是保留旧数据加横幅，还是（关键词已经变了）整块
 // 进入错误态——两种情况都不能显示成"没有会员"。
-async function loadCustomers() {
+//
+// restorePage/restorePageSize 仅在从详情页返回、需要一次性把之前翻到的深度补
+// 回来时才会被传真实值；平时调用（首次进入/手动刷新/换关键词）用默认值，行为
+// 和这两个参数加入之前完全一样。不管是不是在恢复，这里始终发起一次真实请求，
+// 不会把上一次的旧内存数组直接当结果用（详情页可能已经改了会员状态）。
+async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {
   loading.value = true
   page.value = 1
   let resultStatus = 'success'
   try {
-    const params = { page: 1, page_size: PAGE_SIZE }
+    const params = { page: 1, page_size: restorePageSize }
     if (keyword.value) params.search = keyword.value
     const res = await getCustomers(params)
     if (res.code !== 200) throw new Error(res.msg || '会员加载失败')
@@ -155,6 +206,7 @@ async function loadCustomers() {
     const rows = extractRows(data)
     customers.value = rows.map(mapCustomer)
     total.value = Number(data?.total ?? customers.value.length)
+    page.value = restorePage
     loadedKeyword.value = keyword.value
     loadError.value = false
     resultStatus = customers.value.length ? 'success' : 'empty'
@@ -170,6 +222,14 @@ async function loadCustomers() {
       data_count: customers.value.length,
     })
   }
+}
+
+// 从详情返回时调用：把保存的 keyword/page 接回来，用一次更大的 page_size 请求
+// 补齐已经翻过的深度（封顶 RESTORE_PAGE_SIZE_CAP），而不是连续点 N 次"加载更多"。
+async function restoreListContext(saved) {
+  keyword.value = saved.keyword || ''
+  const cappedPage = Math.max(1, Math.min(Number(saved.page) || 1, Math.floor(RESTORE_PAGE_SIZE_CAP / PAGE_SIZE)))
+  await loadCustomers({ restorePage: cappedPage, restorePageSize: cappedPage * PAGE_SIZE })
 }
 
 // 翻页：真实请求后端下一页，追加到已有列表；失败不回退已加载的行、不推进
@@ -197,7 +257,10 @@ async function loadMore() {
   }
 }
 
-function goToDetail(id) { router.push(`/customers/${id}`) }
+function goToDetail(id) {
+  saveListContext()
+  router.push(`/customers/${id}`)
+}
 function sendCoupon(customer) { router.push({ path: '/coupons', query: { customerId: customer.id, customerName: customer.name } }) }
 
 function disableCustomer(customer) {
@@ -227,7 +290,14 @@ function restore(customer) {
   })
 }
 
-onMounted(loadCustomers)
+// 正常进入（底部导航、从 Dashboard 点进来、刷新页面）不会有可消费的历史上下文，
+// 走跟以前完全一样的路径；只有从详情页返回时 consumeSavedListContext() 才会
+// 返回非空值。
+onMounted(() => {
+  const saved = consumeSavedListContext()
+  if (saved) restoreListContext(saved)
+  else loadCustomers()
+})
 </script>
 
 <style scoped>

@@ -32,7 +32,7 @@ function slice(startMarker, endMarker) {
 }
 
 test('1. First page reads a real backend total, not array.length pretending to be the count', () => {
-  const loadCustomers = slice('async function loadCustomers() {', '\n// 翻页')
+  const loadCustomers = slice('async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {', '\n\n// 从详情返回时调用')
   assert.ok(
     loadCustomers.includes('total.value = Number(data?.total ?? customers.value.length)'),
     'total must come from the response payload\'s real total field, only falling back to length when the field is genuinely absent',
@@ -53,7 +53,7 @@ test('2. Requesting more members triggers a real second-page API call, not revea
 })
 
 test('3. Changing the search keyword re-queries the backend, not a client-side filter over the first page', () => {
-  const loadCustomers = slice('async function loadCustomers() {', '\n// 翻页')
+  const loadCustomers = slice('async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {', '\n\n// 从详情返回时调用')
   assert.ok(loadCustomers.includes('if (keyword.value) params.search = keyword.value'), 'the current keyword must be sent to the backend as a real search param')
   assert.ok(!src.includes('.filter(c => c.name.includes(keyword'), 'search must not be simulated with an in-memory array filter')
   const loadMore = slice('async function loadMore() {', '\nfunction goToDetail')
@@ -61,7 +61,7 @@ test('3. Changing the search keyword re-queries the backend, not a client-side f
 })
 
 test('4. A request failure resolves to Error, never a fabricated empty member list', () => {
-  const loadCustomers = slice('async function loadCustomers() {', '\n// 翻页')
+  const loadCustomers = slice('async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {', '\n\n// 从详情返回时调用')
   assert.ok(loadCustomers.includes("if (res.code !== 200) throw new Error(res.msg || '会员加载失败')"), 'a business-level failure must be rejected through the same path as a network failure -- no separate branch that forgets to set loadError')
   const catchBlock = loadCustomers.split('} catch (e) {', 2)[1].split('} finally {', 1)[0]
   assert.ok(catchBlock.includes('loadError.value = true'), 'any failure (business or network) must set loadError')
@@ -76,7 +76,7 @@ test('4. A request failure resolves to Error, never a fabricated empty member li
 })
 
 test('5. A confirmed real zero-result response resolves to Empty', () => {
-  const loadCustomers = slice('async function loadCustomers() {', '\n// 翻页')
+  const loadCustomers = slice('async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {', '\n\n// 从详情返回时调用')
   assert.ok(loadCustomers.includes("resultStatus = customers.value.length ? 'success' : 'empty'"), 'a successful response with zero rows must be tagged empty, not error')
   assert.ok(loadCustomers.includes('loadError.value = false'), 'a successful response must explicitly clear loadError, including when it returns zero rows')
   const successIdx = loadCustomers.indexOf('loadError.value = false')
@@ -91,7 +91,7 @@ test('6. A refresh failure on an already-loaded, same-keyword list preserves the
     'a same-keyword refresh failure with existing data must render a persistent stale-data banner, not silence or data loss',
   )
   assert.ok(template.includes('会员同步失败，当前显示的是上次数据'), 'the banner must say the shown data may be stale, not claim it is fresh')
-  const loadCustomers = slice('async function loadCustomers() {', '\n// 翻页')
+  const loadCustomers = slice('async function loadCustomers({ restorePage = 1, restorePageSize = PAGE_SIZE } = {}) {', '\n\n// 从详情返回时调用')
   assert.ok(!loadCustomers.includes('customers.value = []'), 'loadCustomers must never clear customers.value on any path, including failure')
   // A search to a genuinely different keyword that then fails must NOT show the old
   // keyword's results relabeled as current -- pinned separately, this is the
