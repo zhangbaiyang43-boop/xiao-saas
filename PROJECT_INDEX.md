@@ -46,6 +46,7 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 商家后台前端系统 Phase-04：页面一致性与组件采用治理（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE04_COMPONENT_ADOPTION_GOVERNANCE.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE04_COMPONENT_ADOPTION_GOVERNANCE.md)
 - 商家后台前端系统 Phase-05：高频任务效率基线，冻结 05A/05B/05C 优先级（只读，审计+排序，无代码改动）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05_HIGH_FREQUENCY_TASK_EFFICIENCY.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05_HIGH_FREQUENCY_TASK_EFFICIENCY.md)
 - 商家后台前端系统 Phase-05A：OrderManage 新订单高亮 + 拒单二次确认 Touch And Migrate（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md)
+- 商家后台前端系统 Phase-05B：MenuManage 菜品名称搜索 Touch And Migrate（只读，验收证据）：[docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md](./docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md)
 - 视觉现状审计（只读，不是新规范）：[docs/frontend/DESIGN_SYSTEM_CURRENT.md](./docs/frontend/DESIGN_SYSTEM_CURRENT.md)
 - 设计系统采用审计：[docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md](./docs/frontend/DESIGN_SYSTEM_ADOPTION_AUDIT.md)
 - 小程序功能可见性审计：[docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md](./docs/frontend/MINI_FEATURE_VISIBILITY_AUDIT.md)

@@ -40,6 +40,12 @@
       </a-button>
     </div>
 
+    <!-- 菜名搜索：门店菜单本身的查找入口，不是菜品库搜索；紧贴分类筛选和菜品列表，
+         不占页头/营销区位置。allDishes 已经是完整门店菜单，搜索直接在本地过滤。 -->
+    <div v-if="allDishes.length > 0" class="section-block animate-in" style="padding:0 16px 8px">
+      <a-input-search v-model:value="searchKeyword" placeholder="搜菜名" allow-clear />
+    </div>
+
     <!-- 分类筛选 -->
     <div v-if="categories.length > 1" class="cat-bar animate-in" style="animation-delay:.04s">
       <span class="cat-tag" :class="{ 'cat-tag--active': activeCategory === '' }" @click="activeCategory = ''">全部</span>
@@ -82,13 +88,22 @@
       </a-empty>
     </div>
 
+    <!-- 搜索无结果：区别于"真的没有菜品"，菜品数据本身没有任何问题，只是这个
+         关键词没匹配到——不能显示成"还没有菜品"那句话，也不能引导去新建菜品。 -->
+    <div v-else-if="searchKeyword.trim() && filteredCategories.length === 0" style="padding:60px 16px;text-align:center;color:var(--text-3);font-size:13px">
+      没有找到匹配"{{ searchKeyword.trim() }}"的菜品
+    </div>
+
     <!-- 菜品列表 -->
     <template v-else>
       <div v-for="cat in filteredCategories" :key="cat" style="padding:8px 16px 0">
         <div class="cat-header">
           <span style="font-weight:700;color:var(--text-1)">{{ cat }}</span>
           <a-tag color="default" size="small">{{ dishesByCategory(cat).length }}</a-tag>
-          <a-button type="link" size="small" @click="toggleCategory(cat)" style="margin-left:auto;padding:0;color:var(--text-2)">
+          <!-- 搜索时 dishesByCategory 只返回匹配的子集，"全部上架/下架"作用的是
+               这个分类的全部菜品，语义会对不上，所以搜索时不显示，避免老板以为
+               批量操作只影响到搜到的这几道菜，或者反过来影响了看不到的其它菜。 -->
+          <a-button v-if="!searchKeyword.trim()" type="link" size="small" @click="toggleCategory(cat)" style="margin-left:auto;padding:0;color:var(--text-2)">
             {{ allAvailable(cat) ? '全部下架' : '全部上架' }}
           </a-button>
         </div>
@@ -578,6 +593,11 @@ const saving = ref(false)
 const showForm = ref(false)
 const allDishes = ref([])
 const activeCategory = ref('')
+// 门店菜单按名称查找——不是菜品库搜索（那是 doLibrarySearch，另一份数据源）。
+// allDishes 本来就是后端一次性返回的完整门店菜单（GET /v1/menu/items 不分页、
+// 不限量），搜索直接在这份已加载的真实数据上做本地过滤，不新建第二份菜品状态、
+// 不新增请求。
+const searchKeyword = ref('')
 const categoryOrder = ref([])   // 商家设置的分类顺序
 const showCatSort = ref(false)  // 分类排序抽屉
 const savingCatOrder = ref(false)
@@ -682,7 +702,15 @@ function addNewCategory() {
   if (v) { form.category = v; newCategoryInput.value = ''; formDirty.value = true }
 }
 
-const filteredCategories = computed(() => activeCategory.value ? [activeCategory.value] : categories.value)
+// 搜索时故意跨越分类（OPTION B）：老板输入明确菜名时，不该因为忘记自己停留在
+// 某个分类 tab 上，就被系统告知"没有找到"——那道菜可能只是在另一个分类里。
+// 有搜索词时忽略 activeCategory，只保留真的有匹配菜品的分类；没有搜索词时行为
+// 完全不变。
+const filteredCategories = computed(() => {
+  const q = searchKeyword.value.trim().toLowerCase()
+  if (q) return categories.value.filter(cat => dishesByCategory(cat).length > 0)
+  return activeCategory.value ? [activeCategory.value] : categories.value
+})
 const availableCount = computed(() => allDishes.value.filter(d => d.available !== false).length)
 
 // Section 6: not just createMenuItem -- any action that can bring the
@@ -695,7 +723,11 @@ function maybeCompleteOnboardingStep1() {
 }
 const soldOutCount = computed(() => allDishes.value.filter(d => d.available === false || (d.stock !== null && d.stock !== undefined && d.stock <= 0)).length)
 
-function dishesByCategory(cat) { return allDishes.value.filter(d => d.category === cat) }
+function dishesByCategory(cat) {
+  const base = allDishes.value.filter(d => d.category === cat)
+  const q = searchKeyword.value.trim().toLowerCase()
+  return q ? base.filter(d => (d.name || '').toLowerCase().includes(q)) : base
+}
 function allAvailable(cat) { return dishesByCategory(cat).every(d => d.available !== false) }
 function displayDesc(dish, raw) {
   const real = dish.desc || dish.description || ''
