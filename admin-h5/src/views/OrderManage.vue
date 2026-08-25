@@ -166,6 +166,7 @@
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
                 <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
+                <a-tag v-if="justServedLabel(order.id)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px;font-weight:700">{{ justServedLabel(order.id) }}</a-tag>
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status, order.status_text) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
@@ -318,6 +319,14 @@
           @click="statusFilter = f.val"
         >{{ f.label }}</span>
       </div>
+      <!-- 待接单/制作中/已上餐是履约队列，按等待时长正序排（等得越久越靠前），
+           跟"最新排最前"的直觉相反；不加说明的话，商家很容易把排在前面的老订单
+           误认成刚发生的。已结账/已拒单/已取消是查看态，仍然是最新在前，不需要
+           这条提示，所以只在履约态筛选下显示。 -->
+      <div
+        v-if="isLiveToday && ['', 'pending', 'preparing', 'done'].includes(statusFilter)"
+        style="padding:4px 16px 0;font-size:11px;color:var(--text-3)"
+      >按等待时长排序，等得越久的订单越靠前，不是最新的订单排最前</div>
       <div v-if="!isLiveToday && historicalError" style="padding:8px 16px 0">
         <a-alert type="error" show-icon message="历史订单加载失败" description="请检查网络后重试，失败不代表这一天没有订单" style="border-radius:10px">
           <template #action>
@@ -345,6 +354,7 @@
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
               <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
+              <a-tag v-if="justServedLabel(order.id)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px;font-weight:700">{{ justServedLabel(order.id) }}</a-tag>
               <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status, order.status_text) }}</a-tag>
@@ -1002,6 +1012,35 @@ const {
 
 const loading = computed(() => initialLoading.value || backgroundSyncing.value)
 const orderLoadError = computed(() => syncFailed.value && orders.value.length === 0)
+
+// "已上餐"分组本身按等待结账时长排序（FIFO，不能改——排在后面的桌子等得更久，
+// 改成最新优先会让老桌子被新出的餐顶到后面，制造漏结账风险）。但这导致刚出餐/
+// 刚上菜的那一单不会跳到分组最前面，商家问"刚才服务的是哪个"时列表本身答不出来。
+// 这里只加一层与排序无关的瞬时标记：出餐完成/确认上菜成功后记一笔，几秒后自动清除，
+// 不改变 order 在列表里的位置，也不是第二套"新订单"提醒（那个语义属于 isHighlighted，
+// 由 workbenchSyncCore.js 统一管理，这里刻意不复用、不混淆）。
+const justServedMap = ref(new Map())
+function markJustServed(orderId, label) {
+  const next = new Map(justServedMap.value)
+  next.set(orderId, label)
+  justServedMap.value = next
+  const timer = setTimeout(() => {
+    if (justServedMap.value.get(orderId) !== label) return
+    const cleared = new Map(justServedMap.value)
+    cleared.delete(orderId)
+    justServedMap.value = cleared
+  }, 8000)
+  timer.unref?.()
+}
+function justServedLabel(orderId) {
+  return justServedMap.value.get(orderId) || ''
+}
+function orderDishSummary(order) {
+  const items = Array.isArray(order?.items) ? order.items : []
+  if (items.length === 0) return ''
+  if (items.length === 1) return `${items[0].name}×${items[0].qty}`
+  return `${items[0].name}等${items.length}个菜品`
+}
 const lastRefreshed = computed(() => {
   if (!lastSuccessfulSyncAt.value) return ''
   const now = new Date(lastSuccessfulSyncAt.value)
@@ -1386,6 +1425,8 @@ async function finishOrder(order) {
   try {
     const res = await updateOrderStatus(order.id, 'done')
     if (res.code === 200) {
+      message.success(`桌${order.table} 已出餐：${orderDishSummary(order)}`)
+      markJustServed(order.id, '刚出餐')
       await reconcileAfterOrderAction()
     } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
@@ -1401,7 +1442,8 @@ async function confirmServed(order) {
   try {
     const res = await serveOrder(order.id)
     if (res?.code === 200) {
-      message.success('已确认上菜')
+      message.success(`桌${order.table} 已上菜：${orderDishSummary(order)}`)
+      markJustServed(order.id, '刚上菜')
       await reconcileAfterOrderAction()
     } else { message.error(res?.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   } catch {
