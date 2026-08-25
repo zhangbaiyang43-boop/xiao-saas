@@ -51,7 +51,7 @@ function makeStore() {
 }
 
 function currentContextIdentity(localStorageStore) {
-  return `${localStorageStore.getItem('tenant_id') || ''}:${localStorageStore.getItem('token') || ''}`
+  return localStorageStore.getItem('tenant_id') || ''
 }
 
 function saveListContext(sessionStorageStore, localStorageStore, keyword, page) {
@@ -73,7 +73,7 @@ function cappedRestorePage(savedPage) {
 }
 
 test('0. The mirror above matches the real save/consume/identity logic verbatim', () => {
-  assert.ok(src.includes("function currentContextIdentity() {\n  return `${localStorage.getItem('tenant_id') || ''}:${localStorage.getItem('token') || ''}`\n}"), 'currentContextIdentity must match the mirror')
+  assert.ok(src.includes("function currentContextIdentity() {\n  return localStorage.getItem('tenant_id') || ''\n}"), 'currentContextIdentity must match the mirror (Phase-06-SEC: tenant_id only, no token)')
   assert.ok(src.includes('identity: currentContextIdentity(),\n      keyword: keyword.value,\n      page: page.value,'), 'saveListContext payload shape must match the mirror')
   assert.ok(src.includes('if (!saved || saved.identity !== currentContextIdentity()) return null'), 'consumeSavedListContext must reject any identity mismatch, matching the mirror')
   assert.ok(src.includes('Math.floor(RESTORE_PAGE_SIZE_CAP / PAGE_SIZE)'), 'the page cap formula must match the mirror')
@@ -144,17 +144,27 @@ test('5. Tenant A\'s saved context can never be restored under Tenant B\'s ident
 // TEST 6: logout / session change.
 // ---------------------------------------------------------------------------
 
-test('6. A logout (token rotation) invalidates any saved context, even for the same tenant', () => {
+test('6. Same-tenant token rotation alone no longer invalidates by identity mismatch -- logout invalidation is now an explicit purge (Phase-06-SEC)', () => {
+  // Phase-06-SEC removed the raw token from currentContextIdentity() (it was being
+  // persisted into sessionStorage as a second plaintext copy of the Bearer credential --
+  // see ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md). Identity is now tenant_id
+  // only, so a token rotation under the SAME tenant_id no longer changes the identity by
+  // itself. Logout/re-login invalidation is instead handled by an explicit
+  // sessionStorage.removeItem('admin_customer_list_context') inside stores/auth.js's
+  // clearAuth() (asserted directly against that file in
+  // test-phase06sec-customer-context-credential-hardening.mjs), which runs on every real
+  // logout path (More.vue, the three workbenches). This test documents the new contract
+  // so a future change can't silently reintroduce token-based identity without noticing
+  // this assertion flip.
   const session = makeStore()
   const local = makeStore()
   local.setItem('tenant_id', 't1'); local.setItem('token', 'old-token')
   saveListContext(session, local, '13800001111', 2)
 
-  // logout clears the token; a fresh login issues a new one (utils/session.js
-  // saveSession always writes a new token value).
   local.setItem('token', 'new-token-after-relogin')
   const saved = consumeSavedListContext(session, local)
-  assert.equal(saved, null, 'a context saved before logout must not be restored after a fresh login, even under the same tenant_id')
+  assert.notEqual(saved, null, 'identity no longer includes the token, so a same-tenant token rotation alone must NOT invalidate the saved context by itself')
+  assert.equal(saved.keyword, '13800001111', 'the context that survives token rotation is exactly the one saved before it')
 })
 
 // ---------------------------------------------------------------------------

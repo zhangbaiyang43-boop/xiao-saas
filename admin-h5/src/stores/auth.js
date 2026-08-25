@@ -102,6 +102,11 @@ export const useAuthStore = defineStore('auth', () => {
     ;['role', 'permissions', 'home_path', 'account_id', 'account_name', 'account_username', 'auth_method'].forEach((k) => {
       localStorage.removeItem(k)
     })
+    // CustomerList.vue's saved list context is keyed only by tenant_id (Phase-06-SEC:
+    // the raw token was removed from that identity to stop persisting it into
+    // sessionStorage). Same-tenant logout/re-login no longer changes the identity on
+    // its own, so this must explicitly drop any stale context here.
+    sessionStorage.removeItem('admin_customer_list_context')
   }
 
   async function tryDeviceRefresh() {

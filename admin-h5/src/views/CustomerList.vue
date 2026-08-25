@@ -144,19 +144,20 @@ function mapCustomer(item) {
   }
 }
 
-// ── 会员详情往返的工作上下文保持（Phase-05C）──────────────────────────
+// ── 会员详情往返的工作上下文保持（Phase-05C，identity 公式在 Phase-06-SEC 收紧）──
 // 只保存"老板刚才在找什么"（关键词 + 翻到第几页），不保存会员数据本身——
 // 返回后永远用这两个值发起一次真实请求重新拿数据，不复用旧数组、不假装
 // 详情页里可能做的停用/恢复不存在。sessionStorage 不写手机号进 URL（不进
 // 浏览器历史/服务端日志/Referer/截图），且天然只活在这个标签页内，比
-// localStorage 生命周期短。identity 用 tenant_id+token 拼接（跟
-// useWorkbenchSync.js 的 currentIdentity() 同一种做法），读取时必须完全
-// 匹配当前登录身份才采信——换租户、退出登录后重新登录，identity 必然不同，
-// 旧上下文永远不会被错误恢复。
+// localStorage 生命周期短。identity 只用 tenant_id（不再拼接 token——
+// Phase-06 审计发现原始 Bearer Token 明文被复制进 sessionStorage 是真实凭证
+// 泄露面，token 已从这里彻底移除）：换租户时 identity 必然不同，旧上下文
+// 不会被错误恢复；同租户登出/重新登录不再靠"token 变了"间接失效，而是
+// 由 stores/auth.js 的 clearAuth() 在登出时显式清掉这个 key。
 const CUSTOMER_LIST_CONTEXT_KEY = 'admin_customer_list_context'
 
 function currentContextIdentity() {
-  return `${localStorage.getItem('tenant_id') || ''}:${localStorage.getItem('token') || ''}`
+  return localStorage.getItem('tenant_id') || ''
 }
 
 function saveListContext() {
