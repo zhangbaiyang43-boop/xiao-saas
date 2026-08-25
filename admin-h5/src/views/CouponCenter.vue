@@ -3,7 +3,10 @@
 
     <!-- 顶部：强度选择器，跟"今日"页是同一个决策，不是另一套系统 -->
     <section class="hero-card animate-in">
-      <div class="hero-badge"><span class="live-dot"></span>自动运行中</div>
+      <!-- "自动运行中"只在真正确认成功后才展示；加载中/失败必须说真话，不能预先
+           假定系统在跑（Constitution §4、Phase-02 状态合同）。 -->
+      <div v-if="previewLoaded && !previewError" class="hero-badge"><span class="live-dot"></span>自动运行中</div>
+      <div v-else class="hero-badge hero-badge--unknown">{{ previewError ? '状态未知，请重试' : '状态确认中…' }}</div>
       <h1>智能营销已为你开启</h1>
 
       <div class="intensity-switch">
@@ -11,14 +14,17 @@
           v-for="opt in intensityOptions"
           :key="opt.key"
           class="intensity-pill tap-shrink"
-          :class="{ 'intensity-pill--on': opt.key === currentIntensity, 'intensity-pill--disabled': switchingIntensity }"
+          :class="{
+            'intensity-pill--on': previewLoaded && !previewError && opt.key === currentIntensity,
+            'intensity-pill--disabled': switchingIntensity || !previewLoaded || previewError,
+          }"
           @click="switchIntensity(opt.key)"
         >{{ opt.label }}</div>
       </div>
 
       <p class="hero-desc">{{ heroDesc }}</p>
 
-      <div class="hero-stat-row">
+      <div v-if="previewLoaded && !previewError" class="hero-stat-row">
         <div class="hero-stat">
           <span class="stat-num">{{ preview.issued_this_month ?? 0 }}</span>
           <span class="stat-label">本月已发券</span>
@@ -27,6 +33,10 @@
           <span class="stat-num">{{ redemptionRateText }}</span>
           <span class="stat-label">核销率（{{ preview.redeemed_this_month ?? 0 }}张已用）</span>
         </div>
+      </div>
+      <div v-else-if="previewError" class="hero-error-row">
+        <span>营销状态加载失败</span>
+        <button type="button" class="hero-retry-btn tap-shrink" @click="loadPreview">重试</button>
       </div>
     </section>
 
@@ -86,7 +96,11 @@
             </div>
           </div>
           <div v-if="loadingTemplates" class="empty-state">加载中…</div>
-          <div v-else-if="templates.length === 0" class="empty-state">还没有手动建券，系统自动券已在运行。</div>
+          <div v-else-if="templatesError" class="empty-state empty-state--error">
+            加载失败，请重试
+            <div style="margin-top:8px"><button type="button" class="hero-retry-btn hero-retry-btn--light tap-shrink" @click="loadTemplates">重试</button></div>
+          </div>
+          <div v-else-if="templates.length === 0" class="empty-state">还没有手动建券，需要时随时可以建一张。</div>
           <div v-else class="template-list">
             <article v-for="item in templates" :key="item.id" class="template-card">
               <div class="coupon-face">
@@ -185,8 +199,11 @@ const intensityOptions = [
 
 // ── 状态 ────────────────────────────────────────────────
 const preview = ref({})           // 来自 /marketing-preview 的系统计算结果
+const previewLoaded = ref(false)  // 是否已经拿到一次确定结果（成功或失败）
+const previewError = ref(false)   // 加载失败/无法确认，禁止假定"运行中"
 const templates = ref([])
 const loadingTemplates = ref(false)
+const templatesError = ref(false)
 const switchingIntensity = ref(false)
 const activeCollapse = ref([])
 const showForm = ref(false)
@@ -203,6 +220,10 @@ const redemptionRateText = computed(() => {
 })
 
 const heroDesc = computed(() => {
+  // 未确认（首次加载中）和确认失败必须先说清楚，不能沿用"系统正在配置"这类
+  // 听起来一切正常的文案——那句话只应该在"确认成功但细项还没算出来"时出现。
+  if (previewError.value) return '暂时无法确认营销运行状态，请点击重试'
+  if (!previewLoaded.value) return '正在确认营销运行状态…'
   const outcomes = preview.value?.intensity_outcomes
   if (!outcomes) return '系统正在为你自动配置营销参数…'
   if (!outcomes.has_enough_data) return '数据积累中，当前用安全参数自动运行，满 5 单后为你精算'
@@ -214,21 +235,33 @@ const heroDesc = computed(() => {
 
 // ── 数据加载 ─────────────────────────────────────────────
 async function loadPreview() {
+  previewLoaded.value = false
   try {
     const res = await getMarketingPreview()
+    if (res?.code !== 200) throw new Error(res?.msg || '营销状态加载失败')
     preview.value = res?.data?.data || res?.data || {}
+    previewError.value = false
   } catch {
-    // 加载失败不阻断页面
+    // 失败不清空 preview.value：若之前已经成功加载过，旧数据仍保留，只是
+    // previewError 会让模板不再假定它仍然是"运行中"的确定证据。
+    previewError.value = true
+  } finally {
+    previewLoaded.value = true
   }
 }
 
 async function loadTemplates() {
   loadingTemplates.value = true
+  templatesError.value = false
   try {
     const res = await getCouponTemplates({ page: 1, page_size: 100 })
+    if (res?.code !== 200) throw new Error(res?.msg || '优惠券加载失败')
     const data = res?.data?.data || res?.data || []
     templates.value = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : []
   } catch {
+    // 失败不清空 templates：保留上一次正确列表，由 templatesError 触发独立错误态，
+    // 不落入"还没有手动建券"的空态文案。
+    templatesError.value = true
     showFailToast('优惠券加载失败')
   } finally {
     loadingTemplates.value = false
@@ -345,7 +378,32 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-size: 12px;
   font-weight: 700;
 }
+.hero-badge--unknown { background: rgba(255,255,255,.14); }
 .hero-card h1 { font-size: 20px; margin: 0 0 12px; }
+
+.hero-error-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  opacity: .95;
+}
+.hero-retry-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.5);
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.hero-retry-btn--light {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--brand);
+}
+.empty-state--error { color: #dc2626; }
 
 .intensity-switch {
   display: flex;
