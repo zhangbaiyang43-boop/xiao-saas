@@ -11,7 +11,7 @@
           <text class="success-paid-currency">{{ currency }}</text>
           <text class="success-paid-amount">{{ successTotal.toFixed(2) }}</text>
         </view>
-        <text class="success-paid-label">{{ successText.paidLabel }}</text>
+        <text class="success-paid-label">{{ paidLabel }}</text>
 
         <view class="order-status-bar" :class="successStatusTone">
           <text class="order-status-text">{{ successStatusText }}</text>
@@ -100,6 +100,10 @@ export default {
   name: 'PaymentSuccessSheet',
   props: {
     successText: { type: Object, required: true },
+    // postpay/table_account 下单成功时没有实际收款，不能沿用 successText.paidLabel
+    // 那句"实付金额"——调用方（useSuccessSheetView.js）按这一笔订单自己的
+    // payment_mode 算出该用哪句话，这里只负责渲染，不判断该显示哪句。
+    paidLabel: { type: String, required: true },
     currency: { type: String, default: '' },
     successTotal: { type: Number, default: 0 },
     successStatusTone: { type: String, default: '' },

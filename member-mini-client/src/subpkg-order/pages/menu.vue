@@ -282,6 +282,7 @@
     <PaymentSuccessSheet
       v-if="showSuccess"
       :success-text="successText"
+      :paid-label="successPaidLabel"
       :currency="confirmationText.currency"
       :success-total="successTotal"
       :member-value="successMemberValue"
@@ -613,6 +614,11 @@ export default {
     const successItems = ref([])
     const successTotal = ref(0)
     const successDiscount = ref(0)
+    // P0 修复：成功页"实付/本单"文案取决于这一笔订单自己的支付模式，不是页面
+    // 当前的 paymentMode（那个会随下一次下单/继续加菜变化）。默认 'prepay'
+    // 只是初始占位，真正的值在 useCheckout.js 的 hydratePaidSuccessPresentation
+    // 里、拿到订单数据的那一刻才写入。
+    const successPaymentMode = ref('prepay')
     // P0-B2a: GET /v1/orders/my 的 member_value 权威结果原样存这里，成功页
     // 会员本单已省/积分/奖励券都只读这一个对象，不在页面里另算。
     const successMemberValue = ref(null)
@@ -782,9 +788,9 @@ export default {
     })
 
     const {
-      successOrderItemCount, successOrderNo, successStatusText, successStatusTone,
+      successOrderItemCount, successPaidLabel, successOrderNo, successStatusText, successStatusTone,
       orderStatusText, orderStatusClass,
-    } = useSuccessSheetView({ successItems, orderNo, orderId, orderStatus })
+    } = useSuccessSheetView({ successItems, orderNo, orderId, orderStatus, successPaymentMode })
 
     const canPollDiningSession = () => (
       !isExitingSession.value
@@ -1218,7 +1224,7 @@ export default {
       recoverPendingPaymentResult,
     } = useCheckout({
       shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
-      orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
+      orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue, successPaymentMode,
       showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
       payAmount, pendingOrderId, pendingSubmitRequestId,
       myOrders, showOrders, showCart, showSuccess, successPreserveDraft,
@@ -1427,7 +1433,7 @@ export default {
       showCheckoutAuth, authorizing, authSheetText, authPrimaryText, handleCheckoutAuth, cancelCheckoutAuth,
       showMemberCheckoutChoice, memberChoiceJoining, memberChoiceText, cancelMemberCheckoutChoice, checkoutAsGuest, joinMemberAndCheckout, openMemberAgreement,
       paying, paymentConfirming, paymentResultUnknown, payAmount, confirmPay,
-      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
+      orderId, orderNo, orderStatus, orderStatusText, successStatusText, successStatusTone, successOrderItemCount, successPaidLabel, successOrderNo, orderStatusClass, pickupNoEnabled, successPickupNo,
       startStatusPoll, stopStatusPoll, startTablePresencePoll, stopTablePresencePoll, startTablePresencePollIfActive,
       finishSettledSession, acknowledgeClosedSession, showUnexpectedClosedMask, exitDiningSession, isExitingSession,
       remark, remarkChips, toggleRemarkChip, orderRemarkChips, showOrderRemarkExtra, orderRemarkExtra,

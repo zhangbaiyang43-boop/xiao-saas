@@ -22,6 +22,11 @@ export const confirmationText = {
 export const successText = {
   title: '下单成功',
   paidLabel: '实付金额',
+  // postpay/table_account 下单成功时钱还没收——need_payment=false，前端根本
+  // 没调起过微信支付——这时候继续用"实付金额"是在断言一笔没发生过的收款。
+  // 这一单的钱到底怎么样，用中性的"本单金额"，跟 confirmationText.postpay/
+  // tableAccount 结算前的措辞口径保持一致。
+  payableLabel: '本单金额',
   table: '桌号',
   orderNo: '订单号',
   items: '商品',

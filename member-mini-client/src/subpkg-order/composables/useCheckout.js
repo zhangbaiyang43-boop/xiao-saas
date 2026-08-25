@@ -39,7 +39,7 @@ import { confirmationText, toastText } from '../utils/orderText.js'
 // 购物车，交给 applyRecoveryCartCleanup 用指纹比对 successItems 快照判断。
 export function useCheckout({
   shopId, tableNo, diningSessionId, diningParticipantToken, diningClientId,
-  orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue,
+  orderNo, orderId, orderStatus, successItems, successTotal, successDiscount, successMemberValue, successPaymentMode,
   showCheckoutAuth, authorizing, authActionStatus, pendingPaymentIntent, paying, paymentFailed, paymentConfirming, paymentResultUnknown,
   payAmount, pendingOrderId, pendingSubmitRequestId,
   myOrders, showOrders, showCart, showSuccess, successPreserveDraft,
@@ -297,6 +297,11 @@ export function useCheckout({
     orderId.value = id
     orderStatus.value = data.status || 'pending'
     successTotal.value = Number(data.total ?? payAmount.value)
+    // 成功页文案要绑定"这一笔订单"实际的 payment_mode，不是页面当前的
+    // paymentMode.value——恢复路径可能在展示一笔跟页面当前状态不同模式的
+    // 旧订单，不能让文案跟着串到另一笔订单的模式上去。data 没带这个字段时
+    // 才退回页面当前值，跟 upsertPaidOrderResult 里同样的兜底写法一致。
+    if (successPaymentMode) successPaymentMode.value = normalizePaymentMode(data.payment_mode || paymentMode.value)
     applyAuthoritativeMemberReward(data.member_value || null)
     if (freshOpen) reminderRequested.value = false
     showSuccess.value = true
