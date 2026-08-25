@@ -10,8 +10,23 @@
         <a-button v-if="canStaffOrder" size="small" type="primary" @click="openStaffOrder()" style="font-size:12px;height:28px;padding:0 10px">
           代客加单
         </a-button>
-        <div v-if="alertEnabled" class="alert-on-badge tap-shrink" @click="disableAlert">
+        <!-- P1 修复：alertEnabled（想不想要这个功能）和 audioNeedsUnlock（浏览器声音
+        引擎是否真正就绪）是两个独立状态，只展示 alertEnabled 会让商家在声音还没解锁时
+        看到一个"万事俱备"的绿色徽章，跟下面的解锁横幅自相矛盾。开着但没解锁时徽章本身
+        就要显示成待解锁态，点它也能直接解锁（不需要非得点下面那条横幅）。 -->
+        <div
+          v-if="alertEnabled && !audioNeedsUnlock"
+          class="alert-on-badge tap-shrink"
+          @click="disableAlert"
+        >
           <span class="live-dot" />提醒开
+        </div>
+        <div
+          v-else-if="alertEnabled && audioNeedsUnlock"
+          class="alert-pending-badge tap-shrink"
+          @click="unlockAudio"
+        >
+          提醒开 · 待解锁
         </div>
         <a-button v-else size="small" type="primary" ghost @click="enableAlert" style="font-size:12px;height:28px;padding:0 10px">
           开启提醒
@@ -1614,6 +1629,23 @@ onMounted(async () => {
   color: #16a34a;
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
+  border-radius: 20px;
+  padding: 3px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 复用 .unlock-audio-banner 同一套琥珀色，不新建 token——同一件事（声音引擎待解锁）
+   在徽章和横幅两个位置出现，颜色语义必须一致，商家才能一眼认出这是同一个状态。 */
+.alert-pending-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
   border-radius: 20px;
   padding: 3px 10px;
   cursor: pointer;

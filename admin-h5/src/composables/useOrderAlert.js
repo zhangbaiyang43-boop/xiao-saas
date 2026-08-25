@@ -33,13 +33,25 @@ function isSoundReady() {
   return Boolean(alertEnabled.value && audioCtx && audioCtx.state !== 'suspended' && !audioNeedsUnlock.value)
 }
 
+// P2 修复：以前这里只是静默把 audioNeedsUnlock 打开，商家要自己注意到那条容易被
+// 忽略的横幅才知道响铃刚刚失效了——新订单进来但响铃悄悄没响，是最容易导致真实漏单
+// 的场景。这里改成新订单响铃失败的那一刻主动弹一次提示；只在"刚失效"这一刻弹一次
+// （edge trigger，判断 audioNeedsUnlock 之前是不是 false），连续多单都撞上同一次
+// 失效不会重复刷屏。
+function _reportAudioBroken() {
+  if (!audioNeedsUnlock.value) {
+    message.warning('提醒声音失效了，请点右上角"待解锁"重新开启', 4)
+  }
+  audioNeedsUnlock.value = true
+}
+
 function playNewOrderBeep() {
   if (!alertEnabled.value || !audioCtx) return false
   try {
     if (audioCtx.state === 'suspended') {
       audioCtx.resume()
       if (audioCtx.state === 'suspended') {
-        audioNeedsUnlock.value = true
+        _reportAudioBroken()
         return false
       }
     }
@@ -49,7 +61,7 @@ function playNewOrderBeep() {
     audioNeedsUnlock.value = false
     return true
   } catch {
-    audioNeedsUnlock.value = true
+    _reportAudioBroken()
     return false
   }
 }
@@ -76,14 +88,24 @@ function disableAlert() {
   message.info('提醒已关闭')
 }
 
-function unlockAudio() {
+// P3 修复：resume() 是异步 Promise，以前这里不 await、也不核对最终状态，无条件就
+// 宣告"已解锁"——万一这次点击真的没能把 AudioContext 从 suspended 带出来（极少数
+// 浏览器/场景），界面会撒谎说已解锁，商家会带着错误的安全感继续等一个永远不会响的
+// 铃，比现在这种"诚实但看起来矛盾"的状态更危险。
+async function unlockAudio() {
   if (!audioCtx) return
   try {
-    audioCtx.resume()
+    await audioCtx.resume()
+    if (audioCtx.state === 'suspended') {
+      message.error('解锁失败，请重试')
+      return
+    }
     _beep(audioCtx, 880, 0)
     audioNeedsUnlock.value = false
     message.success('提醒已解锁，有新订单会响铃')
-  } catch {}
+  } catch {
+    message.error('解锁失败，请重试')
+  }
 }
 
 // 如果之前已开启提醒，静默恢复 AudioContext——但不能只是"等用户下次点击页面时自动
