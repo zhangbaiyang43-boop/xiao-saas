@@ -1,6 +1,13 @@
 <template>
   <div class="page-wrap">
-    <van-pull-refresh v-model="refreshing" @refresh="onPullRefresh">
+    <!-- P0 修复：van-pull-refresh 默认阈值只有 50px（headHeight），从"划到底部再往回滑
+    到顶"这种带惯性的正常上滑手势，划过头 50px 太容易发生——一旦触发，preventDefault
+    会接管、冻结原生滚动，刷新期间页面区块又会因为数据重拉而变高，冻结的 scrollTop
+    停在旧布局的某个中间位置，刷新完就再也回不到顶部，只有切 tab 强制重新挂载组件才能
+    复位。pull-distance 调大到 80，降低"只是想滑到顶"被误判成"下拉刷新"的概率；
+    disabled 显式绑定 refreshing，避免手指全程不松开、跨越整个刷新周期这类边界情况下
+    内部状态机继续接管手势。 -->
+    <van-pull-refresh v-model="refreshing" :pull-distance="80" :disabled="refreshing" @refresh="onPullRefresh">
       <!-- Hero -->
       <div class="hero-header">
         <div>
