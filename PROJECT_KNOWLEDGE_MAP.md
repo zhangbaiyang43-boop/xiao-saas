@@ -42,7 +42,7 @@ xiao/
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md OrderManage 新订单高亮+拒单二次确认（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md MenuManage 菜品名称搜索（只读，验收证据）
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE05C_CUSTOMER_CONTEXT_PRESERVATION.md CustomerList 工作上下文保持，Phase-05 收口（只读，验收证据）
-│   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md 下一优先级审计，Security Preflight 中止——CustomerList 上下文曾含原始 token（已在 Phase-06-SEC 修复）
+│   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md 下一优先级审计已完成（SECURITY_GATE=PASS）——TOP_PRIORITY_AREA=VISUAL_SYSTEM（深色模式 token 合规缺口），Phase-06A 已定义待实施
 │   │   ├── ADMIN_FRONTEND_SYSTEM_PHASE06_SEC_CUSTOMER_CONTEXT_CREDENTIAL_REMEDIATION.md CustomerList 凭证泄露修复——identity 改为只用 tenant_id，登出显式清理 sessionStorage，已实施已验证
 │   │   ├── DESIGN_SYSTEM_CURRENT.md 前端视觉现状审计
 │   │   ├── HIGH_FREQUENCY_UI_AUDIT.md 顾客端高频路径视觉审计（只读）
@@ -177,7 +177,7 @@ Vault：`C:\Users\15936\Documents\Obsidian Vault`
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05A_ORDER_HIGH_FREQUENCY_EFFICIENCY.md`（OrderManage 新订单高亮+拒单二次确认，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05B_MENU_HIGH_FREQUENCY_EFFICIENCY.md`（MenuManage 菜品名称搜索，只读，验收证据）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE05C_CUSTOMER_CONTEXT_PRESERVATION.md`（CustomerList 工作上下文保持，Phase-05 收口，只读，验收证据）
-- `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md`（CustomerList 会话上下文曾含原始 Bearer Token 明文，安全发现，已在 Phase-06-SEC 修复；Phase-06 体验审计仍未开始，需重新执行）
+- `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE06_NEXT_PRIORITY_AUDIT.md`（体验优先级审计已完成：TOP_PRIORITY_AREA=VISUAL_SYSTEM，深色模式 token 合规缺口——PageHeader 等 20 页共用组件 + OrderManage 等高频页硬编码颜色；BACKLOG-01 建议独立提前处理：Settings 保存失败不回滚）
 - `docs/frontend/ADMIN_FRONTEND_SYSTEM_PHASE06_SEC_CUSTOMER_CONTEXT_CREDENTIAL_REMEDIATION.md`（上条发现的修复：identity 改为只用 tenant_id + clearAuth() 显式清理，方向一，已实施已验证）
 - `docs/frontend/DESIGN_SYSTEM_CURRENT.md`（视觉现状）
 - `docs/frontend/MENU_PERFORMANCE_AUDIT.md`（菜单首屏性能，只读）
