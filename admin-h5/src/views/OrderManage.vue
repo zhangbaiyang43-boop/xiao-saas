@@ -7,9 +7,12 @@
         <div v-if="lastRefreshed" class="sync-trust-time">最近成功同步 {{ lastRefreshed }}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <!-- 决策#4/#6（DEMOTE）：声音"已开启"徽标和"开启提醒"按钮的常态权重下沉到辅助
-        能力区。决策#5（KEEP）：待解锁是需要处理的异常态，必须继续留在页头显眼位置，
-        跟下面的解锁横幅保持同一套判断，不重复建声音状态源。 -->
+        <a-button v-if="canStaffOrder" size="small" type="primary" @click="openStaffOrder()" style="font-size:12px;height:28px;padding:0 10px">
+          代客加单
+        </a-button>
+        <!-- 待解锁是需要处理的异常态，必须显眼，点击直接解锁。已经开启且能正常播放时
+        只给一个不可点的静默指示——开着的提醒不该被这里的一次误触关掉，真要关必须走
+        专门的声音设置入口，不能是页头一次随手点击。没开启时给一个开启入口。 -->
         <div
           v-if="alertEnabled && audioNeedsUnlock"
           class="alert-pending-badge tap-shrink"
@@ -17,6 +20,12 @@
         >
           提醒开 · 待解锁
         </div>
+        <div v-else-if="alertEnabled" class="alert-on-indicator">
+          <span class="live-dot" />提醒开
+        </div>
+        <a-button v-else size="small" type="primary" ghost @click="enableAlert" style="font-size:12px;height:28px;padding:0 10px">
+          开启提醒
+        </a-button>
         <a-button type="text" aria-label="刷新" @click="manualRefresh" :loading="loading">
           <template #icon><ReloadOutlined /></template>
         </a-button>
@@ -66,8 +75,13 @@
     </div>
 
     <!-- 六类条件P0行动队列：全部读现有派生字段，不建新真相源；工作区处于加载/失败/
-    真空壳时（跟 C1 五态壳同一组条件）不重复显示，避免跟壳内文案打架。 -->
-    <div v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0)" class="section-block p0-queue">
+    真空壳时（跟 C1 五态壳同一组条件）不重复显示，避免跟壳内文案打架。正常、没有
+    任何待办的时候整块不出现——"当前没有异常"这种话不需要每次都念一遍，商家是
+    来处理事情的，没事情时这里就该是安静的，不用专门告诉他"没事"。 -->
+    <div
+      v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0) && (pendingCount > 0 || p0Queue.length > 0)"
+      class="section-block p0-queue"
+    >
       <div class="p0-queue-head">
         <span class="p0-queue-title">现在要处理</span>
       </div>
@@ -90,9 +104,6 @@
           <div class="p0-item-detail">{{ row.detail }}</div>
         </div>
         <a-button size="small">{{ row.actionLabel }}</a-button>
-      </div>
-      <div v-if="pendingCount === 0 && p0Queue.length === 0" class="p0-queue-clear">
-        当前没有P0异常，继续处理制作中订单
       </div>
     </div>
 
@@ -361,14 +372,6 @@
           @click="statusFilter = f.val"
         >{{ f.label }}</span>
       </div>
-      <!-- 待接单/制作中/已上餐是履约队列，按等待时长正序排（等得越久越靠前），
-           跟"最新排最前"的直觉相反；不加说明的话，商家很容易把排在前面的老订单
-           误认成刚发生的。已结账/已拒单/已取消是查看态，仍然是最新在前，不需要
-           这条提示，所以只在履约态筛选下显示。 -->
-      <div
-        v-if="isLiveToday && ['', 'pending', 'preparing', 'done'].includes(statusFilter)"
-        style="padding:4px 16px 0;font-size:11px;color:var(--text-3)"
-      >按等待时长排序，等得越久的订单越靠前，不是最新的订单排最前</div>
       <div v-if="!isLiveToday && historicalError" style="padding:8px 16px 0">
         <a-alert type="error" show-icon message="历史订单加载失败" description="请检查网络后重试" style="border-radius:10px">
           <template #action>
@@ -478,26 +481,6 @@
       <div style="height:16px" />
     </template>
     </template>
-
-    <!-- 辅助能力：决策#3/#4/#6/#13 下沉的代客加单、声音设置、今日营收，都是既有能力
-    原样保留，只是不再常驻页头/统计行抢首屏注意力；声音待解锁时页头已有徽标+横幅，
-    这里不重复出现第二份声音控件，避免两处状态源不一致。 -->
-    <div v-if="isLiveToday" class="section-block aux-panel">
-      <div class="aux-panel-title">辅助能力</div>
-      <div class="aux-panel-grid">
-        <button v-if="canStaffOrder" type="button" class="aux-btn" @click="openStaffOrder()">代客加单</button>
-        <button
-          v-if="!audioNeedsUnlock"
-          type="button"
-          class="aux-btn"
-          @click="alertEnabled ? disableAlert() : enableAlert()"
-        >{{ alertEnabled ? '提醒开 · 点击关闭' : '开启提醒' }}</button>
-        <div class="aux-revenue">
-          <span class="aux-revenue-label">今日营收</span>
-          <span class="aux-revenue-value">¥{{ todayRevenue }}</span>
-        </div>
-      </div>
-    </div>
 
     <!-- 结账确认 Modal -->
     <a-modal
@@ -1065,7 +1048,6 @@ const {
   alertEnabled,
   audioNeedsUnlock,
   enableAlert,
-  disableAlert,
   unlockAudio,
   isHighlighted,
   syncNow,
@@ -1166,18 +1148,9 @@ const preparingCount = computed(() => orders.value.filter(o => o.status === 'pre
 // 视图上"看不到任何可结账桌子"互相矛盾。
 const doneCount = computed(() => orders.value.filter(o => o.status === 'done' && o.diningSessionId).length)
 const pendingPaymentCount = computed(() => orders.value.filter(o => o.status === 'pending_payment').length)
-// 记账/桌台账模式下，preparing/done 阶段顾客还没有实际付款，钱是结账（settled）那一刻
-// 才真正收到的——用跟预付模式一样的口径把 preparing/done 也算进"今日营收"会让这个数字
-// 虚高，误导商家对当天实际到手现金的判断，所以这两种模式下只统计已结账的订单。
-const todayRevenue = computed(() => {
-  const revenueStatuses = ['postpay', 'table_account'].includes(paymentMode.value)
-    ? ['settled']
-    : ['preparing', 'done', 'settled']
-  return orders.value.filter(o => revenueStatuses.includes(o.status)).reduce((s, o) => s + o.total, 0).toFixed(2)
-})
 
-// 决策#13（DEMOTE）：今日营收不建立老板的第二Job，从首屏统计行搬到辅助能力区，
-// 这里只剩前台/店长当场就要用的三个履约数字。
+// 今日营收 Dashboard（底部"今日"tab）已经有，这里不重复展示，避免同一个数字
+// 两个地方各算一遍、以后各自改动漂移成两个不一样的口径。
 const statItems = computed(() => [
   { label: '待接单', value: pendingCount.value, color: pendingCount.value > 0 ? '#ef4444' : '#374151' },
   { label: '制作中', value: preparingCount.value, color: '#374151' },
@@ -1939,56 +1912,12 @@ onMounted(async () => {
 .p0-item--warning { --p0-bg: #fff7ed; --p0-border: #fed7aa; --p0-mark-bg: #c2410c; }
 .p0-item--pickup { --p0-bg: #fff7ed; --p0-border: #fed7aa; --p0-mark-bg: #c2410c; }
 .p0-item--unknown { --p0-bg: #fffbeb; --p0-border: #fde68a; --p0-mark-bg: #b45309; border-style: dashed; }
-.p0-queue-clear {
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid #bbf7d0;
-  background: #f0fdf4;
-  color: #16a34a;
-  font-size: 12px;
-  font-weight: 700;
-  text-align: center;
-}
 @media (prefers-color-scheme: dark) {
   .p0-item--error { --p0-bg: rgba(239, 68, 68, .14); --p0-border: rgba(248, 113, 113, .4); --p0-mark-bg: #f87171; }
   .p0-item--warning,
   .p0-item--pickup { --p0-bg: rgba(194, 65, 12, .16); --p0-border: rgba(251, 146, 60, .4); --p0-mark-bg: #fb923c; }
   .p0-item--unknown { --p0-bg: rgba(245, 158, 11, .12); --p0-border: #d97706; --p0-mark-bg: #fbbf24; }
-  .p0-queue-clear { background: rgba(5, 153, 82, .16); border-color: rgba(52, 211, 153, .4); color: #34d399; }
 }
-
-/* 辅助能力区：代客加单/声音设置/今日营收下沉后的落脚点，纯复用现有卡片/按钮视觉，
-   不引入新组件体系。 */
-.aux-panel-title { font-size: 12px; font-weight: 700; color: var(--text-3); margin-bottom: 8px; }
-.aux-panel-grid {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.aux-btn {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-2);
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 12px;
-  cursor: pointer;
-}
-.aux-btn:active { opacity: .7; }
-.aux-revenue {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  padding: 7px 12px;
-  border-radius: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-}
-.aux-revenue-label { font-size: 11px; color: var(--text-3); }
-.aux-revenue-value { font-size: 13px; font-weight: 800; color: var(--text-1); }
 
 /* 复用 .unlock-audio-banner 同一套琥珀色，不新建 token——同一件事（声音引擎待解锁）
    在徽章和横幅两个位置出现，颜色语义必须一致，商家才能一眼认出这是同一个状态。 */
@@ -2004,6 +1933,21 @@ onMounted(async () => {
   border-radius: 20px;
   padding: 3px 10px;
   cursor: pointer;
+  user-select: none;
+}
+/* 静默指示，不可点——提醒已经开着且能正常响，这里不给"关闭"入口，
+   跟 .alert-pending-badge 的可点击待解锁态刻意区分开。 */
+.alert-on-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #16a34a;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 20px;
+  padding: 3px 10px;
   user-select: none;
 }
 

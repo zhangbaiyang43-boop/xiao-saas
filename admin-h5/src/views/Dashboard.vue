@@ -168,7 +168,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { SettingOutlined, BellOutlined, ThunderboltOutlined, RiseOutlined } from '@ant-design/icons-vue'
@@ -461,6 +461,17 @@ async function onPullRefresh() {
   refreshing.value = false
   if (statsError.value) message.error('刷新失败，请检查网络后重试')
   else message.success('已刷新')
+  // 之前只把误触发的概率调低（pull-distance 80px），没处理"万一还是被从底部往回
+  // 滑的那种大幅度手势触发了"的兜底：van-pull-refresh 触发时 preventDefault 会冻结
+  // 原生滚动，这 5 个并行请求各自 v-if 出新内容又会把页面撑高，冻结的 scrollTop
+  // 停在旧布局中间，刷新完也回不到顶部。真实反馈证实单纯调阈值不够用——这里在数据
+  // 落地、DOM 按新高度重新布局之后（nextTick），显式把滚动位置归零，不管这次刷新是
+  // 手动下拉触发的还是被这个手势误伤触发的，结束时永远回到一个确定、可信的位置。
+  await nextTick()
+  // 这个壳的实际滚动容器是 body（html/body 各自 overflow:auto 但真正在滚的是
+  // body——跟 OrderManage 页面同一套壳），不是 window/documentElement，
+  // window.scrollTo 在这里对不上真正的滚动元素，必须直接归零 body.scrollTop。
+  document.body.scrollTop = 0
 }
 
 // 智能营销卡片
