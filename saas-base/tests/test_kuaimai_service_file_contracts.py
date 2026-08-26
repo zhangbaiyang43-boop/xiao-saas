@@ -102,6 +102,7 @@ class KuaimaiServiceFileContractsTest(unittest.TestCase):
         render_data = {
             "order_no": "7482068958623961088",
             "table_no": "A01",
+            "pickup_no": "15",
             "total_amount": "15.00",
             "pay_amount": "15.00",
             "pay_type": "balance",
@@ -137,6 +138,7 @@ class KuaimaiServiceFileContractsTest(unittest.TestCase):
         self.assertIsInstance(final_render_data["点餐订单"], list)
         self.assertEqual(final_render_data["点餐订单"][0]["order_no"], "7482068958623961088")
         self.assertEqual(final_render_data["点餐订单"][0]["table_no"], "A01")
+        self.assertEqual(final_render_data["点餐订单"][0]["pickup_no"], "15")
         self.assertEqual(final_render_data["点餐订单"][0]["total_amount"], "15.00")
         self.assertEqual(final_render_data["点餐订单"][0]["pay_amount"], "15.00")
         self.assertEqual(final_render_data["点餐订单"][0]["pay_type"], "余额支付")
