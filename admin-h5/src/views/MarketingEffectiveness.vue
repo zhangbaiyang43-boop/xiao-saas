@@ -178,7 +178,7 @@ onMounted(loadData)
 .window-tab {
   flex: 1;
   border: 1px solid var(--border);
-  background: #fff;
+  background: var(--bg-card);
   color: var(--text-2);
   border-radius: 999px;
   padding: 8px 0;

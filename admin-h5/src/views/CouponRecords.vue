@@ -63,9 +63,7 @@
               <strong>{{ record.customer_name || '会员用户' }}</strong>
               <span>{{ record.customer_phone || '-' }}</span>
             </div>
-            <van-tag :type="getTagType(record.status)" round>
-              {{ getStatusText(record.status) }}
-            </van-tag>
+            <CouponStatusTag :status="record.status" />
           </div>
 
           <div class="coupon-row">
@@ -124,11 +122,11 @@ import {
   Loading as VanLoading,
   Pagination as VanPagination,
   Search as VanSearch,
-  Tag as VanTag,
   showConfirmDialog,
   showToast
 } from 'vant'
 import PageHeader from '../components/PageHeader.vue'
+import CouponStatusTag from '../components/CouponStatusTag.vue'
 import { getIssuedCoupons, recallCoupon } from '../api'
 
 const router = useRouter()
@@ -193,26 +191,6 @@ const extractTotal = (data) => {
 }
 
 const money = (value) => Number(value || 0).toFixed(Number(value || 0) % 1 === 0 ? 0 : 2)
-
-const getTagType = (status) => {
-  const map = {
-    UNUSED: 'warning',
-    USED: 'success',
-    EXPIRED: 'default',
-    REVOKED: 'danger'
-  }
-  return map[status] || 'default'
-}
-
-const getStatusText = (status) => {
-  const map = {
-    UNUSED: '未使用',
-    USED: '已使用',
-    EXPIRED: '已过期',
-    REVOKED: '已收回'
-  }
-  return map[status] || status || '-'
-}
 
 const getSourceText = (source) => {
   const map = {
@@ -491,6 +469,14 @@ onMounted(loadRecords)
   border-radius: 16px;
   border: 1px solid #f1e7d7;
   background: #fff8ef;
+}
+/* .coupon-info 里的文字用 var(--text-1/2)，深色下会变浅；这张卡的暖色底如果不跟着换，
+   就会变成浅字配浅底（Phase-06 审计发现）。保留"票券"的暖色识别，只把亮度换到暗色区间。 */
+@media (prefers-color-scheme: dark) {
+  .coupon-row {
+    border-color: rgba(251, 146, 60, .3);
+    background: rgba(194, 65, 12, .14);
+  }
 }
 
 .coupon-value {

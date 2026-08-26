@@ -39,17 +39,9 @@
       <span class="live-dot" />提醒还没生效，点这里立即解锁
     </div>
 
-    <div
-      v-if="isLiveToday && pendingPickupCount > 0"
-      class="pickup-todo-banner tap-shrink"
-      @click="focusFirstPendingPickup"
-    >
-      <span class="pickup-todo-dot" />
-      <div>
-        <div class="pickup-todo-title">{{ pendingPickupCount }}笔订单待发桌牌</div>
-        <div class="pickup-todo-sub">顾客已付款</div>
-      </div>
-    </div>
+    <!-- 待发桌牌横幅在C2加入P0行动队列后是重复信号——p0Queue的"牌"那一行读的是
+    同一个 pendingPickupCount、点了走的是同一个 focusFirstPendingPickup，这里不再
+    单独画一遍，避免同一件事在页面上说两次。 -->
 
     <!-- 统计数字 -->
     <div class="section-block animate-in">
@@ -77,11 +69,9 @@
       </div>
       <div v-if="pendingCount > 0" class="p0-next-task tap-shrink" @click="focusPendingAccept">
         <div class="p0-next-count">{{ pendingCount }}</div>
-        <div class="p0-next-body">
-          <div class="p0-next-label">新订单待接单</div>
-          <div class="p0-next-copy">等待最久的订单优先，点击定位</div>
-        </div>
-        <a-button type="primary" size="small">去接单</a-button>
+        <div class="p0-next-label">新订单待接单</div>
+        <div class="p0-next-copy">等待最久的订单优先，点击定位</div>
+        <a-button type="primary" block class="p0-next-btn">去接单</a-button>
       </div>
       <div
         v-for="row in p0Queue"
@@ -206,15 +196,15 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
-                <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
-                <a-tag v-if="justServedLabel(order.id)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px;font-weight:700">{{ justServedLabel(order.id) }}</a-tag>
+                <a-tag v-if="isHighlighted(order.id)" size="small" class="order-tag-new">新</a-tag>
+                <a-tag v-if="justServedLabel(order.id)" size="small" class="order-tag-served">{{ justServedLabel(order.id) }}</a-tag>
                 <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status, order.status_text) }}</a-tag>
-                <a-tag v-if="order.source === 'h5'" size="small" style="background:#eff6ff;color:#2563eb;border-color:#bfdbfe;font-size:10px">H5</a-tag>
-                <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
-                <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
+                <a-tag v-if="order.source === 'h5'" size="small" class="order-tag-source-h5">H5</a-tag>
+                <a-tag v-if="order.source === 'staff'" size="small" class="order-tag-source-staff">{{ staffSourceLabel(order) }}</a-tag>
+                <a-tag v-if="order.pickup_no" size="small" class="order-tag-pickup">{{ order.pickup_no }}号桌牌</a-tag>
                 <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
-                <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
-                <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
+                <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
+                <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
                 <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
               </div>
@@ -394,16 +384,16 @@
         <a-card :bordered="false" :body-style="{ padding: '12px 16px' }" :class="{ 'order-card--new': isHighlighted(order.id) }">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-              <a-tag v-if="isHighlighted(order.id)" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700">新</a-tag>
-              <a-tag v-if="justServedLabel(order.id)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px;font-weight:700">{{ justServedLabel(order.id) }}</a-tag>
-              <a-tag style="color:#374151;background:#f3f4f6;border-color:#e5e7eb">桌{{ order.table }}</a-tag>
+              <a-tag v-if="isHighlighted(order.id)" size="small" class="order-tag-new">新</a-tag>
+              <a-tag v-if="justServedLabel(order.id)" size="small" class="order-tag-served">{{ justServedLabel(order.id) }}</a-tag>
+              <a-tag class="order-tag-table">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
               <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status, order.status_text) }}</a-tag>
-              <a-tag v-if="order.source === 'staff'" size="small" style="background:#fdf4ff;color:#a21caf;border-color:#f5d0fe;font-size:10px">{{ staffSourceLabel(order) }}</a-tag>
-              <a-tag v-if="order.pickup_no" size="small" style="background:#fff7ed;color:#c2410c;border-color:#fed7aa;font-size:10px">{{ order.pickup_no }}号桌牌</a-tag>
+              <a-tag v-if="order.source === 'staff'" size="small" class="order-tag-source-staff">{{ staffSourceLabel(order) }}</a-tag>
+              <a-tag v-if="order.pickup_no" size="small" class="order-tag-pickup">{{ order.pickup_no }}号桌牌</a-tag>
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
-              <a-tag v-if="order.printStatus === 'failed'" size="small" style="background:#fef2f2;color:#dc2626;border-color:#fecaca;font-size:10px">打印失败</a-tag>
-              <a-tag v-else-if="order.printStatus === 'unknown'" size="small" style="background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px">打印结果未知</a-tag>
+              <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
+              <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
               <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
             </div>
@@ -1823,22 +1813,35 @@ onMounted(async () => {
 }
 .p0-queue-title { font-size: 14px; font-weight: 800; color: var(--text-1); }
 .p0-queue-meta { font-size: 11px; color: var(--text-3); }
+/* 下一项主任务是六类P0里唯一"非异常"但最高频的一条（待接单），视觉权重要明显
+   高于其它条件行——用深底+大数字，而不是跟其它行一样的浅色卡片，商家一进页面
+   扫一眼就知道现在最该做什么，不用先读文字。深色模式下页面本身已经很暗，
+   补一条微弱的绿色描边，避免这张卡"融进"背景。 */
 .p0-next-task {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
+  padding: 14px;
   border-radius: 12px;
   margin-bottom: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  background: #17201b;
+  box-shadow: 0 8px 18px rgba(7, 193, 96, .16);
   cursor: pointer;
   user-select: none;
 }
-.p0-next-count { font-size: 22px; font-weight: 900; color: #ef4444; min-width: 28px; text-align: center; }
-.p0-next-body { flex: 1; min-width: 0; }
-.p0-next-label { font-size: 13px; font-weight: 700; color: var(--text-1); }
-.p0-next-copy { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.p0-next-count { font-size: 32px; line-height: 1; font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; }
+.p0-next-label { margin-top: 5px; font-size: 15px; font-weight: 800; color: #fff; }
+.p0-next-copy { margin: 4px 0 12px; font-size: 12px; line-height: 1.45; color: rgba(255, 255, 255, .7); }
+.p0-next-btn.ant-btn-primary {
+  border-color: #fff;
+  color: #0b2d1b;
+  background: #fff;
+}
+.p0-next-btn.ant-btn-primary:hover {
+  border-color: #fff;
+  color: #0b2d1b;
+  background: rgba(255, 255, 255, .85);
+}
+@media (prefers-color-scheme: dark) {
+  .p0-next-task { background: #0d2a1c; border: 1px solid rgba(18, 216, 115, .3); }
+}
 .p0-item {
   display: flex;
   align-items: center;
@@ -2108,7 +2111,7 @@ onMounted(async () => {
 .order-item-name {
   font-size: 22px;
   font-weight: 800;
-  color: #111827;
+  color: var(--text-1);
   line-height: 1.35;
 }
 .order-item-qty {
@@ -2197,12 +2200,10 @@ onMounted(async () => {
 }
 /* 待接单/备餐中/已完成/已结账/已取消这 5 个之前共用组件库默认灰色，只能靠读文字分辨——
    现在每个状态一个专属颜色：待接单最紧急用红，备餐中进行中用蓝，已完成可结账用绿，
-   已结账/已取消是"事情结束了"用浅灰区分开，不跟前面几个抢注意力。 */
-.tag-pending {
-  color: #dc2626 !important;
-  background: #fef2f2 !important;
-  border-color: #fecaca !important;
-}
+   已结账/已取消是"事情结束了"用浅灰区分开，不跟前面几个抢注意力。
+   .tag-pending 本身不在这里定义——它和 global.scss 的同名规则曾经各写一份、颜色
+   悄悄漂移成两种红色（Phase-06 审计发现），现已收敛成只有 global.scss 一份权威定义，
+   这里不再重复，避免以后又各自改出第二份。 */
 .tag-preparing {
   color: #2563eb !important;
   background: #eff6ff !important;
@@ -2223,6 +2224,55 @@ onMounted(async () => {
   background: #f9fafb !important;
   border-color: #e5e7eb !important;
 }
+/* 订单元信息标签：列表卡片和桌台抽屉两处渲染同一个订单，之前这几个 a-tag 的
+   style="..." 逐字复制了一份，改一处配色得记得改另一处。收敛成 class 后只有一份定义。 */
+.order-tag-new,
+.order-tag-print-unknown {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+.order-tag-new { font-weight: 700; }
+.order-tag-served {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+  font-weight: 700;
+}
+.order-tag-table {
+  color: #374151;
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+}
+.order-tag-source-h5 {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
+}
+.order-tag-source-staff {
+  background: #fdf4ff;
+  color: #a21caf;
+  border-color: #f5d0fe;
+}
+.order-tag-pickup {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: #fed7aa;
+}
+.order-tag-print-failed {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+.order-tag-new,
+.order-tag-served,
+.order-tag-source-h5,
+.order-tag-source-staff,
+.order-tag-pickup,
+.order-tag-print-failed,
+.order-tag-print-unknown {
+  font-size: 10px;
+}
 .order-row--pending-payment {
   background: #fffbeb;
 }
@@ -2240,18 +2290,6 @@ onMounted(async () => {
   cursor: pointer;
   user-select: none;
 }
-.pickup-todo-banner {
-  margin: 8px 16px 0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  cursor: pointer;
-  user-select: none;
-}
 .pickup-todo-dot {
   width: 8px;
   height: 8px;
@@ -2259,17 +2297,6 @@ onMounted(async () => {
   background: #f59e0b;
   flex-shrink: 0;
   display: inline-block;
-}
-.pickup-todo-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #c2410c;
-  line-height: 1.3;
-}
-.pickup-todo-sub {
-  font-size: 11px;
-  color: #b45309;
-  margin-top: 2px;
 }
 .pickup-pending-hint {
   display: inline-flex;
@@ -2308,9 +2335,14 @@ onMounted(async () => {
   padding: 4px 6px;
   cursor: pointer;
 }
+/* min-height 36px 是触控区域下限（Constitution §1.3 禁止靠过小触控区域换密度）；
+   之前只有 4px 上下padding，字号13px时实测高度不到28px。选中态改成实心填充而不是
+   浅色描边，饭点扫一眼筛选行就能看出选中的是哪个，不用凑近看文字颜色。 */
 .filter-chip {
-  display: inline-block;
-  padding: 4px 14px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
   border-radius: 20px;
   border: 1px solid var(--border);
   font-size: 13px;
@@ -2322,10 +2354,10 @@ onMounted(async () => {
   &:active { transform: scale(.95); }
 }
 .filter-chip--active {
-  border-color: #07C160;
-  color: #07C160;
-  background: #f0fdf4;
-  font-weight: 600;
+  border-color: var(--brand);
+  color: #fff;
+  background: var(--brand);
+  font-weight: 700;
 }
 .order-date-input {
   height: 28px;

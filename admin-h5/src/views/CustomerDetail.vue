@@ -94,7 +94,7 @@
                 <div style="font-size:11px;color:var(--text-3);margin-top:1px">券码 {{ coupon.code || coupon.coupon_code || '-' }}</div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-                <a-tag :color="coupon.status === 'UNUSED' ? 'success' : 'default'" size="small">{{ couponStatusText(coupon.status) }}</a-tag>
+                <CouponStatusTag :status="coupon.status" />
                 <a-button
                   v-if="coupon.status === 'UNUSED'"
                   danger size="small" type="text"
@@ -164,6 +164,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { UserOutlined, GiftOutlined, ShoppingCartOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
+import CouponStatusTag from '../components/CouponStatusTag.vue'
 import {
   getConsumptions, getCouponTemplates, getCustomer, getCustomerCoupons,
   getCustomerMembership, getCustomerOperationLogs, recallCoupon, restoreCustomer, sendCoupons, updateCustomerStatus,
@@ -208,7 +209,6 @@ function formatDate(v) {
   if (isNaN(d.getTime())) return String(v).substring(0, 16)
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
-function couponStatusText(s) { return { UNUSED: '可用', USED: '已使用', EXPIRED: '已过期', REVOKED: '已收回' }[s] || s || '-' }
 function ruleTypeLabel(r) { return { entry_coupon: '进店券', consumption_coupon: '复购券', new_customer_coupon: '新客券', recall_coupon: '召回券' }[r] || r }
 function ruleTypeColor(r) { return { entry_coupon: 'blue', consumption_coupon: 'green', new_customer_coupon: 'orange', recall_coupon: 'purple' }[r] || 'default' }
 function operationTitle(log) {
