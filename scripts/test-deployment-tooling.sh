@@ -356,7 +356,7 @@ STORE_DIR = os.environ.get("FAKE_COS_STORE", "/tmp/fake_cos_store")
 
 
 class CosConfig:
-    def __init__(self, Region=None, SecretId=None, SecretKey=None):
+    def __init__(self, Region=None, SecretId=None, SecretKey=None, Timeout=None):
         self.region = Region
 
 
