@@ -29,7 +29,6 @@
       <span class="trust-mark trust-mark--warning">!</span>
       <div class="trust-body">
         <div class="trust-title">订单同步失败，当前显示的是上次数据</div>
-        <div class="trust-copy">页面暂时无法确认最新事实，请重试以获取实时订单</div>
       </div>
       <a-button size="small" :loading="loading" @click="manualRefresh">重试</a-button>
     </div>
@@ -71,12 +70,11 @@
     <div v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0)" class="section-block p0-queue">
       <div class="p0-queue-head">
         <span class="p0-queue-title">现在要处理</span>
-        <span class="p0-queue-meta">行动与异常优先</span>
       </div>
       <div v-if="pendingCount > 0" class="p0-next-task tap-shrink" @click="focusPendingAccept">
         <div class="p0-next-count">{{ pendingCount }}</div>
         <div class="p0-next-label">新订单待接单</div>
-        <div class="p0-next-copy">等待最久的订单优先，点击定位</div>
+        <div class="p0-next-copy">等待最久优先</div>
         <a-button type="primary" block class="p0-next-btn">去接单</a-button>
       </div>
       <div
@@ -117,7 +115,6 @@
     <div v-if="orderLoadError" class="state-panel state-panel--error section-block">
       <span class="state-symbol state-symbol--error">!</span>
       <div class="state-title">订单加载失败</div>
-      <div class="state-copy">失败不代表今天没有订单，请检查网络后重试</div>
       <a-button type="primary" size="small" :loading="loading" @click="manualRefresh">重新加载</a-button>
     </div>
 
@@ -125,23 +122,26 @@
     <div v-else-if="loading && orders.length === 0" class="section-block">
       <a-skeleton active :paragraph="{ rows: 4 }" style="background:var(--bg-card);border-radius:12px;padding:16px;margin-bottom:12px" />
       <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:12px;padding:16px" />
-      <div class="state-copy state-copy--center">正在加载订单，尚未获得成功结果，不代表没有订单</div>
     </div>
 
     <!-- 空状态：仅在首次同步明确成功且订单为0时出现，与加载/失败严格分开 -->
     <div v-else-if="!loading && !syncFailed && orders.length === 0" style="padding:48px 0">
-      <a-empty description="今天还没有订单，去桌码页面打印桌贴码，贴到桌上后顾客即可扫码点餐">
+      <a-empty description="今天还没有订单">
         <template #image><OrderedListOutlined style="font-size:60px;color:#d1d5db" /></template>
       </a-empty>
-      <div class="state-copy--center" style="text-align:center;margin-top:4px">
+      <div class="state-copy--center" style="text-align:center;margin-top:4px;display:flex;gap:8px;justify-content:center">
         <a-button size="small" :loading="loading" @click="manualRefresh">刷新订单</a-button>
+        <a-button size="small" @click="router.push('/entrance-codes')">去打印桌贴码</a-button>
       </div>
     </div>
 
+    <!-- 加载/失败/真空三态之一时，桌台和列表工作区（含搜索框、筛选chip）整体不渲染，
+    避免跟上面的三态壳同屏出现"没有订单"和一整套搜索/筛选UI并存的矛盾画面。 -->
+    <template v-if="!liveWorkspaceBlocked">
     <!-- 桌台视图：宫格，一眼看清有几桌、分别什么状态 -->
     <template v-if="view === 'table'">
       <div v-if="!loading && visibleTableGroups.length === 0 && orders.length > 0" style="padding:48px 0">
-        <a-empty description="今天的桌子都已结账，坐等下一波客人吧">
+        <a-empty description="桌子都已结账">
           <template #image><CheckCircleOutlined style="font-size:60px;color:#bbf7d0" /></template>
         </a-empty>
       </div>
@@ -223,7 +223,7 @@
               </div>
             </div>
             <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
-            <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要处理退款。请点击下方退款，由系统向支付渠道发起退款。</div>
+            <div v-if="order.refundRequired" class="refund-attention">已付款但已终止，需要处理退款</div>
             <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
               {{ printDiagnostic(order) }}
             </div>
@@ -244,7 +244,7 @@
             <div class="order-action-row">
               <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
-              <span v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" class="paid-cancel-sop">已付款订单不可直接取消</span>
+              <a-tooltip v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" title="已付款订单不可直接取消"><InfoCircleOutlined class="paid-cancel-sop" /></a-tooltip>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
               <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
               <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
@@ -370,7 +370,7 @@
         style="padding:4px 16px 0;font-size:11px;color:var(--text-3)"
       >按等待时长排序，等得越久的订单越靠前，不是最新的订单排最前</div>
       <div v-if="!isLiveToday && historicalError" style="padding:8px 16px 0">
-        <a-alert type="error" show-icon message="历史订单加载失败" description="请检查网络后重试，失败不代表这一天没有订单" style="border-radius:10px">
+        <a-alert type="error" show-icon message="历史订单加载失败" description="请检查网络后重试" style="border-radius:10px">
           <template #action>
             <a-button size="small" :loading="historicalLoading" @click="loadHistoricalOrders({ append: false })">重试</a-button>
           </template>
@@ -414,7 +414,7 @@
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">单号尾号 {{ orderTail(order) }}<template v-if="order.paymentMethodText"> · {{ order.paymentMethodText }}</template></div>
-          <div v-if="order.refundRequired" class="refund-attention">该订单已付款但已终止，需要处理退款。请点击下方退款，由系统向支付渠道发起退款。</div>
+          <div v-if="order.refundRequired" class="refund-attention">已付款但已终止，需要处理退款</div>
           <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
             {{ printDiagnostic(order) }}
           </div>
@@ -439,7 +439,7 @@
             >发桌牌</a-button>
             <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
             <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
-            <span v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" class="paid-cancel-sop">已付款订单不可直接取消</span>
+            <a-tooltip v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" title="已付款订单不可直接取消"><InfoCircleOutlined class="paid-cancel-sop" /></a-tooltip>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
             <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
             <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
@@ -476,6 +476,7 @@
         </a-button>
       </div>
       <div style="height:16px" />
+    </template>
     </template>
 
     <!-- 辅助能力：决策#3/#4/#6/#13 下沉的代客加单、声音设置、今日营收，都是既有能力
@@ -655,9 +656,9 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined } from '@ant-design/icons-vue'
+import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined, InfoCircleOutlined } from '@ant-design/icons-vue'
 import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
@@ -682,6 +683,7 @@ function getCurrentTenantId() {
 }
 
 const route = useRoute()
+const router = useRouter()
 const reviewsMap = ref({}) // order_id -> review
 // 默认打开"订单列表"而不是"桌台视图"——按桌视图要点开桌子详情抽屉才能看到接单/出餐
 // 按钮，多了一步；订单列表按钮直接在卡片上。桌台视图还在，需要看整桌汇总时手动切过去。
@@ -1080,6 +1082,15 @@ const {
 
 const loading = computed(() => initialLoading.value || backgroundSyncing.value)
 const orderLoadError = computed(() => syncFailed.value && orders.value.length === 0)
+// 当前订单处于加载/失败/真空三态之一时，搜索框、筛选chip、桌台或列表工作区完全
+// 没有内容可搜/可筛，之前这些控件跟三态壳各画各的、没有互斥，导致真空态下面
+// 会同时看到"今天还没有订单"和一整套搜索/筛选UI——真实机器截图证实了这个问题，
+// 不是理论风险。历史模式（!isLiveToday）有自己独立的 historicalLoading/
+// historicalError 状态壳，不受这三态影响，永远不在这里被挡住。
+const liveWorkspaceBlocked = computed(() => (
+  isLiveToday.value
+  && (orderLoadError.value || (loading.value && orders.value.length === 0) || (!loading.value && !syncFailed.value && orders.value.length === 0))
+))
 
 // "已上餐"分组本身按等待结账时长排序（FIFO，不能改——排在后面的桌子等得更久，
 // 改成最新优先会让老桌子被新出的餐顶到后面，制造漏结账风险）。但这导致刚出餐/
@@ -1839,7 +1850,7 @@ onMounted(async () => {
   margin-bottom: 10px;
 }
 .state-symbol--error { color: #dc2626; background: #fef2f2; }
-.state-title { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 4px; }
+.state-title { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 12px; }
 .state-copy { font-size: 12px; color: var(--text-3); margin-bottom: 12px; }
 .state-copy--center { text-align: center; margin-top: 8px; margin-bottom: 0; }
 
@@ -2189,8 +2200,12 @@ onMounted(async () => {
   line-height: 1.5;
 }
 
+/* 接单/拒单/取消订单/发桌牌/更换等最多能同时出现5、6个，之前不换行，窄屏下
+   最后一个（通常是"更换"链接）会被挤出容器可视区域之外，而不是显示不下、
+   自然换行——真机截图证实了这一点。 */
 .order-action-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -2227,10 +2242,12 @@ onMounted(async () => {
 .order-action-btn--reject {
   font-weight: 700 !important;
 }
+/* 图标+tooltip代替常驻文字："已付款订单不可直接取消"只在真的碰到这种订单时
+   才用得上，没必要一直占着一整句话的位置。 */
 .paid-cancel-sop {
   color: #b45309;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 18px;
+  padding: 4px;
 }
 .refund-attention {
   margin-bottom: 8px;
