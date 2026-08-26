@@ -54,7 +54,20 @@ test('2. New-order visual state is driven by isHighlighted(order.id), not a seco
 })
 
 test('3. The new-order badge and tile ring use the file\'s own existing amber vocabulary, not a new color/token', () => {
-  assert.ok(src.includes("background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700\">新</a-tag>"), 'the "新" tag must reuse the exact amber tag style already used elsewhere in this file (e.g. printStatus === \'unknown\')')
+  // Accepts either the original inline-style tag, or the later refactor that
+  // moved repeated inline styles into a shared class (order-tag-new) -- both
+  // are fine as long as the "新" tag still renders with the exact same amber
+  // already used by printStatus === 'unknown' (order-tag-print-unknown), not
+  // a second, drifted color.
+  const inlineMatch = src.includes("background:#fffbeb;color:#b45309;border-color:#fde68a;font-size:10px;font-weight:700\">新</a-tag>")
+  const classMatch = /class="order-tag-new">新<\/a-tag>/.test(src)
+  assert.ok(inlineMatch || classMatch, 'the "新" tag must be styled with either the exact inline amber style, or the order-tag-new class')
+  if (classMatch) {
+    const sharedRuleMatch = src.match(/\.order-tag-new,\s*\n\s*\.order-tag-print-unknown\s*\{([^}]*)\}/)
+    assert.ok(sharedRuleMatch, 'order-tag-new must share its color rule with order-tag-print-unknown, not define its own separate amber')
+    const rule = sharedRuleMatch[1]
+    assert.ok(rule.includes('#fffbeb') && rule.includes('#b45309') && rule.includes('#fde68a'), 'the shared order-tag-new/order-tag-print-unknown rule must use the exact amber tag style already used elsewhere in this file (e.g. printStatus === \'unknown\')')
+  }
   assert.ok(src.includes('.table-tile--new {') , 'the grid-tile new-order ring must be a real CSS rule')
   const tileNewRule = slice('.table-tile--new {', '}')
   assert.ok(tileNewRule.includes('#f59e0b'), 'the tile ring must reuse the same amber (#f59e0b) already used by .table-tile--urgent, not invent a new color')

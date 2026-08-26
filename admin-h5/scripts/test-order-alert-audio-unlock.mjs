@@ -34,16 +34,26 @@ function slice(startMarker, endMarker) {
 // ---------------------------------------------------------------------------
 
 test('P1.1 badge shows plain green "提醒开" only when enabled AND unlocked', () => {
+  // Later revision (per explicit product direction: an already-on reminder
+  // must never be one-tap-closable from the header) reordered the branches
+  // so the pending/needs-unlock case is checked first and the plain "on"
+  // indicator is the v-else-if fallback -- that ordering makes it reachable
+  // only when alertEnabled is true AND the pending branch's audioNeedsUnlock
+  // check already failed, i.e. exactly alertEnabled && !audioNeedsUnlock,
+  // without needing to spell out the negation a second time.
   const badgeArea = slice('<div style="display:flex;align-items:center;gap:8px">', '</a-button>\n        <a-button type="text" aria-label="刷新"')
-  assert.ok(badgeArea.includes('v-if="alertEnabled && !audioNeedsUnlock"'), 'the plain green badge must require both alertEnabled and !audioNeedsUnlock, not alertEnabled alone')
-  const greenBlock = badgeArea.slice(badgeArea.indexOf('v-if="alertEnabled && !audioNeedsUnlock"'), badgeArea.indexOf('alert-pending-badge'))
-  assert.ok(greenBlock.includes('class="alert-on-badge'), 'the alertEnabled && !audioNeedsUnlock branch must render the plain green badge')
+  const pendingIdx = badgeArea.indexOf('v-if="alertEnabled && audioNeedsUnlock"')
+  const onIdx = badgeArea.indexOf('v-else-if="alertEnabled"')
+  assert.ok(pendingIdx !== -1 && onIdx !== -1 && pendingIdx < onIdx, 'the plain "on" indicator must be a v-else-if chained after the alertEnabled && audioNeedsUnlock pending branch, so it only renders when alertEnabled is true and audioNeedsUnlock is false')
+  const greenBlock = badgeArea.slice(onIdx, badgeArea.indexOf('a-button', onIdx))
+  assert.ok(greenBlock.includes('class="alert-on-indicator"'), 'the alertEnabled && !audioNeedsUnlock branch must render the plain indicator')
+  assert.ok(!greenBlock.includes('@click'), 'an already-on reminder must not be clickable/closable from this header badge')
 })
 
 test('P1.2 badge shows an amber pending state when enabled but not yet unlocked, and clicking it unlocks', () => {
   const badgeArea = slice('<div style="display:flex;align-items:center;gap:8px">', '</a-button>\n        <a-button type="text" aria-label="刷新"')
-  assert.ok(badgeArea.includes('v-else-if="alertEnabled && audioNeedsUnlock"'), 'pending badge branch must gate on alertEnabled && audioNeedsUnlock')
-  assert.ok(badgeArea.includes('class="alert-pending-badge tap-shrink"'), 'pending badge must use its own distinct class, not reuse alert-on-badge')
+  assert.ok(badgeArea.includes('v-if="alertEnabled && audioNeedsUnlock"'), 'pending badge branch must gate on alertEnabled && audioNeedsUnlock')
+  assert.ok(badgeArea.includes('class="alert-pending-badge tap-shrink"'), 'pending badge must use its own distinct class, not reuse alert-on-indicator')
   assert.ok(badgeArea.includes('提醒开 · 待解锁'), 'pending badge text must say "待解锁", not claim full success')
   const pendingBlock = badgeArea.slice(badgeArea.indexOf('alert-pending-badge'), badgeArea.indexOf('提醒开 · 待解锁'))
   assert.ok(pendingBlock.includes('@click="unlockAudio"'), 'clicking the pending badge must call unlockAudio, not disableAlert')
