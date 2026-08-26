@@ -44,8 +44,39 @@ import hashlib
 import os
 import sys
 import tempfile
+import time
 
 COS_PREFIX = "deploy-artifacts/admin-h5"
+
+# The CI runner (GitHub-hosted, outside China) occasionally sees a bare TCP
+# write stall against COS with no timeout configured -- default Timeout=None
+# means the SDK/requests never gives up on its own, so a stalled write just
+# hangs until something else (the OS, the job's overall time limit) kills it.
+# A bounded timeout + a few retries turns a rare cross-border network blip
+# into "took a bit longer" instead of a hard pipeline failure.
+COS_TIMEOUT_SECONDS = 60
+COS_UPLOAD_MAX_ATTEMPTS = 3
+COS_UPLOAD_RETRY_DELAY_SECONDS = 8
+
+
+def put_object_with_retry(client, **kwargs):
+    from qcloud_cos.cos_exception import CosClientError, CosServiceError
+
+    last_exc: Exception | None = None
+    for attempt in range(1, COS_UPLOAD_MAX_ATTEMPTS + 1):
+        try:
+            return client.put_object(**kwargs)
+        except (CosClientError, CosServiceError) as exc:
+            last_exc = exc
+            if attempt == COS_UPLOAD_MAX_ATTEMPTS:
+                break
+            print(
+                f"put_object attempt {attempt}/{COS_UPLOAD_MAX_ATTEMPTS} failed "
+                f"({exc}), retrying in {COS_UPLOAD_RETRY_DELAY_SECONDS}s...",
+                file=sys.stderr,
+            )
+            time.sleep(COS_UPLOAD_RETRY_DELAY_SECONDS)
+    raise last_exc
 
 
 def sha256_of(path: str) -> str:
@@ -108,7 +139,7 @@ def main() -> int:
 
     from qcloud_cos import CosConfig, CosS3Client
 
-    config = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key)
+    config = CosConfig(Region=region, SecretId=secret_id, SecretKey=secret_key, Timeout=COS_TIMEOUT_SECONDS)
     client = CosS3Client(config)
 
     archive_name = os.path.basename(args.archive)
@@ -160,7 +191,8 @@ def main() -> int:
         print(f"Existing COS object admin-h5-{args.sha}/ matches this build byte-for-byte -- reusing.")
     else:
         with open(args.archive, "rb") as f:
-            client.put_object(
+            put_object_with_retry(
+                client,
                 Bucket=bucket,
                 Body=f.read(),
                 Key=archive_key,
@@ -168,7 +200,8 @@ def main() -> int:
                 CacheControl="public,max-age=31536000,immutable",
             )
         with open(args.checksum, "rb") as f:
-            client.put_object(
+            put_object_with_retry(
+                client,
                 Bucket=bucket,
                 Body=f.read(),
                 Key=checksum_key,
