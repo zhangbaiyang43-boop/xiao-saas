@@ -581,7 +581,7 @@ async function submit() {
   submitError.value = ''
   try {
     const items = cart.value.map((l) => ({
-      dish_id: Number(l.dishId),
+      dish_id: l.dishId,
       name: l.name,
       price: l.unitPrice,
       qty: l.qty,
@@ -591,7 +591,7 @@ async function submit() {
     const res = await createOrder({
       shop: props.shopId,
       table: selectedSession.value.table_no,
-      dining_session_id: Number(selectedSession.value.dining_session_id),
+      dining_session_id: selectedSession.value.dining_session_id,
       items,
       total: cartTotal.value,
       remark: buildRemark(),
