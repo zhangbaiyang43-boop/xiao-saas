@@ -4,37 +4,34 @@
     <div class="page-header">
       <div>
         <span class="page-title">接单管理</span>
-        <div v-if="lastRefreshed" style="font-size:11px;color:var(--text-3);margin-top:1px">{{ lastRefreshed }} 更新</div>
+        <div v-if="lastRefreshed" class="sync-trust-time">最近成功同步 {{ lastRefreshed }}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <a-button v-if="canStaffOrder" size="small" type="primary" @click="openStaffOrder()" style="font-size:12px;height:28px;padding:0 10px">
-          代客加单
-        </a-button>
-        <!-- P1 修复：alertEnabled（想不想要这个功能）和 audioNeedsUnlock（浏览器声音
-        引擎是否真正就绪）是两个独立状态，只展示 alertEnabled 会让商家在声音还没解锁时
-        看到一个"万事俱备"的绿色徽章，跟下面的解锁横幅自相矛盾。开着但没解锁时徽章本身
-        就要显示成待解锁态，点它也能直接解锁（不需要非得点下面那条横幅）。 -->
+        <!-- 决策#4/#6（DEMOTE）：声音"已开启"徽标和"开启提醒"按钮的常态权重下沉到辅助
+        能力区。决策#5（KEEP）：待解锁是需要处理的异常态，必须继续留在页头显眼位置，
+        跟下面的解锁横幅保持同一套判断，不重复建声音状态源。 -->
         <div
-          v-if="alertEnabled && !audioNeedsUnlock"
-          class="alert-on-badge tap-shrink"
-          @click="disableAlert"
-        >
-          <span class="live-dot" />提醒开
-        </div>
-        <div
-          v-else-if="alertEnabled && audioNeedsUnlock"
+          v-if="alertEnabled && audioNeedsUnlock"
           class="alert-pending-badge tap-shrink"
           @click="unlockAudio"
         >
           提醒开 · 待解锁
         </div>
-        <a-button v-else size="small" type="primary" ghost @click="enableAlert" style="font-size:12px;height:28px;padding:0 10px">
-          开启提醒
-        </a-button>
         <a-button type="text" aria-label="刷新" @click="manualRefresh" :loading="loading">
           <template #icon><ReloadOutlined /></template>
         </a-button>
       </div>
+    </div>
+
+    <!-- 系统可信度提示：同步失败但仍有旧数据可看，是页面上所有其它事实（统计、桌台、
+    列表）是否可信的前提，必须排在页头之后、其它一切横幅和标签页之前。 -->
+    <div v-if="syncFailed && orders.length > 0" class="trust-banner trust-banner--warning">
+      <span class="trust-mark trust-mark--warning">!</span>
+      <div class="trust-body">
+        <div class="trust-title">订单同步失败，当前显示的是上次数据</div>
+        <div class="trust-copy">页面暂时无法确认最新事实，请重试以获取实时订单</div>
+      </div>
+      <a-button size="small" :loading="loading" @click="manualRefresh">重试</a-button>
     </div>
 
     <!-- 提醒已开启但浏览器把声音挂起了——不点这里，新订单来了也听不到 -->
@@ -58,7 +55,7 @@
     <div class="section-block animate-in">
       <a-card :bordered="false" :body-style="{ padding: '12px 0' }">
         <a-row>
-          <a-col :span="6" v-for="s in statItems" :key="s.label" style="text-align:center;padding:4px 0">
+          <a-col :span="8" v-for="s in statItems" :key="s.label" style="text-align:center;padding:4px 0">
             <div :style="{ fontSize: '22px', fontWeight: 900, color: s.color }">{{ s.value }}</div>
             <div style="font-size:11px;color:var(--text-3);margin-top:2px">{{ s.label }}</div>
           </a-col>
@@ -71,6 +68,40 @@
       <a-tab-pane key="history" tab="历史订单" />
     </a-tabs>
 
+    <!-- 六类条件P0行动队列：全部读现有派生字段，不建新真相源；工作区处于加载/失败/
+    真空壳时（跟 C1 五态壳同一组条件）不重复显示，避免跟壳内文案打架。 -->
+    <div v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0)" class="section-block p0-queue">
+      <div class="p0-queue-head">
+        <span class="p0-queue-title">现在要处理</span>
+        <span class="p0-queue-meta">行动与异常优先</span>
+      </div>
+      <div v-if="pendingCount > 0" class="p0-next-task tap-shrink" @click="focusPendingAccept">
+        <div class="p0-next-count">{{ pendingCount }}</div>
+        <div class="p0-next-body">
+          <div class="p0-next-label">新订单待接单</div>
+          <div class="p0-next-copy">等待最久的订单优先，点击定位</div>
+        </div>
+        <a-button type="primary" size="small">去接单</a-button>
+      </div>
+      <div
+        v-for="row in p0Queue"
+        :key="row.key"
+        class="p0-item tap-shrink"
+        :class="`p0-item--${row.kind}`"
+        @click="row.action"
+      >
+        <span class="p0-item-icon">{{ row.code }}</span>
+        <div class="p0-item-body">
+          <div class="p0-item-title">{{ row.title }}</div>
+          <div class="p0-item-detail">{{ row.detail }}</div>
+        </div>
+        <a-button size="small">{{ row.actionLabel }}</a-button>
+      </div>
+      <div v-if="pendingCount === 0 && p0Queue.length === 0" class="p0-queue-clear">
+        当前没有P0异常，继续处理制作中订单
+      </div>
+    </div>
+
     <!-- 视图切换 -->
     <a-tabs v-if="isLiveToday" v-model:activeKey="view" class="animate-in" style="padding:0 16px;margin-top:0" :tab-bar-style="{ marginBottom: 0 }">
       <a-tab-pane key="table" tab="桌台视图" />
@@ -82,35 +113,30 @@
       有历史订单未关联桌台会话，<a @click="view = 'list'">请在订单列表查看</a>
     </div>
 
-    <!-- 网络警告 -->
-    <div v-if="syncFailed && orders.length > 0" class="section-block" style="padding-top:8px">
-      <a-alert type="warning" show-icon message="订单同步失败，当前显示的是上次数据" style="border-radius:10px">
-        <template #action>
-          <a-button size="small" @click="manualRefresh">重试</a-button>
-        </template>
-      </a-alert>
+    <!-- 首次同步失败不是空订单；必须保留独立错误状态和重试入口，这是当前工作区
+    唯一权威的加载/失败/空态壳，三者互斥（loading / orderLoadError / 真空）。 -->
+    <div v-if="orderLoadError" class="state-panel state-panel--error section-block">
+      <span class="state-symbol state-symbol--error">!</span>
+      <div class="state-title">订单加载失败</div>
+      <div class="state-copy">失败不代表今天没有订单，请检查网络后重试</div>
+      <a-button type="primary" size="small" :loading="loading" @click="manualRefresh">重新加载</a-button>
     </div>
 
-    <!-- 首次同步失败不是空订单；必须保留独立错误状态和重试入口。 -->
-    <div v-if="orderLoadError" class="section-block" style="padding-top:8px">
-      <a-alert type="error" show-icon message="订单加载失败，请检查网络后重试" style="border-radius:10px">
-        <template #action>
-          <a-button size="small" :loading="loading" @click="manualRefresh">重试</a-button>
-        </template>
-      </a-alert>
-    </div>
-
-    <!-- 骨架屏 -->
+    <!-- 骨架屏：成功结果出现前不展示空态或数量，避免假空态 -->
     <div v-else-if="loading && orders.length === 0" class="section-block">
       <a-skeleton active :paragraph="{ rows: 4 }" style="background:var(--bg-card);border-radius:12px;padding:16px;margin-bottom:12px" />
       <a-skeleton active :paragraph="{ rows: 3 }" style="background:var(--bg-card);border-radius:12px;padding:16px" />
+      <div class="state-copy state-copy--center">正在加载订单，尚未获得成功结果，不代表没有订单</div>
     </div>
 
-    <!-- 空状态 -->
+    <!-- 空状态：仅在首次同步明确成功且订单为0时出现，与加载/失败严格分开 -->
     <div v-else-if="!loading && !syncFailed && orders.length === 0" style="padding:48px 0">
       <a-empty description="今天还没有订单，去桌码页面打印桌贴码，贴到桌上后顾客即可扫码点餐">
         <template #image><OrderedListOutlined style="font-size:60px;color:#d1d5db" /></template>
       </a-empty>
+      <div class="state-copy--center" style="text-align:center;margin-top:4px">
+        <a-button size="small" :loading="loading" @click="manualRefresh">刷新订单</a-button>
+      </div>
     </div>
 
     <!-- 桌台视图：宫格，一眼看清有几桌、分别什么状态 -->
@@ -444,6 +470,26 @@
       </div>
       <div style="height:16px" />
     </template>
+
+    <!-- 辅助能力：决策#3/#4/#6/#13 下沉的代客加单、声音设置、今日营收，都是既有能力
+    原样保留，只是不再常驻页头/统计行抢首屏注意力；声音待解锁时页头已有徽标+横幅，
+    这里不重复出现第二份声音控件，避免两处状态源不一致。 -->
+    <div v-if="isLiveToday" class="section-block aux-panel">
+      <div class="aux-panel-title">辅助能力</div>
+      <div class="aux-panel-grid">
+        <button v-if="canStaffOrder" type="button" class="aux-btn" @click="openStaffOrder()">代客加单</button>
+        <button
+          v-if="!audioNeedsUnlock"
+          type="button"
+          class="aux-btn"
+          @click="alertEnabled ? disableAlert() : enableAlert()"
+        >{{ alertEnabled ? '提醒开 · 点击关闭' : '开启提醒' }}</button>
+        <div class="aux-revenue">
+          <span class="aux-revenue-label">今日营收</span>
+          <span class="aux-revenue-value">¥{{ todayRevenue }}</span>
+        </div>
+      </div>
+    </div>
 
     <!-- 结账确认 Modal -->
     <a-modal
@@ -1112,11 +1158,12 @@ const todayRevenue = computed(() => {
   return orders.value.filter(o => revenueStatuses.includes(o.status)).reduce((s, o) => s + o.total, 0).toFixed(2)
 })
 
+// 决策#13（DEMOTE）：今日营收不建立老板的第二Job，从首屏统计行搬到辅助能力区，
+// 这里只剩前台/店长当场就要用的三个履约数字。
 const statItems = computed(() => [
   { label: '待接单', value: pendingCount.value, color: pendingCount.value > 0 ? '#ef4444' : '#374151' },
   { label: '制作中', value: preparingCount.value, color: '#374151' },
   { label: '待结账', value: doneCount.value, color: '#16a34a' },
-  { label: '今日营收', value: '¥' + todayRevenue.value, color: '#07C160' },
 ])
 
 const orderCenterMode = ref('live')
@@ -1312,6 +1359,79 @@ function openTableDetail(table) {
   showTableDetail.value = true
 }
 
+// P0行动队列：跳到某个订单时复用既有列表筛选/搜索/分页，只是临时清空并把可见数量
+// 提到全量，保证目标订单一定已经在DOM里再滚动；不新建列表事实源，也不产生请求。
+async function focusFirstOrderMatching(predicate, statusFilterValue = '') {
+  const target = orders.value.find(predicate)
+  if (!target) return
+  view.value = 'list'
+  statusFilter.value = statusFilterValue
+  searchQuery.value = ''
+  listVisibleCount.value = Math.max(sortedOrders.value.length, LIST_PAGE_SIZE)
+  await nextTick()
+  document.querySelector(`[data-order-card="${target.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function focusPendingAccept() {
+  focusFirstOrderMatching((o) => o.status === 'pending', 'pending')
+}
+
+function focusPrintIssue() {
+  focusFirstOrderMatching((o) => ['failed', 'unknown'].includes(o.printStatus), '')
+}
+
+function focusFinanceIssue() {
+  if (pendingPaymentCount.value > 0) {
+    view.value = 'list'
+    statusFilter.value = 'pending_payment'
+    searchQuery.value = ''
+    return
+  }
+  focusFirstOrderMatching((o) => o.refundRequired, '')
+}
+
+function focusUrgentSettle() {
+  const table = visibleTableGroups.value.find((t) => t.canSettle && t.checkoutRequestedAt)
+    || visibleTableGroups.value.find((t) => t.canSettle)
+  if (!table) return
+  view.value = 'table'
+  openTableDetail(table)
+}
+
+const printIssueCount = computed(() => orders.value.filter((o) => ['failed', 'unknown'].includes(o.printStatus)).length)
+const printIssueHasFailed = computed(() => orders.value.some((o) => o.printStatus === 'failed'))
+const refundRequiredCount = computed(() => orders.value.filter((o) => o.refundRequired).length)
+const financeIssueCount = computed(() => pendingPaymentCount.value + refundRequiredCount.value)
+const urgentSettleTables = computed(() => visibleTableGroups.value.filter((t) => t.canSettle))
+const urgentSettleHasRequested = computed(() => urgentSettleTables.value.some((t) => t.checkoutRequestedAt))
+
+// 六类P0的5个条件行，全部读已有派生字段；顺序对应A1.2优先级（打印>发牌>结账>资金>同步）
+// 之外单独在最前追加同步失败——同步失败是其它一切事实是否可信的前提，见C1的页头横幅。
+const p0Queue = computed(() => {
+  if (!isLiveToday.value) return []
+  const rows = []
+  if (syncFailed.value) {
+    rows.push({ key: 'sync', kind: 'error', code: '同', title: '网络同步失败', detail: '当前数据可能不是最新，请重试', actionLabel: '重试', action: manualRefresh })
+  }
+  if (printIssueCount.value > 0) {
+    rows.push({ key: 'print', kind: printIssueHasFailed.value ? 'error' : 'unknown', code: '印', title: '打印失败或结果未知', detail: `${printIssueCount.value}笔订单需要处理`, actionLabel: '去处理', action: focusPrintIssue })
+  }
+  if (pendingPickupCount.value > 0) {
+    rows.push({ key: 'pickup', kind: 'pickup', code: '牌', title: '待发桌牌', detail: `${pendingPickupCount.value}笔订单已付款，等待发牌`, actionLabel: '去发牌', action: focusFirstPendingPickup })
+  }
+  if (urgentSettleTables.value.length > 0) {
+    rows.push({ key: 'settle', kind: 'warning', code: '结', title: urgentSettleHasRequested.value ? '顾客催结账' : '待结账', detail: `${urgentSettleTables.value.length}桌可以结账`, actionLabel: '去结账', action: focusUrgentSettle })
+  }
+  if (financeIssueCount.value > 0) {
+    const detail = [
+      pendingPaymentCount.value ? `${pendingPaymentCount.value}笔待支付` : '',
+      refundRequiredCount.value ? `${refundRequiredCount.value}笔需要退款` : '',
+    ].filter(Boolean).join('，')
+    rows.push({ key: 'finance', kind: 'error', code: '资', title: '资金异常', detail, actionLabel: '查看订单', action: focusFinanceIssue })
+  }
+  return rows
+})
+
 function tableTagClass(t) {
   if (t.pendingOrders?.length) return 'pending'
   if (t.preparingOrders?.length) return 'preparing'
@@ -1366,7 +1486,7 @@ function showPaidCancelSop() {
 function cancelPendingPaymentOrder(order) {
   Modal.confirm({
     title: '取消这单待支付订单？',
-    content: `¥${Number(order.total).toFixed(2)}，取消后顾客的这个订单会失效，需要重新下单。`,
+    content: `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，取消后顾客的这个订单会失效，需要重新下单。`,
     okText: '取消订单',
     okType: 'danger',
     cancelText: '再想想',
@@ -1414,7 +1534,7 @@ function applyPickupNoToOrders(pickupNo, orderIds) {
 function rejectOrder(order) {
   Modal.confirm({
     title: '确认拒绝该订单？',
-    content: `¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
+    content: `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
     okText: '拒绝订单',
     okType: 'danger',
     cancelText: '再想想',
@@ -1472,7 +1592,7 @@ async function confirmServed(order) {
 function refundPaidOrderClick(order) {
   Modal.confirm({
     title: '确认退款？',
-    content: `¥${Number(order.total).toFixed(2)}，将由系统向支付渠道发起退款。已付款订单不能直接取消。`,
+    content: `桌${order.table} · 订单尾号${orderTail(order)} · 已付款 ¥${Number(order.total).toFixed(2)}，将由系统向支付渠道发起退款。已付款订单不能直接取消。`,
     okText: '确认退款',
     okType: 'danger',
     cancelText: '再想想',
@@ -1619,21 +1739,188 @@ onMounted(async () => {
   border-bottom: 1px solid var(--border);
 }
 .page-title { font-size: 18px; font-weight: 700; color: var(--text-1); }
+.sync-trust-time { font-size: 11px; color: var(--text-3); margin-top: 1px; }
 
-.alert-on-badge {
+/* 系统可信度提示与工作区五态壳共用一套 error 视觉语言（图标块+标题+说明），
+   颜色沿用页面已有的 #fef2f2/#fecaca/#dc2626 失败组合（打印失败标签同款），
+   不新建全局 Token；深色媒体查询里只覆盖这三个局部变量。 */
+.trust-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--trust-border);
+  background: var(--trust-bg);
+}
+.trust-banner--warning { --trust-bg: #fef2f2; --trust-border: #fecaca; --trust-mark-bg: #dc2626; }
+.trust-mark {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   font-size: 12px;
-  font-weight: 600;
-  color: #16a34a;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 20px;
-  padding: 3px 10px;
+  font-weight: 900;
+  color: #fff;
+  background: var(--trust-mark-bg);
+}
+.trust-body { flex: 1; min-width: 0; }
+.trust-title { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.trust-copy { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+
+.state-panel {
+  text-align: center;
+  padding: 32px 16px !important;
+}
+.state-panel--error {
+  border-radius: 12px;
+  border: 1px solid var(--trust-border);
+  background: var(--trust-bg);
+  --trust-bg: #fef2f2;
+  --trust-border: #fecaca;
+}
+.state-symbol {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  font-size: 18px;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+.state-symbol--error { color: #dc2626; background: #fef2f2; }
+.state-title { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 4px; }
+.state-copy { font-size: 12px; color: var(--text-3); margin-bottom: 12px; }
+.state-copy--center { text-align: center; margin-top: 8px; margin-bottom: 0; }
+
+@media (prefers-color-scheme: dark) {
+  .trust-banner--warning,
+  .state-panel--error {
+    --trust-bg: rgba(239, 68, 68, .14);
+    --trust-border: rgba(248, 113, 113, .4);
+    --trust-mark-bg: #f87171;
+  }
+  .state-symbol--error { color: #f87171; background: rgba(239, 68, 68, .14); }
+}
+
+/* P0行动队列：三种配色语义分别复用页面已有约定——error 沿用打印失败/结账警示的红色组合，
+   warning 沿用桌牌相关文案已用的橙色组合（pickup-todo-banner 同款），unknown 复用警示
+   琥珀色但加虚线边框区分"未知≠已知失败"。不新建 Token，深色媒体查询里只覆盖三组局部变量。 */
+.p0-queue {
+  padding-top: 8px !important;
+}
+.p0-queue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.p0-queue-title { font-size: 14px; font-weight: 800; color: var(--text-1); }
+.p0-queue-meta { font-size: 11px; color: var(--text-3); }
+.p0-next-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   cursor: pointer;
   user-select: none;
 }
+.p0-next-count { font-size: 22px; font-weight: 900; color: #ef4444; min-width: 28px; text-align: center; }
+.p0-next-body { flex: 1; min-width: 0; }
+.p0-next-label { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.p0-next-copy { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+.p0-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--p0-border);
+  background: var(--p0-bg);
+  cursor: pointer;
+  user-select: none;
+}
+.p0-item-icon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 900;
+  color: #fff;
+  background: var(--p0-mark-bg);
+}
+.p0-item-body { flex: 1; min-width: 0; }
+.p0-item-title { font-size: 13px; font-weight: 700; color: var(--text-1); }
+.p0-item-detail { font-size: 11px; color: var(--text-2); margin-top: 1px; }
+.p0-item--error { --p0-bg: #fef2f2; --p0-border: #fecaca; --p0-mark-bg: #dc2626; }
+.p0-item--warning { --p0-bg: #fff7ed; --p0-border: #fed7aa; --p0-mark-bg: #c2410c; }
+.p0-item--pickup { --p0-bg: #fff7ed; --p0-border: #fed7aa; --p0-mark-bg: #c2410c; }
+.p0-item--unknown { --p0-bg: #fffbeb; --p0-border: #fde68a; --p0-mark-bg: #b45309; border-style: dashed; }
+.p0-queue-clear {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+@media (prefers-color-scheme: dark) {
+  .p0-item--error { --p0-bg: rgba(239, 68, 68, .14); --p0-border: rgba(248, 113, 113, .4); --p0-mark-bg: #f87171; }
+  .p0-item--warning,
+  .p0-item--pickup { --p0-bg: rgba(194, 65, 12, .16); --p0-border: rgba(251, 146, 60, .4); --p0-mark-bg: #fb923c; }
+  .p0-item--unknown { --p0-bg: rgba(245, 158, 11, .12); --p0-border: #d97706; --p0-mark-bg: #fbbf24; }
+  .p0-queue-clear { background: rgba(5, 153, 82, .16); border-color: rgba(52, 211, 153, .4); color: #34d399; }
+}
+
+/* 辅助能力区：代客加单/声音设置/今日营收下沉后的落脚点，纯复用现有卡片/按钮视觉，
+   不引入新组件体系。 */
+.aux-panel-title { font-size: 12px; font-weight: 700; color: var(--text-3); margin-bottom: 8px; }
+.aux-panel-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.aux-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.aux-btn:active { opacity: .7; }
+.aux-revenue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 7px 12px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+.aux-revenue-label { font-size: 11px; color: var(--text-3); }
+.aux-revenue-value { font-size: 13px; font-weight: 800; color: var(--text-1); }
 
 /* 复用 .unlock-audio-banner 同一套琥珀色，不新建 token——同一件事（声音引擎待解锁）
    在徽章和横幅两个位置出现，颜色语义必须一致，商家才能一眼认出这是同一个状态。 */
