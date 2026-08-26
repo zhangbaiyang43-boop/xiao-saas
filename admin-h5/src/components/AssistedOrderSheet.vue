@@ -22,8 +22,8 @@
               :class="{ selected: selectedSessionId === s.dining_session_id }"
               @click="selectSession(s)"
             >
-              <strong>{{ s.table_no || '未分桌' }}号桌</strong>
-              <span v-if="s.pickup_no">{{ s.pickup_no }}号桌牌</span>
+              <strong class="ao-table-no">{{ s.table_no || '未分桌' }}号桌</strong>
+              <span v-if="s.pickup_no" class="muted">{{ s.pickup_no }}号桌牌</span>
               <span v-else class="muted">未发牌</span>
             </button>
           </div>
@@ -43,9 +43,43 @@
             {{ selectedSession?.table_no || '-' }}号桌
             <span v-if="selectedSession?.pickup_no"> · {{ selectedSession.pickup_no }}号桌牌</span>
           </div>
+          <div v-if="!loadingMenu && categoryNavItems.length > 1" class="ao-cat-nav">
+            <button
+              v-for="c in categoryNavItems"
+              :key="c"
+              type="button"
+              class="ao-cat-nav-chip"
+              :class="{ hot: c === '热门加菜' }"
+              @click="scrollToCategory(c)"
+            >{{ c }}</button>
+          </div>
           <div v-if="loadingMenu" class="ao-empty">菜单加载中…</div>
           <div v-else class="ao-menu">
-            <div v-for="cat in categories" :key="cat" class="ao-cat">
+            <div v-if="hotDishes.length" id="ao-cat-热门加菜" class="ao-cat">
+              <div class="ao-cat-title ao-cat-title-hot">🔥 热门加菜</div>
+              <button
+                v-for="dish in hotDishes"
+                :key="'hot-' + dish.id"
+                type="button"
+                class="ao-dish ao-dish-hot"
+                :class="{ disabled: isSoldOut(dish) }"
+                :disabled="isSoldOut(dish)"
+                @click="onDishClick(dish)"
+              >
+                <div class="ao-dish-main">
+                  <div class="ao-dish-name">{{ dish.name }}</div>
+                  <div class="ao-dish-price">¥{{ Number(dish.price || 0).toFixed(2) }}</div>
+                </div>
+                <div class="ao-qty" v-if="qtyOf(dish.id) > 0" @click.stop>
+                  <a-button size="small" shape="circle" @click="decLine(dish.id)">-</a-button>
+                  <span>{{ qtyOf(dish.id) }}</span>
+                  <a-button size="small" shape="circle" type="primary" :disabled="isSoldOut(dish)" @click="incSimple(dish)">+</a-button>
+                </div>
+                <span v-else-if="isSoldOut(dish)" class="sold">售罄</span>
+                <span v-else class="add-hint">+</span>
+              </button>
+            </div>
+            <div v-for="cat in categories" :key="cat" :id="'ao-cat-' + cat" class="ao-cat">
               <div class="ao-cat-title">{{ cat }}</div>
               <button
                 v-for="dish in dishesByCategory(cat)"
@@ -82,7 +116,7 @@
         <div v-else-if="step === 3" class="ao-step">
           <div class="ao-step-label">确认加单</div>
           <div class="ao-confirm-card">
-            <div>{{ selectedSession?.table_no || '-' }}号桌
+            <div class="ao-confirm-table">{{ selectedSession?.table_no || '-' }}号桌
               <span v-if="selectedSession?.pickup_no"> · {{ selectedSession.pickup_no }}号桌牌</span>
             </div>
             <div v-for="(line, idx) in cartLines" :key="idx" class="ao-line">
@@ -90,10 +124,11 @@
               <span>¥{{ (line.unitPrice * line.qty).toFixed(2) }}</span>
             </div>
             <div class="ao-total">
-              <span>共 {{ cartCount }} 件</span>
-              <strong>¥{{ cartTotal.toFixed(2) }}</strong>
+              <span class="ao-total-count">共 {{ cartCount }} 件</span>
+              <strong class="ao-total-amount">¥{{ cartTotal.toFixed(2) }}</strong>
             </div>
           </div>
+          <div class="ao-remark-label">加菜备注</div>
           <div class="ao-remark-row">
             <button
               v-for="tag in quickRemarks"
@@ -214,6 +249,15 @@ const categories = computed(() => {
   const set = new Set(menuItems.value.map((d) => d.category || '其他'))
   return Array.from(set)
 })
+// 热门加菜：商家在菜单管理里给菜品打过标签（招牌/热销等）就代表这道菜是主推的，
+// 直接摘出来放最前面，服务员不用再从头翻到对应分类去找。
+const hotDishes = computed(() =>
+  menuItems.value.filter((d) => Array.isArray(d.tags) && d.tags.length > 0 && !isSoldOut(d)).slice(0, 8),
+)
+const categoryNavItems = computed(() => (hotDishes.value.length ? ['热门加菜', ...categories.value] : categories.value))
+function scrollToCategory(cat) {
+  document.getElementById('ao-cat-' + cat)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 const cartLines = computed(() => cart.value)
 const cartCount = computed(() => cart.value.reduce((n, l) => n + l.qty, 0))
 const cartTotal = computed(() => cart.value.reduce((n, l) => n + l.qty * l.unitPrice, 0))
@@ -616,15 +660,27 @@ onBeforeUnmount(() => {
   text-align: left; display: flex; flex-direction: column; gap: 4px; font-size: 13px;
 }
 .ao-table-card.selected { border-color: #1677ff; background: #e6f4ff; }
-.ao-table-card .muted { color: #999; }
+.ao-table-card .muted { color: #999; font-size: 12px; }
+.ao-table-no { font-size: 19px; font-weight: 800; color: #111; }
 .ao-context { font-size: 13px; color: #666; margin-bottom: 8px; }
+.ao-cat-nav {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 4px;
+  position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.ao-cat-nav-chip {
+  flex: 0 0 auto; border: 1px solid #e5e5e5; border-radius: 999px; padding: 6px 14px;
+  font-size: 13px; font-weight: 600; color: #444; background: #fff; white-space: nowrap;
+}
+.ao-cat-nav-chip.hot { border-color: #f59e0b; color: #b45309; background: #fffbeb; }
 .ao-cat-title { font-size: 13px; font-weight: 700; color: #666; margin: 10px 0 4px; }
+.ao-cat-title-hot { color: #b45309; }
 .ao-dish {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
   padding: 10px 0; border: 0; border-bottom: 1px solid #f0f0f0; background: transparent; text-align: left;
 }
 .ao-dish.disabled { opacity: 0.45; }
-.ao-dish-name { font-size: 15px; font-weight: 600; }
+.ao-dish-hot { background: #fffbeb; padding-left: 8px; padding-right: 8px; border-radius: 8px; border-bottom-color: transparent; }
+.ao-dish-name { font-size: 16px; font-weight: 700; color: #111; }
 .ao-dish-price { font-size: 13px; color: #07c160; font-weight: 700; margin-top: 2px; }
 .ao-qty { display: flex; align-items: center; gap: 8px; }
 .sold { color: #999; font-size: 12px; }
@@ -636,9 +692,13 @@ onBeforeUnmount(() => {
 .ao-footer .ant-btn-primary { flex: 1; }
 .ao-next { margin-top: 16px; }
 .ao-confirm-card { background: #fafafa; border-radius: 12px; padding: 12px; }
+.ao-confirm-table { font-size: 12px; color: #888; margin-bottom: 4px; }
 .ao-line { display: flex; justify-content: space-between; font-size: 14px; padding: 6px 0; }
-.ao-total { display: flex; justify-content: space-between; margin-top: 8px; font-size: 15px; }
-.ao-remark-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.ao-total { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #e5e5e5; }
+.ao-total-count { font-size: 12px; color: #888; }
+.ao-total-amount { font-size: 24px; font-weight: 800; color: #111; }
+.ao-remark-label { font-size: 12px; color: #888; margin: 14px 0 8px; }
+.ao-remark-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .ao-chip {
   border: 1px solid #ddd; border-radius: 16px; padding: 6px 12px; background: #fff; font-size: 13px;
 }

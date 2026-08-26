@@ -96,7 +96,7 @@ import { getSession } from '../utils/session'
 const router = useRouter()
 const auth = useAuthStore()
 const displayName = computed(() => auth.displayName)
-const shopId = computed(() => getSession().tenant_id || '')
+const shopId = computed(() => getSession().tenantId || '')
 const assistedOpen = ref(false)
 const assistedTable = ref('')
 const assistedSessionId = ref('')
