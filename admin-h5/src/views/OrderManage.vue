@@ -55,10 +55,16 @@
       </a-card>
     </div>
 
-    <a-tabs v-model:activeKey="orderCenterMode" class="animate-in" style="padding:0 16px;margin-top:8px;animation-delay:.04s" :tab-bar-style="{ marginBottom: 0 }">
-      <a-tab-pane key="live" tab="当前订单" />
-      <a-tab-pane key="history" tab="历史订单" />
-    </a-tabs>
+    <!-- Demo用分段控件（一体轨道+实心选中块）表达"当前/历史"和"列表/桌台"这两组
+    互斥选择，比Ant默认下划线Tabs的层级感强得多——同一件事该选哪个一眼就看出来。
+    a-segmented是Ant Design Vue现成能力，不是新画的控件。 -->
+    <div class="section-block" style="padding-bottom:0">
+      <a-segmented
+        v-model:value="orderCenterMode"
+        block
+        :options="[{ label: '当前订单', value: 'live' }, { label: '历史订单', value: 'history' }]"
+      />
+    </div>
 
     <!-- 六类条件P0行动队列：全部读现有派生字段，不建新真相源；工作区处于加载/失败/
     真空壳时（跟 C1 五态壳同一组条件）不重复显示，避免跟壳内文案打架。 -->
@@ -93,10 +99,13 @@
     </div>
 
     <!-- 视图切换 -->
-    <a-tabs v-if="isLiveToday" v-model:activeKey="view" class="animate-in" style="padding:0 16px;margin-top:0" :tab-bar-style="{ marginBottom: 0 }">
-      <a-tab-pane key="table" tab="桌台视图" />
-      <a-tab-pane key="list" tab="订单列表" />
-    </a-tabs>
+    <div v-if="isLiveToday" class="section-block" style="padding-bottom:0">
+      <a-segmented
+        v-model:value="view"
+        block
+        :options="[{ label: '订单列表', value: 'list' }, { label: '桌台视图', value: 'table' }]"
+      />
+    </div>
 
     <!-- 没有会话的历史订单不再出现在桌台视图，给一个极轻的入口去订单列表看，不做成大 banner -->
     <div v-if="view === 'table' && hasSessionlessActiveOrders" style="padding:6px 16px 0;font-size:12px;color:var(--text-3)">
@@ -341,7 +350,9 @@
           @change="onCustomDate"
         />
       </div>
-      <div v-if="isLiveToday" style="padding:8px 16px 0;display:flex;gap:8px;flex-wrap:wrap">
+      <!-- 8个状态筛选换成单行横向滚动而不是换行——8个chip换行后要占两行，在饭点
+      挤掉本来就紧张的首屏空间；改成横向滚动后首屏只占一行，全部选项仍然可达。 -->
+      <div v-if="isLiveToday" class="filter-scroll-row" style="padding:8px 16px 0">
         <span
           v-for="f in statusFilters"
           :key="f.val"
@@ -435,6 +446,12 @@
             <a-button v-if="order.canCancel" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
             <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">退款</a-button>
+            <a-button
+              v-if="orphanCanSettle(order)"
+              type="primary"
+              @click="settleOrphanOrderClick(order)"
+              class="order-action-btn order-action-btn--settle"
+            >结账 ¥{{ orphanSettleGroups[order.table].total.toFixed(2) }}</a-button>
             <button
               v-if="orderCanReplacePickup(order)"
               type="button"
@@ -1668,6 +1685,43 @@ function settleTableClick(table) {
   showSettleDialog.value = true
 }
 
+// 孤儿订单（没有 dining_session_id：老版本直连下单、超管填充测试数据等历史遗留）
+// 在桌台视图从建组阶段就被排除，不动这条——那是修过一次真实 P0 事故的安全设计
+// （同桌号混进另一个真实会话，商家结错账）。但列表视图从来没给这类订单一个结账
+// 入口，导致它们卡在"已上餐"之后永远到不了"已结账"。后端 settle_table 早就有
+// 专门给这条路径准备的分支（按租户+桌号查非终态孤儿订单，不依赖会话，见
+// order_lifecycle_service.py:1119-1138），这里只是把入口接上，不新建判定逻辑。
+// 单独按桌号聚合，绝不并入 tableGroups，避免重蹈那次事故。
+const orphanSettleGroups = computed(() => {
+  const map = {}
+  for (const o of orders.value) {
+    if (o.diningSessionId) continue
+    if (['settled', 'cancelled', 'rejected'].includes(o.status)) continue
+    const key = o.table
+    if (!map[key]) map[key] = { tableNo: o.table, diningSessionId: null, orders: [], total: 0, blocked: false }
+    map[key].orders.push(o)
+    map[key].total += o.total
+    if (o.status !== 'done' || o.refundRequired || orderNeedsServe(o)) map[key].blocked = true
+  }
+  return map
+})
+
+function orphanCanSettle(order) {
+  if (order.diningSessionId) return false
+  const group = orphanSettleGroups.value[order.table]
+  return !!group && !group.blocked
+}
+
+function settleOrphanOrderClick(order) {
+  const group = orphanSettleGroups.value[order.table]
+  if (!group || group.blocked) {
+    message.error('该桌还有未完成的订单，暂时不能结账')
+    return
+  }
+  settlingTable.value = group
+  showSettleDialog.value = true
+}
+
 async function confirmSettle() {
   if (!settlingTable.value) return
   settling.value = true
@@ -2335,12 +2389,21 @@ onMounted(async () => {
   padding: 4px 6px;
   cursor: pointer;
 }
+.filter-scroll-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filter-scroll-row::-webkit-scrollbar { display: none; }
 /* min-height 36px 是触控区域下限（Constitution §1.3 禁止靠过小触控区域换密度）；
    之前只有 4px 上下padding，字号13px时实测高度不到28px。选中态改成实心填充而不是
    浅色描边，饭点扫一眼筛选行就能看出选中的是哪个，不用凑近看文字颜色。 */
 .filter-chip {
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
   min-height: 36px;
   padding: 0 14px;
   border-radius: 20px;
