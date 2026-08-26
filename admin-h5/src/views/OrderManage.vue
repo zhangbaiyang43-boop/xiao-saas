@@ -63,15 +63,35 @@
       </a-card>
     </div>
 
-    <!-- Demo用分段控件（一体轨道+实心选中块）表达"当前/历史"和"列表/桌台"这两组
-    互斥选择，比Ant默认下划线Tabs的层级感强得多——同一件事该选哪个一眼就看出来。
-    a-segmented是Ant Design Vue现成能力，不是新画的控件。 -->
-    <div class="section-block" style="padding-bottom:0">
+    <!-- 方案C（HTML demo对比后选定）："看哪批数据"（当前/历史）和"同一批数据换个
+    排法"（列表/桌台）不是同一层级的选择，权重不该一样高，所以不再各占一条满宽
+    分段控件——数据域用小号分段控件，视图切换收进一对图标按钮，一行放完，订单卡片
+    也更快出现在首屏。 -->
+    <div class="section-block view-switch-row">
       <a-segmented
         v-model:value="orderCenterMode"
-        block
         :options="[{ label: '当前订单', value: 'live' }, { label: '历史订单', value: 'history' }]"
       />
+      <div v-if="isLiveToday" class="view-icon-toggle">
+        <a-button
+          :type="view === 'list' ? 'primary' : 'default'"
+          shape="circle"
+          size="small"
+          aria-label="订单列表"
+          @click="view = 'list'"
+        >
+          <template #icon><OrderedListOutlined /></template>
+        </a-button>
+        <a-button
+          :type="view === 'table' ? 'primary' : 'default'"
+          shape="circle"
+          size="small"
+          aria-label="桌台视图"
+          @click="view = 'table'"
+        >
+          <template #icon><AppstoreOutlined /></template>
+        </a-button>
+      </div>
     </div>
 
     <!-- 六类条件P0行动队列：全部读现有派生字段，不建新真相源；工作区处于加载/失败/
@@ -105,15 +125,6 @@
         </div>
         <a-button size="small">{{ row.actionLabel }}</a-button>
       </div>
-    </div>
-
-    <!-- 视图切换 -->
-    <div v-if="isLiveToday" class="section-block" style="padding-bottom:0">
-      <a-segmented
-        v-model:value="view"
-        block
-        :options="[{ label: '订单列表', value: 'list' }, { label: '桌台视图', value: 'table' }]"
-      />
     </div>
 
     <!-- 没有会话的历史订单不再出现在桌台视图，给一个极轻的入口去订单列表看，不做成大 banner -->
@@ -641,7 +652,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined, InfoCircleOutlined } from '@ant-design/icons-vue'
+import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons-vue'
 import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
@@ -1848,6 +1859,19 @@ onMounted(async () => {
   align-items: baseline;
   gap: 8px;
   margin-bottom: 8px;
+}
+/* 数据域分段控件不再 block 撑满，跟右边的图标切换在同一行分居两端——
+   两者不是同一层级的选择，视觉权重也不该一样。 */
+.view-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.view-icon-toggle {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .p0-queue-title { font-size: 14px; font-weight: 800; color: var(--text-1); }
 .p0-queue-meta { font-size: 11px; color: var(--text-3); }
