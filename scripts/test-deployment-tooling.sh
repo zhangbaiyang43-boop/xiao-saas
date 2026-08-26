@@ -401,6 +401,10 @@ class CosServiceError(Exception):
 
     def get_status_code(self):
         return self._status_code
+
+
+class CosClientError(Exception):
+    pass
 PYEOF
 
 # usage: run_cos_publish <sha> <archive> <checksum> <fake-cos-store-dir>
