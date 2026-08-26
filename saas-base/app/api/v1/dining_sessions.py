@@ -47,7 +47,7 @@ async def list_active_dining_sessions(
         return error_response(code=400, msg="缺少门店")
     TenantContext.set_tenant_id(tenant_id)
 
-    tenant_result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
     tenant = tenant_result.scalar_one_or_none()
     payment_mode = (getattr(tenant, "payment_mode", None) or "prepay") if tenant else "prepay"
 

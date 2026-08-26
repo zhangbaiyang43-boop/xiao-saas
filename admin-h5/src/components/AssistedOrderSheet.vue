@@ -8,7 +8,6 @@
     @update:open="onOpenChange"
   >
     <div class="ao-body">
-      <template>
         <!-- STEP 1: 选桌 -->
         <div v-if="step === 1" class="ao-step">
           <div class="ao-step-label">选哪一桌</div>
@@ -143,7 +142,6 @@
             <a-button type="primary" size="large" @click="emit('update:open', false)">先关闭</a-button>
           </div>
         </div>
-      </template>
     </div>
 
     <!-- Spec picker -->
