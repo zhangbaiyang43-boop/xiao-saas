@@ -21,6 +21,13 @@
           <a-form-item label="联系电话">
             <a-input v-model:value="storeForm.phone" placeholder="顾客咨询电话" />
           </a-form-item>
+          <a-form-item v-if="phoneChanged" label="新手机号验证码">
+            <div class="phone-code-row">
+              <a-input v-model:value="phoneCode" placeholder="请输入验证码" maxlength="6" />
+              <a-button :disabled="phoneCodeButtonDisabled" @click="sendPhoneCode">{{ phoneCodeButtonText }}</a-button>
+            </div>
+            <div class="logo-upload-hint">联系电话同时是登录手机号，改动后需要验证码确认，防止手滑改错把自己踢出账号</div>
+          </a-form-item>
           <a-form-item label="门店 Logo">
             <div class="logo-upload-box" @click="triggerLogoUpload">
               <img v-if="storeForm.logo_url" :src="storeForm.logo_url" class="logo-upload-preview" alt="Logo 预览" />
@@ -74,11 +81,17 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { ShopOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../../components/PageHeader.vue'
-import { getTenantProfile, updateTenantProfile, updateTenantSettings, uploadShopLogo } from '../../api'
+import {
+  getTenantProfile,
+  sendTenantPhoneChangeCode,
+  updateTenantProfile,
+  updateTenantSettings,
+  uploadShopLogo,
+} from '../../api'
 
 const merchant = ref({})
 const savingStore = ref(false)
@@ -86,6 +99,75 @@ const savingPickup = ref(false)
 const logoUploading = ref(false)
 const logoInputRef = ref(null)
 const storeForm = ref({ name: '', address: '', phone: '', logo_url: '' })
+const originalPhone = ref('')
+const phoneCode = ref('')
+const phoneCodeSending = ref(false)
+const phoneCodeCountdown = ref(0)
+const phoneCodeDailyLimited = ref(false)
+let phoneCodeCountdownTimer = null
+
+// 跟 saas-base/app/services/tencent_sms_service.py 的 SmsErrorCode/
+// _ERROR_CODE_MESSAGES 保持一致，参见 Login.vue 里同款的映射。
+const SMS_ERROR_MESSAGES = {
+  SMS_TOO_FREQUENT: '验证码获取过于频繁，请稍后再试',
+  SMS_DAILY_LIMIT: '今日验证码获取次数已达上限，请明日再试',
+  SMS_PROVIDER_REJECTED: '验证码发送失败，请稍后再试或联系服务商',
+  SMS_PROVIDER_UNAVAILABLE: '短信服务暂时不可用，请稍后再试',
+}
+
+const phoneChanged = computed(() => storeForm.value.phone !== originalPhone.value)
+const phoneCodeButtonDisabled = computed(
+  () => phoneCodeSending.value || phoneCodeCountdown.value > 0 || phoneCodeDailyLimited.value,
+)
+const phoneCodeButtonText = computed(() => {
+  if (phoneCodeDailyLimited.value) return '今日已达上限'
+  if (phoneCodeCountdown.value > 0) return `${phoneCodeCountdown.value}s后重发`
+  return phoneCodeSending.value ? '发送中…' : '发送验证码'
+})
+
+function clearPhoneCodeCountdown() {
+  if (phoneCodeCountdownTimer) {
+    clearInterval(phoneCodeCountdownTimer)
+    phoneCodeCountdownTimer = null
+  }
+}
+
+function startPhoneCodeCountdown(seconds = 60) {
+  clearPhoneCodeCountdown()
+  phoneCodeCountdown.value = Number(seconds) || 60
+  phoneCodeCountdownTimer = setInterval(() => {
+    phoneCodeCountdown.value -= 1
+    if (phoneCodeCountdown.value <= 0) {
+      phoneCodeCountdown.value = 0
+      clearPhoneCodeCountdown()
+    }
+  }, 1000)
+}
+
+async function sendPhoneCode() {
+  const phone = (storeForm.value.phone || '').trim()
+  if (!/^1\d{10}$/.test(phone)) {
+    message.error('请输入正确的11位手机号')
+    return
+  }
+  phoneCodeSending.value = true
+  try {
+    const res = await sendTenantPhoneChangeCode(phone)
+    if (res?.code === 200) {
+      message.success(res?.msg || '验证码已发送')
+      startPhoneCodeCountdown(res?.data?.retry_after || 60)
+      return
+    }
+    const errorCode = res?.data?.error_code
+    message.error((errorCode && SMS_ERROR_MESSAGES[errorCode]) || res?.msg || '验证码发送失败，请稍后再试')
+    if (errorCode === 'SMS_TOO_FREQUENT') startPhoneCodeCountdown(res?.data?.retry_after || 60)
+    else if (errorCode === 'SMS_DAILY_LIMIT') phoneCodeDailyLimited.value = true
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '验证码发送失败，请稍后再试')
+  } finally {
+    phoneCodeSending.value = false
+  }
+}
 const pickupForm = ref({
   pickup_no_enabled: false,
   pickup_no_count: 30,
@@ -104,6 +186,7 @@ async function loadProfile() {
         phone: res.data.phone || '',
         logo_url: res.data.logo_url || '',
       }
+      originalPhone.value = res.data.phone || ''
       pickupForm.value = {
         pickup_no_enabled: !!res.data.pickup_no_enabled,
         pickup_no_count: Number(res.data.pickup_no_count || 30),
@@ -150,17 +233,27 @@ async function saveStoreProfile() {
     message.error('请填写门店名称')
     return
   }
+  if (phoneChanged.value && !phoneCode.value.trim()) {
+    message.error('联系电话已修改，请先获取并填写验证码')
+    return
+  }
   savingStore.value = true
   try {
-    const res = await updateTenantProfile(storeForm.value)
+    const payload = { ...storeForm.value }
+    if (phoneChanged.value) payload.phone_code = phoneCode.value.trim()
+    const res = await updateTenantProfile(payload)
     if (res.code === 200 && res.data) {
       merchant.value = { ...merchant.value, ...res.data }
+      originalPhone.value = res.data.phone || ''
+      phoneCode.value = ''
+      clearPhoneCodeCountdown()
+      phoneCodeCountdown.value = 0
       message.success('门店资料已保存')
       return
     }
     message.error(res.msg || '保存失败')
-  } catch {
-    message.error('保存失败，请检查后端接口')
+  } catch (e) {
+    message.error(e?.response?.data?.msg || '保存失败，请检查后端接口')
   } finally {
     savingStore.value = false
   }
@@ -204,6 +297,7 @@ function copyTenantId() {
 }
 
 onMounted(loadProfile)
+onBeforeUnmount(clearPhoneCodeCountdown)
 </script>
 
 <style scoped>
@@ -293,4 +387,7 @@ onMounted(loadProfile)
   color: var(--text-3);
   line-height: 1.4;
 }
+.phone-code-row { display: flex; gap: 8px; }
+.phone-code-row .ant-input { flex: 1; }
+.phone-code-row .ant-btn { flex: 0 0 auto; white-space: nowrap; }
 </style>

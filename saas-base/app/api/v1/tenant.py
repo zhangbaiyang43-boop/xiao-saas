@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.entitlement_guard import require_capability_response
 from app.core.plan_capabilities import CAP_KITCHEN_PRINT
+from app.core.rate_limiter import login_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
-from app.schemas.tenant import ChangePasswordRequest, UpdateTenantProfileRequest
+from app.schemas.tenant import ChangePasswordRequest, TenantPhoneCodeRequest, UpdateTenantProfileRequest
+from app.services.tencent_sms_service import SmsPurpose, TencentSmsService
 from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/api/v1/tenant", tags=["商家租户"])
@@ -179,6 +181,22 @@ async def get_activation_status(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/profile/phone-code", response_model=RespVo)
+@login_limit()
+async def send_change_phone_code(request: Request, data: TenantPhoneCodeRequest, db: AsyncSession = Depends(get_db)):
+    """给"联系电话"要改成的新号码发验证码。不验证旧手机号——调用这个接口本身
+    已经是登录态，只需要证明这个新号码确实收得到短信，再回填到 /profile 里。"""
+    service = TenantService(db)
+    tenant_id, tenant, error = await get_current_tenant(service)
+    if error:
+        return error
+
+    ok, msg, payload = await TencentSmsService().request_login_code(data.phone, purpose=SmsPurpose.CHANGE_PHONE)
+    if not ok:
+        return error_response(code=400, msg=msg, data=payload or None)
+    return success_response(data=payload, msg=msg)
+
+
 @router.put("/profile", response_model=RespVo)
 async def update_profile(data: UpdateTenantProfileRequest, db: AsyncSession = Depends(get_db)):
     service = TenantService(db)
@@ -187,6 +205,17 @@ async def update_profile(data: UpdateTenantProfileRequest, db: AsyncSession = De
         return error
 
     payload = data.model_dump(exclude_unset=True)
+    phone_code = payload.pop("phone_code", None)
+    new_phone = payload.get("phone")
+    # phone doubles as the login credential -- only require the code when it's
+    # actually changing, so every other profile edit (address/logo/name/status)
+    # is unaffected. Rejecting here leaves the DB untouched (update_tenant_profile
+    # hasn't run yet).
+    if new_phone and new_phone != tenant.phone:
+        if not phone_code or not await TencentSmsService().verify_login_code(
+            new_phone, phone_code, purpose=SmsPurpose.CHANGE_PHONE
+        ):
+            return error_response(code=400, msg="验证码错误或已过期")
     if "logo_url" in payload:
         from app.core.cos import is_allowed_cos_url
         if not is_allowed_cos_url(payload.get("logo_url")):

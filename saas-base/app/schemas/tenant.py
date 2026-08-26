@@ -61,9 +61,24 @@ class RegisterRequest(BaseModel):
 class UpdateTenantProfileRequest(BaseModel):
     name: Optional[str] = Field(None, description="商家名称")
     phone: Optional[str] = Field(None, description="手机号")
+    # phone 同时是登录凭证：只有当 phone 真的发生变化时才会被校验，用来确认
+    # 提交的人真的能收到这个新手机号的验证码，防止手滑改错把自己踢出账号。
+    phone_code: Optional[str] = Field(None, description="更换联系电话时，发到新手机号的验证码")
     address: Optional[str] = Field(None, description="商家地址")
     logo_url: Optional[str] = Field(None, description="商家 logo")
     status: Optional[bool] = Field(None, description="商家状态")
+
+
+class TenantPhoneCodeRequest(BaseModel):
+    """给"联系电话"要改成的新手机号发一条验证码——不验证旧手机号，
+    因为这一步本身已经是登录态，只需要证明新号码确实收得到短信。"""
+
+    phone: str = Field(..., description="要改绑的新手机号")
+
+    @field_validator("phone")
+    @classmethod
+    def phone_format(cls, value):
+        return normalize_phone(value)
 
 
 class TenantSettingsRequest(BaseModel):

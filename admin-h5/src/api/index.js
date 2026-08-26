@@ -44,6 +44,7 @@ export const logoutTenant = () => request.post('/v1/tenant/logout')
 export const getTenantProfile = () => request.get('/v1/tenant/profile')
 export const getActivationStatus = () => request.get('/v1/tenant/activation-status')
 export const updateTenantProfile = (data) => request.put('/v1/tenant/profile', data)
+export const sendTenantPhoneChangeCode = (phone) => request.post('/v1/tenant/profile/phone-code', { phone })
 export const uploadShopLogo = (file) => {
   const fd = new FormData()
   fd.append('file', file)

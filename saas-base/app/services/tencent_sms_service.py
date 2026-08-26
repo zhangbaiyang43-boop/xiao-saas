@@ -23,11 +23,12 @@ class SmsPurpose:
     and hash functions below -- each purpose gets its own cooldown/code
     namespace, entirely independent of the others (the daily send *budget*
     is deliberately NOT purpose-scoped -- see _daily_key). Deliberately just
-    two string constants, not a project-wide enum: add a new one here only
+    a few string constants, not a project-wide enum: add a new one here only
     when a new phone-verification flow actually needs it."""
 
     LOGIN = "login"
     REGISTER = "register"
+    CHANGE_PHONE = "change_phone"
 
 
 class SmsErrorCode:
