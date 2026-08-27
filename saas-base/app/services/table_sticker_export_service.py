@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
+import warnings
 
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
@@ -9,9 +9,9 @@ from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 DPI = 300
 STICKER_WIDTH = 1181
 STICKER_HEIGHT = 1417
-A4_WIDTH = 2480
-A4_HEIGHT = 3508
-QR_SIZE = 732
+QR_CONTAINER_SIZE = 752
+QR_CONTENT_SIZE = 652
+QR_QUIET_ZONE = 50
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_DIMENSION = 4096
 SAFE_IMAGE_PREFIX = "/static/entrance-codes/"
@@ -31,13 +31,6 @@ class TableStickerExportError(ValueError):
         super().__init__(message)
         self.code = code
         self.message = message
-
-
-@dataclass(slots=True)
-class ExportArtifact:
-    zip_path: Path | None = None
-    temp_dir: Path | None = None
-    download_name: str | None = None
 
 
 class TableStickerExportService:
@@ -71,33 +64,41 @@ class TableStickerExportService:
             )
             self._draw_centered_text(draw, (110, 82, 1071, 168), merchant_label, merchant_font, fill="white")
 
-            title_font = self._font(82)
-            footer_font = self._font(56)
-            badge_font = self._fit_table_font(draw, table_no, max_width=260, max_height=88)
+            title_font = self._font(59)
+            footer_font = self._font(44)
+            table_body = self._normalize_table_no(table_no)
+            body_font = self._fit_table_font(draw, table_body, max_width=260, max_height=126)
+            unit_font = self._font(56)
 
-            draw.text((84, 246), "扫码点餐", font=title_font, fill="#111418")
+            draw.text((84, 248), "扫码点餐", font=title_font, fill="#111418")
             draw.rounded_rectangle(
-                (797, 220, 1099, 334),
+                (797, 220, 1109, 400),
                 radius=28,
                 fill="#EAFAF0",
                 outline="#07C160",
                 width=4,
             )
-            self._draw_centered_text(draw, (797, 220, 1099, 334), table_no, badge_font, fill="#05913F")
+            self._draw_table_badge_text(
+                draw,
+                (797, 220, 1109, 400),
+                table_body,
+                body_font,
+                unit_font,
+            )
 
-            qr_card = Image.new("RGB", (752, 752), "white")
+            qr_card = Image.new("RGB", (QR_CONTAINER_SIZE, QR_CONTAINER_SIZE), "white")
             try:
                 draw_card = ImageDraw.Draw(qr_card)
-                draw_card.rounded_rectangle((0, 0, 751, 751), radius=32, fill="white")
+                draw_card.rounded_rectangle((0, 0, QR_CONTAINER_SIZE - 1, QR_CONTAINER_SIZE - 1), radius=32, fill="white")
 
-                qr_image = source_image.resize((652, 652), Image.Resampling.LANCZOS)
+                qr_image = source_image.resize((QR_CONTENT_SIZE, QR_CONTENT_SIZE), Image.Resampling.LANCZOS)
                 try:
-                    qr_card.paste(qr_image, (50, 50))
+                    qr_card.paste(qr_image, (QR_QUIET_ZONE, QR_QUIET_ZONE))
                 finally:
                     qr_image.close()
 
-                qr_left = (STICKER_WIDTH - 752) // 2
-                qr_top = 396
+                qr_left = (STICKER_WIDTH - QR_CONTAINER_SIZE) // 2
+                qr_top = 418
                 canvas.paste(qr_card, (qr_left, qr_top))
             finally:
                 qr_card.close()
@@ -106,7 +107,7 @@ class TableStickerExportService:
             footer_bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
             footer_width = footer_bbox[2] - footer_bbox[0]
             draw.text(
-                ((STICKER_WIDTH - footer_width) // 2, 1222),
+                ((STICKER_WIDTH - footer_width) // 2, 1312),
                 footer_text,
                 font=footer_font,
                 fill="#111418",
@@ -144,27 +145,43 @@ class TableStickerExportService:
         if source_path.stat().st_size > MAX_SOURCE_BYTES:
             raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
 
+        image = None
         try:
-            with Image.open(source_path) as verifying_image:
-                verifying_image.verify()
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(source_path) as verifying_image:
+                    verifying_image.verify()
 
-            image = Image.open(source_path)
-            image.load()
-        except (FileNotFoundError, UnidentifiedImageError, OSError, SyntaxError) as exc:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                image = Image.open(source_path)
+            width, height = image.size
+            if (
+                width <= 0
+                or height <= 0
+                or width != height
+                or width < 300
+                or height < 300
+                or width > MAX_SOURCE_DIMENSION
+                or height > MAX_SOURCE_DIMENSION
+            ):
+                raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                image.load()
+        except TableStickerExportError:
+            if image is not None:
+                image.close()
+            raise
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+            if image is not None:
+                image.close()
             raise TableStickerExportError(CORRUPTED_SOURCE_IMAGE, "桌码图片损坏") from exc
-
-        width, height = image.size
-        if (
-            width <= 0
-            or height <= 0
-            or width != height
-            or width < 300
-            or height < 300
-            or width > MAX_SOURCE_DIMENSION
-            or height > MAX_SOURCE_DIMENSION
-        ):
-            image.close()
-            raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
+        except (FileNotFoundError, UnidentifiedImageError, OSError, SyntaxError) as exc:
+            if image is not None:
+                image.close()
+            raise TableStickerExportError(CORRUPTED_SOURCE_IMAGE, "桌码图片损坏") from exc
 
         if image.mode != "RGB":
             converted = image.convert("RGB")
@@ -179,6 +196,15 @@ class TableStickerExportService:
             return ImageFont.truetype(str(FONT_PATH), size=size)
         except OSError as exc:
             raise TableStickerExportError(FONT_NOT_FOUND, f"桌贴字体缺失: {FONT_PATH}") from exc
+
+    @staticmethod
+    def _normalize_table_no(table_no: str) -> str:
+        normalized = (table_no or "").strip()
+        if normalized.endswith("桌"):
+            normalized = normalized[:-1].rstrip()
+        if not normalized:
+            raise TableStickerExportError(EMPTY_TABLE_NO, "桌号不能为空")
+        return normalized
 
     def _fit_table_font(
         self,
@@ -195,6 +221,30 @@ class TableStickerExportService:
             if text_width <= max_width and text_height <= max_height:
                 return font
         raise TableStickerExportError(TABLE_NO_TOO_LONG, "桌号过长")
+
+    def _draw_table_badge_text(
+        self,
+        draw: ImageDraw.ImageDraw,
+        box: tuple[int, int, int, int],
+        table_body: str,
+        body_font: ImageFont.FreeTypeFont,
+        unit_font: ImageFont.FreeTypeFont,
+    ) -> None:
+        left, top, right, bottom = box
+        body_bbox = draw.textbbox((0, 0), table_body, font=body_font)
+        unit_bbox = draw.textbbox((0, 0), "桌", font=unit_font)
+        body_width = body_bbox[2] - body_bbox[0]
+        body_height = body_bbox[3] - body_bbox[1]
+        unit_width = unit_bbox[2] - unit_bbox[0]
+        unit_height = unit_bbox[3] - unit_bbox[1]
+        gap = 8
+        total_width = body_width + gap + unit_width
+        start_x = left + ((right - left) - total_width) // 2
+        baseline_top = top + ((bottom - top) - max(body_height, unit_height)) // 2 + 8
+        body_y = baseline_top - body_bbox[1]
+        unit_y = baseline_top + (body_height - unit_height) + 10 - unit_bbox[1]
+        draw.text((start_x, body_y), table_body, font=body_font, fill="#05913F")
+        draw.text((start_x + body_width + gap, unit_y), "桌", font=unit_font, fill="#05913F")
 
     def _fit_merchant_font(
         self,
