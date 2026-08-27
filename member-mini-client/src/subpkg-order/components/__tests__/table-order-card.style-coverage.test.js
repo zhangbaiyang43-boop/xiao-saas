@@ -101,6 +101,33 @@ describe('本桌订单卡片：模板用到的类都有对应样式', () => {
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
   })
 
+  it('三个弹层的底部动作区都是 BaseSheet #footer 里的正常 flex 子元素', () => {
+    // TableBillSheet 的动作栏曾经是 position:absolute 浮在滚动区上面，只能靠
+    // .to-scroll 写死一个 padding-bottom 给它让位——那个值永远猜不准：真机安全区
+    // 一变就压住最后一行，「订单详情」折叠卡整个够不着。三个弹层统一走
+    // BaseSheet 的 flex 列，不再有任何"让位 padding"。
+    const footers = [
+      ['../TableBillSheet.vue', '.table-account-actions'],
+      ['../OrderHistorySheet.vue', '.orders-actions'],
+      ['../CheckoutSheet.vue', '.order-confirm-bottom'],
+    ]
+    for (const [rel, selector] of footers) {
+      const css = read(rel)
+      const block = css.match(new RegExp('\\' + selector + '\\s*\\{[^}]*\\}'))
+      expect(block, `${rel} 缺少 ${selector}`).not.toBeNull()
+      expect(block[0], `${rel} ${selector} 不能脱离文档流`).not.toMatch(/position:\s*(absolute|fixed)/)
+      expect(block[0]).toMatch(/flex-shrink:\s*0/)
+    }
+  })
+
+  it('滚动区不再靠写死的 padding-bottom 给悬浮按钮让位', () => {
+    const css = read('../TableBillSheet.vue')
+    const block = css.match(/\.to-scroll\s*\{[^}]*\}/)
+    expect(block).not.toBeNull()
+    // 底部内边距应当是普通的小留白，不是用来容纳整个按钮栏的大数值
+    expect(block[0]).not.toMatch(/padding:[^;]*calc\([^)]*(1[6-9]\d|2\d\d)rpx\s*\+\s*env/)
+  })
+
   it('点亮态和未点亮态是两种颜色，否则进度看不出来', () => {
     const css = read(SHARED_SCSS)
     const base = css.match(/\.to-stage-dot\s*\{[^}]*background:\s*([^;]+);/)

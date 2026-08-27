@@ -308,16 +308,14 @@ export default {
 
 .table-order-sheet {
   background: var(--bg-subtle);
-  padding-bottom: 0;
 }
 
+/* 跟 CheckoutSheet 同一套：给 scroll-view 一个具体的 max-height
+   （mp-weixin 不认 flex 推算出来的高度，长列表会滚不动），
+   底部动作栏作为正常 flex 子元素排在它下面，不需要任何让位 padding。 */
 .to-scroll {
-  max-height: calc(82vh - 176rpx - env(safe-area-inset-bottom));
-  /* 底部按钮是 position:absolute 悬浮的，滚动内容要留出它的整个高度再让位。
-     按钮区 ≈ 18rpx + 92rpx + 18rpx + BaseSheet 自己那层 24rpx + 安全区，
-     实测 160rpx + env 只剩一点点缝，这里给足 220rpx + env（最后一行离按钮
-     约 90rpx，清清楚楚一段留白）。 */
-  padding: 8rpx 24rpx calc(220rpx + env(safe-area-inset-bottom));
+  max-height: calc(86vh - 250rpx - env(safe-area-inset-bottom));
+  padding: 8rpx 24rpx 20rpx;
   box-sizing: border-box;
 }
 
@@ -325,16 +323,19 @@ export default {
   padding: 24rpx 0;
 }
 
-/* footer 动作区沿用原样式（模板未改），只是状态类前缀保持 table-account-* */
+/* 底部动作区：BaseSheet 的 #footer 插槽里的正常 flex 子元素，跟
+   OrderHistorySheet(.orders-actions) / CheckoutSheet(.order-confirm-bottom) 一致。
+   原来这里是 position:absolute 浮在滚动区上面，只能靠 .to-scroll 写死一个
+   padding-bottom 给它让位——那个值永远猜不准（真机安全区一变就压住最后一行，
+   订单详情折叠卡整个够不着）。改成在流内以后，BaseSheet 的 flex 列自然把
+   滚动区和按钮排开，不再需要任何让位 padding。 */
 .table-account-actions {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 3;
+  flex-shrink: 0;
   display: flex;
   gap: 18rpx;
-  padding: 18rpx 24rpx calc(18rpx + env(safe-area-inset-bottom));
+  /* 真机底部安全区由 BaseSheet 的 .base-sheet-surface padding-bottom 兜；
+     这里垫 12rpx 最小底距，开发者工具里 env()=0 时按钮也不贴边。 */
+  padding: 18rpx 24rpx 12rpx;
   background: var(--bg-card);
   border-top: 1rpx solid #edf0f2;
   box-sizing: border-box;
