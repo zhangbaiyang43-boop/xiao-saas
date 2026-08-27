@@ -52,13 +52,9 @@
   /* 店招压顶 */
   .topbar{
     background:var(--brand);color:#fff;border-radius:11px;
-    display:flex;align-items:center;gap:9px;padding:9px 12px;z-index:1;
+    display:flex;align-items:center;justify-content:center;padding:10px 12px;z-index:1;
   }
-  .topbar .logo{
-    width:28px;height:28px;border-radius:7px;background:#fff;color:var(--brand-ink);
-    display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:900;flex:none;
-  }
-  .topbar .name{font-size:15px;font-weight:800;letter-spacing:.5px}
+  .topbar .name{font-size:16px;font-weight:800;letter-spacing:1px}
   .topbar .name small{font-weight:600;opacity:.9;font-size:12px;margin-left:4px}
 
   /* 主行：扫码点餐 + 大桌号 */
@@ -99,7 +95,7 @@
     <h2>相对原图改了什么</h2>
     <ul>
       <li>桌号 → 右侧超大字块，和店招同级主视觉</li>
-      <li>顶部绿条压店名 + Logo，一眼是"官方码"</li>
+      <li>顶部绿条压店名，一眼是"官方码"</li>
       <li>二维码中心换本店 Logo（去掉"开心点单"）</li>
       <li>"扫码点餐"缩小，只做辅助说明</li>
       <li>"加菜也扫这里"并进一行副标题</li>
@@ -113,7 +109,6 @@
     <div class="sticker">
       <div class="cut"></div>
       <div class="topbar">
-        <div class="logo">宝</div>
         <div class="name">大宝羊肉汤<small>弘农路店</small></div>
       </div>
       <div class="headline">
