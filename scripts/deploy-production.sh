@@ -62,6 +62,13 @@
 #     full validation (index.html + assets/ + release.json whose sha field
 #     matches <sha>); otherwise the deploy stops rather than overwrite an
 #     unknown directory.
+#   - The admin-h5 artifact is keyed by the last commit that actually TOUCHED
+#     admin-h5 (ADMIN_ARTIFACT_SHA), not by the deploy's TARGET_SHA. The
+#     release workflow only runs on commits touching those paths, so an admin
+#     commit followed by a non-admin commit leaves TARGET_SHA with no artifact
+#     -- ever. Keying off TARGET_SHA made that a permanent 404 that looked
+#     like "CI is still running". Releases are therefore named by the artifact
+#     SHA too, which is also what release.json records.
 
 set -Eeuo pipefail
 
@@ -221,6 +228,18 @@ BACKEND_CHANGED=0
 MIGRATION_CHANGED=0
 REQUIREMENTS_CHANGED=0
 
+# The paths whose changes cause .github/workflows/admin-h5-release.yml to run
+# and publish an artifact. This list MUST mirror that workflow's `on.push.paths`
+# exactly -- it is what makes "which commit is the artifact keyed by" answerable
+# here. If the workflow's trigger paths change, change these together.
+ADMIN_ARTIFACT_PATHS=(
+  'admin-h5/'
+  '.github/workflows/admin-h5-release.yml'
+  'scripts/deploy-production.sh'
+  'scripts/test-deployment-tooling.sh'
+  'scripts/publish-admin-artifact-cos.py'
+)
+
 if [ "$BEFORE_SHA" != "$TARGET_SHA" ]; then
   if git diff --name-only "$BEFORE_SHA" "$TARGET_SHA" -- 'admin-h5/' | grep -q .; then ADMIN_CHANGED=1; fi
   if git diff --name-only "$BEFORE_SHA" "$TARGET_SHA" -- 'saas-base/' | grep -q .; then BACKEND_CHANGED=1; fi
@@ -236,6 +255,44 @@ fi
 [ "$FORCE_BACKEND" -eq 1 ] && BACKEND_CHANGED=1
 
 log "ADMIN_CHANGED=$ADMIN_CHANGED BACKEND_CHANGED=$BACKEND_CHANGED MIGRATION_CHANGED=$MIGRATION_CHANGED"
+
+# ---------------------------------------------------------------------------
+# 2b. Which commit is the admin-h5 artifact keyed by?
+#
+#     NOT necessarily TARGET_SHA. The release workflow only runs on commits
+#     that touch ADMIN_ARTIFACT_PATHS, and names the artifact after that
+#     commit. So whenever an admin commit is followed by a non-admin commit
+#     before anyone deploys -- e.g. admin fix, then a member-mini-client-only
+#     commit -- TARGET_SHA has no artifact and never will, while the real
+#     artifact sits under the earlier admin commit's SHA.
+#
+#     Deploying TARGET_SHA's URL in that situation 404s forever
+#     (ADMIN_ARTIFACT_NOT_READY), which reads like "CI hasn't finished yet"
+#     and invites waiting for something that is never coming. The artifact
+#     SHA is the last commit at-or-before TARGET_SHA that touched those paths.
+#
+#     ADMIN_ARTIFACT_SHA may be overridden from the environment to pin an
+#     older, known-good build (rollback without a revert commit).
+# ---------------------------------------------------------------------------
+if [ "$ADMIN_CHANGED" -eq 1 ] && [ -z "${ADMIN_ARTIFACT_SHA:-}" ]; then
+  ADMIN_ARTIFACT_SHA="$(git log -1 --format=%H "$TARGET_SHA" -- "${ADMIN_ARTIFACT_PATHS[@]}" || true)"
+  if [ -z "$ADMIN_ARTIFACT_SHA" ]; then
+    echo "STATUS=BLOCKED_ADMIN_ARTIFACT_SHA_UNRESOLVED" >&2
+    echo "This deploy needs an admin-h5 artifact, but no commit at or before" >&2
+    echo "$TARGET_SHA touches any of: ${ADMIN_ARTIFACT_PATHS[*]}" >&2
+    echo "-- so no artifact was ever published. Not pulling, downloading," >&2
+    echo "restarting the backend, or touching current." >&2
+    exit 1
+  fi
+fi
+
+if [ "$ADMIN_CHANGED" -eq 1 ]; then
+  if [ "$ADMIN_ARTIFACT_SHA" = "$TARGET_SHA" ]; then
+    log "ADMIN_ARTIFACT_SHA=$ADMIN_ARTIFACT_SHA (== TARGET_SHA)"
+  else
+    log "ADMIN_ARTIFACT_SHA=$ADMIN_ARTIFACT_SHA (TARGET_SHA=$TARGET_SHA does not touch admin-h5; using the last commit that does)"
+  fi
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   log "DRY_RUN=1 -- no git checkout/pull, no download, no release, no restart."
@@ -318,29 +375,32 @@ BACKEND_STATUS="SKIPPED"
 #    backend deploy below fails, this release simply never goes live, and
 #    `current` is never touched. No frontend build ever happens here.
 # ---------------------------------------------------------------------------
-RELEASE_DIR="$ADMIN_RELEASE_ROOT/$AFTER_SHA"
+# Release dirs are named by the artifact's own SHA, not the deploy SHA --
+# that is what release.json records, and it means two deploys carrying the
+# same admin build reuse one validated release instead of re-downloading.
+RELEASE_DIR="$ADMIN_RELEASE_ROOT/${ADMIN_ARTIFACT_SHA:-$AFTER_SHA}"
 
 if [ "$ADMIN_CHANGED" -eq 1 ]; then
   if [ -d "$RELEASE_DIR" ]; then
     log "Release $RELEASE_DIR already exists -- validating before reuse"
-    if release_is_valid "$RELEASE_DIR" "$AFTER_SHA"; then
+    if release_is_valid "$RELEASE_DIR" "$ADMIN_ARTIFACT_SHA"; then
       log "Existing release validated -- reusing, no download needed"
     else
       echo "STATUS=BLOCKED_INVALID_EXISTING_RELEASE" >&2
       echo "$RELEASE_DIR exists but failed validation (missing index.html/assets/" >&2
-      echo "release.json, or release.json's sha does not match $AFTER_SHA). Refusing" >&2
+      echo "release.json, or release.json's sha does not match $ADMIN_ARTIFACT_SHA). Refusing" >&2
       echo "to overwrite an unknown existing release directory." >&2
       exit 1
     fi
   else
-    ARTIFACT_TAG="admin-h5-$AFTER_SHA"
-    ARTIFACT_NAME="admin-h5-dist-$AFTER_SHA.tar.gz"
+    ARTIFACT_TAG="admin-h5-$ADMIN_ARTIFACT_SHA"
+    ARTIFACT_NAME="admin-h5-dist-$ADMIN_ARTIFACT_SHA.tar.gz"
     CHECKSUM_NAME="$ARTIFACT_NAME.sha256"
     ARTIFACT_URL="$ARTIFACT_BASE_URL/$ARTIFACT_TAG/$ARTIFACT_NAME"
     CHECKSUM_URL="$ARTIFACT_BASE_URL/$ARTIFACT_TAG/$CHECKSUM_NAME"
 
     mkdir -p "$ADMIN_RELEASE_ROOT"
-    STAGE_DIR="$(mktemp -d "$ADMIN_RELEASE_ROOT/.stage-${AFTER_SHA}.XXXXXX")"
+    STAGE_DIR="$(mktemp -d "$ADMIN_RELEASE_ROOT/.stage-${ADMIN_ARTIFACT_SHA}.XXXXXX")"
     CLEANUP_TMP="$STAGE_DIR"
     mkdir -p "$STAGE_DIR/download" "$STAGE_DIR/extract"
 
@@ -354,7 +414,7 @@ if [ "$ADMIN_CHANGED" -eq 1 ]; then
     if ! curl "${DOWNLOAD_CURL_OPTS[@]}" -o "$STAGE_DIR/download/$ARTIFACT_NAME" "$ARTIFACT_URL"; then
       echo "STATUS=ADMIN_ARTIFACT_NOT_READY" >&2
       echo "Could not download $ARTIFACT_URL -- the admin-h5-release workflow" >&2
-      echo "for $AFTER_SHA may not have finished publishing yet. Not restarting" >&2
+      echo "for $ADMIN_ARTIFACT_SHA may not have finished publishing yet. Not restarting" >&2
       echo "the backend or switching current; re-run once the artifact exists." >&2
       exit 1
     fi
@@ -381,10 +441,10 @@ if [ "$ADMIN_CHANGED" -eq 1 ]; then
 
     tar -xzf "$STAGE_DIR/download/$ARTIFACT_NAME" -C "$STAGE_DIR/extract"
 
-    if ! release_is_valid "$STAGE_DIR/extract" "$AFTER_SHA"; then
+    if ! release_is_valid "$STAGE_DIR/extract" "$ADMIN_ARTIFACT_SHA"; then
       echo "STATUS=BLOCKED_INVALID_ADMIN_ARTIFACT" >&2
       echo "Extracted artifact failed validation (missing index.html/assets/" >&2
-      echo "release.json, or release.json's sha does not match $AFTER_SHA)." >&2
+      echo "release.json, or release.json's sha does not match $ADMIN_ARTIFACT_SHA)." >&2
       exit 1
     fi
 
@@ -523,6 +583,7 @@ fi
 
 log "ADMIN_STATUS=$ADMIN_STATUS BACKEND_STATUS=$BACKEND_STATUS"
 echo "DEPLOYED_SHA=$AFTER_SHA"
+[ "$ADMIN_CHANGED" -eq 1 ] && echo "ADMIN_ARTIFACT_SHA=$ADMIN_ARTIFACT_SHA"
 
 if [ "$ADMIN_STATUS" = "FAILED_ROLLED_BACK" ]; then
   echo "STATUS=ADMIN_DEPLOY_FAILED_ROLLED_BACK" >&2

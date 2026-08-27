@@ -1160,6 +1160,53 @@ assert_eq "current unchanged" "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$CURRENT_TARGET"
 export ARTIFACT_BASE_URL="https://cos.example.invalid/deploy-artifacts/admin-h5" # restore for subsequent cases
 
 # ---------------------------------------------------------------------------
+# CASE AQ -- admin commit followed by a NON-admin commit. This is the real
+# production failure from 2026-08-27: admin-h5 changed at commit N, then a
+# member-mini-client-only commit N+1 landed before anyone deployed. The
+# release workflow only runs on commits touching admin paths, so the artifact
+# exists under N and TARGET_SHA (N+1) has none and never will -- keying the
+# download off TARGET_SHA produced a permanent 404 reported as
+# ADMIN_ARTIFACT_NOT_READY, i.e. "wait for CI" for something never coming.
+# ---------------------------------------------------------------------------
+echo "== CASE AQ: artifact keyed by last admin commit, not TARGET_SHA =="
+setup_case case-aq
+OLD_SHA="0000000000000000000000000000000000oldaq"
+make_valid_release "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$OLD_SHA"
+ln -sfn "$ADMIN_RELEASE_ROOT/$OLD_SHA" "$ADMIN_CURRENT"
+touch "$MOCK_STATE_DIR/frontend_verifiable"
+ADMIN_SHA="$(publish admin-h5/feature.txt hello)"
+TARGET_SHA_AQ="$(publish member-mini-client/src/thing.js "// mini-client only")"
+# The artifact only ever exists under ADMIN_SHA.
+prepare_artifact_fixture "$CASE_DIR" normal "$ADMIN_SHA" "$ADMIN_SHA"
+run_deploy
+assert_exit "deploy succeeds despite TARGET_SHA having no artifact" 0 "$LAST_EXIT"
+assert_contains "reports DEPLOY_OK" "STATUS=DEPLOY_OK" "$LAST_OUTPUT"
+assert_contains "still treats admin as changed" "ADMIN_CHANGED=1" "$LAST_OUTPUT"
+assert_contains "resolves the artifact to the admin commit" "ADMIN_ARTIFACT_SHA=$ADMIN_SHA" "$LAST_OUTPUT"
+assert_contains "deployed SHA is still TARGET_SHA" "DEPLOYED_SHA=$TARGET_SHA_AQ" "$LAST_OUTPUT"
+assert_true "never requested an artifact under TARGET_SHA"   file_not_contains "$MOCK_STATE_DIR/curl_calls.log" "admin-h5-dist-$TARGET_SHA_AQ.tar.gz"
+assert_contains "requested the artifact under the admin commit"   "admin-h5-dist-$ADMIN_SHA.tar.gz" "$(cat "$MOCK_STATE_DIR/curl_calls.log")"
+CURRENT_TARGET="$(readlink -f "$ADMIN_CURRENT")"
+assert_eq "current points at the artifact-SHA release" "$ADMIN_RELEASE_ROOT/$ADMIN_SHA" "$CURRENT_TARGET"
+assert_true "npm was never invoked" file_absent "$MOCK_STATE_DIR/npm_calls.log"
+
+# ---------------------------------------------------------------------------
+# CASE AR -- ADMIN_ARTIFACT_PATHS must stay in sync with the workflow's
+# push.paths. If someone adds a trigger path to the workflow without adding
+# it here, this script would resolve the artifact SHA to an older commit and
+# silently deploy a stale build.
+# ---------------------------------------------------------------------------
+echo "== CASE AR: ADMIN_ARTIFACT_PATHS mirrors workflow push.paths =="
+WORKFLOW_FILE="$(cd "$SCRIPT_DIR/.." && pwd)/.github/workflows/admin-h5-release.yml"
+if [ -f "$WORKFLOW_FILE" ]; then
+  WF_PATHS="$(sed -n '/^on:/,/^jobs:/p' "$WORKFLOW_FILE"     | sed -n "/^  push:/,/^  [a-z_]*:/p"     | grep -oE "^ +- '[^']+'" | tr -d " -'" | sed 's#/\*\*$#/#' | sort -u)"
+  DEPLOY_PATHS="$(sed -n '/^ADMIN_ARTIFACT_PATHS=(/,/^)/p' "$DEPLOY_SCRIPT"     | grep -oE "^ +'[^']+'" | tr -d " '" | sort -u)"
+  assert_eq "workflow push.paths == ADMIN_ARTIFACT_PATHS" "$WF_PATHS" "$DEPLOY_PATHS"
+else
+  ok "workflow file not present in this checkout -- sync check skipped"
+fi
+
+# ---------------------------------------------------------------------------
 echo
 echo "PASS=$PASS_COUNT FAIL=$FAIL_COUNT"
 if [ "$FAIL_COUNT" -gt 0 ]; then
