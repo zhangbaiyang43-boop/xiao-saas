@@ -7,9 +7,11 @@ from app.core.tenant_context import TenantContext
 from app.core.database import get_db
 from app.models.tenant import Tenant
 from app.schemas.entrance_code import (
+    BatchDownloadEntranceCodeRequest,
     CreateEntranceCodeRequest,
     EntranceCodeResponse,
     RegenerateEntranceCodeRequest,
+    UpdateEntranceCodeStatusRequest,
 )
 from app.services.entrance_code_service import EntranceCodeService
 from app.services.tenant_service import TenantService
@@ -211,6 +213,26 @@ async def create_entrance_code(data: CreateEntranceCodeRequest, db=Depends(get_d
     return success_response(data=EntranceCodeResponse.model_validate(item))
 
 
+@router.post("/batch-download")
+async def batch_download_entrance_codes(data: BatchDownloadEntranceCodeRequest, db=Depends(get_db)):
+    """Bundle the selected codes' existing images into one zip (no re-render)."""
+    from urllib.parse import quote
+
+    from fastapi.responses import Response
+
+    from app.services.entrance_code_service import EntranceCodeService
+
+    try:
+        filename, blob = await EntranceCodeService(db).build_codes_zip(data.ids)
+    except ValueError as exc:
+        return error_response(code=400, msg=str(exc))
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 @router.get("/", response_model=RespVo)
 async def list_entrance_codes(
     db=Depends(get_db),
@@ -244,11 +266,27 @@ async def get_entrance_code(code_id: int, db=Depends(get_db)):
 async def delete_entrance_code(code_id: int, db=Depends(get_db)):
     """Delete entrance code."""
     from app.services.entrance_code_service import EntranceCodeService
-    
-    success = await EntranceCodeService(db).delete_entrance_code(code_id)
+
+    try:
+        success = await EntranceCodeService(db).delete_entrance_code(code_id)
+    except ValueError as exc:
+        return error_response(code=400, msg=str(exc))
     if not success:
         return error_response(code=404, msg="入口码不存在")
     return success_response(msg="删除成功")
+
+
+@router.put("/{code_id}/status", response_model=RespVo)
+async def update_entrance_code_status(
+    code_id: int, data: UpdateEntranceCodeStatusRequest, db=Depends(get_db)
+):
+    """Enable (1) or disable (0) an entrance code without deleting it."""
+    from app.services.entrance_code_service import EntranceCodeService
+
+    item = await EntranceCodeService(db).update_status(code_id, data.status)
+    if not item:
+        return error_response(code=404, msg="入口码不存在")
+    return success_response(data=EntranceCodeResponse.model_validate(item))
 
 
 @router.put("/{code_id}/regenerate", response_model=RespVo)

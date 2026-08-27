@@ -22,6 +22,10 @@ class UpdateEntranceCodeStatusRequest(BaseModel):
     status: int = Field(..., ge=0, le=1, description="status: 1 enabled, 0 disabled")
 
 
+class BatchDownloadEntranceCodeRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1, max_length=200, description="entrance code ids to bundle")
+
+
 class ResolveEntranceRequest(BaseModel):
     scene: str = Field(..., min_length=1, max_length=32, description="entrance scene")
 

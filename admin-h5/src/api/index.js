@@ -102,6 +102,12 @@ export const updateEntranceCodeStatus = (id, data) => request.put(`/v1/entrance-
 export const deleteEntranceCode = (id) => request.delete(`/v1/entrance-codes/${id}`)
 export const getEntranceCodeSummary = () => request.get('/v1/entrance-codes/summary')
 export const regenerateEntranceCode = (id) => request.put(`/v1/entrance-codes/${id}/regenerate`)
+export const batchDownloadEntranceCodes = (ids) =>
+  request.post('/v1/entrance-codes/batch-download', { ids }, {
+    responseType: 'blob',
+    timeout: 60000,
+    meta: { rawResponse: true },
+  })
 
 export const getChannelEntries = (params) => request.get('/v1/channel-entries/', { params })
 export const getChannelEntry = (id) => request.get(`/v1/channel-entries/${id}`)

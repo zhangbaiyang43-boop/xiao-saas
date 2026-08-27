@@ -74,6 +74,24 @@ class EntranceCodeService(BaseService):
     ) -> EntranceCode:
         tenant_id = self.require_tenant_id()
         coupon_template_id = await self._validate_coupon_template_id(coupon_template_id)
+
+        # 桌号防呆：同一桌已有启用中的桌贴码就不再生成第二张，否则顾客扫到哪张
+        # 都算这一桌、归属不清（resolve 那边对历史脏数据是容忍的，这里是入口拦截）。
+        normalized_table_no = (table_no or "").strip()
+        if (channel or "STORE").upper() == "TABLE" and normalized_table_no:
+            existing = await self.db.execute(
+                select(EntranceCode.id)
+                .where(
+                    EntranceCode.tenant_id == tenant_id,
+                    func.trim(EntranceCode.table_no) == normalized_table_no,
+                    EntranceCode.channel == "TABLE",
+                    EntranceCode.status == 1,
+                )
+                .limit(1)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError(f"桌号 {normalized_table_no} 已有启用中的桌贴码，请勿重复生成")
+
         scene = await self._generate_scene()
         resolved_target_page = target_page or self._resolve_target_page(entry_type)
         resolved_order_mode = order_mode or self._resolve_order_mode(entry_type)
@@ -211,7 +229,12 @@ class EntranceCodeService(BaseService):
         entrance_code = await self.get_tenant_code(entrance_code_id)
         if not entrance_code:
             return False
-        
+
+        # 已经有人扫过的码，背后挂着扫码/入会记录，硬删会留下悬空引用，也让统计
+        # 对不上。这种只允许「停用」（status=0），不允许物理删除。
+        if (getattr(entrance_code, "scan_count", 0) or 0) > 0:
+            raise ValueError("该桌贴码已有扫码记录，请改用「停用」而不是删除")
+
         if entrance_code.image_url:
             file_name = entrance_code.image_url.split("/")[-1]
             file_path = os.path.join(ENTRANCE_CODE_DIR, file_name)
@@ -221,6 +244,57 @@ class EntranceCodeService(BaseService):
         await self.db.delete(entrance_code)
         await self.db.commit()
         return True
+
+    async def build_codes_zip(self, code_ids: list[int]) -> tuple[str, bytes]:
+        """把选中的这些码的现成图片打成一个 zip（不重新渲染、不加版式），
+        条目名用桌号（没有就用码名/ID），重名追加序号。"""
+        import io
+        import re
+        import zipfile
+
+        tenant_id = self.require_tenant_id()
+        ids = [int(i) for i in (code_ids or []) if str(i).strip()]
+        if not ids:
+            raise ValueError("请选择要下载的桌贴码")
+        if len(ids) > 200:
+            raise ValueError("一次最多下载 200 张")
+
+        result = await self.db.execute(
+            select(EntranceCode).where(
+                EntranceCode.tenant_id == tenant_id,
+                EntranceCode.id.in_(ids),
+            )
+        )
+        codes = result.scalars().all()
+        if not codes:
+            raise ValueError("没有可下载的桌贴码")
+
+        buffer = io.BytesIO()
+        used: set[str] = set()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for code in codes:
+                if not code.image_url:
+                    continue
+                src_name = os.path.basename(code.image_url)
+                src_path = os.path.join(ENTRANCE_CODE_DIR, src_name)
+                if not os.path.isfile(src_path):
+                    continue
+                ext = os.path.splitext(src_name)[1] or ".png"
+                label = (code.table_no or code.name or str(code.id)).strip()
+                # \w 在 str 正则下已经匹配中文，够用；其余字符（斜杠、点、空格）一律换成下划线
+                safe = re.sub(r"[^\w-]", "_", label) or str(code.id)
+                entry = f"{safe}{ext}"
+                seq = 2
+                while entry in used:
+                    entry = f"{safe}_{seq}{ext}"
+                    seq += 1
+                used.add(entry)
+                with open(src_path, "rb") as fh:
+                    zf.writestr(entry, fh.read())
+
+        if not used:
+            raise ValueError("选中的桌贴码都还没有生成图片")
+        return "桌贴码.zip", buffer.getvalue()
 
     async def resolve_scene(
         self,
