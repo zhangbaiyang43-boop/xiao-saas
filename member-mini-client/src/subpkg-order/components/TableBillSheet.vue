@@ -41,7 +41,6 @@
               </view>
               <text class="to-track-end">{{ tableBillTimeline[tableBillTimeline.length - 1].label }}</text>
             </view>
-            <text v-if="tableBillWaitText" class="to-track-wait">{{ tableBillWaitText }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -187,10 +186,9 @@ export default {
     tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
-    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语 + 已等待时长。
+    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语。
     tableBillTimeline: { type: Array, default: () => [] },
     tableBillPayStateText: { type: String, default: '' },
-    tableBillWaitText: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
     tableItemCount: { type: Number, default: 0 },
     tableOrderGroups: { type: Array, default: () => [] },

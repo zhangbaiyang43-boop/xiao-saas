@@ -205,36 +205,17 @@ export function useTableBillView({
     return isPostpayMode.value ? '餐后统一结账' : '待结账'
   })
 
-  // 等餐场景最焦虑的是"还要等多久 / 我等了多久"。createdTs 是毫秒时间戳
-  // （useDiningSession.mapServerOrder 里 new Date().getTime()），这里推一个
-  // 分钟粒度的"已等待"文案；useOrderStatusPoll 每轮轮询会刷新 myOrders，
-  // 分钟级更新够用，不额外挂计时器。
-  const formatWait = (ts) => {
-    const base = Number(ts || 0)
-    if (!base) return ''
-    const mins = Math.floor((Date.now() - base) / 60000)
-    if (mins <= 0) return '刚刚下单'
-    if (mins < 60) return '已等待 ' + mins + ' 分钟'
-    const hours = Math.floor(mins / 60)
-    const rest = mins % 60
-    return '已等待 ' + hours + ' 小时' + (rest ? ' ' + rest + ' 分钟' : '')
-  }
-  const earliestActiveWaitTs = computed(() => {
-    const list = validTableOrders.value
-      .filter(order => ['pending', 'preparing'].includes(normalizeOrderStatus(order.status)))
-      .map(order => Number(order.createdTs || 0))
-      .filter(Boolean)
-    return list.length ? Math.min(...list) : 0
-  })
-  // 只在"还没上齐"（待接单 / 制作中）时给等待时长；上齐或结账后再显示"已等待"很怪。
-  const tableBillWaitText = computed(() => {
-    if (isTableSettled.value) return ''
-    const stage = tableBillStageIndex.value
-    if (stage !== 1 && stage !== 2) return ''
-    return formatWait(earliestActiveWaitTs.value)
-  })
-
   const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
+
+  // 「这一单的钱到底收没收到」——纯展示派生，读后端 raw status，不进
+  // normalizeOrderStatus。normalizeOrderStatus 是结算状态机的承重墙
+  // （allOrdersDone / isTableSettled / canCheckout 都依赖它，pending_payment
+  // 在那里落到 'pending'），动它会波及桌台结算判断；这里只解决"界面上不能把
+  // 一笔没收到的钱说成已经在正常走流程"。
+  const AWAITING_PAYMENT_STATUSES = ['pending_payment', 'unpaid', 'need_payment']
+  const isAwaitingPayment = computed(() =>
+    AWAITING_PAYMENT_STATUSES.includes(String(currentTableOrder.value?.status || ''))
+  )
 
   const tableOrderStatusTone = computed(() => {
     if (!currentTableOrder.value) return 'empty'
@@ -260,13 +241,18 @@ export function useTableBillView({
     settled: 'icon-roundcheckfill',
   })[tableOrderStatusTone.value] || 'icon-pay')
 
-  const tableOrderNextAction = computed(() => ({
-    canceled: '重新点餐',
-    paid: '无需操作，请稍候',
-    preparing: '等待上餐即可',
-    served: '请确认菜品',
-    settled: '可关闭查看',
-  })[tableOrderStatusTone.value] || '无需操作，请稍候')
+  const tableOrderNextAction = computed(() => {
+    // 未支付时说"无需操作，请稍候"是给了相反的下一步——这一单恰恰卡在需要顾客
+    // 去付款。OPPO 规则：任何异常提示必须自带真实的下一步。
+    if (isAwaitingPayment.value) return '这一单还没付款，请完成微信支付'
+    return ({
+      canceled: '重新点餐',
+      paid: '无需操作，请稍候',
+      preparing: '等待上餐即可',
+      served: '请确认菜品',
+      settled: '可关闭查看',
+    })[tableOrderStatusTone.value] || '无需操作，请稍候'
+  })
 
   const tableOrderProgressSub = computed(() => ({
     canceled: '无需等待',
@@ -313,12 +299,6 @@ export function useTableBillView({
       { key: 'done', status: 'done', label: '已上餐', icon: 'icon-deliver', desc: currentIndex >= 2 ? '餐品已完成' : '' },
       { key: 'settled', status: 'settled', label: '已完成', icon: 'icon-roundcheckfill', desc: currentIndex >= 3 ? '本桌已结束' : '' },
     ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
-  })
-
-  // 先付后厨单笔订单的"已等待"——只在待接单 / 制作中显示。
-  const tableOrderWaitText = computed(() => {
-    if (!['pending', 'preparing'].includes(currentTableOrderStatus.value)) return ''
-    return formatWait(Number(currentTableOrder.value?.createdTs || 0))
   })
 
   const currentOrderItemCount = computed(() => orderItemCount(currentTableOrder.value))
@@ -377,9 +357,8 @@ export function useTableBillView({
     tableStatusView,
     tableBillTimeline,
     tableBillPayStateText,
-    tableBillWaitText,
-    tableOrderWaitText,
     currentTableOrderStatus,
+    isAwaitingPayment,
     tableOrderStatusTone,
     tableOrderStatusBadge,
     tableOrderStatusIcon,

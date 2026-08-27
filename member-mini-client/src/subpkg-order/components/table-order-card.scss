@@ -48,6 +48,13 @@
   --to-soft: #fee2e2;
 }
 
+/* 未支付——顾客当下唯一需要动手的状态。跟「待接单」的琥珀色分开，
+   对齐 OrderManage「颜色即优先级」的做法（最紧急的那一态用红）。 */
+.to-card--unpaid {
+  --to-accent: var(--danger);
+  --to-soft: #fee2e2;
+}
+
 .to-head {
   display: flex;
   align-items: flex-start;
@@ -118,9 +125,11 @@
   line-height: 1.4;
 }
 
-/* 方案B 压缩进度：一排小圆点铺满整行 + 两端固定文字框住"从哪到哪"，
-   下面右对齐一句"已等待 X 分钟"给等餐的人一个时间感。不是每点一个标签
-   （那是分段式的做法）。 */
+/* 方案B 压缩进度：一排小圆点铺满整行 + 两端固定文字框住"从哪到哪"。
+   不是每点一个标签（那是分段式的做法）。
+   这里刻意不放"已等待 X 分钟"——孤立的时长数字既不告诉顾客还要等多久，
+   也不给下一步动作，违反 OPPO「数字必须带场景」；真要做时间感必须是
+   后端给的出餐预估（ETA），不是前端拿下单时间倒算。 */
 .to-track {
   margin: 22rpx 0 2rpx;
 }
@@ -183,14 +192,6 @@
 
 .to-track-step.done .to-track-seg {
   background: var(--brand);
-}
-
-.to-track-wait {
-  display: block;
-  margin-top: 8rpx;
-  text-align: right;
-  font-size: 21rpx;
-  color: var(--text-3);
 }
 
 .to-divider {

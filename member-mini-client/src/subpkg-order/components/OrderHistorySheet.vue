@@ -6,7 +6,7 @@
           <text class="refund-attention-sub">请保留订单信息并联系商家处理退款。</text>
         </view>
 
-        <view class="to-card" :class="'to-card--' + (tableOrderStatusTone === 'paid' ? 'wait' : tableOrderStatusTone)">
+        <view class="to-card" :class="'to-card--' + cardTone">
           <view class="to-head">
             <view class="to-head-status">
               <text class="to-badge">{{ tableOrderStatusBadge }}</text>
@@ -19,7 +19,9 @@
             </view>
           </view>
 
-          <view v-if="tableOrderTimeline.length" class="to-track">
+          <!-- 未支付的单不画进度条：进度条断言的是一条"已经开始走"的出餐流程，
+               而这一单还卡在付款，画出来等于告诉顾客"正在处理中，你不用管"。 -->
+          <view v-if="tableOrderTimeline.length && !isAwaitingPayment" class="to-track">
             <view class="to-track-bar">
               <text class="to-track-end">{{ tableOrderTimeline[0].label }}</text>
               <view class="to-track-rail">
@@ -35,7 +37,6 @@
               </view>
               <text class="to-track-end">{{ tableOrderTimeline[tableOrderTimeline.length - 1].label }}</text>
             </view>
-            <text v-if="tableOrderWaitText" class="to-track-wait">{{ tableOrderWaitText }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -151,8 +152,8 @@ export default {
     tableOrderStatusHint: { type: String, default: '' },
     tableOrderProgressSub: { type: String, default: '' },
     tableOrderTimeline: { type: Array, default: () => [] },
-    // 方案B：进度条下的"已等待 X 分钟"（待接单 / 制作中才有值）。
-    tableOrderWaitText: { type: String, default: '' },
+    // 这一单的钱还没收到（pending_payment 等）——决定卡片配色、要不要画进度条。
+    isAwaitingPayment: { type: Boolean, default: false },
     currentOrderItemCount: { type: Number, default: 0 },
     currentOrderMainItemText: { type: String, default: '' },
     // 菜品行缩略图——跟 TableBillSheet 对齐，取不到落占位图。
@@ -175,12 +176,18 @@ export default {
   },
   emits: ['close', 'toggle-history', 'mark-image-failed'],
   computed: {
+    // 颜色即优先级：未支付是顾客当下唯一需要动手的状态，必须跟"待接单"
+    // （同样是琥珀色的等待态）区分开，不能长得一样。
+    cardTone() {
+      if (this.isAwaitingPayment) return 'unpaid'
+      return this.tableOrderStatusTone === 'paid' ? 'wait' : this.tableOrderStatusTone
+    },
     // 卡底的收款状态——先付后厨绝大多数是"已在线支付"，但不能对
     // pending_payment / 已结账 的单也这么写死。
     paidStateText() {
+      if (this.isAwaitingPayment) return '待支付'
       const raw = String((this.currentTableOrder && this.currentTableOrder.status) || '')
       if (raw === 'settled') return '已结账'
-      if (['pending_payment', 'unpaid', 'need_payment'].includes(raw)) return '待支付'
       return '已在线支付'
     },
   },
