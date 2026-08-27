@@ -164,6 +164,39 @@ describe('默认视图的份数是"点了多少菜"，不是"这次结账里有�
   })
 })
 
+describe('每道菜的进度档位', () => {
+  // 后端只有 pending / preparing / done 三个真实档位。第 4 档 settled(已结账)
+  // 是整桌事件不是这道菜的事件——曾经把它当第 4 档，导致菜早就上齐了、
+  // 进度却永远差一格，非要等整桌结账才填满。
+  const stageOf = (status) => {
+    const view = setup([order({ id: 's', orderNo: 's', status, paymentMode: 'table_account', total: 1, items: [{ name: '菜', qty: 1 }] })])
+    return view.tableOrderGroups.value[0].stage
+  }
+
+  it('档数是 3，跟后端真实档位一致', () => {
+    expect(setup().ORDER_STAGE_COUNT).toBe(3)
+  })
+
+  it('待接单走 1 步，制作中走 2 步', () => {
+    expect(stageOf('pending')).toBe(1)
+    expect(stageOf('preparing')).toBe(2)
+  })
+
+  it('已上餐就是这道菜的终点，进度必须走满（不用等整桌结账）', () => {
+    expect(stageOf('done')).toBe(3)
+    expect(stageOf('done')).toBe(setup().ORDER_STAGE_COUNT)
+  })
+
+  it('已结账同样是终点', () => {
+    expect(stageOf('settled')).toBe(3)
+  })
+
+  it('已取消 / 已拒单给 -1：那是"这道菜没了"，不是"进度停在某一步"', () => {
+    expect(stageOf('cancelled')).toBe(-1)
+    expect(stageOf('rejected')).toBe(-1)
+  })
+})
+
 describe('桌牌号取会话内任意一单', () => {
   it('只有 prepay 那一单带 pickup_no 时也能取到', () => {
     const view = setup([

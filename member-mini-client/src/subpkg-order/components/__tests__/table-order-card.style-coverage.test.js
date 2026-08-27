@@ -75,6 +75,32 @@ describe('本桌订单卡片：模板用到的类都有对应样式', () => {
     expect(wrapBlock[0]).toMatch(/height:\s*\d+rpx/)
   })
 
+  it('进度点整条的高度必须小于菜品缩略图，不能喧宾夺主', () => {
+    const css = read(SHARED_SCSS)
+    const rpx = (block, prop) => {
+      const m = block.match(new RegExp(prop + ':\\s*(\\d+)rpx'))
+      return m ? Number(m[1]) : null
+    }
+    const stage = css.match(/\.to-stage\s*\{[^}]*\}/)[0]
+    const img = css.match(/\.to-drow-img\s*\{[^}]*\}/)[0]
+    const stageH = rpx(stage, 'height')
+    const imgH = rpx(img, 'height')
+    expect(stageH).not.toBeNull()
+    expect(imgH).not.toBeNull()
+    expect(stageH).toBeLessThan(imgH)
+  })
+
+  it('上餐后有汇聚成对号的收尾动效，并且尊重系统的"减弱动效"设置', () => {
+    const css = read(SHARED_SCSS)
+    expect(css).toContain('.to-stage--done')
+    expect(css).toContain('.to-stage-check')
+    // 汇聚：上下两端的点各自往中心位移
+    expect(css).toContain('@keyframes toStageConvergeTop')
+    expect(css).toContain('@keyframes toStageConvergeBottom')
+    expect(css).toContain('@keyframes toStageCheckIn')
+    expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
+  })
+
   it('点亮态和未点亮态是两种颜色，否则进度看不出来', () => {
     const css = read(SHARED_SCSS)
     const base = css.match(/\.to-stage-dot\s*\{[^}]*background:\s*([^;]+);/)

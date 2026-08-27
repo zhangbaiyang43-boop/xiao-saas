@@ -117,15 +117,22 @@ export function useTableBillView({
     validTableOrders.value.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0)
   )
   const tableGroupStatusText = (status, statusText) => formatOrderStatusText(status, statusText)
-  // 进度用四个点表达，不用文字：0 已下单 · 1 商家接单 · 2 已上齐 · 3 已完成。
-  // 返回"已经走完几步"，菜品行左侧据此点亮圆点。异常单（取消/拒单）给 -1，
-  // 由界面单独处理，不要用同一套点去表达"这道菜没了"。
-  const ORDER_STAGE_COUNT = 4
+  // 每道菜的进度，用点表达，不用文字。返回"已经走完几步"。
+  //
+  // 档数 = 3，因为后端就只有三个真实档位：pending(待接单) → preparing(制作中)
+  // → done(已上餐)。`accepted` 只是客户端容错的别名，后端从来不产出。
+  //
+  // 之前是 4 档、第 4 档给 settled(已结账)——那是**整桌**事件，不是这道菜的事件，
+  // 于是菜早就上齐了、进度却永远差一格，非要等整桌结账才填满。现在 done 就是
+  // 这道菜的终点（settled 同样算终点，菜都上了、账也结了）。
+  //
+  // 异常单（取消/拒单）给 -1：那是"这道菜没了"，不是"进度停在某一步"，
+  // 由界面单独处理，不要用同一套点去表达。
+  const ORDER_STAGE_COUNT = 3
   const orderStageIndex = (status) => {
     const normalized = normalizeOrderStatus(status)
     if (['cancelled', 'rejected'].includes(normalized)) return -1
-    if (normalized === 'settled') return 4
-    if (normalized === 'done') return 3
+    if (['done', 'settled'].includes(normalized)) return ORDER_STAGE_COUNT
     if (normalized === 'preparing') return 2
     return 1
   }

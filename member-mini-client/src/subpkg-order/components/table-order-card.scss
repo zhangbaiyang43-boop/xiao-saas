@@ -150,15 +150,16 @@
   line-height: 1.4;
 }
 
-/* 菜品行左侧的四点进度：一道菜走到哪一步，点亮几个。
+/* 菜品行左侧的进度点：一道菜走到哪一步，点亮几个。
    不配任何文字——顾客用几次就知道点代表什么。
-   0 未点亮 · 1 已下单 · 2 商家接单 · 3 已上齐 · 4 已完成，
-   档数由 useTableBillView.orderStageIndex 决定。 */
+   1 已下单 · 2 制作中 · 3 已上餐（终点，见下面的对号）。
+   档数由 useTableBillView.ORDER_STAGE_COUNT 决定，后端就这三个真实档位。
+   总高度必须小于菜品缩略图（64rpx），不能喧宾夺主。 */
 .to-stage {
   position: relative;
   flex-shrink: 0;
-  width: 22rpx;
-  height: 72rpx;
+  width: 18rpx;
+  height: 52rpx;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -166,13 +167,13 @@
   box-sizing: border-box;
 }
 
-/* 贯穿四个点的细轨道，让它读起来是"一条进度"而不是四个孤立的点 */
+/* 贯穿各点的细轨道，让它读起来是"一条进度"而不是几个孤立的点 */
 .to-stage::before {
   content: '';
   position: absolute;
   left: 50%;
-  top: 8rpx;
-  bottom: 8rpx;
+  top: 5rpx;
+  bottom: 5rpx;
   width: 2rpx;
   margin-left: -1rpx;
   background: #e8ecef;
@@ -181,12 +182,12 @@
 .to-stage-dot {
   position: relative;
   z-index: 1;
-  width: 16rpx;
-  height: 16rpx;
+  width: 10rpx;
+  height: 10rpx;
   border-radius: 50%;
   background: #dbe0e5;
   /* 用卡片底色描一圈，让点压在轨道线上而不是被线穿过去 */
-  box-shadow: 0 0 0 4rpx var(--bg-card);
+  box-shadow: 0 0 0 3rpx var(--bg-card);
   box-sizing: border-box;
 }
 
@@ -199,6 +200,87 @@
 .to-stage--void .to-stage-dot,
 .to-stage--void .to-stage-dot.on {
   background: #dbe0e5;
+}
+
+/* ── 这道菜上完了 ──────────────────────────────
+   几个点向中间汇聚、缩小消失，同时中间浮出一个带对号的圆点，
+   表示"这道菜完结了"。轨道线也一起淡出，免得对号被一条线穿过去。 */
+.to-stage--done::before {
+  animation: toStageRailOut .28s ease-in forwards;
+}
+
+.to-stage--done .to-stage-dot {
+  animation-duration: .3s;
+  animation-timing-function: ease-in;
+  animation-fill-mode: forwards;
+}
+
+/* 三个点各自往中心走：上面的往下、中间的原地、下面的往上。
+   位移量 = 各自到中心的距离（容器 52rpx，点间距 21rpx）。 */
+.to-stage--done .to-stage-dot:nth-child(1) { animation-name: toStageConvergeTop; }
+.to-stage--done .to-stage-dot:nth-child(2) { animation-name: toStageConvergeMid; }
+.to-stage--done .to-stage-dot:nth-child(3) { animation-name: toStageConvergeBottom; }
+
+@keyframes toStageConvergeTop {
+  to { transform: translateY(21rpx) scale(.3); opacity: 0; }
+}
+
+@keyframes toStageConvergeMid {
+  to { transform: scale(.3); opacity: 0; }
+}
+
+@keyframes toStageConvergeBottom {
+  to { transform: translateY(-21rpx) scale(.3); opacity: 0; }
+}
+
+@keyframes toStageRailOut {
+  to { opacity: 0; }
+}
+
+.to-stage-check {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  width: 28rpx;
+  height: 28rpx;
+  margin: -14rpx 0 0 -14rpx;
+  border-radius: 50%;
+  background: var(--brand);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 等点汇聚得差不多了再浮出来；both 让延迟期间保持 0% 的状态（不闪现） */
+  animation: toStageCheckIn .32s cubic-bezier(.34, 1.56, .64, 1) .22s both;
+}
+
+/* 对号用两条边框拼，不依赖 iconfont 字形 */
+.to-stage-check::after {
+  content: '';
+  width: 7rpx;
+  height: 12rpx;
+  margin-top: -3rpx;
+  border: solid var(--text-inverse);
+  border-width: 0 3rpx 3rpx 0;
+  transform: rotate(45deg);
+}
+
+@keyframes toStageCheckIn {
+  0% { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 顾客把系统动效关了就别硬播——直接给结果 */
+@media (prefers-reduced-motion: reduce) {
+  .to-stage--done::before,
+  .to-stage--done .to-stage-dot {
+    animation: none;
+    opacity: 0;
+  }
+
+  .to-stage-check {
+    animation: none;
+  }
 }
 
 .to-divider {

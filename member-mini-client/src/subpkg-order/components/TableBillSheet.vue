@@ -30,13 +30,18 @@
               :class="{ 'to-drow--muted': row.isInvalid }"
             >
               <!-- 这道菜走到哪一步，四个点自己说，不配文字。 -->
-              <view class="to-stage" :class="{ 'to-stage--void': row.stage < 0 }">
+              <view
+                class="to-stage"
+                :class="{ 'to-stage--void': row.stage < 0, 'to-stage--done': row.stage >= stageCount }"
+              >
                 <view
                   v-for="n in stageCount"
                   :key="n"
                   class="to-stage-dot"
                   :class="{ on: row.stage >= n }"
                 ></view>
+                <!-- 这道菜上完了：几个点汇聚成一个点，中间一个对号，表示这道菜完结 -->
+                <view v-if="row.stage >= stageCount" class="to-stage-check"></view>
               </view>
               <image
                 v-if="row.image && !orderItemImageFailed[row.key]"
