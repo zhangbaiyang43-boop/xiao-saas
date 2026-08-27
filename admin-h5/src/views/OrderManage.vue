@@ -599,24 +599,78 @@
           </div>
         </template>
       </div>
-      <div style="padding:8px 16px;max-height:calc(100% - 260px);overflow-y:auto">
+      <!-- 找菜：搜索 + 标签。代客加单是高频短任务，服务员往往已经知道要加什么，
+           打字或点一下标签都比滚整份菜单快。 -->
+      <div v-if="!staffMenuError && (staffMenuLoading || staffMenuItems.length)" class="staff-menu-finder">
+        <a-input
+          v-model:value="staffMenuKeyword"
+          placeholder="搜菜名"
+          allow-clear
+          :disabled="staffMenuLoading"
+        />
+        <div v-if="!staffMenuKeyword.trim() && staffMenuTabs.length > 1" class="staff-menu-tabs">
+          <button
+            v-for="tab in staffMenuTabs"
+            :key="tab.key"
+            type="button"
+            class="staff-menu-tab tap-shrink"
+            :class="{ 'staff-menu-tab--selected': staffMenuTab === tab.key }"
+            @click="staffMenuTab = tab.key"
+          >{{ tab.label }}</button>
+        </div>
+      </div>
+
+      <div style="padding:8px 16px;max-height:calc(100% - 320px);overflow-y:auto">
         <div v-if="staffMenuLoading" style="padding:24px 0;text-align:center;color:var(--text-3)">菜单加载中…</div>
+
+        <!-- 状态合同：加载失败不能显示成"还没有上架菜品"，那是完全不同的一件事 -->
+        <a-result
+          v-else-if="staffMenuError"
+          status="warning"
+          title="菜单没能加载出来"
+          sub-title="加不了菜，先重试一次；一直失败请检查网络后重新进入本页"
+        >
+          <template #extra>
+            <a-button type="primary" @click="ensureStaffMenuLoaded(true)">重新加载</a-button>
+          </template>
+        </a-result>
+
+        <a-empty v-else-if="staffMenuItems.length === 0" description="还没有上架菜品，先去「菜品」里添加" />
+
+        <a-empty
+          v-else-if="staffVisibleDishes.length === 0"
+          :description="staffMenuKeyword.trim() ? `没有找到「${staffMenuKeyword.trim()}」` : '这个分类下暂时没有菜品'"
+        >
+          <a-button v-if="staffMenuKeyword.trim()" @click="staffMenuKeyword = ''">清除搜索</a-button>
+        </a-empty>
+
         <template v-else>
-          <div v-for="cat in staffMenuCategories" :key="cat" style="margin-bottom:4px">
-            <p style="font-size:13px;font-weight:700;color:var(--text-2);margin:10px 0 4px">{{ cat }}</p>
-            <div v-for="dish in staffMenuByCategory(cat)" :key="dish.id" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
-              <div style="flex:1;min-width:0">
-                <div style="font-size:14px;font-weight:600;color:var(--text-1)">{{ dish.name }}</div>
-                <div style="font-size:13px;color:#07C160;font-weight:700;margin-top:2px">¥{{ dish.price }}</div>
+          <div
+            v-for="dish in staffVisibleDishes"
+            :key="dish.id"
+            style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)"
+          >
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600;color:var(--text-1)">
+                {{ dish.name }}
+                <!-- 关键状态用文字表达，颜色只辅助 -->
+                <span v-if="staffDishSoldOut(dish)" class="staff-dish-flag staff-dish-flag--out">售罄</span>
               </div>
-              <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-                <a-button v-if="staffCart[dish.id]" shape="circle" size="small" @click="staffCartRemove(dish)">-</a-button>
-                <span v-if="staffCart[dish.id]" style="min-width:16px;text-align:center;font-weight:700">{{ staffCart[dish.id] }}</span>
-                <a-button shape="circle" size="small" type="primary" @click="staffCartAdd(dish)">+</a-button>
-              </div>
+              <div style="font-size:12px;color:var(--text-3);margin-top:2px">{{ dish.category || '默认' }}</div>
+              <div style="font-size:13px;color:#07C160;font-weight:700;margin-top:2px">¥{{ dish.price }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <a-button v-if="staffCart[dish.id]" shape="circle" size="small" @click="staffCartRemove(dish)">-</a-button>
+              <span v-if="staffCart[dish.id]" style="min-width:16px;text-align:center;font-weight:700">{{ staffCart[dish.id] }}</span>
+              <a-button
+                shape="circle"
+                size="small"
+                type="primary"
+                :disabled="staffDishSoldOut(dish)"
+                @click="staffCartAdd(dish)"
+              >+</a-button>
             </div>
           </div>
-          <div v-if="staffMenuItems.length === 0" style="padding:24px 0;text-align:center;color:var(--text-3)">还没有上架菜品</div>
         </template>
       </div>
       <div style="position:absolute;left:0;right:0;bottom:0;background:var(--bg-card);border-top:1px solid var(--border);padding:10px 16px 16px">
@@ -706,6 +760,10 @@ const staffOrderSelectedKey = ref('')
 const staffMenuItems = ref([])
 const staffMenuLoading = ref(false)
 const staffMenuLoaded = ref(false)
+// 状态合同：error 跟 empty 是两件事，分开建模。
+const staffMenuError = ref(false)
+const staffMenuKeyword = ref('')
+const staffMenuTab = ref('__all__')
 const staffCart = ref({}) // dish_id -> qty
 const staffNote = ref('')
 const staffPickupNo = ref('')
@@ -891,28 +949,75 @@ async function loadPaymentMode() {
   } catch {}
 }
 
-async function ensureStaffMenuLoaded() {
-  if (staffMenuLoaded.value) return
+async function ensureStaffMenuLoaded(force = false) {
+  if (staffMenuLoaded.value && !force) return
   staffMenuLoading.value = true
+  staffMenuError.value = false
   try {
     const res = await getMenuItems()
-    const list = res?.data?.data || res?.data || []
-    staffMenuItems.value = (Array.isArray(list) ? list : []).filter(d => d.available !== false)
+    if (res?.code !== 200) throw new Error(res?.msg || '菜单加载失败')
+    // `/v1/menu/items` 返回的是 { items, version }，不是裸数组——version 是给
+    // 顾客端做本地缓存比对用的。这里之前按裸数组读，Array.isArray 判定失败后
+    // 静默落到空数组，界面显示成"还没有上架菜品"，代客加单从此点不了任何菜。
+    // 读法跟 MenuManage.vue 保持一致，多兜一层裸数组以防接口再变。
+    const raw = res?.data?.data?.items || res?.data?.items || res?.data || []
+    if (!Array.isArray(raw)) throw new Error('菜品数据格式异常')
+    staffMenuItems.value = raw.filter(d => d.available !== false)
     staffMenuLoaded.value = true
-  } catch {
-    message.error('菜单加载失败')
+  } catch (e) {
+    // 状态合同：接口失败不能显示成"还没有上架菜品"——那是"这家店真的没上架菜"
+    // 的意思，会让老板去菜品管理里白找一趟。失败就说失败，并给重试。
+    staffMenuError.value = true
+    staffMenuLoaded.value = false
+    message.error(e?.message || '菜单加载失败')
   } finally {
     staffMenuLoading.value = false
   }
 }
+
+// 「热门」：代客加单大多是顾客临时喊一嘴加个饮料、加份主食，
+// 常点的那几样排在最前面能省掉翻分类的时间。sales_count 是后端已有字段，
+// 没有销量数据时这个标签不出现，不硬造一个空分组。
+const STAFF_HOT_LIMIT = 8
+const staffHotDishes = computed(() =>
+  [...staffMenuItems.value]
+    .filter(d => Number(d.sales_count || 0) > 0)
+    .sort((a, b) => Number(b.sales_count || 0) - Number(a.sales_count || 0))
+    .slice(0, STAFF_HOT_LIMIT)
+)
 
 const staffMenuCategories = computed(() => {
   const set = new Set()
   staffMenuItems.value.forEach(d => set.add(d.category || '默认'))
   return Array.from(set)
 })
-function staffMenuByCategory(cat) {
-  return staffMenuItems.value.filter(d => (d.category || '默认') === cat)
+
+// 标签行：全部 / 热门 / 各分类。用标签一步跳到目标分类，不用滚整份菜单。
+const staffMenuTabs = computed(() => {
+  const tabs = [{ key: '__all__', label: '全部' }]
+  if (staffHotDishes.value.length) tabs.push({ key: '__hot__', label: '热门' })
+  staffMenuCategories.value.forEach(cat => tabs.push({ key: cat, label: cat }))
+  return tabs
+})
+
+// 搜索优先于标签：知道菜名时直接打字最快，这时标签筛选让位，全量里搜。
+const staffVisibleDishes = computed(() => {
+  const keyword = staffMenuKeyword.value.trim().toLowerCase()
+  if (keyword) {
+    return staffMenuItems.value.filter(d =>
+      String(d.name || '').toLowerCase().includes(keyword)
+      || String(d.category || '').toLowerCase().includes(keyword)
+    )
+  }
+  if (staffMenuTab.value === '__hot__') return staffHotDishes.value
+  if (staffMenuTab.value === '__all__') return staffMenuItems.value
+  return staffMenuItems.value.filter(d => (d.category || '默认') === staffMenuTab.value)
+})
+
+// 售罄的菜不能加——后端 stock<=0 时 sold_out=true。让它可见但不可点，
+// 比直接藏起来更好：老板知道"这道菜我确实有，只是卖完了"。
+function staffDishSoldOut(dish) {
+  return dish?.sold_out === true || (dish?.stock !== null && dish?.stock !== undefined && Number(dish.stock) <= 0)
 }
 
 const staffCartCount = computed(() => Object.values(staffCart.value).reduce((s, q) => s + q, 0))
@@ -937,6 +1042,10 @@ async function openStaffOrder(tableNo, groupKey) {
   staffCart.value = {}
   staffNote.value = ''
   staffPickupNo.value = ''
+  // 找菜条件每次重新打开都归零——上一桌搜过什么跟这一桌无关，
+  // 留着上次的关键词会让人以为菜单只剩那几道。
+  staffMenuKeyword.value = ''
+  staffMenuTab.value = '__all__'
   staffOrderVisible.value = true
   await Promise.all([ensureStaffMenuLoaded(), ensureStaffNewTablesLoaded()])
 }
@@ -2087,6 +2196,60 @@ onMounted(async () => {
   border-style: solid;
   background: var(--brand-light);
   color: var(--brand);
+}
+
+/* 代客加单的找菜区：搜索框 + 分类标签。跟上面的桌台选择区用同一套
+   chip 视觉语言，不另起一套。 */
+.staff-menu-finder {
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.staff-menu-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+  /* 分类可能很多，横滑而不是换行撑高——上面还有桌台选择，竖向空间紧张 */
+  -webkit-overflow-scrolling: touch;
+}
+
+.staff-menu-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.staff-menu-tab {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-page);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.staff-menu-tab--selected {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.staff-dish-flag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.staff-dish-flag--out {
+  background: var(--bg-page);
+  color: var(--text-3);
+  border: 1px solid var(--border);
 }
 
 .table-head {
