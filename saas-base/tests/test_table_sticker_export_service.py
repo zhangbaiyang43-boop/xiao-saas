@@ -292,7 +292,8 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
         )
         try:
             assert _region_has_color(rendered, (300, 100, 340, 140), (7, 193, 96), tolerance=4)
-            assert _region_has_color(rendered, (70, 28, 80, 32), (207, 214, 221), tolerance=8)
+            assert _region_has_color(rendered, (28, 80, 32, 120), (207, 214, 221), tolerance=8)
+            assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
             assert _region_has_color(rendered, (830, 350, 860, 380), (234, 250, 240), tolerance=6)
             assert _region_has_color(rendered, (797, 270, 805, 300), (7, 193, 96), tolerance=6)
             assert _region_has_color(rendered, (226, 430, 244, 448), (255, 255, 255), tolerance=0)
@@ -543,12 +544,39 @@ def test_render_sticker_visual_contract_includes_outer_border_and_merchant_cap(m
 
         rendered = service.render_sticker(code, merchant_name="大宝羊肉汤")
         try:
-            assert _region_has_color(rendered, (18, 80, 24, 120), (230, 233, 236), tolerance=8)
+            assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
+            assert not _region_has_color(rendered, (18, 80, 24, 120), (230, 233, 236), tolerance=8)
+            assert _region_has_color(rendered, (28, 80, 32, 120), (207, 214, 221), tolerance=8)
             merchant_calls = [call for call in captured_text_calls if call["text"] == "大宝羊肉汤"]
             assert len(merchant_calls) == 1
             assert merchant_calls[0]["font_size"] == 50
         finally:
             rendered.close()
+
+
+def test_table_sticker_font_cache_reuses_sizes_across_renders():
+    from app.services.table_sticker_export_service import TableStickerExportService
+
+    TableStickerExportService._cached_font.cache_clear()
+    before = TableStickerExportService._cached_font.cache_info()
+    assert before.hits == 0
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, code = _service_and_code(directory, _write_source_image(directory), "A01")
+
+        first = service.render_sticker(code, merchant_name="大宝羊肉汤")
+        first.close()
+        after_first = TableStickerExportService._cached_font.cache_info()
+
+        second = service.render_sticker(code, merchant_name="大宝羊肉汤")
+        second.close()
+        after_second = TableStickerExportService._cached_font.cache_info()
+
+    assert after_first.misses > 0
+    assert after_first.maxsize == 128
+    assert after_second.hits > after_first.hits
 
 
 @pytest.mark.parametrize("table_no", ["18", "A01", "春风桌"])

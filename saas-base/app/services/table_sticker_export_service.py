@@ -57,10 +57,10 @@ class TableStickerExportService:
             draw = ImageDraw.Draw(canvas)
 
             draw.rounded_rectangle(
-                (18, 18, 1163, 1399),
-                radius=60,
+                (2, 2, 1178, 1414),
+                radius=56,
                 outline="#E6E9EC",
-                width=5,
+                width=3,
             )
             self._draw_dashed_guide(draw, (28, 28, 1153, 1389), radius=34, dash=18, gap=12, fill="#CFD6DD", width=3)
             draw.rounded_rectangle(
@@ -229,7 +229,7 @@ class TableStickerExportService:
             raise TableStickerExportError(FONT_NOT_FOUND, f"桌贴字体缺失: {FONT_PATH}") from exc
 
     @staticmethod
-    @lru_cache(maxsize=16)
+    @lru_cache(maxsize=128)
     def _cached_font(size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.truetype(str(FONT_PATH), size=size)
 
