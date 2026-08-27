@@ -85,17 +85,19 @@ describe('结算口径：prepay 的钱绝不能并进本桌应付金额', () => 
     expect(setup().tableItemCount.value).toBe(3)
   })
 
-  it('prepaidItemCount / prepaidTotal 单独给出差额，供界面解释份数对不上', () => {
-    const view = setup()
-    expect(view.prepaidItemCount.value).toBe(1)
-    expect(view.prepaidTotal.value).toBeCloseTo(0.01, 2)
+  it('已单独付款的菜靠 isPrepaid 在菜品行标"已付"，合计因此自己解释得通', () => {
+    // 菜品行金额合计 0.01(已付) + 0.02 + 0.01 + 49.80 = 49.84，
+    // 减掉标了"已付"的 0.01 和优惠 1.00，正好是待结账 48.83。
+    const groups = setup().tableOrderGroups.value
+    const prepaid = groups.filter(g => g.isPrepaid)
+    expect(prepaid).toHaveLength(1)
+    expect(prepaid[0].orderNo).toBe('7152')
   })
 
-  it('纯 table_account 会话不产生任何"已单独付款"差额', () => {
+  it('纯 table_account 会话里没有任何"已付"标记', () => {
     const view = setup(MIXED_TABLE.filter(o => o.paymentMode !== 'prepay'))
-    expect(view.prepaidItemCount.value).toBe(0)
-    expect(view.prepaidTotal.value).toBe(0)
     expect(view.tableOrderGroups.value).toHaveLength(3)
+    expect(view.tableOrderGroups.value.some(g => g.isPrepaid)).toBe(false)
   })
 })
 
@@ -136,26 +138,29 @@ describe('结账闸门口径必须跟后端 settle_table 对齐', () => {
   })
 })
 
-describe('整桌状态与进度也按展示口径', () => {
-  const step = (view, key) => view.tableBillTimeline.value.find(s => s.key === key)
-
-  it('同会话 prepay 单还在制作中时，顶部不能说"菜品已上齐"，进度也不能把"已上齐"点亮', () => {
+describe('整桌状态按展示口径', () => {
+  it('同会话 prepay 单还在制作中时，顶部不能说"菜品已上齐"', () => {
     const view = setup([
       order({ id: 'a', orderNo: 'a', status: 'done', paymentMode: 'table_account', total: 10, items: [{ name: '菜A', qty: 1 }] }),
       order({ id: 'b', orderNo: 'b', status: 'preparing', paymentMode: 'prepay', createdTs: 5000, total: 5, items: [{ name: '菜B', qty: 1 }] }),
     ])
     expect(view.tableStatusView.value.title).toBe('菜品正在制作')
-    expect(step(view, 'served').done).toBe(false)
   })
 
-  it('顶部文案和进度条对同一批订单的判断必须一致（都先看"还有没有单没接"）', () => {
-    // 现场那一桌：#6608 制作中，#9232/#8176 还待接单。顶部说"商家正在确认订单"，
-    // 进度条就不能已经走到"等上齐"。
+  it('还有单没被接下时，顶部说的是"商家正在确认订单"', () => {
+    expect(setup().tableStatusView.value.title).toBe('订单已收到')
+  })
+})
+
+describe('默认视图的份数是"点了多少菜"，不是"这次结账里有多少菜"', () => {
+  it('displayItemCount 数全桌 4 份，tableItemCount 仍只数待结账的 3 份', () => {
     const view = setup()
-    expect(view.tableStatusView.value.title).toBe('订单已收到')
-    expect(step(view, 'accepted').active).toBe(true)
-    expect(step(view, 'accepted').done).toBe(false)
-    expect(step(view, 'served').done).toBe(false)
+    expect(view.displayItemCount.value).toBe(4)
+    expect(view.tableItemCount.value).toBe(3)
+  })
+
+  it('优惠汇总到一处，不再只藏在某一单的批次头里', () => {
+    expect(setup().tableDiscountTotal.value).toBeCloseTo(1, 2)
   })
 })
 

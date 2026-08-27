@@ -25,27 +25,60 @@
             </view>
           </view>
 
-          <view v-if="tableBillTimeline.length" class="to-track">
-            <view class="to-track-bar">
-              <text class="to-track-end">{{ tableBillTimeline[0].label }}</text>
-              <view class="to-track-rail">
-                <view
-                  v-for="(step, i) in tableBillTimeline"
-                  :key="step.key"
-                  class="to-track-step"
-                  :class="{ done: step.done, now: step.active }"
-                >
-                  <view class="to-track-node"></view>
-                  <view v-if="i < tableBillTimeline.length - 1" class="to-track-seg"></view>
-                </view>
+          <view class="to-divider"></view>
+
+          <!-- 默认视图只回答顾客真正在问的两件事：点了多少菜、要付多少钱。
+               同一道菜跨批次合并成一行，不按"第几单"拆开——分单是系统的组织方式。 -->
+          <view class="to-list">
+            <view
+              v-for="row in mergedItems"
+              :key="row.key"
+              class="to-drow"
+              :class="{ 'to-drow--muted': row.isInvalid }"
+            >
+              <image
+                v-if="row.image && !orderItemImageFailed[row.key]"
+                class="to-drow-img"
+                :src="row.image"
+                mode="aspectFill"
+                @error="$emit('mark-image-failed', row.key)"
+              />
+              <view v-else class="to-drow-img to-drow-img--ph">
+                <image class="to-drow-img-ph" src="/static/order/dish-placeholder.png" mode="aspectFit" />
               </view>
-              <text class="to-track-end">{{ tableBillTimeline[tableBillTimeline.length - 1].label }}</text>
+              <view class="to-drow-main">
+                <text class="to-drow-name">{{ row.name }}</text>
+                <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
+                <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
+              </view>
+              <text class="to-drow-qty">×{{ row.qty }}</text>
+              <view class="to-drow-money">
+                <text class="to-drow-amt">¥{{ formatPrice(row.amount) }}</text>
+                <!-- 这道菜已经单独付过款，不在本次结账里。标在金额旁边，
+                     合计就自己解释得通，不需要底部再加一句说明。 -->
+                <text v-if="row.isPrepaid" class="to-drow-paid">已付</text>
+              </view>
             </view>
           </view>
 
-          <view class="to-divider"></view>
+          <view v-if="tableDiscountTotal > 0" class="to-line">
+            <text class="to-line-l">优惠</text>
+            <text class="to-line-v">-¥{{ formatPrice(tableDiscountTotal) }}</text>
+          </view>
 
-          <view class="to-list">
+          <view class="to-foot">
+            <text class="to-foot-l">共 {{ displayItemCount }} 份 · {{ isTableSettled ? '已结账' : tableBillPayStateText }}</text>
+            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(tableTotal) }}</text>
+          </view>
+        </view>
+
+        <!-- 详细数据一直都在，只是默认不推给顾客。想看再展开。 -->
+        <view v-if="tableOrderGroups.length" class="to-detail">
+          <view class="to-detail-head" @click="showDetail = !showDetail">
+            <text class="to-detail-t">订单详情</text>
+            <text class="to-detail-a">{{ showDetail ? '收起' : '展开' }}</text>
+          </view>
+          <view v-if="showDetail" class="to-detail-body">
             <view v-for="group in tableOrderGroups" :key="group.id" class="to-group">
               <view class="to-round">
                 <view class="to-round-left">
@@ -55,51 +88,27 @@
                     :style="{ background: group.participantColor }"
                   >{{ group.participantNo }}</view>
                   <text class="to-round-t">{{ group.title }} · #{{ group.orderNo }}</text>
-                  <!-- 先付后厨的批次已经单独付过款，不在本次结账里。不标出来顾客会
-                       疑惑"为什么份数跟应付金额对不上"。 -->
                   <text v-if="group.isPrepaid" class="to-round-paid">已单独付款</text>
                   <text v-if="group.discountAmount > 0" class="to-round-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
-                <!-- 单批次时顶部胶囊已经说了状态，这里的批次标签就是重复信息，隐掉。 -->
-                <text v-if="tableOrderGroups.length > 1" class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
+                <text class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
               </view>
               <text v-if="group.isStaff" class="to-round-staff">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
-
               <view
                 v-for="(item, idx) in group.items"
                 :key="item.specKey || item.dish_id || item.id || item.name || idx"
-                class="to-drow"
+                class="to-drow to-drow--plain"
                 :class="{ 'to-drow--muted': item.isInvalid }"
               >
-                <image
-                  v-if="orderItemImage(item) && !orderItemImageFailed[group.id + '_' + idx]"
-                  class="to-drow-img"
-                  :src="orderItemImage(item)"
-                  mode="aspectFill"
-                  @error="$emit('mark-image-failed', group.id + '_' + idx)"
-                />
-                <view v-else class="to-drow-img to-drow-img--ph">
-                  <image class="to-drow-img-ph" src="/static/order/dish-placeholder.png" mode="aspectFit" />
-                </view>
                 <view class="to-drow-main">
                   <text class="to-drow-name">{{ orderItemName(item) }}</text>
                   <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
-                  <text v-if="item.isInvalid" class="to-drow-mark">{{ item.invalidText }}</text>
                 </view>
                 <text class="to-drow-qty">×{{ orderItemQty(item) }}</text>
                 <text class="to-drow-amt">¥{{ formatPrice(orderItemAmount(item)) }}</text>
               </view>
             </view>
           </view>
-
-          <view class="to-foot">
-            <text class="to-foot-l">共 {{ tableItemCount }} 份 · {{ isTableSettled ? '已结账' : tableBillPayStateText }}</text>
-            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(tableTotal) }}</text>
-          </view>
-          <!-- 数字必须带场景：合计只算待结账的部分，这里说明差额去哪了。 -->
-          <text v-if="prepaidItemCount > 0" class="to-foot-note">
-            另有 {{ prepaidItemCount }} 份已单独付款 ¥{{ formatPrice(prepaidTotal) }}，不计入本次结账
-          </text>
         </view>
 
         <view v-else class="to-empty">
@@ -110,8 +119,6 @@
             desc="可以先去点菜，后续加菜会自动合并到本桌账单"
           />
         </view>
-
-        <view v-if="tableOrderGroups.length" class="to-submeta">{{ (tableOrderGroups[0] && tableOrderGroups[0].title ? tableOrderGroups[0].title + ' · ' : '') + sharedBillSubLabel }}</view>
 
         <!-- 加菜合并提示：只在第一单（还没加过菜）时给；加过一次之后顾客已经知道会合并，
              常驻反而是噪音。 -->
@@ -174,9 +181,10 @@
 // 从 menu.vue 拆出来的桌台账单弹层（原来是 showOrders && isSharedBillMode 那一段
 // 模板）。纯展示组件，不带任何业务逻辑——所有需要改父组件状态的动作都只 emit 出去。
 //
-// 方案B（聚合式）改版：状态胶囊 + 身份信息同框，压缩进度条（tableBillTimeline），
-// 菜品按下单批次平铺，卡底压合计。跟 OrderHistorySheet 用同一套 `.to-*` 卡片结构，
-// 两个「本桌订单类」弹层的顾客端展示自此统一。
+// 默认视图只回答顾客真正在问的两件事：点了多少菜、要付多少钱。
+// 状态只用一个胶囊 + 一句提示表达（没有进度条——同一件事不做两种表达）；
+// 订单号、下单时间、分单、每单各自的状态都是系统数据，收在「订单详情」折叠区，
+// 顾客想看再展开。跟 OrderHistorySheet 用同一套 `.to-*` 卡片结构。
 import StateEmpty from '@/components/state-empty/state-empty.vue'
 import StateError from '@/components/state-error/state-error.vue'
 import BaseSheet from '@/components/base-sheet/base-sheet.vue'
@@ -193,14 +201,12 @@ export default {
     tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
-    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语。
-    tableBillTimeline: { type: Array, default: () => [] },
     tableBillPayStateText: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
-    tableItemCount: { type: Number, default: 0 },
-    // 会话里已单独付款（prepay）的部分——只用于向顾客解释份数差额，不参与应付金额。
-    prepaidItemCount: { type: Number, default: 0 },
-    prepaidTotal: { type: Number, default: 0 },
+    // 展示口径的份数（这一桌一共点了多少菜），不是结算口径的 tableItemCount。
+    displayItemCount: { type: Number, default: 0 },
+    // PRODUCT_RULES 第4条：优惠一眼可见，不藏在分单里。
+    tableDiscountTotal: { type: Number, default: 0 },
     tableOrderGroups: { type: Array, default: () => [] },
     orderItemImageFailed: { type: Object, default: () => ({}) },
     canContinueOrder: { type: Boolean, default: false },
@@ -218,6 +224,46 @@ export default {
     orderItemAmount: { type: Function, required: true },
   },
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
+  data() {
+    // 纯 UI 展开态，不是业务状态，所以留在组件本地，不往父组件抬。
+    return { showDetail: false }
+  },
+  computed: {
+    // 同一道菜跨批次合并成一行——顾客问的是"点了什么"，不是"这道菜分几次点的"。
+    // 合并键带上规格/已付/失效三个维度：规格不同是不同的菜；已单独付款的那份
+    // 不进本次结账，不能跟待结账的同名菜混在一行；已退菜/已取消的也要单独成行。
+    mergedItems() {
+      const rows = []
+      const index = new Map()
+      for (const group of this.tableOrderGroups) {
+        for (const item of group.items) {
+          const name = this.orderItemName(item)
+          const spec = this.orderItemSpecText(item) || ''
+          const key = [item.specKey || name, spec, group.isPrepaid ? 'paid' : '', item.isInvalid ? 'void' : ''].join('|')
+          const existing = index.get(key)
+          if (existing) {
+            existing.qty += this.orderItemQty(item)
+            existing.amount += Number(this.orderItemAmount(item)) || 0
+            continue
+          }
+          const row = {
+            key,
+            name,
+            spec,
+            qty: this.orderItemQty(item),
+            amount: Number(this.orderItemAmount(item)) || 0,
+            image: this.orderItemImage(item),
+            isPrepaid: group.isPrepaid,
+            isInvalid: item.isInvalid,
+            invalidText: item.invalidText,
+          }
+          index.set(key, row)
+          rows.push(row)
+        }
+      }
+      return rows
+    },
+  },
   methods: {
     emitCloseOrFinish() {
       if (this.isTableSettled) this.$emit('finish')

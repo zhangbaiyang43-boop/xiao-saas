@@ -15,54 +15,37 @@
             <view class="to-ident">
               <text class="to-ident-main">店内 {{ tableNo || orderModeText.unknownTable }} 桌</text>
               <text v-if="currentTableOrder.pickupNo" class="to-ident-line">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
-              <text class="to-ident-line">#{{ currentTableOrder.orderNo }}</text>
-            </view>
-          </view>
-
-          <!-- 未支付的单不画进度条：进度条断言的是一条"已经开始走"的出餐流程，
-               而这一单还卡在付款，画出来等于告诉顾客"正在处理中，你不用管"。 -->
-          <view v-if="tableOrderTimeline.length && !isAwaitingPayment" class="to-track">
-            <view class="to-track-bar">
-              <text class="to-track-end">{{ tableOrderTimeline[0].label }}</text>
-              <view class="to-track-rail">
-                <view
-                  v-for="(step, i) in tableOrderTimeline"
-                  :key="step.key"
-                  class="to-track-step"
-                  :class="{ done: step.done, now: step.active }"
-                >
-                  <view class="to-track-node"></view>
-                  <view v-if="i < tableOrderTimeline.length - 1" class="to-track-seg"></view>
-                </view>
-              </view>
-              <text class="to-track-end">{{ tableOrderTimeline[tableOrderTimeline.length - 1].label }}</text>
             </view>
           </view>
 
           <view class="to-divider"></view>
 
-          <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="to-list">
+          <!-- 顾客问的是"这一桌点了多少菜、花了多少钱"，所以这里是全桌合并清单，
+               不是"当前这一笔"。哪道菜属于哪一单，是系统的组织方式，收在详情里。 -->
+          <view v-if="mergedItems.length" class="to-list">
             <view
-              v-for="(item, idx) in currentTableOrder.items"
-              :key="item.specKey || item.id || item.name || idx"
+              v-for="row in mergedItems"
+              :key="row.key"
               class="to-drow"
+              :class="{ 'to-drow--muted': row.isInvalid }"
             >
               <image
-                v-if="orderItemImage(item) && !orderItemImageFailed['cur_' + idx]"
+                v-if="row.image && !orderItemImageFailed[row.key]"
                 class="to-drow-img"
-                :src="orderItemImage(item)"
+                :src="row.image"
                 mode="aspectFill"
-                @error="$emit('mark-image-failed', 'cur_' + idx)"
+                @error="$emit('mark-image-failed', row.key)"
               />
               <view v-else class="to-drow-img to-drow-img--ph">
                 <image class="to-drow-img-ph" src="/static/order/dish-placeholder.png" mode="aspectFit" />
               </view>
               <view class="to-drow-main">
-                <text class="to-drow-name">{{ orderItemName(item) }}</text>
-                <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
+                <text class="to-drow-name">{{ row.name }}</text>
+                <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
+                <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
               </view>
-              <text class="to-drow-qty">×{{ orderItemQty(item) }}</text>
-              <text class="to-drow-amt">¥{{ formatPrice(orderItemAmount(item)) }}</text>
+              <text class="to-drow-qty">×{{ row.qty }}</text>
+              <text class="to-drow-amt">¥{{ formatPrice(row.amount) }}</text>
             </view>
           </view>
           <view v-else class="to-list">
@@ -72,35 +55,42 @@
           </view>
 
           <view class="to-foot">
-            <text class="to-foot-l">共 {{ currentOrderItemCount }} 份 · {{ paidStateText }}</text>
-            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(currentTableOrder.total || 0) }}</text>
+            <text class="to-foot-l">共 {{ orderHistoryItemCount }} 份 · {{ paidStateText }}</text>
+            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(orderHistoryTotal) }}</text>
           </view>
         </view>
 
-        <view class="to-submeta">{{ (currentTableOrder.createdAt || '-') }} 下单 · 先付后厨</view>
-
-        <view v-if="historyTableOrders.length" class="history-orders-card">
-          <!-- P1：本桌合计（当前这一笔 + 历史订单加总），纯展示性小结，不是应付金额——
-          prepay 每一笔都已经各自付清，不存在欠款。 -->
-          <view class="history-orders-summary">
-            <text>本桌共点 {{ orderHistoryItemCount }} 份</text>
-            <text>¥{{ formatPrice(orderHistoryTotal) }}</text>
+        <!-- 详细数据一直都在，只是默认不推给顾客。想看再展开。 -->
+        <view v-if="orderHistoryGroups.length" class="to-detail">
+          <view class="to-detail-head" @click="$emit('toggle-history')">
+            <text class="to-detail-t">订单详情</text>
+            <text class="to-detail-a">{{ showAllOrders ? '收起' : '展开' }}</text>
           </view>
-          <view class="history-orders-head" @click="$emit('toggle-history')">
-            <text>历史订单</text>
-            <text>{{ showAllOrders ? '收起' : '查看全部 ' + historyTableOrders.length }}</text>
-          </view>
-          <view v-if="showAllOrders">
-            <view v-for="order in historyTableOrders" :key="order.id" class="history-order-block">
-              <view class="history-order-row">
-                <text>#{{ order.orderNo }} 共{{ orderItemCount(order) }}份</text>
-                <text>¥{{ Number(order.total || 0).toFixed(2) }}</text>
-              </view>
-              <view v-if="(order.items || []).length" class="history-order-items">
-                <view v-for="(item, idx) in order.items" :key="item.specKey || item.id || item.name || idx" class="history-order-item-row">
-                  <text>{{ orderItemName(item) }} ×{{ orderItemQty(item) }}</text>
-                  <text>¥{{ formatPrice(orderItemAmount(item)) }}</text>
+          <view v-if="showAllOrders" class="to-detail-body">
+            <view class="history-orders-summary">
+              <text>本桌共点 {{ orderHistoryItemCount }} 份</text>
+              <text>¥{{ formatPrice(orderHistoryTotal) }}</text>
+            </view>
+            <view v-for="group in orderHistoryGroups" :key="group.id" class="to-group">
+              <view class="to-round">
+                <view class="to-round-left">
+                  <text class="to-round-t">{{ group.title }} · #{{ group.orderNo }}</text>
+                  <text v-if="group.discountAmount > 0" class="to-round-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
+                <text class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
+              </view>
+              <view
+                v-for="(item, idx) in group.items"
+                :key="item.specKey || item.id || item.name || idx"
+                class="to-drow to-drow--plain"
+                :class="{ 'to-drow--muted': item.isInvalid }"
+              >
+                <view class="to-drow-main">
+                  <text class="to-drow-name">{{ orderItemName(item) }}</text>
+                  <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
+                </view>
+                <text class="to-drow-qty">×{{ orderItemQty(item) }}</text>
+                <text class="to-drow-amt">¥{{ formatPrice(orderItemAmount(item)) }}</text>
               </view>
             </view>
           </view>
@@ -150,9 +140,9 @@ export default {
     tableOrderNextAction: { type: String, default: '' },
     tableOrderStatusTitle: { type: String, default: '' },
     tableOrderStatusHint: { type: String, default: '' },
-    tableOrderProgressSub: { type: String, default: '' },
-    tableOrderTimeline: { type: Array, default: () => [] },
-    // 这一单的钱还没收到（pending_payment 等）——决定卡片配色、要不要画进度条。
+    // 全桌分单流水（当前这一笔 + 历史订单），只在「订单详情」折叠区里渲染。
+    orderHistoryGroups: { type: Array, default: () => [] },
+    // 这一单的钱还没收到（pending_payment 等）——决定卡片配色。
     isAwaitingPayment: { type: Boolean, default: false },
     currentOrderItemCount: { type: Number, default: 0 },
     currentOrderMainItemText: { type: String, default: '' },
@@ -176,6 +166,39 @@ export default {
   },
   emits: ['close', 'toggle-history', 'mark-image-failed'],
   computed: {
+    // 全桌菜品合并成一行一道菜。跟 TableBillSheet.mergedItems 同一套规则，
+    // 只是这边的数据源是 orderHistoryGroups（prepay 每单各自付清，没有"已付/待付"
+    // 之分，所以合并键不带 paid 维度）。
+    mergedItems() {
+      const rows = []
+      const index = new Map()
+      for (const group of this.orderHistoryGroups) {
+        for (const item of group.items) {
+          const name = this.orderItemName(item)
+          const spec = this.orderItemSpecText(item) || ''
+          const key = [item.specKey || name, spec, item.isInvalid ? 'void' : ''].join('|')
+          const existing = index.get(key)
+          if (existing) {
+            existing.qty += this.orderItemQty(item)
+            existing.amount += Number(this.orderItemAmount(item)) || 0
+            continue
+          }
+          const row = {
+            key,
+            name,
+            spec,
+            qty: this.orderItemQty(item),
+            amount: Number(this.orderItemAmount(item)) || 0,
+            image: this.orderItemImage(item),
+            isInvalid: item.isInvalid,
+            invalidText: item.invalidText,
+          }
+          index.set(key, row)
+          rows.push(row)
+        }
+      }
+      return rows
+    },
     // 颜色即优先级：未支付是顾客当下唯一需要动手的状态，必须跟"待接单"
     // （同样是琥珀色的等待态）区分开，不能长得一样。
     cardTone() {

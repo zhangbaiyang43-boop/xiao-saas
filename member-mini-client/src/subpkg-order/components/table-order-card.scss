@@ -1,11 +1,13 @@
-// 「本桌订单」聚合卡（方案B）——TableBillSheet 和 OrderHistorySheet 共用的
-// 顾客端订单状态展示。两个弹层过去各画各的（一个太简、一个四宫格太满），
-// 这里把卡片区收成一套：状态胶囊 + 右侧身份栏 + 压缩进度条 + 平铺菜品清单 +
-// 卡底合计。谁的模板里出现 `.to-*` 类名，谁就在自己的 <style> 顶部
-// `@import './table-order-card.scss';`。
+// 「本桌订单」聚合卡——TableBillSheet 和 OrderHistorySheet 共用的顾客端展示。
 //
-// 只放这两个弹层都用的卡片样式；弹层自己的滚动壳、返回键、footer 动作区
-// 各自写在组件里。
+// 默认视图只回答两件事：点了多少菜、要付多少钱。
+//   状态胶囊 + 一句提示 · 桌号/桌牌 · 合并后的菜品清单 · 优惠 · 合计
+// 系统数据（订单号、下单时间、分单、每单各自的状态）收在 `.to-detail` 折叠区，
+// 顾客想看再展开。没有进度条：状态只用一种表达。
+//
+// 谁的模板里出现 `.to-*` 类名，谁就在自己的 <style> 顶部
+// `@import './table-order-card.scss';`。只放两个弹层都用的卡片样式；
+// 弹层自己的滚动壳、返回键、footer 动作区各自写在组件里。
 
 .to-card {
   margin-top: 12rpx;
@@ -123,75 +125,6 @@
   color: var(--text-3);
   font-size: 22rpx;
   line-height: 1.4;
-}
-
-/* 方案B 压缩进度：一排小圆点铺满整行 + 两端固定文字框住"从哪到哪"。
-   不是每点一个标签（那是分段式的做法）。
-   这里刻意不放"已等待 X 分钟"——孤立的时长数字既不告诉顾客还要等多久，
-   也不给下一步动作，违反 OPPO「数字必须带场景」；真要做时间感必须是
-   后端给的出餐预估（ETA），不是前端拿下单时间倒算。 */
-.to-track {
-  margin: 22rpx 0 2rpx;
-}
-
-.to-track-bar {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.to-track-end {
-  flex: 0 0 auto;
-  font-size: 20rpx;
-  line-height: 1;
-  color: var(--text-3);
-}
-
-.to-track-rail {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-}
-
-.to-track-step {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-
-  &:last-child {
-    flex: 0 0 auto;
-  }
-}
-
-.to-track-node {
-  width: 16rpx;
-  height: 16rpx;
-  border-radius: 50%;
-  background: #d7dbe0;
-  flex-shrink: 0;
-}
-
-.to-track-seg {
-  flex: 1;
-  min-width: 20rpx;
-  height: 3rpx;
-  background: #e5e7eb;
-}
-
-.to-track-step.done .to-track-node,
-.to-track-step.now .to-track-node {
-  background: var(--brand);
-}
-
-.to-track-step.now .to-track-node {
-  background: var(--to-accent);
-  box-shadow: 0 0 0 5rpx var(--to-soft);
-}
-
-.to-track-step.done .to-track-seg {
-  background: var(--brand);
 }
 
 .to-divider {
@@ -372,6 +305,52 @@
   font-weight: 800;
 }
 
+.to-drow-money {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* 这道菜已经单独付过款——标在金额旁边，合计就自己解释得通，
+   底部不需要再加一句"另有 N 份已单独付款"。 */
+.to-drow-paid {
+  margin-top: 2rpx;
+  color: var(--text-3);
+  font-size: 19rpx;
+  line-height: 1.2;
+}
+
+/* 详情区里的菜品行没有缩略图（那边是核对用的分单流水，不是认菜） */
+.to-drow--plain {
+  padding: 8rpx 0;
+}
+
+.to-drow--plain .to-drow-name {
+  font-size: 25rpx;
+  font-weight: 600;
+}
+
+/* 优惠 / 抵扣这类"合计上面的一行小账"——PRODUCT_RULES 第4条要求一眼可见 */
+.to-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 10rpx;
+}
+
+.to-line-l {
+  color: var(--text-3);
+  font-size: 23rpx;
+}
+
+.to-line-v {
+  color: var(--danger);
+  font-size: 25rpx;
+  font-weight: 700;
+}
+
 .to-foot {
   display: flex;
   align-items: baseline;
@@ -401,19 +380,38 @@
   margin-right: 2rpx;
 }
 
-.to-foot-note {
-  display: block;
-  margin-top: 8rpx;
-  color: var(--text-3);
-  font-size: 21rpx;
-  line-height: 1.4;
+/* 「订单详情」折叠区——系统数据一直都在，只是默认不推给顾客。 */
+.to-detail {
+  margin-top: 16rpx;
+  padding: 4rpx 26rpx 8rpx;
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+  border: 2rpx solid #eef1f4;
+  box-sizing: border-box;
 }
 
-.to-submeta {
-  margin: 16rpx 4rpx 0;
+.to-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 20rpx 0;
+}
+
+.to-detail-t {
+  color: var(--text-2);
+  font-size: 25rpx;
+  font-weight: 700;
+}
+
+.to-detail-a {
   color: var(--text-3);
-  font-size: 22rpx;
-  line-height: 1.4;
+  font-size: 23rpx;
+}
+
+.to-detail-body {
+  padding-bottom: 12rpx;
+  border-top: 1rpx solid #f1f3f5;
 }
 
 .to-hint-note {

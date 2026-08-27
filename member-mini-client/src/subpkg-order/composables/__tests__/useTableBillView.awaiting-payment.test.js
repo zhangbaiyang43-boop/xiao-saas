@@ -99,9 +99,14 @@ describe('静态合同：面板不再展示孤立的等待时长', () => {
     }
   })
 
-  it('未支付时不渲染进度条', () => {
-    const source = read('../../components/OrderHistorySheet.vue')
-    expect(source).toContain('tableOrderTimeline.length && !isAwaitingPayment')
+  it('两个弹层都没有进度条——状态只用状态胶囊一种表达', () => {
+    // 顾客是来吃饭的，不是来看订单状态机的。四个状态一次性摊开给顾客，
+    // 跟顶部胶囊说的是同一件事，属于同一功能的第二种交互。
+    for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).not.toContain('to-track')
+      expect(source).not.toContain('Timeline')
+    }
   })
 
   it('未支付有独立配色，不跟"待接单"同色', () => {

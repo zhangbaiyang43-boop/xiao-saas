@@ -97,26 +97,23 @@ export function useTableBillView({
   const isItemInvalid = (item) => ['refunded', 'refund', 'cancelled', 'canceled'].includes(String(item?.status || item?.refund_status || '').toLowerCase())
   const validTableOrders = computed(() => tableSessionOrders.value.filter(order => !isOrderInvalid(order)))
   const validDisplayOrders = computed(() => sessionDisplayOrders.value.filter(order => !isOrderInvalid(order)))
-  // 会话里已经单独付过款的那部分——只用来向顾客解释"为什么份数对不上本桌应付金额"，
-  // 不参与任何应付金额计算。
-  const prepaidDisplayOrders = computed(() => validDisplayOrders.value.filter(isPrepaidOrder))
-  const prepaidItemCount = computed(() =>
-    prepaidDisplayOrders.value.reduce(
-      (sum, order) => sum + (order.items || []).reduce((n, item) => n + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0),
-      0,
-    )
-  )
-  const prepaidTotal = computed(() =>
-    prepaidDisplayOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
-  )
   const tableTotal = computed(() => {
     if (Number(tableSessionTotal.value) > 0) return Number(tableSessionTotal.value)
     const backendTotal = validTableOrders.value.map(order => Number(order.tableTotal || 0)).find(total => total > 0)
     if (backendTotal) return backendTotal
     return validTableOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
   })
-  const tableItemCount = computed(() =>
-    validTableOrders.value.reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => itemSum + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0), 0)
+  const countItems = (orders) =>
+    orders.reduce((sum, order) => sum + (order.items || []).reduce((itemSum, item) => itemSum + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0), 0)
+  // 结算口径的份数：gate canCheckout 用，跟 tableTotal 同一批订单。
+  const tableItemCount = computed(() => countItems(validTableOrders.value))
+  // 展示口径的份数：顾客问的是"我点了多少菜"，答案是这一桌全部的菜，
+  // 不是"这次要结的账里有多少菜"。
+  const displayItemCount = computed(() => countItems(validDisplayOrders.value))
+  // PRODUCT_RULES 第4条：优惠必须一眼可见。原来它藏在每一单的批次头里，
+  // 顾客要展开分单才看得到自己省了多少。
+  const tableDiscountTotal = computed(() =>
+    validTableOrders.value.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0)
   )
   const tableGroupStatusText = (status, statusText) => formatOrderStatusText(status, statusText)
   const tableGroupStatusTone = (status) => {
@@ -133,10 +130,11 @@ export function useTableBillView({
     if (!no || no < 1) return PARTICIPANT_COLORS[0]
     return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
   }
-  // 展示口径：会话内全部订单。prepay 的批次带 isPrepaid，界面上标成"已单独付款"，
-  // 让顾客知道这道菜在本桌、但不在这次要结的账里。
-  const tableOrderGroups = computed(() =>
-    sessionDisplayOrders.value.map((order, index) => ({
+  // 分单数据。默认视图不展示它——顾客问的是"点了多少菜、花了多少钱"，
+  // 「第几单、几点几分、单号多少」是系统怎么组织这些菜的，收在「订单详情」里，
+  // 想看再展开（PRODUCT_RULES 第3条：细节默认折叠）。
+  const buildOrderGroups = (orders) =>
+    orders.map((order, index) => ({
       id: order.id || String(index),
       orderNo: order.orderNo || String(order.id || '').slice(-4),
       title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
@@ -154,6 +152,16 @@ export function useTableBillView({
         invalidText: isOrderInvalid(order) ? '已取消' : '已退菜',
       })),
     }))
+
+  // 展示口径：会话内全部订单。prepay 的批次带 isPrepaid，菜品行标"已付"，
+  // 让顾客知道这道菜在本桌、但不在这次要结的账里。
+  const tableOrderGroups = computed(() =>
+    buildOrderGroups(sessionDisplayOrders.value)
+  )
+  // 先付后厨侧的同款分单数据（当前这一笔 + 历史订单），让两个弹层的
+  // 「订单详情」折叠区用同一套渲染，不再各写一份。
+  const orderHistoryGroups = computed(() =>
+    buildOrderGroups([...orderHistoryOrders.value].sort(byCreatedTs))
   )
   const isTableSettled = computed(() => {
     if (tableSessionClosed.value) return true
@@ -219,32 +227,11 @@ export function useTableBillView({
     return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
   })
 
-  // 方案B：餐后付款 / 桌台账单也要有一条压缩进度条（原来只有 prepay 的
-  // tableOrderTimeline）。这里按"整桌"聚合状态推一个 0..4 的阶段下标：
-  // 0 还没下单 · 1 已下单待接单 · 2 商家已接单/制作中 · 3 全部上齐待结账 · 4 已结账。
-  const tableBillStageIndex = computed(() => {
-    if (isTableSettled.value) return 4
-    // 展示口径，同 tableStatusView：进度条画的是整桌出餐进度。
-    const statuses = validDisplayOrders.value.map(order => normalizeOrderStatus(order.status))
-    if (!statuses.length) return 0
-    if (allOrdersDone.value) return 3
-    // 还有单没被商家接下时，整桌就停在"等接单"，哪怕另一单已经在做了——
-    // 跟 tableStatusView 同一套优先级（它也是先判 pending 再判 preparing）。
-    // 原来这里先判 preparing，导致顶部说"订单已收到，商家正在确认"、
-    // 下面的进度条却已经走到"等上齐"，同一张卡里两处自相矛盾。
-    if (statuses.includes('pending')) return 1
-    if (statuses.includes('preparing')) return 2
-    return 2
-  })
-  const tableBillTimeline = computed(() => {
-    const currentIndex = tableBillStageIndex.value
-    return [
-      { key: 'ordered', label: '已下单' },
-      { key: 'accepted', label: '商家接单' },
-      { key: 'served', label: '已上齐' },
-      { key: 'settled', label: '已结账' },
-    ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
-  })
+  // 这里曾经有一条四步进度条（tableBillStageIndex / tableBillTimeline），已删除。
+  // 顾客是来吃饭的，不是来看订单状态机的：同一件事只用一种表达，
+  // 「现在是什么状态」由 tableStatusView 的状态胶囊 + 一句提示单独负责，
+  // 不需要再把「已下单/接单/上齐/结账」四个状态一次性摊给顾客看。
+  // 每一单各自的状态仍然有，收在「订单详情」折叠区里（tableOrderGroups.statusText）。
   const tableBillPayStateText = computed(() => {
     if (isTableSettled.value) return '已结账'
     return isPostpayMode.value ? '餐后统一结账' : '待结账'
@@ -299,14 +286,6 @@ export function useTableBillView({
     })[tableOrderStatusTone.value] || '无需操作，请稍候'
   })
 
-  const tableOrderProgressSub = computed(() => ({
-    canceled: '无需等待',
-    paid: '预计很快接单',
-    preparing: '商家处理中',
-    served: '可安心用餐',
-    settled: '订单完成',
-  })[tableOrderStatusTone.value] || '订单进行中')
-
   const tableOrderPrimaryButtonText = computed(() => ({
     empty: '去点餐',
     canceled: '重新点餐',
@@ -330,21 +309,8 @@ export function useTableBillView({
     return ['done', 'settled'].includes(currentTableOrderStatus.value) ? '请留意取餐或服务员通知' : '无需操作，请安心等待'
   })
 
-  const tableOrderTimeline = computed(() => {
-    const order = ['pending', 'preparing', 'done', 'settled']
-    const currentIndex = Math.max(0, order.indexOf(currentTableOrderStatus.value))
-    // 先付后厨正常是"支付即建单"，首节点写"已支付"；但订单确实可能停在
-    // pending_payment（支付没完成），这时首节点必须说"待支付"，否则进度条在
-    // 断言一笔没发生过的收款。
-    const rawStatus = String(currentTableOrder.value?.status || '')
-    const awaitingPayment = ['pending_payment', 'unpaid', 'need_payment'].includes(rawStatus)
-    return [
-      { key: 'paid', status: 'pending', label: awaitingPayment ? '待支付' : '已支付', icon: 'icon-pay', desc: currentTableOrder.value?.createdAt || '' },
-      { key: 'preparing', status: 'preparing', label: '商家已接单', icon: 'icon-beican', desc: currentIndex >= 1 ? '厨房开始处理' : '' },
-      { key: 'done', status: 'done', label: '已上餐', icon: 'icon-deliver', desc: currentIndex >= 2 ? '餐品已完成' : '' },
-      { key: 'settled', status: 'settled', label: '已完成', icon: 'icon-roundcheckfill', desc: currentIndex >= 3 ? '本桌已结束' : '' },
-    ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
-  })
+  // 这里曾经有 tableOrderTimeline（先付后厨的四步进度条），已删除，理由同
+  // tableBillTimeline：状态只用状态胶囊一种表达，不把四个状态一次性摊给顾客。
 
   const currentOrderItemCount = computed(() => orderItemCount(currentTableOrder.value))
   const currentOrderItems = computed(() => currentTableOrder.value?.items || [])
@@ -390,12 +356,13 @@ export function useTableBillView({
     sessionDisplayOrders,
     validTableOrders,
     validDisplayOrders,
-    prepaidItemCount,
-    prepaidTotal,
     tableTotal,
     tableItemCount,
+    displayItemCount,
+    tableDiscountTotal,
     tablePickupNo,
     tableOrderGroups,
+    orderHistoryGroups,
     isTableSettled,
     canContinueOrder,
     allOrdersDone,
@@ -404,7 +371,6 @@ export function useTableBillView({
     canCheckout,
     postpayReadyToSettle,
     tableStatusView,
-    tableBillTimeline,
     tableBillPayStateText,
     currentTableOrderStatus,
     isAwaitingPayment,
@@ -412,11 +378,9 @@ export function useTableBillView({
     tableOrderStatusBadge,
     tableOrderStatusIcon,
     tableOrderNextAction,
-    tableOrderProgressSub,
     tableOrderPrimaryButtonText,
     tableOrderStatusTitle,
     tableOrderStatusHint,
-    tableOrderTimeline,
     currentOrderItemCount,
     currentOrderItems,
     currentOrderMainItemText,
