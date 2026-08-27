@@ -1,7 +1,11 @@
 import importlib
+import inspect
+import math
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
+import zipfile
 
 from PIL import Image, ImageDraw, ImageFont
 import pytest
@@ -591,3 +595,190 @@ def test_render_sticker_renders_reasonable_table_numbers(table_no):
             assert rendered.size == (1181, 1417)
         finally:
             rendered.close()
+
+
+PAGE_RE = re.compile(rb"/Type\s*/Page\b")
+MEDIA_BOX_RE = re.compile(
+    rb"/MediaBox\s*\[\s*0(?:\.0+)?\s+0(?:\.0+)?\s+([0-9.]+)\s+([0-9.]+)\s*\]"
+)
+
+
+def _pdf_stats(data: bytes) -> tuple[int, list[tuple[float, float]]]:
+    boxes = [(float(width), float(height)) for width, height in MEDIA_BOX_RE.findall(data)]
+    return len(PAGE_RE.findall(data)), boxes
+
+
+def _bundle_service_and_codes(directory: Path, count: int):
+    from app.services.table_sticker_export_service import TableStickerExportService
+
+    image_url = _write_source_image(directory, name="shared-code.png")
+    codes = [
+        SimpleNamespace(image_url=image_url, table_no=f"A{index:02d}")
+        for index in range(1, count + 1)
+    ]
+    return TableStickerExportService(entrance_code_dir=directory), codes
+
+
+@pytest.mark.parametrize(
+    "count, expected_single_pages, expected_a4_pages",
+    [(1, 1, 1), (4, 4, 1), (5, 5, 2)],
+)
+def test_bundle_for_one_four_and_five_stickers_has_exact_files_and_pdf_sizes(
+    count,
+    expected_single_pages,
+    expected_a4_pages,
+):
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, codes = _bundle_service_and_codes(directory, count)
+
+        artifact = service.build_bundle(codes, merchant_name="测试餐厅")
+        try:
+            with zipfile.ZipFile(artifact.zip_path) as archive:
+                expected_entries = [f"PNG/A{index:02d}桌.png" for index in range(1, count + 1)] + [
+                    "PDF/单贴印厂版.pdf",
+                    "PDF/A4四联打印版.pdf",
+                    "导出说明.txt",
+                ]
+                assert archive.namelist() == expected_entries
+
+                for png_name in expected_entries[:count]:
+                    with archive.open(png_name) as png_file, Image.open(png_file) as png:
+                        png.load()
+                        assert png.mode == "RGB"
+                        assert png.size == (1181, 1417)
+                        assert png.info["dpi"] == pytest.approx((300, 300), abs=0.1)
+
+                single_count, single_boxes = _pdf_stats(archive.read("PDF/单贴印厂版.pdf"))
+                four_up_count, four_up_boxes = _pdf_stats(archive.read("PDF/A4四联打印版.pdf"))
+                assert single_count == expected_single_pages
+                assert four_up_count == expected_a4_pages
+                assert all(width == pytest.approx(100 / 25.4 * 72, abs=0.1) for width, _ in single_boxes)
+                assert all(height == pytest.approx(120 / 25.4 * 72, abs=0.1) for _, height in single_boxes)
+                assert all(width == pytest.approx(210 / 25.4 * 72, abs=0.1) for width, _ in four_up_boxes)
+                assert all(height == pytest.approx(297 / 25.4 * 72, abs=0.1) for _, height in four_up_boxes)
+
+                instructions = archive.read("导出说明.txt").decode("utf-8")
+                assert f"桌贴数量：{count}" in instructions
+                assert "100 × 120 mm" in instructions
+                assert "300 DPI" in instructions
+                assert "实际大小/100%" in instructions
+        finally:
+            artifact.cleanup()
+        assert not artifact.temp_dir.exists()
+
+
+def test_bundle_uses_stable_sanitized_duplicate_names_and_safe_download_name():
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, codes = _bundle_service_and_codes(directory, 3)
+        codes[0].table_no = "../A01"
+        codes[1].table_no = "..\\A01"
+        codes[2].table_no = "..."
+
+        artifact = service.build_bundle(codes, merchant_name="../危险/餐厅\\名称")
+        try:
+            with zipfile.ZipFile(artifact.zip_path) as archive:
+                assert archive.namelist()[:3] == [
+                    "PNG/A01桌.png",
+                    "PNG/A01桌-2.png",
+                    "PNG/桌码桌.png",
+                ]
+                assert all(".." not in name and "\\" not in name for name in archive.namelist())
+            assert re.fullmatch(r"危险-餐厅-名称-桌贴-\d{8}\.zip", artifact.download_name)
+            assert "/" not in artifact.download_name
+            assert "\\" not in artifact.download_name
+        finally:
+            artifact.cleanup()
+            artifact.cleanup()
+        assert not artifact.temp_dir.exists()
+
+
+def test_bundle_composes_four_a4_slots_and_crop_marks(monkeypatch):
+    import app.services.table_sticker_export_service as export_service
+
+    captured_a4 = []
+
+    def fake_render(_code, *, merchant_name=None):
+        return Image.new("RGB", (1181, 1417), "#E11D48")
+
+    def inspect_pdf_page(_writer, image_path, first):
+        del first
+        with Image.open(image_path) as page:
+            page.load()
+            if page.size == (2480, 3508):
+                captured_a4.append(page.copy())
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, codes = _bundle_service_and_codes(directory, 4)
+        monkeypatch.setattr(service, "render_sticker", fake_render)
+        monkeypatch.setattr(export_service, "_append_pdf_page", inspect_pdf_page)
+
+        artifact = service.build_bundle(codes, merchant_name="测试餐厅")
+        try:
+            assert len(captured_a4) == 1
+            page = captured_a4[0]
+            try:
+                for x, y in ((59, 337), (1240, 337), (59, 1754), (1240, 1754)):
+                    assert page.getpixel((x + 100, y + 100)) == (225, 29, 72)
+                    assert page.getpixel((x, y - 20)) == (107, 114, 128)
+                    assert page.getpixel((x - 20, y)) == (107, 114, 128)
+            finally:
+                page.close()
+        finally:
+            artifact.cleanup()
+
+
+def test_bundle_closes_each_render_before_rendering_the_next(monkeypatch):
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, codes = _bundle_service_and_codes(directory, 5)
+        previous = None
+
+        def tracked_render(_code, *, merchant_name=None):
+            nonlocal previous
+            if previous is not None:
+                with pytest.raises(ValueError):
+                    previous.getbbox()
+            previous = Image.new("RGB", (1181, 1417), "white")
+            return previous
+
+        monkeypatch.setattr(service, "render_sticker", tracked_render)
+        artifact = service.build_bundle(codes, merchant_name="测试餐厅")
+        try:
+            assert previous is not None
+            with pytest.raises(ValueError):
+                previous.getbbox()
+        finally:
+            artifact.cleanup()
+
+    source = inspect.getsource(type(service).build_bundle)
+    assert "append_images" not in source
+    assert "[self.render_sticker" not in source
+
+
+def test_bundle_removes_entire_temp_directory_when_generation_fails(monkeypatch, tmp_path):
+    import app.services.table_sticker_export_service as export_service
+
+    created_temp_dir = tmp_path / "table-stickers-known"
+
+    def create_known_temp_dir(**_kwargs):
+        created_temp_dir.mkdir()
+        return str(created_temp_dir)
+
+    monkeypatch.setattr(export_service.tempfile, "mkdtemp", create_known_temp_dir)
+
+    directory = tmp_path / "entrance-codes"
+    directory.mkdir()
+    service, codes = _bundle_service_and_codes(directory, 1)
+    monkeypatch.setattr(service, "render_sticker", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        service.build_bundle(codes, merchant_name="测试餐厅")
+
+    assert not created_temp_dir.exists()

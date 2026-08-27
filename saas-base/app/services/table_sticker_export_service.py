@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
+import re
+import shutil
+import tempfile
 import warnings
+import zipfile
 
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
@@ -10,6 +17,9 @@ from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 DPI = 300
 STICKER_WIDTH = 1181
 STICKER_HEIGHT = 1417
+A4_WIDTH = 2480
+A4_HEIGHT = 3508
+A4_SLOTS = ((59, 337), (1240, 337), (59, 1754), (1240, 1754))
 QR_CONTAINER_SIZE = 752
 QR_CONTENT_SIZE = 652
 QR_QUIET_ZONE = 50
@@ -29,6 +39,139 @@ FONT_NOT_FOUND = "FONT_NOT_FOUND"
 BADGE_HORIZONTAL_PADDING = 16
 BADGE_TEXT_GAP = 8
 BADGE_UNIT_TEXT = "桌"
+
+
+@dataclass(frozen=True)
+class ExportArtifact:
+    zip_path: Path
+    temp_dir: Path
+    download_name: str
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+
+def _safe_name(value: str, fallback: str) -> str:
+    cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", str(value or "")).strip(" .-")
+    return cleaned[:64] or fallback
+
+
+class _PdfPageWriter:
+    def __init__(self, pdf_path: Path, page_width_points: float, page_height_points: float):
+        self.pdf_path = pdf_path
+        self.page_width_points = page_width_points
+        self.page_height_points = page_height_points
+        self._file = None
+        self._offsets: dict[int, int] = {}
+        self._page_ids: list[int] = []
+        self._next_object_id = 3
+
+    def __enter__(self):
+        self._file = self.pdf_path.open("wb")
+        self._file.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+        self._write_object(1, b"<< /Type /Catalog /Pages 2 0 R >>")
+        return self
+
+    def __exit__(self, exc_type, _exc, _traceback):
+        try:
+            if exc_type is None:
+                self._finish()
+        finally:
+            if self._file is not None:
+                self._file.close()
+                self._file = None
+
+    def append(self, image_path: Path) -> None:
+        if self._file is None:
+            raise RuntimeError("PDF writer is not open")
+
+        with Image.open(image_path) as page:
+            page.load()
+            rgb = page.convert("RGB")
+            try:
+                width, height = rgb.size
+                encoded = BytesIO()
+                rgb.save(encoded, "JPEG", quality=95, subsampling=0)
+                image_data = encoded.getvalue()
+            finally:
+                rgb.close()
+
+        image_id = self._next_object_id
+        content_id = image_id + 1
+        page_id = image_id + 2
+        self._next_object_id += 3
+        self._page_ids.append(page_id)
+
+        image_header = (
+            f"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} "
+            f"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {len(image_data)} >>\nstream\n"
+        ).encode("ascii")
+        self._write_object(image_id, image_header + image_data + b"\nendstream")
+
+        content = (
+            f"q\n{self.page_width_points:.6f} 0 0 {self.page_height_points:.6f} 0 0 cm\n/Im0 Do\nQ\n"
+        ).encode("ascii")
+        content_body = f"<< /Length {len(content)} >>\nstream\n".encode("ascii") + content + b"endstream"
+        self._write_object(content_id, content_body)
+
+        page_body = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {self.page_width_points:.6f} {self.page_height_points:.6f}] "
+            f"/Resources << /XObject << /Im0 {image_id} 0 R >> >> /Contents {content_id} 0 R >>"
+        ).encode("ascii")
+        self._write_object(page_id, page_body)
+
+    def _write_object(self, object_id: int, body: bytes) -> None:
+        if self._file is None:
+            raise RuntimeError("PDF writer is not open")
+        self._offsets[object_id] = self._file.tell()
+        self._file.write(f"{object_id} 0 obj\n".encode("ascii"))
+        self._file.write(body)
+        self._file.write(b"\nendobj\n")
+
+    def _finish(self) -> None:
+        if self._file is None:
+            raise RuntimeError("PDF writer is not open")
+        kids = " ".join(f"{page_id} 0 R" for page_id in self._page_ids)
+        self._write_object(2, f"<< /Type /Pages /Kids [{kids}] /Count {len(self._page_ids)} >>".encode("ascii"))
+
+        max_object_id = self._next_object_id - 1
+        xref_offset = self._file.tell()
+        self._file.write(f"xref\n0 {max_object_id + 1}\n".encode("ascii"))
+        self._file.write(b"0000000000 65535 f \n")
+        for object_id in range(1, max_object_id + 1):
+            self._file.write(f"{self._offsets[object_id]:010d} 00000 n \n".encode("ascii"))
+        self._file.write(
+            (
+                f"trailer\n<< /Size {max_object_id + 1} /Root 1 0 R >>\n"
+                f"startxref\n{xref_offset}\n%%EOF\n"
+            ).encode("ascii")
+        )
+
+
+def _append_pdf_page(writer: _PdfPageWriter, image_path: Path, first: bool) -> None:
+    del first
+    writer.append(image_path)
+
+
+def _draw_crop_marks(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
+    mark = 34
+    gap = 10
+    color = "#6B7280"
+    width = 2
+    for px in (x, x + STICKER_WIDTH):
+        draw.line((px, y - gap - mark, px, y - gap), fill=color, width=width)
+        draw.line(
+            (px, y + STICKER_HEIGHT + gap, px, y + STICKER_HEIGHT + gap + mark),
+            fill=color,
+            width=width,
+        )
+    for py in (y, y + STICKER_HEIGHT):
+        draw.line((x - gap - mark, py, x - gap, py), fill=color, width=width)
+        draw.line(
+            (x + STICKER_WIDTH + gap, py, x + STICKER_WIDTH + gap + mark, py),
+            fill=color,
+            width=width,
+        )
 
 
 class TableStickerExportError(ValueError):
@@ -138,6 +281,106 @@ class TableStickerExportService:
             raise
         finally:
             source_image.close()
+
+    def build_bundle(self, codes, merchant_name: str) -> ExportArtifact:
+        temp_dir = Path(tempfile.mkdtemp(prefix="table-stickers-"))
+        png_dir = temp_dir / "PNG"
+        pdf_dir = temp_dir / "PDF"
+        single_pdf_path = pdf_dir / "单贴印厂版.pdf"
+        four_up_pdf_path = pdf_dir / "A4四联打印版.pdf"
+        instructions_path = temp_dir / "导出说明.txt"
+        zip_path = temp_dir / "桌贴打印包.zip"
+
+        try:
+            png_dir.mkdir()
+            pdf_dir.mkdir()
+            png_entries: list[tuple[Path, str]] = []
+            name_counts: dict[str, int] = {}
+
+            with _PdfPageWriter(
+                single_pdf_path,
+                page_width_points=100 / 25.4 * 72,
+                page_height_points=120 / 25.4 * 72,
+            ) as single_pdf:
+                for index, code in enumerate(codes):
+                    table_no = self._normalize_table_no((getattr(code, "table_no", "") or "").strip())
+                    safe_table_no = _safe_name(table_no, "桌码")
+                    name_counts[safe_table_no] = name_counts.get(safe_table_no, 0) + 1
+                    duplicate_index = name_counts[safe_table_no]
+                    suffix = "" if duplicate_index == 1 else f"-{duplicate_index}"
+                    file_name = f"{safe_table_no}桌{suffix}.png"
+                    image_path = png_dir / file_name
+
+                    sticker = self.render_sticker(code, merchant_name=merchant_name)
+                    try:
+                        if sticker.mode != "RGB" or sticker.size != (STICKER_WIDTH, STICKER_HEIGHT):
+                            raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌贴图片生成失败")
+                        sticker.save(image_path, "PNG", dpi=(DPI, DPI))
+                    finally:
+                        sticker.close()
+
+                    _append_pdf_page(single_pdf, image_path, first=index == 0)
+                    png_entries.append((image_path, f"PNG/{file_name}"))
+
+            if not png_entries:
+                raise TableStickerExportError(EMPTY_TABLE_NO, "请选择至少一个桌码")
+
+            self._build_four_up_pdf([path for path, _ in png_entries], four_up_pdf_path, temp_dir)
+
+            export_date = datetime.now().strftime("%Y-%m-%d")
+            instructions_path.write_text(
+                "\n".join(
+                    (
+                        "桌贴打印说明",
+                        f"桌贴数量：{len(png_entries)}",
+                        f"导出日期：{export_date}",
+                        "成品尺寸：100 × 120 mm",
+                        "图片精度：300 DPI",
+                        "打印时请选择“实际大小/100%”，不要适应页面。",
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for image_path, arc_name in png_entries:
+                    archive.write(image_path, arc_name)
+                archive.write(single_pdf_path, "PDF/单贴印厂版.pdf")
+                archive.write(four_up_pdf_path, "PDF/A4四联打印版.pdf")
+                archive.write(instructions_path, "导出说明.txt")
+
+            safe_merchant = _safe_name(merchant_name, "商户")
+            download_name = f"{safe_merchant}-桌贴-{datetime.now().strftime('%Y%m%d')}.zip"
+            return ExportArtifact(zip_path=zip_path, temp_dir=temp_dir, download_name=download_name)
+        except Exception:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+    @staticmethod
+    def _build_four_up_pdf(png_paths: list[Path], pdf_path: Path, temp_dir: Path) -> None:
+        with _PdfPageWriter(
+            pdf_path,
+            page_width_points=210 / 25.4 * 72,
+            page_height_points=297 / 25.4 * 72,
+        ) as four_up_pdf:
+            for page_index in range(0, len(png_paths), 4):
+                page = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), "white")
+                page_path = temp_dir / f"a4-page-{page_index // 4 + 1}.png"
+                try:
+                    draw = ImageDraw.Draw(page)
+                    for slot, image_path in zip(A4_SLOTS, png_paths[page_index : page_index + 4]):
+                        with Image.open(image_path) as sticker:
+                            sticker.load()
+                            page.paste(sticker, slot)
+                        _draw_crop_marks(draw, *slot)
+                    page.save(page_path, "PNG", dpi=(DPI, DPI))
+                finally:
+                    page.close()
+
+                try:
+                    _append_pdf_page(four_up_pdf, page_path, first=page_index == 0)
+                finally:
+                    page_path.unlink(missing_ok=True)
 
     def _source_path(self, image_url: str) -> Path:
         normalized_url = (image_url or "").strip()
