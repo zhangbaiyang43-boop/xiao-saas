@@ -8,13 +8,22 @@
 
         <view class="to-card" :class="'to-card--' + cardTone">
           <view class="to-head">
-            <view class="to-head-status">
+            <!-- 只有需要顾客动手时才出文字（这里就是"钱还没付"）。
+                 正常流程的状态由每道菜左边的四个点表达，不再配解释句。 -->
+            <view v-if="isAwaitingPayment" class="to-head-status">
               <text class="to-badge">{{ tableOrderStatusBadge }}</text>
               <text class="to-desc">{{ tableOrderNextAction }}</text>
             </view>
             <view class="to-ident">
-              <text class="to-ident-main">店内 {{ tableNo || orderModeText.unknownTable }} 桌</text>
+              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }} 桌</text>
               <text v-if="currentTableOrder.pickupNo" class="to-ident-line">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
+            </view>
+          </view>
+
+          <view class="to-legend">
+            <view v-for="(label, i) in stageLabels" :key="label" class="to-legend-item">
+              <view class="to-legend-dot" :class="{ on: i === 0 }"></view>
+              <text class="to-legend-t">{{ label }}</text>
             </view>
           </view>
 
@@ -29,6 +38,14 @@
               class="to-drow"
               :class="{ 'to-drow--muted': row.isInvalid }"
             >
+              <view class="to-stage" :class="{ 'to-stage--void': row.stage < 0 }">
+                <view
+                  v-for="n in stageCount"
+                  :key="n"
+                  class="to-stage-dot"
+                  :class="{ on: row.stage >= n }"
+                ></view>
+              </view>
               <image
                 v-if="row.image && !orderItemImageFailed[row.key]"
                 class="to-drow-img"
@@ -44,6 +61,11 @@
                 <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
                 <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
               </view>
+              <view
+                v-if="row.participantNo"
+                class="to-drow-who"
+                :style="{ background: row.participantColor }"
+              >{{ row.participantNo }}</view>
               <text class="to-drow-qty">×{{ row.qty }}</text>
               <text class="to-drow-amt">¥{{ formatPrice(row.amount) }}</text>
             </view>
@@ -55,7 +77,7 @@
           </view>
 
           <view class="to-foot">
-            <text class="to-foot-l">共 {{ orderHistoryItemCount }} 份 · {{ paidStateText }}</text>
+            <text class="to-foot-l">共 {{ orderHistoryItemCount }} 份</text>
             <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(orderHistoryTotal) }}</text>
           </view>
         </view>
@@ -165,7 +187,13 @@ export default {
     orderItemImage: { type: Function, required: true },
   },
   emits: ['close', 'toggle-history', 'mark-image-failed'],
+  data() {
+    return { stageLabels: ['支付', '接单', '上齐', '完成'] }
+  },
   computed: {
+    stageCount() {
+      return this.stageLabels.length
+    },
     // 全桌菜品合并成一行一道菜。跟 TableBillSheet.mergedItems 同一套规则，
     // 只是这边的数据源是 orderHistoryGroups（prepay 每单各自付清，没有"已付/待付"
     // 之分，所以合并键不带 paid 维度）。
@@ -176,7 +204,8 @@ export default {
         for (const item of group.items) {
           const name = this.orderItemName(item)
           const spec = this.orderItemSpecText(item) || ''
-          const key = [item.specKey || name, spec, item.isInvalid ? 'void' : ''].join('|')
+          const stage = item.isInvalid ? -1 : group.stage
+          const key = [item.specKey || name, spec, group.participantNo || '', stage, item.isInvalid ? 'void' : ''].join('|')
           const existing = index.get(key)
           if (existing) {
             existing.qty += this.orderItemQty(item)
@@ -187,9 +216,12 @@ export default {
             key,
             name,
             spec,
+            stage,
             qty: this.orderItemQty(item),
             amount: Number(this.orderItemAmount(item)) || 0,
             image: this.orderItemImage(item),
+            participantNo: group.participantNo,
+            participantColor: group.participantColor,
             isInvalid: item.isInvalid,
             invalidText: item.invalidText,
           }

@@ -14,14 +14,18 @@
       <scroll-view v-if="!loadError" class="to-scroll" scroll-y>
         <view v-if="tableOrderGroups.length" id="table-account-status-anchor" class="to-card" :class="'to-card--' + tableStatusView.tone">
           <view class="to-head">
-            <view class="to-head-status">
-              <text class="to-badge">{{ tableStatusView.title }}</text>
-              <text class="to-desc">{{ tableStatusView.desc }}</text>
-              <text v-if="tableStatusView.note" class="to-desc to-desc--sub">{{ tableStatusView.note }}</text>
-            </view>
             <view class="to-ident">
-              <text class="to-ident-main">店内 {{ tableNo || orderModeText.unknownTable }} 桌</text>
+              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }} 桌</text>
               <text v-if="pickupNoEnabled && tablePickupNo" class="to-ident-line">桌牌 {{ tablePickupNo }} 号</text>
+            </view>
+          </view>
+
+          <!-- 进度图例：四个点各代表哪一步，出现一次。之后每道菜左侧的点
+               自己说话，不再逐条配文字。 -->
+          <view class="to-legend">
+            <view v-for="(label, i) in stageLabels" :key="label" class="to-legend-item">
+              <view class="to-legend-dot" :class="{ on: i === 0 }"></view>
+              <text class="to-legend-t">{{ label }}</text>
             </view>
           </view>
 
@@ -36,6 +40,15 @@
               class="to-drow"
               :class="{ 'to-drow--muted': row.isInvalid }"
             >
+              <!-- 这道菜走到哪一步，四个点自己说，不配文字。 -->
+              <view class="to-stage" :class="{ 'to-stage--void': row.stage < 0 }">
+                <view
+                  v-for="n in stageCount"
+                  :key="n"
+                  class="to-stage-dot"
+                  :class="{ on: row.stage >= n }"
+                ></view>
+              </view>
               <image
                 v-if="row.image && !orderItemImageFailed[row.key]"
                 class="to-drow-img"
@@ -51,6 +64,12 @@
                 <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
                 <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
               </view>
+              <!-- 谁点的：拼桌时顾客要确认"这道菜是我点的还是同桌点的" -->
+              <view
+                v-if="row.participantNo"
+                class="to-drow-who"
+                :style="{ background: row.participantColor }"
+              >{{ row.participantNo }}</view>
               <text class="to-drow-qty">×{{ row.qty }}</text>
               <view class="to-drow-money">
                 <text class="to-drow-amt">¥{{ formatPrice(row.amount) }}</text>
@@ -67,7 +86,7 @@
           </view>
 
           <view class="to-foot">
-            <text class="to-foot-l">共 {{ displayItemCount }} 份 · {{ isTableSettled ? '已结账' : tableBillPayStateText }}</text>
+            <text class="to-foot-l">共 {{ displayItemCount }} 份</text>
             <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(tableTotal) }}</text>
           </view>
         </view>
@@ -115,15 +134,15 @@
           <state-empty
             padded
             icon="🍽️"
-            title="本桌还没有已点菜品"
-            desc="可以先去点菜，后续加菜会自动合并到本桌账单"
+            title="本桌还没点菜"
+            desc="选好菜品加入购物车即可下单"
           />
         </view>
 
         <!-- 加菜合并提示：只在第一单（还没加过菜）时给；加过一次之后顾客已经知道会合并，
-             常驻反而是噪音。 -->
+             常驻反而是噪音。原来是一整句解释，缩到只留结论。 -->
         <view v-if="tableOrderGroups.length === 1 && !isTableSettled" class="to-hint-note">
-          <text>同桌后续加菜会自动合并，不需要每次付款。</text>
+          <text>加菜自动并入本单，无需重复付款</text>
         </view>
       </scroll-view>
 
@@ -158,19 +177,20 @@
           :class="{ 'table-account-action--disabled': tableCheckouting || checkoutRequested }"
           @click="$emit('checkout')"
         >
-          <text>{{ tableCheckouting ? '呼叫中...' : (checkoutRequested ? '已呼叫服务员，等待确认' : '吃好了，去结账') }}</text>
+          <text>{{ tableCheckouting ? '呼叫中…' : (checkoutRequested ? '已呼叫服务员' : '去结账') }}</text>
         </view>
         <view
           v-else-if="stillPreparing"
           class="table-account-action table-account-action--primary table-account-action--disabled"
         >
-          <text>制作中，暂不能结账</text>
+          <!-- 说"什么时候能结"比说"为什么现在不能结"更有用，也更短 -->
+          <text>上齐后可结账</text>
         </view>
         <view
           v-else-if="postpayReadyToSettle"
           class="table-account-action table-account-action--info"
         >
-          <text>用餐结束请到收银台或联系服务员结账</text>
+          <text>请到收银台结账</text>
         </view>
       </view>
       </template>
@@ -226,12 +246,17 @@ export default {
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
   data() {
     // 纯 UI 展开态，不是业务状态，所以留在组件本地，不往父组件抬。
-    return { showDetail: false }
+    return { showDetail: false, stageLabels: ['下单', '接单', '上齐', '完成'] }
   },
   computed: {
-    // 同一道菜跨批次合并成一行——顾客问的是"点了什么"，不是"这道菜分几次点的"。
-    // 合并键带上规格/已付/失效三个维度：规格不同是不同的菜；已单独付款的那份
-    // 不进本次结账，不能跟待结账的同名菜混在一行；已退菜/已取消的也要单独成行。
+    stageCount() {
+      return this.stageLabels.length
+    },
+    // 同一道菜合并成一行——顾客问的是"点了什么"，不是"这道菜分几次点的"。
+    // 合并键的每一个维度都是顾客会区分的东西：
+    //   规格不同 = 不同的菜；谁点的不同 = 不能混；进度不同 = 点点要能分别表达；
+    //   已单独付款的不进本次结账；已退菜/已取消的单独成行。
+    // 「第几单、几点下的」不在键里——那是系统的组织方式，顾客不关心。
     mergedItems() {
       const rows = []
       const index = new Map()
@@ -239,7 +264,15 @@ export default {
         for (const item of group.items) {
           const name = this.orderItemName(item)
           const spec = this.orderItemSpecText(item) || ''
-          const key = [item.specKey || name, spec, group.isPrepaid ? 'paid' : '', item.isInvalid ? 'void' : ''].join('|')
+          const stage = item.isInvalid ? -1 : group.stage
+          const key = [
+            item.specKey || name,
+            spec,
+            group.participantNo || '',
+            stage,
+            group.isPrepaid ? 'paid' : '',
+            item.isInvalid ? 'void' : '',
+          ].join('|')
           const existing = index.get(key)
           if (existing) {
             existing.qty += this.orderItemQty(item)
@@ -250,9 +283,12 @@ export default {
             key,
             name,
             spec,
+            stage,
             qty: this.orderItemQty(item),
             amount: Number(this.orderItemAmount(item)) || 0,
             image: this.orderItemImage(item),
+            participantNo: group.participantNo,
+            participantColor: group.participantColor,
             isPrepaid: group.isPrepaid,
             isInvalid: item.isInvalid,
             invalidText: item.invalidText,

@@ -99,14 +99,28 @@ describe('静态合同：面板不再展示孤立的等待时长', () => {
     }
   })
 
-  it('两个弹层都没有进度条——状态只用状态胶囊一种表达', () => {
-    // 顾客是来吃饭的，不是来看订单状态机的。四个状态一次性摊开给顾客，
-    // 跟顶部胶囊说的是同一件事，属于同一功能的第二种交互。
+  it('两个弹层都没有横贯整卡的进度条组件', () => {
+    // 顾客是来吃饭的，不是来看订单状态机的。进度改成每道菜左侧四个点，
+    // 不再有一条独立的、需要配文字解释的进度条。
     for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
       const source = read(rel)
       expect(source).not.toContain('to-track')
       expect(source).not.toContain('Timeline')
     }
+  })
+
+  it('进度靠菜品行左侧的点表达，不配解释文字', () => {
+    for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).toContain('to-stage-dot')
+      expect(source).toContain("row.stage >= n")
+    }
+  })
+
+  it('正常流程不出状态解释句，只有"需要顾客动手"时才出文字', () => {
+    // 先付后厨那张卡的状态胶囊 + 下一步文案，只在未支付时渲染。
+    const source = read('../../components/OrderHistorySheet.vue')
+    expect(source).toContain('v-if="isAwaitingPayment" class="to-head-status"')
   })
 
   it('未支付有独立配色，不跟"待接单"同色', () => {

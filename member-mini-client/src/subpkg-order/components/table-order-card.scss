@@ -127,6 +127,69 @@
   line-height: 1.4;
 }
 
+/* 进度图例：四个点分别代表哪一步，整张卡里只出现一次。
+   之后每道菜左侧的四个点自己说话，不再逐条配文字。 */
+.to-legend {
+  display: flex;
+  gap: 22rpx;
+  margin-top: 14rpx;
+}
+
+.to-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+
+.to-legend-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: #d7dbe0;
+}
+
+.to-legend-dot.on {
+  background: var(--brand);
+}
+
+.to-legend-t {
+  color: var(--text-3);
+  font-size: 20rpx;
+  line-height: 1;
+}
+
+/* 菜品行左侧的四点进度：一道菜走到哪一步，点亮几个。
+   竖排贴着缩略图，高度跟缩略图对齐，不占横向宽度也不需要文字。 */
+.to-stage {
+  flex-shrink: 0;
+  width: 14rpx;
+  height: 64rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4rpx 0;
+  box-sizing: border-box;
+}
+
+.to-stage-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: #e3e7ea;
+}
+
+.to-stage-dot.on {
+  background: var(--brand);
+}
+
+/* 已取消 / 已退菜：这道菜没了，不是"进度停在某一步"，
+   所以整条点全部灰掉，不点亮任何一个。 */
+.to-stage--void .to-stage-dot,
+.to-stage--void .to-stage-dot.on {
+  background: #e3e7ea;
+}
+
 .to-divider {
   height: 2rpx;
   background: #f1f3f5;
@@ -290,6 +353,21 @@
   color: #9a6a21;
 }
 
+/* 谁点的：拼桌时顾客要确认"这道菜是我点的还是同桌点的"。
+   跟批次头里的 .to-round-badge 同一套编号配色，纯展示，不关联真实身份。 */
+.to-drow-who {
+  flex-shrink: 0;
+  width: 30rpx;
+  height: 30rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-inverse);
+  font-size: 18rpx;
+  font-weight: 800;
+}
+
 .to-drow-qty {
   flex-shrink: 0;
   color: var(--text-3);
@@ -321,7 +399,8 @@
   line-height: 1.2;
 }
 
-/* 详情区里的菜品行没有缩略图（那边是核对用的分单流水，不是认菜） */
+/* 详情区里的菜品行没有缩略图、没有进度点（那边是核对用的分单流水，
+   进度已经由每一单的状态标签给出，不重复表达） */
 .to-drow--plain {
   padding: 8rpx 0;
 }

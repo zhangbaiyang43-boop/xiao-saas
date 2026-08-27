@@ -1,5 +1,6 @@
 import { computed } from 'vue'
 import { formatOrderStatusText } from '@/utils/orderStatus'
+import { formatBeijingClock } from '@/utils/beijingTime'
 
 // 从 menu.vue 拆出来的"桌台账单/单笔订单进度"展示逻辑——本桌当前订单是哪一单、
 // 桌台账单（拼单/餐后付款）要不要显示结账按钮、订单进度条的文案图标——全都是
@@ -116,6 +117,18 @@ export function useTableBillView({
     validTableOrders.value.reduce((sum, order) => sum + Number(order.discountAmount || 0), 0)
   )
   const tableGroupStatusText = (status, statusText) => formatOrderStatusText(status, statusText)
+  // 进度用四个点表达，不用文字：0 已下单 · 1 商家接单 · 2 已上齐 · 3 已完成。
+  // 返回"已经走完几步"，菜品行左侧据此点亮圆点。异常单（取消/拒单）给 -1，
+  // 由界面单独处理，不要用同一套点去表达"这道菜没了"。
+  const ORDER_STAGE_COUNT = 4
+  const orderStageIndex = (status) => {
+    const normalized = normalizeOrderStatus(status)
+    if (['cancelled', 'rejected'].includes(normalized)) return -1
+    if (normalized === 'settled') return 4
+    if (normalized === 'done') return 3
+    if (normalized === 'preparing') return 2
+    return 1
+  }
   const tableGroupStatusTone = (status) => {
     const normalized = normalizeOrderStatus(status)
     if (['cancelled', 'rejected'].includes(normalized)) return 'muted'
@@ -140,6 +153,7 @@ export function useTableBillView({
       title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
       statusText: tableGroupStatusText(order.status, order.status_text),
       tone: tableGroupStatusTone(order.status),
+      stage: orderStageIndex(order.status),
       isPrepaid: isPrepaidOrder(order),
       discountAmount: Number(order.discountAmount || 0),
       participantNo: order.participantNo || null,
@@ -190,12 +204,8 @@ export function useTableBillView({
   const postpayReadyToSettle = computed(() =>
     isPostpayMode.value && tableItemCount.value > 0 && !isTableSettled.value && allOrdersDone.value
   )
-  const formatClosedAtTime = (raw) => {
-    if (!raw) return ''
-    const d = new Date(raw)
-    if (Number.isNaN(d.getTime())) return ''
-    return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-  }
+  // closed_at 跟 created_at 一样是后端的 naive UTC，必须走同一套北京时间格式化。
+  const formatClosedAtTime = (raw) => formatBeijingClock(raw)
   const tableStatusView = computed(() => {
     if (isTableSettled.value) {
       const closedTimeText = formatClosedAtTime(tableSessionClosedAt.value)
@@ -363,6 +373,7 @@ export function useTableBillView({
     tablePickupNo,
     tableOrderGroups,
     orderHistoryGroups,
+    ORDER_STAGE_COUNT,
     isTableSettled,
     canContinueOrder,
     allOrdersDone,

@@ -4,6 +4,7 @@ import { bindDiningParticipant } from '@/api/auth'
 import { resolveDiningIdentity, persistDiningContext as persistDiningStorage, isDiningIdentityError } from '@/utils/dining'
 import { orderModeText, toastText, modalText } from '../utils/orderText.js'
 import { reportError } from '@/utils/monitor'
+import { parseServerTime, formatBeijingClock } from '@/utils/beijingTime'
 
 // 从 menu.vue 拆出来的"拼桌身份"这条链路——建立/校验本桌身份、绑定当前参与者、
 // 拉取本桌所有订单并同步进 myOrders。这是全部拆解里最基础的一块：桌台账单、
@@ -117,8 +118,11 @@ export function useDiningSession({
   })
 
   const mapServerOrder = (order) => {
-    const created = order.created_at ? new Date(order.created_at) : new Date()
-    const timeStr = Number.isNaN(created.getTime()) ? '' : created.getHours().toString().padStart(2,'0') + ':' + created.getMinutes().toString().padStart(2,'0')
+    // created_at 是后端的 naive UTC（无 Z），必须走 parseServerTime 补时区再按
+    // 北京时间格式化——直接 new Date() 会被当成本地时间，界面上整整差 8 小时
+    // （北京 11:13 下的单会显示成 03:13）。详见 utils/beijingTime.js。
+    const created = parseServerTime(order.created_at) || new Date()
+    const timeStr = formatBeijingClock(created)
     return {
       id: String(order.id || ''),
       orderNo: String(order.order_no || order.id || '').slice(-4),

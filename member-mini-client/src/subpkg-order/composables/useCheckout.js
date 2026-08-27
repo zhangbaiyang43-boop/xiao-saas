@@ -3,6 +3,7 @@ import { joinByEntranceCode } from '@/api/auth'
 import { saveCustomerSession, clearCustomerSession } from '@/utils/auth'
 import { isDiningIdentityError } from '@/utils/dining'
 import { reportError } from '@/utils/monitor'
+import { formatBeijingClock } from '@/utils/beijingTime'
 import { savePendingSubmitIntent, restorePendingSubmitIntent, clearPendingSubmitIntent } from '@/utils/pendingSubmitIntent'
 import { confirmationText, toastText } from '../utils/orderText.js'
 
@@ -220,7 +221,7 @@ export function useCheckout({
         ...patch,
         items: successItems.value,
         total: successTotal.value || payAmount.value,
-        createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
+        createdAt: formatBeijingClock(now),
         createdTs: now.getTime(),
         table: tableNo.value,
         shop: shopId.value,
@@ -263,7 +264,7 @@ export function useCheckout({
         orderNo: orderNo.value || String(id).slice(-4),
         items: successItems.value,
         total,
-        createdAt: now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0'),
+        createdAt: formatBeijingClock(now),
         createdTs: now.getTime(),
         table: tableNo.value,
         shop: shopId.value,
