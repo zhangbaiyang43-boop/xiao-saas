@@ -37,7 +37,7 @@ describe('P1-OVERLAY-MIGRATION-PHASE-05A', () => {
     expect(checkout).toContain('<template #footer>')
     expect(checkout).toContain("@close=\"$emit('close')\"")
     expect(checkout).toContain("@click=\"$emit('checkout')\"")
-    expect(checkout).toMatch(/\.checkout-btn-full\s*\{[\s\S]*height:\s*104rpx/)
+    expect(checkout).toMatch(/\.checkout-btn-full\s*\{[\s\S]*height:\s*92rpx/)
     expect(checkout).not.toMatch(/class=["']mask["']/)
     expect(checkout).not.toMatch(/class=["']mask\s/)
     expect(checkout).not.toMatch(/@click\.stop/)

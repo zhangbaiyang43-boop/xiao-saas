@@ -1214,7 +1214,7 @@ export default {
       loadShopSettings().catch(() => {})
       showCart.value = true
       finishFirstCartAction(firstAction)
-      itemsExpanded.value = totalCount.value <= 1
+      itemsExpanded.value = true
       refreshAvailableCoupons()
     }
 

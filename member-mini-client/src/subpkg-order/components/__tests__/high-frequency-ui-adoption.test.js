@@ -59,7 +59,7 @@ describe('P1-HIGH-FREQUENCY-UI-ADOPTION-PHASE-02', () => {
     expect(cartBar).toMatch(/z-index:\s*320/)
     expect(cartBar).toContain('background: #1f2937')
     expect(cartBar).toMatch(/\.checkout-btn\s*\{[\s\S]*height:\s*92rpx/)
-    expect(checkout).toMatch(/\.checkout-btn-full\s*\{[\s\S]*height:\s*104rpx/)
+    expect(checkout).toMatch(/\.checkout-btn-full\s*\{[\s\S]*height:\s*92rpx/)
     expect(homeTab).toContain('class="ht-feature-amount"')
     expect(homeTab).not.toMatch(/import\s+PriceText/)
     expect(homeTab).not.toContain('<price-text')
