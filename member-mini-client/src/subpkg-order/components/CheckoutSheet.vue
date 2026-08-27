@@ -69,9 +69,17 @@
             <text class="to-line-l">{{ confirmationText.goodsAmount }}</text>
             <text class="to-line-v">{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text>
           </view>
-          <view v-if="discountAmount > 0" class="to-line">
+          <!-- 优惠券只在这里出现一次：既是明细里的减项（在应付金额旁边一眼可见），
+               也是换券入口（点开选券）。不在下面「订单详情」里再放一条。 -->
+          <view
+            class="to-line checkout-coupon-line"
+            :class="{ 'to-line--sub': discountAmount <= 0 }"
+            @click="$emit('open-coupon-picker')"
+          >
             <text class="to-line-l">{{ confirmationText.coupon }}</text>
-            <text class="to-line-v">-{{ confirmationText.currency }}{{ discountAmount.toFixed(2) }}</text>
+            <text v-if="discountAmount > 0" class="to-line-v">-{{ confirmationText.currency }}{{ discountAmount.toFixed(2) }} {{ confirmationText.arrow }}</text>
+            <text v-else-if="availableCoupons.length > 0" class="to-line-v">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
+            <text v-else class="to-line-v">{{ confirmationText.couponNone }} {{ confirmationText.arrow }}</text>
           </view>
           <view class="to-foot">
             <text class="to-foot-l">共 {{ totalCount }} 份 · {{ confirmationText.payable }}</text>
@@ -106,12 +114,6 @@
               </view>
             </view>
 
-            <view class="checkout-detail-row checkout-detail-row--clickable" @click="$emit('open-coupon-picker')">
-              <view class="checkout-detail-label"><text class="iconfont icon-ticket"></text><text>{{ confirmationText.coupon }}</text></view>
-              <text v-if="discountAmount > 0" class="checkout-detail-value checkout-detail-value--brand">已优惠 {{ confirmationText.currency }}{{ discountAmount.toFixed(2) }} {{ confirmationText.arrow }}</text>
-              <text v-else-if="availableCoupons.length > 0" class="checkout-detail-value checkout-detail-value--brand">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
-              <text v-else class="checkout-detail-value">{{ confirmationText.couponNone }} {{ confirmationText.arrow }}</text>
-            </view>
             <view class="checkout-detail-row">
               <view class="checkout-detail-label"><text class="iconfont icon-pay"></text><text>支付方式</text></view>
               <text class="checkout-detail-value">{{ confirmPaymentLabel }}</text>
@@ -334,8 +336,6 @@ export default {
   font-size: 25rpx;
 }
 
-.checkout-detail-row--clickable { color: var(--text-1); }
-
 .checkout-detail-label {
   flex-shrink: 0;
   min-width: 0;
@@ -355,7 +355,10 @@ export default {
   white-space: nowrap;
 }
 
-.checkout-detail-value--brand { color: var(--brand); font-weight: 700; }
+/* 优惠券行——明细里的减项 + 换券入口合一，避免"优惠券"在卡片和详情里各显示一次。
+   有券时走 .to-line-v 的减项红；没券/可选时套 .to-line--sub 收敛成中性灰。 */
+.checkout-coupon-line .to-line-v { font-variant-numeric: tabular-nums; }
+.checkout-coupon-line:active { opacity: .6; }
 
 .checkout-detail-section .remark-chips { margin-top: 2rpx; }
 
