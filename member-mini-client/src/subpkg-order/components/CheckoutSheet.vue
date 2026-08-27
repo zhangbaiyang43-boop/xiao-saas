@@ -204,13 +204,12 @@ export default {
 /* 底色跟"本桌订单"的 .table-order-sheet 一致——卡片浮在浅灰上，边框才有对比。 */
 .order-confirm-sheet { background: var(--bg-subtle); }
 
-/* mp-weixin 里把 flex 子元素当 <scroll-view> 用，必须 flex:1 + min-height:0 + height:0
-   三个一起写——只写 flex:1 它会按内容撑高（订单详情展开后内容超过 86vh 时，
-   滚动区不滚、直接把 #footer 的提交按钮顶到屏幕外）。 */
+/* mp-weixin 的 <scroll-view> 要能滚，必须拿到一个「具体」的高度值——flex:1 / height:0
+   推算出来的高度它不认（10 个菜时列表撑满就滚不动）。跟 TableBillSheet 一样给显式
+   max-height：整表 86vh 减去头部(~92rpx)、底部提交栏(~124rpx)、BaseSheet 底部安全区。
+   内容不够高时 scroll-view 自然收缩，弹层不会白占一屏。 */
 .order-confirm-content {
-  flex: 1;
-  min-height: 0;
-  height: 0;
+  max-height: calc(86vh - 250rpx - env(safe-area-inset-bottom));
   padding: 8rpx 24rpx 20rpx;
   box-sizing: border-box;
 }

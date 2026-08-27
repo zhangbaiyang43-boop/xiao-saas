@@ -102,12 +102,13 @@ describe('CheckoutSheet 复用「本桌订单」的 .to-* 点单卡', () => {
     expect(checkout).toContain('<template #footer>')
   })
 
-  it('滚动区写全 flex:1 + min-height:0 + height:0（mp-weixin scroll-view 才会滚，不会把 footer 顶出屏幕）', () => {
+  it('滚动区给显式 max-height（mp-weixin 的 scroll-view 不认 flex 推算的高度，长列表会滚不动）', () => {
     const block = checkout.match(/\.order-confirm-content\s*\{([\s\S]*?)\}/)
     expect(block).not.toBeNull()
-    expect(block[1]).toMatch(/flex:\s*1;/)
-    expect(block[1]).toMatch(/min-height:\s*0;/)
-    expect(block[1]).toMatch(/\bheight:\s*0;/)
+    expect(block[1]).toMatch(/max-height:\s*calc\([^)]*vh[\s\S]*env\(safe-area-inset-bottom\)/)
+    // flex:1 / height:0 的老写法不能再有——那是这次卡死的根因
+    expect(block[1]).not.toMatch(/\bheight:\s*0;/)
+    expect(block[1]).not.toMatch(/\bflex:\s*1;/)
   })
 
   it('打开确认弹层时清单默认展开', () => {
