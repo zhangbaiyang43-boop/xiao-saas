@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 import warnings
 
@@ -15,7 +16,8 @@ QR_QUIET_ZONE = 50
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_DIMENSION = 4096
 SAFE_IMAGE_PREFIX = "/static/entrance-codes/"
-STATIC_ROOT = (Path.cwd() / "static").resolve()
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+STATIC_ROOT = PROJECT_ROOT / "static"
 ENTRANCE_CODE_DIR = STATIC_ROOT / "entrance-codes"
 FONT_PATH = Path(__file__).resolve().parents[1] / "assets" / "fonts" / "NotoSansSC-Bold.otf"
 
@@ -49,10 +51,17 @@ class TableStickerExportService:
         merchant_label = self._normalize_merchant_name(merchant_name)
         source_path = self._source_path(getattr(code, "image_url", ""))
         source_image = self._load_source(source_path)
+        canvas = None
         try:
             canvas = Image.new("RGB", (STICKER_WIDTH, STICKER_HEIGHT), "white")
             draw = ImageDraw.Draw(canvas)
 
+            draw.rounded_rectangle(
+                (18, 18, 1163, 1399),
+                radius=60,
+                outline="#E6E9EC",
+                width=5,
+            )
             self._draw_dashed_guide(draw, (28, 28, 1153, 1389), radius=34, dash=18, gap=12, fill="#CFD6DD", width=3)
             draw.rounded_rectangle(
                 (62, 62, 1119, 188),
@@ -100,7 +109,7 @@ class TableStickerExportService:
                 draw_card = ImageDraw.Draw(qr_card)
                 draw_card.rounded_rectangle((0, 0, QR_CONTAINER_SIZE - 1, QR_CONTAINER_SIZE - 1), radius=32, fill="white")
 
-                qr_image = source_image.resize((QR_CONTENT_SIZE, QR_CONTENT_SIZE), Image.Resampling.LANCZOS)
+                qr_image = source_image.resize((QR_CONTENT_SIZE, QR_CONTENT_SIZE), Image.Resampling.NEAREST)
                 try:
                     qr_card.paste(qr_image, (QR_QUIET_ZONE, QR_QUIET_ZONE))
                 finally:
@@ -123,6 +132,10 @@ class TableStickerExportService:
             )
 
             return canvas
+        except Exception:
+            if canvas is not None:
+                canvas.close()
+            raise
         finally:
             source_image.close()
 
@@ -148,11 +161,16 @@ class TableStickerExportService:
         return resolved_path
 
     def _load_source(self, source_path: Path) -> Image.Image:
-        if not source_path.is_file():
-            raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
+        try:
+            if not source_path.is_file():
+                raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
 
-        if source_path.stat().st_size > MAX_SOURCE_BYTES:
-            raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
+            if source_path.stat().st_size > MAX_SOURCE_BYTES:
+                raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效")
+        except TableStickerExportError:
+            raise
+        except OSError as exc:
+            raise TableStickerExportError(INVALID_SOURCE_IMAGE, "桌码图片无效") from exc
 
         image = None
         try:
@@ -193,7 +211,11 @@ class TableStickerExportService:
             raise TableStickerExportError(CORRUPTED_SOURCE_IMAGE, "桌码图片损坏") from exc
 
         if image.mode != "RGB":
-            converted = image.convert("RGB")
+            try:
+                converted = image.convert("RGB")
+            except OSError as exc:
+                image.close()
+                raise TableStickerExportError(CORRUPTED_SOURCE_IMAGE, "桌码图片损坏") from exc
             image.close()
             return converted
         return image
@@ -202,9 +224,14 @@ class TableStickerExportService:
         if not FONT_PATH.is_file():
             raise TableStickerExportError(FONT_NOT_FOUND, f"桌贴字体缺失: {FONT_PATH}")
         try:
-            return ImageFont.truetype(str(FONT_PATH), size=size)
+            return self._cached_font(size)
         except OSError as exc:
             raise TableStickerExportError(FONT_NOT_FOUND, f"桌贴字体缺失: {FONT_PATH}") from exc
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _cached_font(size: int) -> ImageFont.FreeTypeFont:
+        return ImageFont.truetype(str(FONT_PATH), size=size)
 
     @staticmethod
     def _normalize_table_no(table_no: str) -> str:
@@ -248,7 +275,7 @@ class TableStickerExportService:
         unit_height = unit_bbox[3] - unit_bbox[1]
         inner_left = left + BADGE_HORIZONTAL_PADDING
         inner_right = right - BADGE_HORIZONTAL_PADDING
-        total_left_offset, total_right_offset, total_width = self._table_badge_text_layout(draw, table_body, body_font, unit_font)
+        total_left_offset, _, total_width = self._table_badge_text_layout(draw, table_body, body_font, unit_font)
         start_x = inner_left + ((inner_right - inner_left) - total_width) // 2 - total_left_offset
         baseline_top = top + ((bottom - top) - max(body_height, unit_height)) // 2 + 8
         body_y = baseline_top - body_bbox[1]
@@ -278,8 +305,8 @@ class TableStickerExportService:
         max_width: int,
         max_height: int,
     ) -> tuple[ImageFont.FreeTypeFont, str]:
-        min_size = 32
-        for size in range(64, min_size - 1, -1):
+        min_size = 28
+        for size in range(50, min_size - 1, -1):
             font = self._font(size)
             bbox = draw.textbbox((0, 0), merchant_name, font=font)
             if (bbox[2] - bbox[0]) <= max_width and (bbox[3] - bbox[1]) <= max_height:

@@ -1,3 +1,4 @@
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
@@ -9,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 FONT_PATH = ROOT / "app" / "assets" / "fonts" / "NotoSansSC-Bold.otf"
 LICENSE_PATH = ROOT / "app" / "assets" / "fonts" / "OFL.txt"
+EXPECTED_DEFAULT_ENTRANCE_CODE_DIR = ROOT / "static" / "entrance-codes"
 
 
 def test_table_sticker_print_font_assets_exist_and_render_chinese_text():
@@ -103,6 +105,22 @@ def test_render_sticker_returns_exact_rgb_print_canvas_for_valid_source():
             rendered.close()
 
 
+def test_table_sticker_service_default_entrance_code_dir_ignores_cwd(monkeypatch):
+    import app.services.table_sticker_export_service as export_service
+
+    with TemporaryDirectory() as temp_dir:
+        monkeypatch.chdir(temp_dir)
+        export_service = importlib.reload(export_service)
+
+        service = export_service.TableStickerExportService()
+
+        assert export_service.ENTRANCE_CODE_DIR == EXPECTED_DEFAULT_ENTRANCE_CODE_DIR
+        assert service.entrance_code_dir == EXPECTED_DEFAULT_ENTRANCE_CODE_DIR
+
+        monkeypatch.chdir(ROOT)
+        importlib.reload(export_service)
+
+
 @pytest.mark.parametrize(
     "image_url",
     [
@@ -155,6 +173,28 @@ def test_render_sticker_rejects_corrupted_source_image():
 
         with pytest.raises(ValueError, match="桌码图片损坏"):
             service.render_sticker(code)
+
+
+@pytest.mark.parametrize("method_name", ["is_file", "stat"])
+def test_render_sticker_converts_source_metadata_oserror_to_structured_error(monkeypatch, method_name):
+    import app.services.table_sticker_export_service as export_service
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        source_path = directory / "table.png"
+        source_path.write_bytes(b"placeholder")
+        service, code = _service_and_code(directory, "/static/entrance-codes/table.png")
+
+        if method_name == "is_file":
+            monkeypatch.setattr(Path, "is_file", lambda _self: (_ for _ in ()).throw(PermissionError("denied")))
+        else:
+            monkeypatch.setattr(Path, "stat", lambda _self: (_ for _ in ()).throw(OSError("stat failed")))
+
+        with pytest.raises(export_service.TableStickerExportError, match="桌码图片无效") as exc_info:
+            service.render_sticker(code)
+
+        assert exc_info.value.code == export_service.INVALID_SOURCE_IMAGE
 
 
 def test_render_sticker_rejects_source_larger_than_dimension_limit(monkeypatch):
@@ -372,6 +412,51 @@ def test_render_sticker_rejects_pillow_decompression_bomb(monkeypatch, bomb_kind
         assert exc_info.value.code == export_service.CORRUPTED_SOURCE_IMAGE
 
 
+def test_render_sticker_converts_mode_convert_oserror_to_structured_error(monkeypatch):
+    import app.services.table_sticker_export_service as export_service
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        source_path = directory / "table.png"
+        source_path.write_bytes(b"placeholder")
+        service, code = _service_and_code(directory, "/static/entrance-codes/table.png")
+        image_closed = False
+
+        class VerifyImage:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def verify(self):
+                return None
+
+        class ConvertFailImage:
+            size = (430, 430)
+            mode = "RGBA"
+
+            def load(self):
+                return None
+
+            def convert(self, _mode):
+                raise OSError("convert failed")
+
+            def close(self):
+                nonlocal image_closed
+                image_closed = True
+
+        images = iter([VerifyImage(), ConvertFailImage()])
+        monkeypatch.setattr(export_service.Image, "open", lambda *_args, **_kwargs: next(images))
+
+        with pytest.raises(export_service.TableStickerExportError, match="桌码图片损坏") as exc_info:
+            service.render_sticker(code)
+
+        assert exc_info.value.code == export_service.CORRUPTED_SOURCE_IMAGE
+        assert image_closed is True
+
+
 @pytest.mark.parametrize("table_no", ["A01", "A08", "春风桌"])
 def test_render_sticker_keeps_combined_badge_text_inside_badge(table_no, monkeypatch):
     captured = []
@@ -403,6 +488,65 @@ def test_render_sticker_keeps_combined_badge_text_inside_badge(table_no, monkeyp
             combined_left, _, combined_right, _ = _measure_drawn_text_bounds(badge_calls)
             assert combined_left >= 797 + 16
             assert combined_right <= 1109 - 16
+        finally:
+            rendered.close()
+
+
+def test_render_sticker_uses_nearest_resize_to_preserve_qr_pixels():
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        source_path = directory / "table.png"
+        image = Image.new("RGB", (300, 300), "white")
+        try:
+            for x in range(150):
+                for y in range(300):
+                    image.putpixel((x, y), (0, 0, 0))
+            image.save(source_path)
+        finally:
+            image.close()
+
+        service, code = _service_and_code(directory, "/static/entrance-codes/table.png")
+        rendered = service.render_sticker(code)
+        try:
+            qr_crop = rendered.crop((264, 468, 916, 1120))
+            try:
+                colors = set(qr_crop.getdata())
+            finally:
+                qr_crop.close()
+            assert colors <= {(0, 0, 0), (255, 255, 255)}
+        finally:
+            rendered.close()
+
+
+def test_render_sticker_visual_contract_includes_outer_border_and_merchant_cap(monkeypatch):
+    captured_text_calls = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def spy_text(drawer, xy, text, *args, **kwargs):
+        font = kwargs.get("font")
+        captured_text_calls.append(
+            {
+                "xy": xy,
+                "text": text,
+                "font_size": getattr(font, "size", None),
+            }
+        )
+        return original_text(drawer, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy_text)
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, code = _service_and_code(directory, _write_source_image(directory), "A01")
+
+        rendered = service.render_sticker(code, merchant_name="大宝羊肉汤")
+        try:
+            assert _region_has_color(rendered, (18, 80, 24, 120), (230, 233, 236), tolerance=8)
+            merchant_calls = [call for call in captured_text_calls if call["text"] == "大宝羊肉汤"]
+            assert len(merchant_calls) == 1
+            assert merchant_calls[0]["font_size"] == 50
         finally:
             rendered.close()
 
