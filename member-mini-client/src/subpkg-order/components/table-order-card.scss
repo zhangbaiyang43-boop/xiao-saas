@@ -118,77 +118,63 @@
   line-height: 1.4;
 }
 
-/* 压缩进度条：4 个圆点 + 点下短标签，整条塞进卡片内，不再是独立的一张大卡。 */
+/* 方案B 压缩进度：一排小圆点 + 连接线，后面跟一句当前阶段文字。
+   不是每个点带标签（那是分段式的做法），整条只占一行、塞进卡片里。 */
 .to-track {
   display: flex;
-  margin: 22rpx 0 4rpx;
+  align-items: center;
+  gap: 14rpx;
+  margin: 22rpx 0 2rpx;
+}
+
+.to-track-rail {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .to-track-step {
-  position: relative;
-  flex: 1;
-  min-width: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 10rpx;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 9rpx;
-    left: -50%;
-    width: 100%;
-    height: 3rpx;
-    background: #e5e7eb;
-    z-index: 0;
-  }
-
-  &:first-child::before {
-    display: none;
-  }
-
-  &.done::before,
-  &.now::before {
-    background: var(--brand);
-  }
 }
 
 .to-track-node {
-  position: relative;
-  z-index: 1;
-  width: 20rpx;
-  height: 20rpx;
+  width: 16rpx;
+  height: 16rpx;
   border-radius: 50%;
-  background: var(--bg-card);
-  border: 3rpx solid #d7dbe0;
-  box-sizing: border-box;
+  background: #d7dbe0;
+  flex-shrink: 0;
 }
 
-.to-track-step.done .to-track-node {
+.to-track-seg {
+  width: 32rpx;
+  height: 3rpx;
+  background: #e5e7eb;
+  flex-shrink: 0;
+}
+
+.to-track-step.done .to-track-node,
+.to-track-step.now .to-track-node {
   background: var(--brand);
-  border-color: var(--brand);
 }
 
 .to-track-step.now .to-track-node {
-  border-color: var(--to-accent);
-  box-shadow: 0 0 0 6rpx var(--to-soft);
+  background: var(--to-accent);
+  box-shadow: 0 0 0 5rpx var(--to-soft);
 }
 
-.to-track-label {
-  font-size: 21rpx;
-  line-height: 1.2;
-  color: var(--text-3);
-  white-space: nowrap;
+.to-track-step.done .to-track-seg {
+  background: var(--brand);
 }
 
-.to-track-step.done .to-track-label {
+.to-track-cap {
+  min-width: 0;
   color: var(--text-2);
-}
-
-.to-track-step.now .to-track-label {
-  color: var(--text-1);
-  font-weight: 800;
+  font-size: 22rpx;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .to-divider {

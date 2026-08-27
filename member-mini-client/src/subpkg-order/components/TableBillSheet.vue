@@ -26,15 +26,18 @@
           </view>
 
           <view v-if="tableBillTimeline.length" class="to-track">
-            <view
-              v-for="step in tableBillTimeline"
-              :key="step.key"
-              class="to-track-step"
-              :class="{ done: step.done, now: step.active }"
-            >
-              <view class="to-track-node"></view>
-              <text class="to-track-label">{{ step.label }}</text>
+            <view class="to-track-rail">
+              <view
+                v-for="(step, i) in tableBillTimeline"
+                :key="step.key"
+                class="to-track-step"
+                :class="{ done: step.done, now: step.active }"
+              >
+                <view class="to-track-node"></view>
+                <view v-if="i < tableBillTimeline.length - 1" class="to-track-seg"></view>
+              </view>
             </view>
+            <text class="to-track-cap">{{ progressCaption }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -189,6 +192,16 @@ export default {
     orderItemAmount: { type: Function, required: true },
   },
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
+  computed: {
+    // 方案B：圆点排旁边那句"当前阶段"文字——取进度里正在进行的那一步，
+    // 全部走完（已结账）就显示最后一步。
+    progressCaption() {
+      const steps = this.tableBillTimeline || []
+      const active = steps.find(step => step.active)
+      if (active) return active.label
+      return steps.length ? steps[steps.length - 1].label : ''
+    },
+  },
   methods: {
     emitCloseOrFinish() {
       if (this.isTableSettled) this.$emit('finish')

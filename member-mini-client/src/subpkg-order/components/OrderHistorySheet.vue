@@ -20,15 +20,18 @@
           </view>
 
           <view v-if="tableOrderTimeline.length" class="to-track">
-            <view
-              v-for="step in tableOrderTimeline"
-              :key="step.key"
-              class="to-track-step"
-              :class="{ done: step.done, now: step.active }"
-            >
-              <view class="to-track-node"></view>
-              <text class="to-track-label">{{ step.label }}</text>
+            <view class="to-track-rail">
+              <view
+                v-for="(step, i) in tableOrderTimeline"
+                :key="step.key"
+                class="to-track-step"
+                :class="{ done: step.done, now: step.active }"
+              >
+                <view class="to-track-node"></view>
+                <view v-if="i < tableOrderTimeline.length - 1" class="to-track-seg"></view>
+              </view>
             </view>
+            <text class="to-track-cap">{{ progressCaption }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -54,7 +57,7 @@
           </view>
 
           <view class="to-foot">
-            <text class="to-foot-l">共 {{ currentOrderItemCount }} 份 · 已在线支付</text>
+            <text class="to-foot-l">共 {{ currentOrderItemCount }} 份 · {{ paidStateText }}</text>
             <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(currentTableOrder.total || 0) }}</text>
           </view>
         </view>
@@ -152,6 +155,23 @@ export default {
     orderItemCount: { type: Function, required: true },
   },
   emits: ['close', 'toggle-history'],
+  computed: {
+    // 方案B：圆点排旁边那句"当前阶段"文字。
+    progressCaption() {
+      const steps = this.tableOrderTimeline || []
+      const active = steps.find(step => step.active)
+      if (active) return active.label
+      return steps.length ? steps[steps.length - 1].label : ''
+    },
+    // 卡底的收款状态——先付后厨绝大多数是"已在线支付"，但不能对
+    // pending_payment / 已结账 的单也这么写死。
+    paidStateText() {
+      const raw = String((this.currentTableOrder && this.currentTableOrder.status) || '')
+      if (raw === 'settled') return '已结账'
+      if (['pending_payment', 'unpaid', 'need_payment'].includes(raw)) return '待支付'
+      return '已在线支付'
+    },
+  },
 }
 </script>
 

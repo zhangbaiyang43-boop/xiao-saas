@@ -273,8 +273,13 @@ export function useTableBillView({
   const tableOrderTimeline = computed(() => {
     const order = ['pending', 'preparing', 'done', 'settled']
     const currentIndex = Math.max(0, order.indexOf(currentTableOrderStatus.value))
+    // 先付后厨正常是"支付即建单"，首节点写"已支付"；但订单确实可能停在
+    // pending_payment（支付没完成），这时首节点必须说"待支付"，否则进度条在
+    // 断言一笔没发生过的收款。
+    const rawStatus = String(currentTableOrder.value?.status || '')
+    const awaitingPayment = ['pending_payment', 'unpaid', 'need_payment'].includes(rawStatus)
     return [
-      { key: 'paid', status: 'pending', label: '已支付', icon: 'icon-pay', desc: currentTableOrder.value?.createdAt || '' },
+      { key: 'paid', status: 'pending', label: awaitingPayment ? '待支付' : '已支付', icon: 'icon-pay', desc: currentTableOrder.value?.createdAt || '' },
       { key: 'preparing', status: 'preparing', label: '商家已接单', icon: 'icon-beican', desc: currentIndex >= 1 ? '厨房开始处理' : '' },
       { key: 'done', status: 'done', label: '已上餐', icon: 'icon-deliver', desc: currentIndex >= 2 ? '餐品已完成' : '' },
       { key: 'settled', status: 'settled', label: '已完成', icon: 'icon-roundcheckfill', desc: currentIndex >= 3 ? '本桌已结束' : '' },
