@@ -69,6 +69,26 @@ def _region_has_color(
     return False
 
 
+def _measure_drawn_text_bounds(text_calls: list[dict]) -> tuple[int, int, int, int]:
+    left = None
+    top = None
+    right = None
+    bottom = None
+    for call in text_calls:
+        x, y = call["xy"]
+        x0, y0, x1, y1 = call["bbox"]
+        call_left = x + x0
+        call_top = y + y0
+        call_right = x + x1
+        call_bottom = y + y1
+        left = call_left if left is None else min(left, call_left)
+        top = call_top if top is None else min(top, call_top)
+        right = call_right if right is None else max(right, call_right)
+        bottom = call_bottom if bottom is None else max(bottom, call_bottom)
+    assert left is not None and top is not None and right is not None and bottom is not None
+    return left, top, right, bottom
+
+
 def test_render_sticker_returns_exact_rgb_print_canvas_for_valid_source():
     with TemporaryDirectory() as temp_dir:
         directory = Path(temp_dir) / "entrance-codes"
@@ -208,11 +228,13 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
     original_text = ImageDraw.ImageDraw.text
 
     def spy_text(drawer, xy, text, *args, **kwargs):
+        font = kwargs.get("font")
         captured_text_calls.append(
             {
                 "xy": xy,
                 "text": text,
-                "font_size": getattr(kwargs.get("font"), "size", None),
+                "font_size": getattr(font, "size", None),
+                "bbox": drawer.textbbox((0, 0), text, font=font),
             }
         )
         return original_text(drawer, xy, text, *args, **kwargs)
@@ -249,9 +271,13 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
                 for call in captured_text_calls
                 if 200 <= call["xy"][1] <= 420
             ]
-            assert any(call["text"] == "A08" and 130 <= (call["font_size"] or 0) <= 150 for call in badge_calls)
+            assert any(call["text"] == "A08" and 110 <= (call["font_size"] or 0) < 130 for call in badge_calls)
             assert any(call["text"] == "桌" and 50 <= (call["font_size"] or 0) <= 65 for call in badge_calls)
             assert all(call["text"] != "A08桌" for call in badge_calls)
+            badge_text_calls = [call for call in badge_calls if call["text"] in {"A08", "桌"}]
+            combined_left, _, combined_right, _ = _measure_drawn_text_bounds(badge_text_calls)
+            assert combined_left >= 797 + 16
+            assert combined_right <= 1109 - 16
 
             footer_calls = [call for call in captured_text_calls if call["text"] == "微信扫码 · 本桌下单，加菜也扫这里"]
             assert len(footer_calls) == 1
@@ -344,6 +370,41 @@ def test_render_sticker_rejects_pillow_decompression_bomb(monkeypatch, bomb_kind
             service.render_sticker(code)
 
         assert exc_info.value.code == export_service.CORRUPTED_SOURCE_IMAGE
+
+
+@pytest.mark.parametrize("table_no", ["A01", "A08", "春风桌"])
+def test_render_sticker_keeps_combined_badge_text_inside_badge(table_no, monkeypatch):
+    captured = []
+    original_text = ImageDraw.ImageDraw.text
+
+    def spy_text(drawer, xy, text, *args, **kwargs):
+        font = kwargs.get("font")
+        captured.append(
+            {
+                "xy": xy,
+                "text": text,
+                "font_size": getattr(font, "size", None),
+                "bbox": drawer.textbbox((0, 0), text, font=font),
+            }
+        )
+        return original_text(drawer, xy, text, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", spy_text)
+
+    with TemporaryDirectory() as temp_dir:
+        directory = Path(temp_dir) / "entrance-codes"
+        directory.mkdir()
+        service, code = _service_and_code(directory, _write_source_image(directory), table_no)
+
+        rendered = service.render_sticker(code)
+        try:
+            badge_calls = [call for call in captured if call["text"] in {service._normalize_table_no(table_no), "桌"}]
+            assert [call["text"] for call in badge_calls] == [service._normalize_table_no(table_no), "桌"]
+            combined_left, _, combined_right, _ = _measure_drawn_text_bounds(badge_calls)
+            assert combined_left >= 797 + 16
+            assert combined_right <= 1109 - 16
+        finally:
+            rendered.close()
 
 
 @pytest.mark.parametrize("table_no", ["18", "A01", "春风桌"])

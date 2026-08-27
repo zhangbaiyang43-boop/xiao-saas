@@ -24,6 +24,9 @@ CORRUPTED_SOURCE_IMAGE = "CORRUPTED_SOURCE_IMAGE"
 EMPTY_TABLE_NO = "EMPTY_TABLE_NO"
 TABLE_NO_TOO_LONG = "TABLE_NO_TOO_LONG"
 FONT_NOT_FOUND = "FONT_NOT_FOUND"
+BADGE_HORIZONTAL_PADDING = 16
+BADGE_TEXT_GAP = 8
+BADGE_UNIT_TEXT = "桌"
 
 
 class TableStickerExportError(ValueError):
@@ -67,8 +70,14 @@ class TableStickerExportService:
             title_font = self._font(59)
             footer_font = self._font(44)
             table_body = self._normalize_table_no(table_no)
-            body_font = self._fit_table_font(draw, table_body, max_width=260, max_height=126)
             unit_font = self._font(56)
+            body_font = self._fit_table_font(
+                draw,
+                table_body,
+                unit_font=unit_font,
+                max_total_width=(1109 - 797) - (BADGE_HORIZONTAL_PADDING * 2),
+                max_height=126,
+            )
 
             draw.text((84, 248), "扫码点餐", font=title_font, fill="#111418")
             draw.rounded_rectangle(
@@ -210,15 +219,16 @@ class TableStickerExportService:
         self,
         draw: ImageDraw.ImageDraw,
         table_no: str,
-        max_width: int,
+        unit_font: ImageFont.FreeTypeFont,
+        max_total_width: int,
         max_height: int,
     ) -> ImageFont.FreeTypeFont:
         for size in range(150, 59, -1):
             font = self._font(size)
             bbox = draw.textbbox((0, 0), table_no, font=font)
-            text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            if text_width <= max_width and text_height <= max_height:
+            _, _, combined_width = self._table_badge_text_layout(draw, table_no, font, unit_font)
+            if combined_width <= max_total_width and text_height <= max_height:
                 return font
         raise TableStickerExportError(TABLE_NO_TOO_LONG, "桌号过长")
 
@@ -232,19 +242,34 @@ class TableStickerExportService:
     ) -> None:
         left, top, right, bottom = box
         body_bbox = draw.textbbox((0, 0), table_body, font=body_font)
-        unit_bbox = draw.textbbox((0, 0), "桌", font=unit_font)
+        unit_bbox = draw.textbbox((0, 0), BADGE_UNIT_TEXT, font=unit_font)
         body_width = body_bbox[2] - body_bbox[0]
         body_height = body_bbox[3] - body_bbox[1]
-        unit_width = unit_bbox[2] - unit_bbox[0]
         unit_height = unit_bbox[3] - unit_bbox[1]
-        gap = 8
-        total_width = body_width + gap + unit_width
-        start_x = left + ((right - left) - total_width) // 2
+        inner_left = left + BADGE_HORIZONTAL_PADDING
+        inner_right = right - BADGE_HORIZONTAL_PADDING
+        total_left_offset, total_right_offset, total_width = self._table_badge_text_layout(draw, table_body, body_font, unit_font)
+        start_x = inner_left + ((inner_right - inner_left) - total_width) // 2 - total_left_offset
         baseline_top = top + ((bottom - top) - max(body_height, unit_height)) // 2 + 8
         body_y = baseline_top - body_bbox[1]
         unit_y = baseline_top + (body_height - unit_height) + 10 - unit_bbox[1]
         draw.text((start_x, body_y), table_body, font=body_font, fill="#05913F")
-        draw.text((start_x + body_width + gap, unit_y), "桌", font=unit_font, fill="#05913F")
+        draw.text((start_x + body_width + BADGE_TEXT_GAP, unit_y), BADGE_UNIT_TEXT, font=unit_font, fill="#05913F")
+
+    @staticmethod
+    def _table_badge_text_layout(
+        draw: ImageDraw.ImageDraw,
+        table_body: str,
+        body_font: ImageFont.FreeTypeFont,
+        unit_font: ImageFont.FreeTypeFont,
+    ) -> tuple[int, int, int]:
+        body_bbox = draw.textbbox((0, 0), table_body, font=body_font)
+        unit_bbox = draw.textbbox((0, 0), BADGE_UNIT_TEXT, font=unit_font)
+        body_width = body_bbox[2] - body_bbox[0]
+        unit_x = body_width + BADGE_TEXT_GAP
+        total_left = min(body_bbox[0], unit_x + unit_bbox[0])
+        total_right = max(body_bbox[2], unit_x + unit_bbox[2])
+        return total_left, total_right, total_right - total_left
 
     def _fit_merchant_font(
         self,
