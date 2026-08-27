@@ -1199,8 +1199,11 @@ assert_true "npm was never invoked" file_absent "$MOCK_STATE_DIR/npm_calls.log"
 echo "== CASE AR: ADMIN_ARTIFACT_PATHS mirrors workflow push.paths =="
 WORKFLOW_FILE="$(cd "$SCRIPT_DIR/.." && pwd)/.github/workflows/admin-h5-release.yml"
 if [ -f "$WORKFLOW_FILE" ]; then
-  WF_PATHS="$(sed -n '/^on:/,/^jobs:/p' "$WORKFLOW_FILE"     | sed -n "/^  push:/,/^  [a-z_]*:/p"     | grep -oE "^ +- '[^']+'" | tr -d " -'" | sed 's#/\*\*$#/#' | sort -u)"
-  DEPLOY_PATHS="$(sed -n '/^ADMIN_ARTIFACT_PATHS=(/,/^)/p' "$DEPLOY_SCRIPT"     | grep -oE "^ +'[^']+'" | tr -d " '" | sort -u)"
+  # sed capture groups, not `tr -d " -'"` -- that argument is a RANGE from
+  # space (0x20) to apostrophe (0x27), which does not include "-", so the
+  # YAML list dash survived and every comparison failed.
+  WF_PATHS="$(sed -n '/^on:/,/^jobs:/p' "$WORKFLOW_FILE"     | sed -n "/^  push:/,/^  pull_request:/p"     | sed -n "s/^ *- '\(.*\)'*$//p" | sed 's#/\*\*$#/#' | sort -u)"
+  DEPLOY_PATHS="$(sed -n '/^ADMIN_ARTIFACT_PATHS=(/,/^)/p' "$DEPLOY_SCRIPT"     | sed -n "s/^ *'\(.*\)'*$//p" | sort -u)"
   assert_eq "workflow push.paths == ADMIN_ARTIFACT_PATHS" "$WF_PATHS" "$DEPLOY_PATHS"
 else
   ok "workflow file not present in this checkout -- sync check skipped"
