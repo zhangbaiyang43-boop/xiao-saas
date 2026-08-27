@@ -60,16 +60,28 @@ class OverlayCenterLogoTest(unittest.TestCase):
         self.assertGreater(g, b + 40)
 
     def test_overlay_disc_stays_within_center_zone(self):
-        # 叠加区必须压在码宽 ~20% 的原生头像位内，不能吃到外圈数据点：
-        # 距中心 0.22*宽 处的像素必须和原图一模一样。
+        # 白底盘要盖满微信头像区（~46% 码宽），但不能溢到外圈数据点：
+        # 距中心 0.29*宽 处的像素必须和原图一模一样。
         base = Image.new("RGB", (430, 430), (0, 0, 0))  # 纯黑，方便判断"没被动过"
         buf = io.BytesIO()
         base.save(buf, format="PNG")
         with patch("urllib.request.urlopen", return_value=_FakeResponse(self.logo_bytes)):
             out = self.service._overlay_center_logo(buf.getvalue(), "https://cos.example.com/logo.webp")
         img = Image.open(io.BytesIO(out)).convert("RGB")
-        for point in [(215 + 95, 215), (215, 215 + 95), (215 - 95, 215), (215, 215 - 95)]:
+        for point in [(215 + 125, 215), (215, 215 + 125), (215 - 125, 215), (215, 215 - 125)]:
             self.assertEqual(img.getpixel(point), (0, 0, 0), f"{point} 不应被叠加区覆盖")
+
+    def test_backing_disc_covers_wechat_avatar_zone(self):
+        # 反过来：白底盘必须真的铺到 ~0.4*宽 的半径，否则盖不住"开心点单"那圈绿底。
+        base = Image.new("RGB", (430, 430), (0, 0, 0))
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        with patch("urllib.request.urlopen", return_value=_FakeResponse(self.logo_bytes)):
+            out = self.service._overlay_center_logo(buf.getvalue(), "https://cos.example.com/logo.webp")
+        img = Image.open(io.BytesIO(out)).convert("RGB")
+        # 距中心 0.18*宽（77px）处仍应被盘/Logo 覆盖，不是原来的纯黑
+        for point in [(215 + 77, 215), (215, 215 + 77), (215 - 77, 215), (215, 215 - 77)]:
+            self.assertNotEqual(img.getpixel(point), (0, 0, 0), f"{point} 应被白底盘覆盖")
 
     def test_download_failure_returns_original_untouched(self):
         with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):

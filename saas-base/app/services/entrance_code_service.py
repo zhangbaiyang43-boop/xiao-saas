@@ -436,7 +436,11 @@ class EntranceCodeService(BaseService):
             return None
 
     def _overlay_center_logo(self, image_bytes: bytes, logo_url: str) -> bytes:
-        """把门店 Logo 叠在小程序码中心，盖掉默认的平台头像。
+        """把门店 Logo 叠在小程序码中心，盖掉微信自带的平台头像（"开心点单"）。
+
+        getwxacodeunlimit 返回的小程序码，中心那圈绿底平台头像是微信烧进去
+        的，直径约占码宽的 45%。要遮住它，白底盘必须铺满这块中心区——好在
+        小程序码的中心区本来就是留给 logo 的非数据区，铺白不影响扫码。
 
         任何一步失败（Logo 下载不到、格式坏、Pillow 报错）都返回原图，
         绝不因为 Logo 让整张码出不来。
@@ -458,12 +462,9 @@ class EntranceCodeService(BaseService):
                 logo_img = Image.open(BytesIO(response.read())).convert("RGBA")
 
             ss = 4  # 超采样抗锯齿
-            # 直径压在码宽的 20% 以内：这正好是小程序码原生头像的占位，
-            # 再大就会盖住外圈的数据点导致扫不出。白边只要薄薄一圈，
-            # 够盖掉原平台头像的边缘即可，不是一圈光晕。
-            diameter = max(40, int(cw * 0.20))
-            ring = max(2, int(diameter * 0.04))
-            backing = diameter + ring * 2
+            # 白底盘要盖满微信头像区（~45% 码宽），门店 Logo 放在盘内、留一圈白边。
+            backing = max(48, int(cw * 0.46))
+            diameter = int(backing * 0.86)
 
             logo_scaled = logo_img.resize((diameter * ss, diameter * ss), Image.LANCZOS)
             mask = Image.new("L", (diameter * ss, diameter * ss), 0)
