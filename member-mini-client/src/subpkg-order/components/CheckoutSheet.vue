@@ -204,9 +204,11 @@ export default {
 /* 底色跟"本桌订单"的 .table-order-sheet 一致——卡片浮在浅灰上，边框才有对比。 */
 .order-confirm-sheet { background: var(--bg-subtle); }
 
+/* 结构跟 OrderHistorySheet 一致（那个在 BaseSheet 上能正常滚 + footer 不被盖）：
+   滚动区只写 flex:1 + min-height:0，不要再加 height:0——mp-weixin 某些渲染下
+   会把滚动区当成真的 0 高，footer 被挤出安全区、按钮压到底部小白条上。 */
 .order-confirm-content {
   flex: 1;
-  height: 0;
   min-height: 0;
   padding: 8rpx 24rpx 20rpx;
   box-sizing: border-box;
@@ -214,6 +216,8 @@ export default {
 
 .order-confirm-bottom {
   flex-shrink: 0;
+  /* 底部安全区由 BaseSheet 的 .base-sheet-surface padding-bottom 统一兜
+     （跟 OrderHistorySheet 的 footer 一样，不在这里重复加，否则真机上会多一截空白）。 */
   padding: 16rpx 24rpx 0;
   border-top: 1rpx solid #edf0f2;
   background: rgba(255, 255, 255, 0.98);
