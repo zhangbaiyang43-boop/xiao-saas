@@ -400,6 +400,9 @@ class EntranceCodeService(BaseService):
 
         try:
             image_bytes = self._fetch_wechat_code(scene, page, env_version)
+            logo_url = await self._get_tenant_logo_url(tenant_id)
+            if logo_url:
+                image_bytes = self._overlay_center_logo(image_bytes, logo_url)
             file_name = f"{scene}.jpg"
             file_path = os.path.join(ENTRANCE_CODE_DIR, file_name)
             with open(file_path, "wb") as file:
@@ -418,6 +421,69 @@ class EntranceCodeService(BaseService):
                 "generation_status": "FAILED",
                 "generation_error": wechat_error,
             }
+
+    async def _get_tenant_logo_url(self, tenant_id: str) -> str | None:
+        if not tenant_id:
+            return None
+        try:
+            from app.models.tenant import Tenant
+            result = await self.db.execute(
+                select(Tenant.logo_url).where(Tenant.tenant_id == tenant_id)
+            )
+            logo_url = result.scalar_one_or_none()
+            return logo_url or None
+        except Exception:
+            return None
+
+    def _overlay_center_logo(self, image_bytes: bytes, logo_url: str) -> bytes:
+        """把门店 Logo 叠在小程序码中心，盖掉默认的平台头像。
+
+        任何一步失败（Logo 下载不到、格式坏、Pillow 报错）都返回原图，
+        绝不因为 Logo 让整张码出不来。
+        """
+        try:
+            from io import BytesIO
+            from PIL import Image, ImageDraw
+
+            if not logo_url or not str(logo_url).lower().startswith(("http://", "https://")):
+                return image_bytes
+
+            code_img = Image.open(BytesIO(image_bytes)).convert("RGBA")
+            cw, ch = code_img.size
+
+            request = urllib.request.Request(
+                logo_url, headers={"User-Agent": "xiao-entrance-code/1.0"}
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                logo_img = Image.open(BytesIO(response.read())).convert("RGBA")
+
+            ss = 4  # 超采样抗锯齿
+            diameter = max(48, int(cw * 0.26))
+            ring = max(6, int(diameter * 0.12))
+            backing = diameter + ring * 2
+
+            logo_scaled = logo_img.resize((diameter * ss, diameter * ss), Image.LANCZOS)
+            mask = Image.new("L", (diameter * ss, diameter * ss), 0)
+            ImageDraw.Draw(mask).ellipse((0, 0, diameter * ss, diameter * ss), fill=255)
+            logo_round = Image.new("RGBA", (diameter * ss, diameter * ss), (0, 0, 0, 0))
+            logo_round.paste(logo_scaled, (0, 0), mask)
+            logo_round = logo_round.resize((diameter, diameter), Image.LANCZOS)
+
+            backing_img = Image.new("RGBA", (backing * ss, backing * ss), (0, 0, 0, 0))
+            ImageDraw.Draw(backing_img).ellipse(
+                (0, 0, backing * ss, backing * ss), fill=(255, 255, 255, 255)
+            )
+            backing_img = backing_img.resize((backing, backing), Image.LANCZOS)
+
+            cx, cy = cw // 2, ch // 2
+            code_img.alpha_composite(backing_img, (cx - backing // 2, cy - backing // 2))
+            code_img.alpha_composite(logo_round, (cx - diameter // 2, cy - diameter // 2))
+
+            out = BytesIO()
+            code_img.convert("RGB").save(out, "JPEG", quality=92)
+            return out.getvalue()
+        except Exception:
+            return image_bytes
 
     def _write_qr_code(self, scene: str, tenant_id: str, channel: str, table_no: str, use_h5: bool = False) -> dict:
         try:
