@@ -117,7 +117,9 @@ export default {
       })
     }
     const goOrder = () => {
-      try { uni.setStorageSync('menu_focus_tab', 'order') } catch (_) {}
+      // 这只是"回到点餐页时顺便帮你切到订单 tab"的一个提示，存不进去
+      // （存储满/被清）也不影响跳转本身，所以吞掉不报错。
+      try { uni.setStorageSync('menu_focus_tab', 'order') } catch { /* 存不进去就正常跳转，不影响主流程 */ }
       const pages = getCurrentPages()
       const idx = pages.findIndex(p => (p.route || '').indexOf('subpkg-order/pages/menu') !== -1)
       if (idx >= 0) {
