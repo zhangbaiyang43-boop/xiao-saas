@@ -1,93 +1,95 @@
 <template>
   <base-sheet
-    class="table-account-sheet"
+    class="table-order-sheet"
     layer="blocking"
-    title="已点菜品"
+    title="本桌订单"
     @close="emitCloseOrFinish"
   >
       <template #header-left>
-        <view class="table-account-back" @click="emitCloseOrFinish">
+        <view class="to-back" @click="emitCloseOrFinish">
           <text class="iconfont icon-back"></text>
         </view>
       </template>
-      <scroll-view v-if="!loadError" class="table-account-list" scroll-y>
-        <view id="table-account-status-anchor" class="table-account-status">
-          <view class="table-account-status-icon" :class="'table-account-status-icon--' + tableStatusView.tone">
-            <text class="iconfont" :class="tableStatusView.icon"></text>
-          </view>
-          <text class="table-account-status-title">{{ tableStatusView.title }}</text>
-          <text class="table-account-status-desc">{{ tableStatusView.desc }}</text>
-          <text v-if="tableStatusView.note" class="table-account-status-note">{{ tableStatusView.note }}</text>
-        </view>
 
-        <view v-if="pickupNoEnabled && tablePickupNo" class="table-account-pickup-banner">
-          <text class="table-account-pickup-icon iconfont icon-form"></text>
-          <text class="table-account-pickup-text">桌牌 {{ tablePickupNo }} 号</text>
-        </view>
-
-        <view class="table-account-summary">
-          <view class="table-account-summary-left">
-            <text class="table-account-table">{{ tableNo || orderModeText.unknownTable }}桌</text>
-            <text class="table-account-sub">{{ sharedBillSubLabel }}</text>
-          </view>
-          <view class="table-account-summary-right">
-            <text class="table-account-total">¥{{ formatPrice(tableTotal) }}</text>
-            <text class="table-account-count">共 {{ tableItemCount }} 份</text>
-          </view>
-        </view>
-
-        <view class="table-account-section">
-          <view class="table-account-section-head">
-            <text class="table-account-section-title">本桌已点菜品</text>
+      <scroll-view v-if="!loadError" class="to-scroll" scroll-y>
+        <view v-if="tableOrderGroups.length" id="table-account-status-anchor" class="to-card" :class="'to-card--' + tableStatusView.tone">
+          <view class="to-head">
+            <view class="to-head-status">
+              <text class="to-badge">{{ tableStatusView.title }}</text>
+              <text class="to-desc">{{ tableStatusView.desc }}</text>
+              <text v-if="tableStatusView.note" class="to-desc to-desc--sub">{{ tableStatusView.note }}</text>
+            </view>
+            <view class="to-ident">
+              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }}桌</text>
+              <text v-if="pickupNoEnabled && tablePickupNo" class="to-ident-line">桌牌 {{ tablePickupNo }} 号</text>
+            </view>
           </view>
 
-          <view v-if="tableOrderGroups.length" class="table-account-groups">
-            <view v-for="group in tableOrderGroups" :key="group.id" class="table-account-group">
-              <view class="table-account-group-head">
-                <view class="table-account-group-left">
-                  <view v-if="group.participantNo" class="participant-badge" :style="{ background: group.participantColor }">{{ group.participantNo }}</view>
-                  <text v-if="group.isStaff" class="table-account-staff-badge">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
-                  <text class="table-account-group-time">{{ group.title }}</text>
-                  <text class="table-account-group-no">#{{ group.orderNo }}</text>
-                  <text v-if="group.discountAmount > 0" class="table-account-group-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
+          <view v-if="tableBillTimeline.length" class="to-track">
+            <view
+              v-for="step in tableBillTimeline"
+              :key="step.key"
+              class="to-track-step"
+              :class="{ done: step.done, now: step.active }"
+            >
+              <view class="to-track-node"></view>
+              <text class="to-track-label">{{ step.label }}</text>
+            </view>
+          </view>
+
+          <view class="to-divider"></view>
+
+          <view class="to-list">
+            <view v-for="group in tableOrderGroups" :key="group.id" class="to-group">
+              <view class="to-round">
+                <view class="to-round-left">
+                  <view
+                    v-if="group.participantNo"
+                    class="to-round-badge"
+                    :style="{ background: group.participantColor }"
+                  >{{ group.participantNo }}</view>
+                  <text class="to-round-t">{{ group.title }} · #{{ group.orderNo }}</text>
+                  <text v-if="group.discountAmount > 0" class="to-round-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
-                <text class="table-account-group-status" :class="'table-account-group-status--' + group.tone">{{ group.statusText }}</text>
+                <text class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
               </view>
-              <view v-for="(item, idx) in group.items" :key="item.specKey || item.dish_id || item.id || item.name || idx" class="table-account-item" :class="{ 'table-account-item--muted': item.isInvalid }">
-                <view class="table-account-item-img-wrap">
-                  <image
-                    v-if="orderItemImage(item) && !orderItemImageFailed[group.id + '_' + idx]"
-                    class="table-account-item-img"
-                    :src="orderItemImage(item)"
-                    mode="aspectFill"
-                    @error="$emit('mark-image-failed', group.id + '_' + idx)"
-                  />
-                  <view v-else class="table-account-item-placeholder">
-                    <image class="table-account-item-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
-                  </view>
+              <text v-if="group.isStaff" class="to-round-staff">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
+
+              <view
+                v-for="(item, idx) in group.items"
+                :key="item.specKey || item.dish_id || item.id || item.name || idx"
+                class="to-drow"
+                :class="{ 'to-drow--muted': item.isInvalid }"
+              >
+                <view class="to-drow-main">
+                  <text class="to-drow-name">{{ orderItemName(item) }}</text>
+                  <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
+                  <text v-if="item.isInvalid" class="to-drow-mark">{{ item.invalidText }}</text>
                 </view>
-                <view class="table-account-item-main">
-                  <text class="table-account-item-name">{{ orderItemName(item) }}</text>
-                  <text v-if="orderItemSpecText(item)" class="table-account-item-spec">{{ orderItemSpecText(item) }}</text>
-                  <text v-if="item.isInvalid" class="table-account-item-mark">{{ item.invalidText }}</text>
-                </view>
-                <text class="table-account-item-qty">×{{ orderItemQty(item) }}</text>
-                <text class="table-account-item-amount">¥{{ formatPrice(orderItemAmount(item)) }}</text>
+                <text class="to-drow-qty">×{{ orderItemQty(item) }}</text>
+                <text class="to-drow-amt">¥{{ formatPrice(orderItemAmount(item)) }}</text>
               </view>
             </view>
           </view>
 
-          <view v-else class="table-account-empty">
-            <state-empty
-              padded
-              icon="🍽️"
-              title="本桌还没有已点菜品"
-              desc="可以先去点菜，后续加菜会自动合并到本桌账单"
-            />
+          <view class="to-foot">
+            <text class="to-foot-l">共 {{ tableItemCount }} 份 · {{ isTableSettled ? '已结账' : tableBillPayStateText }}</text>
+            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(tableTotal) }}</text>
           </view>
         </view>
 
-        <view v-if="!isTableSettled" class="table-account-tip">
+        <view v-else class="to-empty">
+          <state-empty
+            padded
+            icon="🍽️"
+            title="本桌还没有已点菜品"
+            desc="可以先去点菜，后续加菜会自动合并到本桌账单"
+          />
+        </view>
+
+        <view v-if="tableOrderGroups.length" class="to-submeta">{{ sharedBillSubLabel }}</view>
+
+        <view v-if="tableOrderGroups.length && !isTableSettled" class="to-hint-note">
           <text>同桌后续加菜会自动合并，不需要每次付款。</text>
         </view>
       </scroll-view>
@@ -144,8 +146,11 @@
 
 <script>
 // 从 menu.vue 拆出来的桌台账单弹层（原来是 showOrders && isSharedBillMode 那一段
-// 模板，"已点菜品"分账/桌台账单视图）。纯展示组件，不带任何业务逻辑——所有需要
-// 改父组件状态的动作都只 emit 出去。
+// 模板）。纯展示组件，不带任何业务逻辑——所有需要改父组件状态的动作都只 emit 出去。
+//
+// 方案B（聚合式）改版：状态胶囊 + 身份信息同框，压缩进度条（tableBillTimeline），
+// 菜品按下单批次平铺，卡底压合计。跟 OrderHistorySheet 用同一套 `.to-*` 卡片结构，
+// 两个「本桌订单类」弹层的顾客端展示自此统一。
 import StateEmpty from '@/components/state-empty/state-empty.vue'
 import StateError from '@/components/state-error/state-error.vue'
 import BaseSheet from '@/components/base-sheet/base-sheet.vue'
@@ -157,12 +162,14 @@ export default {
     loadError: { type: Boolean, default: false },
     tableStatusView: { type: Object, required: true },
     tableNo: { type: [String, Number], default: '' },
-    // P1 修复：menu.vue 一直在传这两个 prop，但组件之前没声明，桌牌号从来没在
-    // 这个弹层里渲染过（跟 OrderHistorySheet 的 pickup-no-banner 不对等）。
+    // P1 修复：menu.vue 一直在传这两个 prop，桌牌号在方案B里放进右侧身份栏。
     pickupNoEnabled: { type: Boolean, default: false },
     tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
+    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语。
+    tableBillTimeline: { type: Array, default: () => [] },
+    tableBillPayStateText: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
     tableItemCount: { type: Number, default: 0 },
     tableOrderGroups: { type: Array, default: () => [] },
@@ -193,23 +200,14 @@ export default {
 
 <style lang="scss">
 @import '../styles/_shared.scss';
+@import './table-order-card.scss';
 
-.table-account-sheet {
+.table-order-sheet {
   background: var(--bg-subtle);
   padding-bottom: 0;
 }
 
-
-
-.table-account-head {
-  position: relative;
-  justify-content: center;
-  min-height: 88rpx;
-}
-
-
-
-.table-account-back {
+.to-back {
   position: absolute;
   left: 18rpx;
   top: 12rpx;
@@ -219,428 +217,23 @@ export default {
   align-items: center;
   justify-content: center;
   color: var(--text-2);
+
+  text {
+    font-size: 34rpx;
+  }
 }
 
-
-
-.table-account-back text {
-  font-size: 34rpx;
-}
-
-
-
-.table-account-list {
+.to-scroll {
   max-height: calc(82vh - 176rpx - env(safe-area-inset-bottom));
-  padding: 0 24rpx 188rpx;
+  padding: 8rpx 24rpx 188rpx;
   box-sizing: border-box;
 }
 
-
-
-.table-account-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 18rpx 24rpx 20rpx;
-  text-align: center;
-}
-
-
-
-.table-account-status-icon {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-
-
-.table-account-status-icon text {
-  font-size: 30rpx;
-}
-
-// 顶部大状态图标和下面每笔子订单的状态标签用同一套语义色：
-// active=还在等（下单/制作中），served=菜已上齐可以结账，settled=已结账/归档。
-.table-account-status-icon--active {
-  background: #fff7e6;
-  color: var(--warning);
-}
-
-.table-account-status-icon--served {
-  background: #ecfbf3;
-  color: var(--brand);
-}
-
-.table-account-status-icon--settled {
-  background: var(--bg-muted);
-  color: var(--text-3);
-}
-
-
-
-.table-account-status-title {
-  margin-top: 12rpx;
-  color: var(--text-1);
-  font-size: 44rpx;
-  font-weight: 900;
-  line-height: 1.25;
-}
-
-
-
-.table-account-status-desc {
-  margin-top: 8rpx;
-  color: var(--text-3);
-  font-size: 28rpx;
-  line-height: 1.45;
-}
-
-
-
-.table-account-status-note {
-  display: block;
-  margin-top: 4rpx;
-  color: var(--text-3);
-  font-size: 24rpx;
-  line-height: 1.4;
-}
-
-
-
-/* 桌牌号复用 PaymentSuccessSheet.pickup-hero / OrderHistorySheet.pickup-no-banner
-   同一套已有的取餐凭证配色（橙色系），不新建 token。 */
-.table-account-pickup-banner {
-  margin-top: 8rpx;
-  padding: 20rpx 24rpx;
-  border-radius: 20rpx;
-  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-}
-
-.table-account-pickup-icon {
-  color: #c2410c;
-  font-size: 30rpx;
-  line-height: 1;
-}
-
-.table-account-pickup-text {
-  color: #c2410c;
-  font-size: 32rpx;
-  font-weight: 900;
-  letter-spacing: 1rpx;
-}
-
-.table-account-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-  margin-top: 8rpx;
-  padding: 26rpx 28rpx;
-  border-radius: 24rpx;
-  background: var(--bg-card);
-  box-sizing: border-box;
-}
-
-
-
-.table-account-summary-left,
-.table-account-summary-right {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-
-
-.table-account-table,
-.table-account-total {
-  color: var(--text-1);
-  font-size: 40rpx;
-  font-weight: 900;
-  line-height: 1.25;
-}
-
-
-
-.table-account-sub,
-.table-account-count {
-  margin-top: 8rpx;
-  color: var(--text-3);
-  font-size: 26rpx;
-  line-height: 1.4;
-}
-
-
-
-.table-account-summary-right {
-  flex-shrink: 0;
-  align-items: flex-end;
-  text-align: right;
-}
-
-
-
-.table-account-total {
-  color: var(--brand);
-}
-
-
-
-.table-account-section {
-  margin-top: 18rpx;
-  padding: 24rpx;
-  border-radius: 24rpx;
-  background: var(--bg-card);
-  box-sizing: border-box;
-}
-
-
-
-.table-account-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18rpx;
-}
-
-
-
-.table-account-section-title {
-  color: var(--text-1);
-  font-size: 34rpx;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-
-
-.table-account-group + .table-account-group {
-  margin-top: 26rpx;
-  padding-top: 22rpx;
-  border-top: 1rpx solid #eef1f3;
-}
-
-
-
-.table-account-group-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18rpx;
-  margin-bottom: 16rpx;
-}
-
-
-
-.table-account-group-left {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-
-
-/* 拼桌时标出"这一单是第几位点的"，纯展示编号，不关联真实身份 */
-.participant-badge {
-  flex-shrink: 0;
-  width: 34rpx;
-  height: 34rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-inverse);
-  font-size: 20rpx;
-  font-weight: 800;
-}
-
-
-
-.table-account-group-time {
-  color: var(--text-2);
-  font-size: 28rpx;
-  font-weight: 800;
-}
-
-/* 顾客反馈问题时能报的号——跟商家后台 OrderManage.vue 的"按订单尾号搜索"
-   口径对上，之前这里只有下单时间，没有任何可报的单号。 */
-.table-account-group-no {
-  color: var(--text-3);
-  font-size: 22rpx;
-  font-weight: 700;
-}
-
-
-
-/* 服务员代客加的单也标出来，让顾客知道这道菜是谁帮加的，结账时不会觉得莫名其妙 */
-.table-account-staff-badge {
-  flex-shrink: 0;
-  color: #a21caf;
-  background: #fdf4ff;
-  border-radius: 8rpx;
-  padding: 2rpx 10rpx;
-  font-size: 20rpx;
-  font-weight: 700;
-}
-
-
-
-.table-account-group-discount {
-  flex-shrink: 0;
-  color: var(--danger);
-  font-size: 24rpx;
-  font-weight: 700;
-}
-
-
-
-.table-account-group-status {
-  flex-shrink: 0;
-  color: var(--warning);
-  font-size: 24rpx;
-  line-height: 34rpx;
-}
-
-.table-account-group-status--served {
-  color: var(--brand);
-}
-
-.table-account-group-status--settled {
-  color: var(--text-3);
-}
-
-.table-account-group-status--muted {
-  color: #9aa1aa;
-}
-
-
-
-.table-account-item {
-  min-height: 128rpx;
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  padding: 12rpx 0;
-  box-sizing: border-box;
-}
-
-
-
-.table-account-item--muted {
-  opacity: .58;
-}
-
-
-
-.table-account-item-img-wrap,
-.table-account-item-img,
-.table-account-item-placeholder {
-  width: 112rpx;
-  height: 112rpx;
-  border-radius: 20rpx;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-
-
-.table-account-item-placeholder {
-  background: #F5F3EE;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.table-account-item-placeholder-img {
-  width: 60%;
-  height: 60%;
-}
-
-
-
-.table-account-item-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-
-
-.table-account-item-name {
-  color: var(--text-1);
-  font-size: 32rpx;
-  font-weight: 800;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.table-account-item-spec,
-.table-account-item-mark {
-  margin-top: 6rpx;
-  color: var(--text-3);
-  font-size: 25rpx;
-  line-height: 1.35;
-}
-
-
-
-.table-account-item-mark {
-  color: #9a6a21;
-}
-
-
-
-.table-account-item-qty {
-  flex-shrink: 0;
-  min-width: 52rpx;
-  color: var(--text-2);
-  font-size: 28rpx;
-  font-weight: 800;
-  text-align: right;
-}
-
-
-
-.table-account-item-amount {
-  flex-shrink: 0;
-  min-width: 118rpx;
-  color: var(--text-1);
-  font-size: 29rpx;
-  font-weight: 900;
-  text-align: right;
-}
-
-
-
-.table-account-empty {
+.to-empty {
   padding: 24rpx 0;
 }
 
-.table-account-tip {
-  margin: 18rpx 0 0;
-  padding: 18rpx 22rpx;
-  border-radius: 18rpx;
-  background: #eef2f0;
-  color: var(--text-3);
-  font-size: 25rpx;
-  line-height: 1.45;
-}
-
-
-
+/* footer 动作区沿用原样式（模板未改），只是状态类前缀保持 table-account-* */
 .table-account-actions {
   position: absolute;
   left: 0;
@@ -655,8 +248,6 @@ export default {
   box-sizing: border-box;
 }
 
-
-
 .table-account-action {
   height: 92rpx;
   border-radius: 46rpx;
@@ -664,53 +255,39 @@ export default {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+
+  text {
+    font-size: 29rpx;
+    font-weight: 900;
+    white-space: nowrap;
+  }
 }
-
-
-
-.table-account-action text {
-  font-size: 29rpx;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-
 
 .table-account-action--secondary {
   flex: 0 0 236rpx;
   border: 2rpx solid var(--brand);
   background: var(--bg-card);
   color: var(--brand);
+
+  text {
+    color: var(--brand);
+  }
 }
-
-
-
-.table-account-action--secondary text {
-  color: var(--brand);
-}
-
-
 
 .table-account-action--primary {
   flex: 1;
   min-width: 0;
   background: var(--brand);
   color: var(--text-inverse);
+
+  text {
+    color: var(--text-inverse);
+  }
 }
-
-
-
-.table-account-action--primary text {
-  color: var(--text-inverse);
-}
-
-
 
 .table-account-action--disabled {
   opacity: .5;
 }
-
-
 
 /* 餐后付款没有可点击的"去结账"——结账动作在商家手里，这里只是一句提示，
    不能长得跟旁边的按钮一样可点，字号、字重都调低，允许换行。 */
@@ -719,16 +296,14 @@ export default {
   min-height: 92rpx;
   background: var(--bg-subtle);
   padding: 12rpx 20rpx;
-}
 
-
-
-.table-account-action--info text {
-  color: var(--text-2);
-  font-size: 24rpx;
-  font-weight: 600;
-  white-space: normal;
-  line-height: 1.4;
-  text-align: center;
+  text {
+    color: var(--text-2);
+    font-size: 24rpx;
+    font-weight: 600;
+    white-space: normal;
+    line-height: 1.4;
+    text-align: center;
+  }
 }
 </style>

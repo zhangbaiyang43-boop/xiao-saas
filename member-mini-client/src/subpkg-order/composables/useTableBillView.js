@@ -179,6 +179,32 @@ export function useTableBillView({
     return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
   })
 
+  // 方案B：餐后付款 / 桌台账单也要有一条压缩进度条（原来只有 prepay 的
+  // tableOrderTimeline）。这里按"整桌"聚合状态推一个 0..4 的阶段下标：
+  // 0 还没下单 · 1 已下单待接单 · 2 商家已接单/制作中 · 3 全部上齐待结账 · 4 已结账。
+  const tableBillStageIndex = computed(() => {
+    if (isTableSettled.value) return 4
+    const statuses = validTableOrders.value.map(order => normalizeOrderStatus(order.status))
+    if (!statuses.length) return 0
+    if (allOrdersDone.value) return 3
+    if (statuses.includes('preparing')) return 2
+    if (statuses.every(status => status === 'pending')) return 1
+    return 2
+  })
+  const tableBillTimeline = computed(() => {
+    const currentIndex = tableBillStageIndex.value
+    return [
+      { key: 'ordered', label: '已下单' },
+      { key: 'accepted', label: '商家接单' },
+      { key: 'served', label: '已上齐' },
+      { key: 'settled', label: '已结账' },
+    ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
+  })
+  const tableBillPayStateText = computed(() => {
+    if (isTableSettled.value) return '已结账'
+    return isPostpayMode.value ? '餐后统一结账' : '待结账'
+  })
+
   const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
 
   const tableOrderStatusTone = computed(() => {
@@ -309,6 +335,8 @@ export function useTableBillView({
     canCheckout,
     postpayReadyToSettle,
     tableStatusView,
+    tableBillTimeline,
+    tableBillPayStateText,
     currentTableOrderStatus,
     tableOrderStatusTone,
     tableOrderStatusBadge,

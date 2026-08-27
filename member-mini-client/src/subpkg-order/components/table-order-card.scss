@@ -1,0 +1,383 @@
+// 「本桌订单」聚合卡（方案B）——TableBillSheet 和 OrderHistorySheet 共用的
+// 顾客端订单状态展示。两个弹层过去各画各的（一个太简、一个四宫格太满），
+// 这里把卡片区收成一套：状态胶囊 + 右侧身份栏 + 压缩进度条 + 平铺菜品清单 +
+// 卡底合计。谁的模板里出现 `.to-*` 类名，谁就在自己的 <style> 顶部
+// `@import './table-order-card.scss';`。
+//
+// 只放这两个弹层都用的卡片样式；弹层自己的滚动壳、返回键、footer 动作区
+// 各自写在组件里。
+
+.to-card {
+  margin-top: 12rpx;
+  padding: 28rpx 26rpx 20rpx;
+  border-radius: var(--radius-card);
+  background: var(--bg-card);
+  border: 2rpx solid #eef1f4;
+  box-sizing: border-box;
+  // 语义色随状态切换：wait=还在等接单（琥珀）、active/served/completed=进行中或已上齐（品牌绿）、
+  // settled=已结账（灰）、canceled=异常（红）。只换强调色，不换卡片底色，保持克制。
+  --to-accent: var(--brand);
+  --to-soft: var(--brand-light);
+}
+
+.to-card--wait {
+  --to-accent: #c2410c;
+  --to-soft: #fdeee0;
+}
+
+.to-card--active,
+.to-card--preparing,
+.to-card--paid {
+  --to-accent: var(--brand);
+  --to-soft: var(--brand-light);
+}
+
+.to-card--served,
+.to-card--completed {
+  --to-accent: var(--brand-dark);
+  --to-soft: var(--brand-light);
+}
+
+.to-card--settled {
+  --to-accent: var(--text-3);
+  --to-soft: var(--bg-muted);
+}
+
+.to-card--canceled {
+  --to-accent: var(--danger);
+  --to-soft: #fee2e2;
+}
+
+.to-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.to-head-status {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8rpx;
+}
+
+.to-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 40rpx;
+  padding: 0 16rpx;
+  border-radius: 999rpx;
+  background: var(--to-soft);
+  color: var(--to-accent);
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 1;
+
+  &::before {
+    content: '';
+    width: 10rpx;
+    height: 10rpx;
+    border-radius: 50%;
+    background: currentColor;
+    margin-right: 8rpx;
+  }
+}
+
+.to-desc {
+  color: var(--text-3);
+  font-size: 25rpx;
+  line-height: 1.4;
+}
+
+.to-desc--sub {
+  font-size: 22rpx;
+}
+
+.to-ident {
+  flex-shrink: 0;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2rpx;
+}
+
+.to-ident-main {
+  color: var(--text-1);
+  font-size: 27rpx;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.to-ident-line {
+  color: var(--text-3);
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+/* 压缩进度条：4 个圆点 + 点下短标签，整条塞进卡片内，不再是独立的一张大卡。 */
+.to-track {
+  display: flex;
+  margin: 22rpx 0 4rpx;
+}
+
+.to-track-step {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10rpx;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 9rpx;
+    left: -50%;
+    width: 100%;
+    height: 3rpx;
+    background: #e5e7eb;
+    z-index: 0;
+  }
+
+  &:first-child::before {
+    display: none;
+  }
+
+  &.done::before,
+  &.now::before {
+    background: var(--brand);
+  }
+}
+
+.to-track-node {
+  position: relative;
+  z-index: 1;
+  width: 20rpx;
+  height: 20rpx;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 3rpx solid #d7dbe0;
+  box-sizing: border-box;
+}
+
+.to-track-step.done .to-track-node {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.to-track-step.now .to-track-node {
+  border-color: var(--to-accent);
+  box-shadow: 0 0 0 6rpx var(--to-soft);
+}
+
+.to-track-label {
+  font-size: 21rpx;
+  line-height: 1.2;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.to-track-step.done .to-track-label {
+  color: var(--text-2);
+}
+
+.to-track-step.now .to-track-label {
+  color: var(--text-1);
+  font-weight: 800;
+}
+
+.to-divider {
+  height: 2rpx;
+  background: #f1f3f5;
+  margin: 20rpx 0 2rpx;
+}
+
+.to-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.to-group + .to-group {
+  margin-top: 8rpx;
+  padding-top: 8rpx;
+  border-top: 1rpx solid #f4f6f8;
+}
+
+.to-round {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin: 16rpx 0 4rpx;
+}
+
+.to-round-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.to-round-t {
+  color: var(--text-3);
+  font-size: 23rpx;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 拼桌时标出"这一单是第几位点的"，纯展示编号，不关联真实身份 */
+.to-round-badge {
+  flex-shrink: 0;
+  width: 30rpx;
+  height: 30rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-inverse);
+  font-size: 18rpx;
+  font-weight: 800;
+}
+
+.to-round-discount {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-size: 21rpx;
+  font-weight: 700;
+}
+
+.to-round-tag {
+  flex-shrink: 0;
+  color: var(--warning);
+  font-size: 21rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.to-round-tag--served {
+  color: var(--brand);
+}
+
+.to-round-tag--settled {
+  color: var(--text-3);
+}
+
+.to-round-tag--muted {
+  color: #9aa1aa;
+}
+
+.to-round-staff {
+  display: block;
+  margin: 2rpx 0 4rpx;
+  color: #a21caf;
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
+.to-drow {
+  display: flex;
+  align-items: baseline;
+  gap: 14rpx;
+  padding: 10rpx 0;
+}
+
+.to-drow--muted {
+  opacity: .55;
+}
+
+.to-drow-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.to-drow-name {
+  color: var(--text-1);
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.to-drow-spec,
+.to-drow-mark {
+  margin-top: 4rpx;
+  color: var(--text-3);
+  font-size: 22rpx;
+  line-height: 1.35;
+}
+
+.to-drow-mark {
+  color: #9a6a21;
+}
+
+.to-drow-qty {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: 24rpx;
+}
+
+.to-drow-amt {
+  flex-shrink: 0;
+  min-width: 96rpx;
+  text-align: right;
+  color: var(--text-1);
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.to-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 12rpx;
+  padding-top: 16rpx;
+  border-top: 2rpx dashed #e2e6ea;
+}
+
+.to-foot-l {
+  color: var(--text-3);
+  font-size: 23rpx;
+}
+
+.to-foot-v {
+  color: var(--brand);
+  font-size: 36rpx;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.to-cur {
+  color: var(--brand);
+  font-size: 24rpx;
+  font-weight: 700;
+  margin-right: 2rpx;
+}
+
+.to-submeta {
+  margin: 16rpx 4rpx 0;
+  color: var(--text-3);
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.to-hint-note {
+  margin: 14rpx 0 0;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: var(--bg-subtle);
+  color: var(--text-3);
+  font-size: 23rpx;
+  line-height: 1.45;
+}

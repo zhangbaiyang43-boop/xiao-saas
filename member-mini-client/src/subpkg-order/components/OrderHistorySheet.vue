@@ -1,102 +1,69 @@
 <template>
   <base-sheet layer="blocking" title="本桌订单" @close="$emit('close')">
       <scroll-view v-if="currentTableOrder" class="orders-list" scroll-y>
-        <view class="table-status-card" :class="'table-status-card--' + tableOrderStatusTone">
-          <view class="table-status-top">
-            <view class="table-status-badge" :class="{ 'table-status-badge--live': tableOrderStatusTone === 'preparing' }">
-              <text class="table-status-badge-icon iconfont" :class="tableOrderStatusIcon"></text>
-              <text>{{ tableOrderStatusBadge }}</text>
-            </view>
-            <text class="table-status-order-no">#{{ currentTableOrder.orderNo }}</text>
-          </view>
-          <!-- 之前这里连着堆了标题+副标题(tableOrderStatusHint)+下面的"下一步"提示条
-          (tableOrderNextAction) 三层，preparing/paid 状态下三层说的其实是同一件事
-          （"别管了，等着就行"），顾客要花时间确认这不是三条不同的信息。只留标题
-          （"当前是什么状态"）和下一步提示条（"接下来该干嘛，逐状态都不一样、信息量
-          更大"），去掉纯重复的副标题层。 -->
-          <text class="table-status-main">{{ tableOrderStatusTitle }}</text>
-          <view class="table-status-action">
-            <text class="table-status-action-icon iconfont icon-roundright"></text>
-            <text class="table-status-action-text">{{ tableOrderNextAction }}</text>
-          </view>
-        </view>
-
         <view v-if="currentTableOrder.refundRequired" class="refund-attention-card">
           <text class="refund-attention-title">订单已取消，付款已成功，请联系商家处理退款</text>
           <text class="refund-attention-sub">请保留订单信息并联系商家处理退款。</text>
         </view>
 
-        <!-- 取餐牌号是顾客用来对上自己那份餐的实体凭证，比金额/时间更重要，之前跟其它
-        四个小方块挤在同一个四列网格里、权重一样大，pickupNo 有值时还会多出第五个格子
-        撑破网格排版、单独换行显得像排版错误。这里单独拎出来做成一整条、字号明显更大，
-        网格永远固定桌号/金额/时间/份数四项，不会再因为桌牌号有没有而错位。 -->
-        <view v-if="currentTableOrder.pickupNo" class="pickup-no-banner">
-          <text class="pickup-no-banner-icon iconfont icon-form"></text>
-          <text class="pickup-no-banner-text">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
-        </view>
-
-        <view class="order-core-strip">
-          <view class="order-core-item">
-            <text class="order-core-icon iconfont icon-zuowei"></text>
-            <text class="order-core-value">{{ tableNo || orderModeText.unknownTable }}</text>
-          </view>
-          <view class="order-core-item">
-            <text class="order-core-icon order-core-icon--amount iconfont icon-pay"></text>
-            <text class="order-core-value order-core-value--amount">{{ '¥' + formatPrice(currentTableOrder.total || 0) }}</text>
-          </view>
-          <view class="order-core-item">
-            <text class="order-core-icon iconfont icon-timefill"></text>
-            <text class="order-core-value">{{ currentTableOrder.createdAt || '-' }}</text>
-          </view>
-          <view class="order-core-item">
-            <text class="order-core-icon iconfont icon-form"></text>
-            <text class="order-core-value">{{ currentOrderItemCount + '份' }}</text>
-          </view>
-        </view>
-
-        <view class="order-progress-card">
-          <view class="order-progress-head">
-            <text class="order-progress-card-title">订单进度</text>
-            <text class="order-progress-card-sub">{{ tableOrderProgressSub }}</text>
-          </view>
-          <view class="order-progress-steps">
-            <view v-for="step in tableOrderTimeline" :key="step.key" class="order-progress-step" :class="{ active: step.active, done: step.done }">
-              <view class="order-progress-dot"><text class="iconfont" :class="step.icon"></text></view>
-              <view v-if="step.key !== 'settled'" class="order-progress-line"></view>
-              <text class="order-progress-title">{{ step.label }}</text>
+        <view class="to-card" :class="'to-card--' + (tableOrderStatusTone === 'paid' ? 'wait' : tableOrderStatusTone)">
+          <view class="to-head">
+            <view class="to-head-status">
+              <text class="to-badge">{{ tableOrderStatusBadge }}</text>
+              <text class="to-desc">{{ tableOrderNextAction }}</text>
+            </view>
+            <view class="to-ident">
+              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }}桌</text>
+              <text v-if="currentTableOrder.pickupNo" class="to-ident-line">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
+              <text class="to-ident-line">#{{ currentTableOrder.orderNo }}</text>
             </view>
           </view>
-        </view>
 
-        <view class="current-order-card">
-          <!-- 订单号/下单时间/份数上面状态卡和信息条已经露过一次了，这里只保留这个
-          区块真正独有的信息——菜品清单本身，标题旁边留总价方便对着清单核对金额。 -->
-          <view class="current-order-head">
-            <view class="current-order-title-line">
-              <text class="current-order-title-icon iconfont icon-list"></text>
-              <text class="current-order-title">菜品明细</text>
+          <view v-if="tableOrderTimeline.length" class="to-track">
+            <view
+              v-for="step in tableOrderTimeline"
+              :key="step.key"
+              class="to-track-step"
+              :class="{ done: step.done, now: step.active }"
+            >
+              <view class="to-track-node"></view>
+              <text class="to-track-label">{{ step.label }}</text>
             </view>
-            <text class="current-order-total">{{ '¥' + formatPrice(currentTableOrder.total || 0) }}</text>
           </view>
-          <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="current-order-items current-order-items--visible">
-            <view v-for="(item, idx) in currentTableOrder.items" :key="item.specKey || item.id || item.name || idx" class="order-detail-row">
-              <view class="order-detail-main">
-                <text class="order-detail-name">{{ orderItemName(item) }}</text>
-                <text v-if="orderItemSpecText(item)" class="order-detail-spec">{{ orderItemSpecText(item) }}</text>
+
+          <view class="to-divider"></view>
+
+          <view v-if="currentTableOrder.items && currentTableOrder.items.length" class="to-list">
+            <view
+              v-for="(item, idx) in currentTableOrder.items"
+              :key="item.specKey || item.id || item.name || idx"
+              class="to-drow"
+            >
+              <view class="to-drow-main">
+                <text class="to-drow-name">{{ orderItemName(item) }}</text>
+                <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
               </view>
-              <text class="order-detail-qty">{{ '×' + orderItemQty(item) }}</text>
-              <text class="order-detail-amount">{{ '¥' + formatPrice(orderItemAmount(item)) }}</text>
+              <text class="to-drow-qty">×{{ orderItemQty(item) }}</text>
+              <text class="to-drow-amt">¥{{ formatPrice(orderItemAmount(item)) }}</text>
             </view>
           </view>
-          <view v-else class="current-order-empty-detail">
-            <text>{{ currentOrderMainItemText }}</text>
+          <view v-else class="to-list">
+            <view class="to-drow to-drow--muted">
+              <text class="to-drow-name">{{ currentOrderMainItemText }}</text>
+            </view>
+          </view>
+
+          <view class="to-foot">
+            <text class="to-foot-l">共 {{ currentOrderItemCount }} 份 · 已在线支付</text>
+            <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(currentTableOrder.total || 0) }}</text>
           </view>
         </view>
+
+        <view class="to-submeta">{{ currentTableOrder.createdAt || '-' }} 下单 · 先付后厨</view>
 
         <view v-if="historyTableOrders.length" class="history-orders-card">
-          <!-- P1：这里之前只能一笔笔点开心算加总，桌台账单模式一进来就有本桌合计，
-          这里补一份等价信息——纯前端把当前这一笔和历史订单加总展示，不是"应付
-          金额"（这里每一笔都已经各自付清，不存在欠款/待结算）。 -->
+          <!-- P1：本桌合计（当前这一笔 + 历史订单加总），纯展示性小结，不是应付金额——
+          prepay 每一笔都已经各自付清，不存在欠款。 -->
           <view class="history-orders-summary">
             <text>本桌共点 {{ orderHistoryItemCount }} 份</text>
             <text>¥{{ formatPrice(orderHistoryTotal) }}</text>
@@ -142,10 +109,13 @@
 </template>
 
 <script>
-// 从 menu.vue 拆出来的本桌订单弹层（原来是 showOrders && !isSharedBillMode 那一段
-// 模板，非分账模式下的订单状态 + 历史订单视图）。纯展示组件，不带任何业务逻
-// 辑——关闭、展开/收起历史订单都只 emit 出去，真正的状态还是父组件的
-// showOrders/showAllOrders，一行逻辑都没有改。
+// 从 menu.vue 拆出来的本桌订单弹层（非分账模式 / 先付后厨下的订单状态 + 历史订单
+// 视图）。纯展示组件，不带任何业务逻辑——关闭、展开/收起历史订单都只 emit 出去。
+//
+// 方案B（聚合式）改版：状态胶囊 + 右侧身份栏（桌号/桌牌/单号）+ 压缩进度条 +
+// 平铺菜品清单 + 卡底合计。四宫格信息条、独立的「订单进度」大卡都收进这张卡里。
+// 跟 TableBillSheet 用同一套 `.to-*` 结构。退款提醒卡、历史订单/本桌合计卡是
+// 先付后厨专属信息，保留。
 import StateEmpty from '@/components/state-empty/state-empty.vue'
 import BaseSheet from '@/components/base-sheet/base-sheet.vue'
 
@@ -187,6 +157,7 @@ export default {
 
 <style lang="scss">
 @import '../styles/_shared.scss';
+@import './table-order-card.scss';
 
 .orders-list {
   flex: 1;
@@ -195,33 +166,8 @@ export default {
   box-sizing: border-box;
 }
 
-
-
-
-.table-status-card {
-  padding: 30rpx;
-  border-radius: var(--radius-card);
-  border: 2rpx solid var(--order-status-border, #bae6fd);
-  background: var(--order-status-bg, #eff8ff);
-  box-sizing: border-box;
-}
-
-.table-status-card--canceled {
-  --order-status-main: var(--danger);
-  --order-status-soft: #fee2e2;
-  --order-status-bg: #fff1f2;
-  --order-status-border: #fecdd3;
-}
-
-.table-status-card--paid {
-  --order-status-main: #0ea5e9;
-  --order-status-soft: #e0f2fe;
-  --order-status-bg: #eff8ff;
-  --order-status-border: #bae6fd;
-}
-
 .refund-attention-card {
-  margin-top: 16rpx;
+  margin-top: 12rpx;
   padding: 22rpx 24rpx;
   border: 2rpx solid #fecaca;
   border-radius: 18rpx;
@@ -247,207 +193,6 @@ export default {
   line-height: 34rpx;
 }
 
-.table-status-card--accepted {
-  --order-status-main: var(--warning);
-  --order-status-soft: #fef3c7;
-  --order-status-bg: #fffbeb;
-  --order-status-border: #fde68a;
-}
-
-.table-status-card--served,
-.table-status-card--completed {
-  --order-status-main: var(--brand);
-  --order-status-soft: #dcfce7;
-  --order-status-bg: #ecfdf5;
-  --order-status-border: #bbf7d0;
-}
-
-
-
-.table-status-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
-  min-width: 0;
-}
-
-
-
-.table-status-badge {
-  height: 52rpx;
-  padding: 0 22rpx;
-  border-radius: 999rpx;
-  background: var(--order-status-main, var(--brand));
-  display: inline-flex;
-  align-items: center;
-  gap: 8rpx;
-  color: var(--text-inverse);
-  font-size: 24rpx;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-
-
-.table-status-badge-icon {
-  font-size: 24rpx;
-  line-height: 1;
-}
-
-
-
-.table-status-order-no {
-  min-width: 0;
-  color: var(--text-3);
-  font-size: 24rpx;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.table-status-main {
-  display: block;
-  margin-top: 22rpx;
-  color: var(--order-status-main, var(--brand));
-  font-size: 42rpx;
-  line-height: 50rpx;
-  font-weight: 900;
-  letter-spacing: 0;
-}
-
-
-
-@keyframes order-status-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .55; }
-}
-
-.table-status-badge--live .table-status-badge-icon {
-  animation: order-status-pulse 1.6s ease-in-out infinite;
-}
-
-.pickup-no-banner {
-  margin-top: 16rpx;
-  padding: 16rpx 20rpx;
-  border-radius: 16rpx;
-  background: rgba(255,255,255,.85);
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.pickup-no-banner-icon {
-  color: var(--order-status-main, var(--brand));
-  font-size: 32rpx;
-  line-height: 1;
-}
-
-.pickup-no-banner-text {
-  color: var(--order-status-main, var(--brand));
-  font-size: 34rpx;
-  font-weight: 900;
-  letter-spacing: 1rpx;
-}
-
-.table-status-action {
-  margin-top: 20rpx;
-  min-height: 64rpx;
-  padding: 14rpx 18rpx;
-  border-radius: 18rpx;
-  background: rgba(255,255,255,.72);
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
-  box-sizing: border-box;
-}
-
-
-
-.table-status-action-icon {
-  flex-shrink: 0;
-  color: var(--order-status-main, var(--brand));
-  font-size: 26rpx;
-  line-height: 1;
-}
-
-
-
-.table-status-action-text {
-  min-width: 0;
-  color: var(--order-status-main, var(--brand));
-  font-size: 26rpx;
-  font-weight: 900;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.order-core-strip {
-  margin-top: 16rpx;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10rpx;
-}
-
-
-
-.order-core-item {
-  min-width: 0;
-  height: 104rpx;
-  border-radius: 18rpx;
-  background: #f8fafb;
-  border: 1rpx solid #edf0f2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-}
-
-
-
-.order-core-icon {
-  color: var(--text-3);
-  font-size: 30rpx;
-  line-height: 1;
-}
-
-
-
-.order-core-icon--amount {
-  color: var(--brand);
-}
-
-
-
-.order-core-value {
-  max-width: 100%;
-  margin-top: 10rpx;
-  color: var(--text-1);
-  font-size: 26rpx;
-  line-height: 30rpx;
-  font-weight: 900;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.order-core-value--amount {
-  color: var(--brand);
-}
-
-
-
-.order-progress-card,
-.current-order-card,
 .history-orders-card {
   margin-top: 20rpx;
   padding: 24rpx;
@@ -456,246 +201,6 @@ export default {
   border: 2rpx solid #f1f5f9;
 }
 
-
-
-.order-progress-head,
-.current-order-head,
-.history-orders-head,
-.history-order-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 20rpx;
-  align-items: center;
-}
-
-
-
-.order-progress-card-title {
-  font-size: 30rpx;
-  font-weight: 900;
-  color: var(--text-1);
-}
-
-
-
-.order-progress-card-sub {
-  min-width: 0;
-  color: var(--text-3);
-  font-size: 23rpx;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.order-progress-steps {
-  margin-top: 24rpx;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8rpx;
-}
-
-
-
-.order-progress-step {
-  position: relative;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  color: var(--text-3);
-}
-
-
-
-.order-progress-dot {
-  position: relative;
-  z-index: 2;
-  width: 48rpx;
-  height: 48rpx;
-  border-radius: 50%;
-  background: #eef0f2;
-  color: #9aa1aa;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26rpx;
-}
-
-
-
-.order-progress-line {
-  position: absolute;
-  z-index: 1;
-  top: 23rpx;
-  left: calc(50% + 28rpx);
-  right: calc(-50% + 28rpx);
-  height: 3rpx;
-  border-radius: 3rpx;
-  background: #e5e7eb;
-}
-
-
-
-.order-progress-title {
-  display: block;
-  width: 100%;
-  margin-top: 14rpx;
-  font-size: 22rpx;
-  line-height: 30rpx;
-  font-weight: 800;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.order-progress-step.done .order-progress-line {
-  background: var(--brand);
-}
-
-.order-progress-step.done .order-progress-dot,
-.order-progress-step.active .order-progress-dot {
-  background: var(--brand);
-  color: var(--text-inverse);
-}
-
-@keyframes order-progress-ring-pulse {
-  0%, 100% { box-shadow: 0 0 0 8rpx #dcfce7; }
-  50% { box-shadow: 0 0 0 14rpx #dcfce7; }
-}
-
-.order-progress-step.active .order-progress-dot {
-  animation: order-progress-ring-pulse 1.8s ease-in-out infinite;
-}
-
-.order-progress-step.done .order-progress-title,
-.order-progress-step.active .order-progress-title {
-  color: var(--text-1);
-}
-
-
-
-.current-order-title-line {
-  display: flex;
-  align-items: center;
-  gap: 8rpx;
-}
-
-
-
-.current-order-title-icon {
-  color: var(--brand);
-  font-size: 28rpx;
-  line-height: 1;
-}
-
-
-
-.current-order-title {
-  display: block;
-  font-size: 30rpx;
-  font-weight: 900;
-  color: var(--text-1);
-}
-
-
-
-.current-order-total {
-  font-size: 36rpx;
-  font-weight: 900;
-  color: var(--brand);
-}
-
-
-
-.current-order-items {
-  margin-top: 10rpx;
-  padding-top: 0;
-}
-
-
-
-.current-order-items--visible {
-  display: block;
-}
-
-
-
-.current-order-empty-detail {
-  margin-top: 14rpx;
-  padding: 18rpx 0 4rpx;
-  border-top: 1rpx solid #f1f5f9;
-  text { font-size: 26rpx; color: var(--text-3); }
-}
-
-
-
-.order-detail-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16rpx;
-  padding: 16rpx 0;
-  border-top: 1rpx solid #f1f5f9;
-}
-
-
-
-.order-detail-main {
-  flex: 1;
-  min-width: 0;
-}
-
-
-
-.order-detail-name,
-.order-detail-spec {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-
-
-.order-detail-name {
-  font-size: 28rpx;
-  color: var(--text-1);
-  font-weight: 700;
-}
-
-
-
-.order-detail-spec {
-  margin-top: 4rpx;
-  font-size: 22rpx;
-  color: var(--text-3);
-}
-
-
-
-.order-detail-qty {
-  width: 72rpx;
-  text-align: right;
-  font-size: 26rpx;
-  color: var(--text-3);
-}
-
-
-
-.order-detail-amount {
-  width: 110rpx;
-  text-align: right;
-  font-size: 26rpx;
-  color: var(--text-1);
-  font-weight: 800;
-}
-
-
-
 .history-orders-summary {
   display: flex;
   align-items: baseline;
@@ -703,16 +208,19 @@ export default {
   padding-bottom: 14rpx;
   margin-bottom: 14rpx;
   border-bottom: 2rpx solid #f1f5f9;
+
   text:first-child { font-size: 25rpx; color: var(--text-3); font-weight: 700; }
   text:last-child { font-size: 32rpx; color: var(--brand); font-weight: 900; }
 }
 
 .history-orders-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
   text:first-child { font-size: 28rpx; font-weight: 800; color: var(--text-1); }
   text:last-child { font-size: 24rpx; color: var(--brand); font-weight: 700; }
 }
-
-
 
 .history-order-block {
   margin-top: 18rpx;
@@ -720,32 +228,30 @@ export default {
   border-top: 2rpx solid #f1f5f9;
 }
 
-
-
 .history-order-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16rpx;
+
   text { font-size: 25rpx; color: var(--text-3); }
   text:last-child { color: var(--text-1); font-weight: 800; }
 }
 
-
-
 .history-order-items {
   margin-top: 10rpx;
 }
-
-
 
 .history-order-item-row {
   display: flex;
   justify-content: space-between;
   gap: 16rpx;
   padding: 8rpx 0;
+
   text { font-size: 23rpx; color: var(--text-3); }
   text:first-child { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   text:last-child { color: var(--text-2); font-weight: 700; }
 }
-
-
 
 .orders-actions {
   flex-shrink: 0;
@@ -753,25 +259,25 @@ export default {
   background: var(--bg-card);
 }
 
-
-
 .orders-secondary-btn {
   height: 88rpx;
   border-radius: 999rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  text { font-size: 30rpx; font-weight: 900; }
   background: var(--brand);
-  text { color: var(--text-inverse); }
+
+  text { font-size: 30rpx; font-weight: 900; color: var(--text-inverse); }
 }
 
 .orders-secondary-btn--canceled {
   background: var(--text-1);
 }
 
-.orders-secondary-btn--completed {
+.orders-secondary-btn--completed,
+.orders-secondary-btn--settled {
   background: #f3f5f7;
+
   text { color: var(--text-2); }
 }
 </style>
