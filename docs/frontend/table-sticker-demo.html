@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>桌贴码 A/B 版 DEMO</title>
+<style>
+  :root{
+    --paper:#ffffff;
+    --ink:#111418;
+    --ink-2:#5b6470;
+    --ink-3:#8a929c;
+    --brand:#07C160;
+    --brand-ink:#05913f;
+    --line:#e6e9ec;
+    --bg:#f4f5f7;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    line-height:1.6;
+    padding:32px 20px 60px;
+  }
+  .wrap{max-width:980px;margin:0 auto}
+  h1{font-size:22px;font-weight:800;margin-bottom:6px}
+  .sub{color:var(--ink-2);font-size:14px;margin-bottom:24px}
+
+  .changes{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px;margin-bottom:28px;font-size:13.5px;
+  }
+  .changes h2{font-size:14px;font-weight:800;margin-bottom:10px;color:var(--brand-ink)}
+  .changes ul{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:6px 22px}
+  .changes li{padding-left:20px;position:relative;color:var(--ink-2)}
+  .changes li::before{content:"✓";position:absolute;left:0;color:var(--brand);font-weight:800}
+  @media(max-width:680px){.changes ul{grid-template-columns:1fr}}
+
+  .stage{display:flex;gap:34px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+  .col{flex:0 0 340px;max-width:340px}
+  .col > .tag{
+    display:inline-block;font-size:12px;font-weight:800;letter-spacing:.5px;
+    background:var(--ink);color:#fff;border-radius:6px;padding:3px 10px;margin-bottom:10px;
+  }
+  .col .why{font-size:12.5px;color:var(--ink-2);margin-top:12px}
+  .col .why b{color:var(--ink)}
+
+  /* ===== 桌贴本体：100 x 120 比例 ===== */
+  .sticker{
+    width:340px;height:408px;background:var(--paper);
+    border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 8px 30px rgba(20,30,40,.08);
+    padding:18px 18px 14px;display:flex;flex-direction:column;
+    position:relative;overflow:hidden;
+  }
+  .cut{position:absolute;inset:8px;border:1px dashed #cfd6dd;border-radius:10px;pointer-events:none}
+
+  /* 店招 */
+  .brand{display:flex;align-items:center;gap:8px;z-index:1}
+  .brand .logo{
+    width:26px;height:26px;border-radius:7px;flex:none;
+    background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:900;
+  }
+  .brand .name{font-size:14px;font-weight:800;color:var(--ink)}
+  .brand .name small{font-weight:600;color:var(--ink-3);font-size:11px;margin-left:2px}
+
+  /* 二维码 + 静区 */
+  .qr-box{
+    align-self:center;background:#fff;border-radius:14px;
+    padding:14px;               /* 这就是留白/静区 */
+    margin:auto 0;
+  }
+  .qr{width:186px;height:186px;display:block}
+  .qr .logo-center{}
+  .qr-cap{width:22px;height:22px}
+
+  /* 说明文案 */
+  .say{font-size:13px;font-weight:700;color:var(--ink);text-align:center}
+  .flow{font-size:11px;color:var(--ink-3);text-align:center;margin-top:4px}
+
+  /* ---------- A 版：店名压顶 ---------- */
+  .v-a .topbar{
+    background:var(--brand);color:#fff;border-radius:10px;
+    display:flex;align-items:center;gap:8px;padding:7px 10px;z-index:1;
+  }
+  .v-a .topbar .logo{width:24px;height:24px;border-radius:6px;background:#fff;color:var(--brand-ink);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;flex:none}
+  .v-a .topbar .name{font-size:14px;font-weight:800}
+  .v-a .topbar .name small{font-weight:600;opacity:.85;font-size:11px;margin-left:3px}
+  .v-a .headline{display:flex;align-items:center;justify-content:space-between;margin-top:12px;z-index:1}
+  .v-a .scan-lite{font-size:20px;font-weight:800;color:var(--ink);letter-spacing:1px}
+  .v-a .tno{
+    display:flex;align-items:baseline;gap:2px;background:#eafaf0;border:1.5px solid var(--brand);
+    color:var(--brand-ink);border-radius:10px;padding:2px 12px;
+  }
+  .v-a .tno b{font-size:34px;font-weight:900;line-height:1}
+  .v-a .tno span{font-size:14px;font-weight:800}
+
+  /* ---------- B 版：桌号即主视觉 ---------- */
+  .v-b{align-items:center}
+  .v-b .brand{align-self:center;margin-bottom:2px}
+  .v-b .brand .logo{width:22px;height:22px;font-size:11px}
+  .v-b .brand .name{font-size:13px}
+  .v-b .hero{text-align:center;z-index:1;margin-top:2px}
+  .v-b .hero .tno{font-size:66px;font-weight:900;line-height:.95;color:var(--ink);letter-spacing:-1px}
+  .v-b .hero .tno span{font-size:24px;font-weight:800;color:var(--brand-ink);margin-left:4px}
+  .v-b .hero .scan-pill{
+    display:inline-block;margin-top:6px;background:var(--ink);color:#fff;
+    font-size:12px;font-weight:800;letter-spacing:2px;border-radius:999px;padding:3px 14px;
+  }
+
+  .foot-note{
+    max-width:720px;margin:34px auto 0;font-size:12.5px;color:var(--ink-2);
+    background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+  }
+  .foot-note b{color:var(--ink)}
+  .foot-note ul{margin:8px 0 0 18px}
+  .foot-note li{margin:3px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>桌贴码 A/B 版 DEMO</h1>
+  <p class="sub">按调整清单重排：桌号放大、店名压顶、中心换本店 Logo、平台品牌移除、文案收敛。两版差别只在<b>信息主次</b>——A 版以"这是哪家店"打头，B 版以"这是几号桌"打头。二维码为示意图，非真实可扫码。</p>
+
+  <div class="changes">
+    <h2>相对原图改了什么</h2>
+    <ul>
+      <li>桌号从右上角小绿标 → 与主视觉同级的大字</li>
+      <li>顶部加店名 + Logo，建立"官方码"信任</li>
+      <li>二维码中心换成本店 Logo（去掉"开心点单"）</li>
+      <li>"扫码点餐"缩小，让版面给桌号和店名</li>
+      <li>"加菜也扫这里"并进副标题，不再压最底部</li>
+      <li>加一行极简流程引导（试运营期观察，可撤）</li>
+      <li>二维码四周留足静区（白边）</li>
+      <li>成品按 100 × 120 mm，四周留裁切安全区</li>
+    </ul>
+  </div>
+
+  <div class="stage">
+    <!-- ================= A 版 ================= -->
+    <div class="col">
+      <span class="tag">A 版 · 店名压顶（信任优先）</span>
+      <div class="sticker v-a">
+        <div class="cut"></div>
+        <div class="topbar">
+          <div class="logo">宝</div>
+          <div class="name">大宝羊肉汤<small>弘农路店</small></div>
+        </div>
+        <div class="headline">
+          <div class="scan-lite">扫码点餐</div>
+          <div class="tno"><b>01</b><span>桌</span></div>
+        </div>
+        <div class="qr-box"><div class="qr" data-qr="A"></div></div>
+        <div class="say">微信扫码 · 本桌下单，加菜也扫这里</div>
+        <div class="flow">扫码选菜 · 下单后厨即做 · 有事招呼服务员</div>
+      </div>
+      <p class="why"><b>什么时候选：</b>顾客对这套流程陌生、担心"是不是别人贴的码"时。店招压顶最快建立信任，桌号在右侧仍然醒目。</p>
+    </div>
+
+    <!-- ================= B 版 ================= -->
+    <div class="col">
+      <span class="tag">B 版 · 桌号即主视觉（运营优先）</span>
+      <div class="sticker v-b">
+        <div class="cut"></div>
+        <div class="brand">
+          <div class="logo">宝</div>
+          <div class="name">大宝羊肉汤 · 弘农路店</div>
+        </div>
+        <div class="hero">
+          <div class="tno">01<span>桌</span></div>
+          <div class="scan-pill">扫码点餐</div>
+        </div>
+        <div class="qr-box"><div class="qr" data-qr="B"></div></div>
+        <div class="say">微信扫码 · 本桌下单，加菜也扫这里</div>
+        <div class="flow">扫码选菜 · 下单后厨即做 · 有事招呼服务员</div>
+      </div>
+      <p class="why"><b>什么时候选：</b>店里桌数多、服务员要靠贴纸快速对桌时。超大桌号一眼可读，隔一张桌子也看得清。</p>
+    </div>
+  </div>
+
+  <div class="foot-note">
+    <b>两版都要做到的（和排版无关）：</b>
+    <ul>
+      <li><b>确认是正式版小程序码</b>，不是体验版——体验版只有白名单手机能扫，试运营必翻车。</li>
+      <li>印之前用两台手机各扫一次，核对进入的是本店、桌号对得上，再批量印。</li>
+      <li>试运营用方形贴纸即可；正式版建议换亚克力立牌，不会被顾客撕、也不会被餐具压住。</li>
+      <li>中心 Logo 用方形、主体居中的图，会被缩到码宽的 ~20% 再裁圆。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+// 生成"小程序码"风格的示意图：外圈放射状短线 + 3 个定位环 + 中心店 Logo。
+// 仅用于看排版比例，不是真实二维码。
+function buildQR(el){
+  const S = 186, c = S/2, NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS,'svg');
+  svg.setAttribute('viewBox', `0 0 ${S} ${S}`);
+  svg.setAttribute('class','qr'); svg.setAttribute('width',S); svg.setAttribute('height',S);
+
+  const rand = (seed => () => (seed = seed*16807 % 2147483647) / 2147483647)(el.dataset.qr === 'A' ? 101 : 907);
+
+  // 放射状短线
+  const rings = [
+    {r0:34, r1:52, n:60, w:3.2},
+    {r0:56, r1:82, n:88, w:3.4},
+    {r0:86, r1:90, n:120, w:2.2}
+  ];
+  rings.forEach(ring=>{
+    for(let i=0;i<ring.n;i++){
+      if(rand() < .32) continue;
+      const a = (i/ring.n) * Math.PI*2;
+      const len = ring.r0 + rand()*(ring.r1-ring.r0);
+      const x1 = c + Math.cos(a)*ring.r0, y1 = c + Math.sin(a)*ring.r0;
+      const x2 = c + Math.cos(a)*len,     y2 = c + Math.sin(a)*len;
+      const ln = document.createElementNS(NS,'line');
+      ln.setAttribute('x1',x1);ln.setAttribute('y1',y1);
+      ln.setAttribute('x2',x2);ln.setAttribute('y2',y2);
+      ln.setAttribute('stroke','#111418');
+      ln.setAttribute('stroke-width',ring.w);
+      ln.setAttribute('stroke-linecap','round');
+      svg.appendChild(ln);
+    }
+  });
+
+  // 3 个定位环
+  [[-1,-1],[1,-1],[-1,1]].forEach(([dx,dy])=>{
+    const px = c + dx*66, py = c + dy*66;
+    const o = document.createElementNS(NS,'circle');
+    o.setAttribute('cx',px);o.setAttribute('cy',py);o.setAttribute('r',8.5);
+    o.setAttribute('fill','none');o.setAttribute('stroke','#111418');o.setAttribute('stroke-width',3);
+    svg.appendChild(o);
+    const d = document.createElementNS(NS,'circle');
+    d.setAttribute('cx',px);d.setAttribute('cy',py);d.setAttribute('r',3);d.setAttribute('fill','#111418');
+    svg.appendChild(d);
+  });
+
+  // 中心：白底盘 + 店 Logo
+  const disc = document.createElementNS(NS,'circle');
+  disc.setAttribute('cx',c);disc.setAttribute('cy',c);disc.setAttribute('r',30);
+  disc.setAttribute('fill','#fff');
+  svg.appendChild(disc);
+  const badge = document.createElementNS(NS,'circle');
+  badge.setAttribute('cx',c);badge.setAttribute('cy',c);badge.setAttribute('r',25);
+  badge.setAttribute('fill','#07C160');
+  svg.appendChild(badge);
+  const t = document.createElementNS(NS,'text');
+  t.setAttribute('x',c);t.setAttribute('y',c+7);t.setAttribute('text-anchor','middle');
+  t.setAttribute('fill','#fff');t.setAttribute('font-size','20');t.setAttribute('font-weight','900');
+  t.textContent='宝';
+  svg.appendChild(t);
+
+  el.replaceWith(svg);
+}
+document.querySelectorAll('.qr').forEach(buildQR);
+</script>
+</body>
+</html>
