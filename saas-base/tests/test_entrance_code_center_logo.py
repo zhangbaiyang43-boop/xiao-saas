@@ -52,12 +52,24 @@ class OverlayCenterLogoTest(unittest.TestCase):
             out = self.service._overlay_center_logo(self.code_bytes, "https://cos.example.com/logo.webp")
 
         self.assertNotEqual(out, self.code_bytes)
-        img = Image.open(io.BytesIO(out))
+        img = Image.open(io.BytesIO(out)).convert("RGB")
         self.assertEqual(img.size, (430, 430))
         # 中心像素应当来自绿色 Logo，而不是原本的白底
-        r, g, b = img.convert("RGB").getpixel((215, 215))
+        r, g, b = img.getpixel((215, 215))
         self.assertGreater(g, r + 40)
         self.assertGreater(g, b + 40)
+
+    def test_overlay_disc_stays_within_center_zone(self):
+        # 叠加区必须压在码宽 ~20% 的原生头像位内，不能吃到外圈数据点：
+        # 距中心 0.22*宽 处的像素必须和原图一模一样。
+        base = Image.new("RGB", (430, 430), (0, 0, 0))  # 纯黑，方便判断"没被动过"
+        buf = io.BytesIO()
+        base.save(buf, format="PNG")
+        with patch("urllib.request.urlopen", return_value=_FakeResponse(self.logo_bytes)):
+            out = self.service._overlay_center_logo(buf.getvalue(), "https://cos.example.com/logo.webp")
+        img = Image.open(io.BytesIO(out)).convert("RGB")
+        for point in [(215 + 95, 215), (215, 215 + 95), (215 - 95, 215), (215, 215 - 95)]:
+            self.assertEqual(img.getpixel(point), (0, 0, 0), f"{point} 不应被叠加区覆盖")
 
     def test_download_failure_returns_original_untouched(self):
         with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):

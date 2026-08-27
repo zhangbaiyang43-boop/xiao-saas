@@ -458,8 +458,11 @@ class EntranceCodeService(BaseService):
                 logo_img = Image.open(BytesIO(response.read())).convert("RGBA")
 
             ss = 4  # 超采样抗锯齿
-            diameter = max(48, int(cw * 0.26))
-            ring = max(6, int(diameter * 0.12))
+            # 直径压在码宽的 20% 以内：这正好是小程序码原生头像的占位，
+            # 再大就会盖住外圈的数据点导致扫不出。白边只要薄薄一圈，
+            # 够盖掉原平台头像的边缘即可，不是一圈光晕。
+            diameter = max(40, int(cw * 0.20))
+            ring = max(2, int(diameter * 0.04))
             backing = diameter + ring * 2
 
             logo_scaled = logo_img.resize((diameter * ss, diameter * ss), Image.LANCZOS)
