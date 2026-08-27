@@ -20,24 +20,28 @@
               <text v-if="tableStatusView.note" class="to-desc to-desc--sub">{{ tableStatusView.note }}</text>
             </view>
             <view class="to-ident">
-              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }}桌</text>
+              <text class="to-ident-main">店内 {{ tableNo || orderModeText.unknownTable }} 桌</text>
               <text v-if="pickupNoEnabled && tablePickupNo" class="to-ident-line">桌牌 {{ tablePickupNo }} 号</text>
             </view>
           </view>
 
           <view v-if="tableBillTimeline.length" class="to-track">
-            <view class="to-track-rail">
-              <view
-                v-for="(step, i) in tableBillTimeline"
-                :key="step.key"
-                class="to-track-step"
-                :class="{ done: step.done, now: step.active }"
-              >
-                <view class="to-track-node"></view>
-                <view v-if="i < tableBillTimeline.length - 1" class="to-track-seg"></view>
+            <view class="to-track-bar">
+              <text class="to-track-end">{{ tableBillTimeline[0].label }}</text>
+              <view class="to-track-rail">
+                <view
+                  v-for="(step, i) in tableBillTimeline"
+                  :key="step.key"
+                  class="to-track-step"
+                  :class="{ done: step.done, now: step.active }"
+                >
+                  <view class="to-track-node"></view>
+                  <view v-if="i < tableBillTimeline.length - 1" class="to-track-seg"></view>
+                </view>
               </view>
+              <text class="to-track-end">{{ tableBillTimeline[tableBillTimeline.length - 1].label }}</text>
             </view>
-            <text class="to-track-cap">{{ progressCaption }}</text>
+            <text v-if="tableBillWaitText" class="to-track-wait">{{ tableBillWaitText }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -54,7 +58,8 @@
                   <text class="to-round-t">{{ group.title }} · #{{ group.orderNo }}</text>
                   <text v-if="group.discountAmount > 0" class="to-round-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
-                <text class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
+                <!-- 单批次时顶部胶囊已经说了状态，这里的批次标签就是重复信息，隐掉。 -->
+                <text v-if="tableOrderGroups.length > 1" class="to-round-tag" :class="'to-round-tag--' + group.tone">{{ group.statusText }}</text>
               </view>
               <text v-if="group.isStaff" class="to-round-staff">服务员代点{{ group.staffNote ? ' · ' + group.staffNote : '' }}</text>
 
@@ -64,6 +69,16 @@
                 class="to-drow"
                 :class="{ 'to-drow--muted': item.isInvalid }"
               >
+                <image
+                  v-if="orderItemImage(item) && !orderItemImageFailed[group.id + '_' + idx]"
+                  class="to-drow-img"
+                  :src="orderItemImage(item)"
+                  mode="aspectFill"
+                  @error="$emit('mark-image-failed', group.id + '_' + idx)"
+                />
+                <view v-else class="to-drow-img to-drow-img--ph">
+                  <image class="to-drow-img-ph" src="/static/order/dish-placeholder.png" mode="aspectFit" />
+                </view>
                 <view class="to-drow-main">
                   <text class="to-drow-name">{{ orderItemName(item) }}</text>
                   <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
@@ -90,9 +105,11 @@
           />
         </view>
 
-        <view v-if="tableOrderGroups.length" class="to-submeta">{{ sharedBillSubLabel }}</view>
+        <view v-if="tableOrderGroups.length" class="to-submeta">{{ (tableOrderGroups[0] && tableOrderGroups[0].title ? tableOrderGroups[0].title + ' · ' : '') + sharedBillSubLabel }}</view>
 
-        <view v-if="tableOrderGroups.length && !isTableSettled" class="to-hint-note">
+        <!-- 加菜合并提示：只在第一单（还没加过菜）时给；加过一次之后顾客已经知道会合并，
+             常驻反而是噪音。 -->
+        <view v-if="tableOrderGroups.length === 1 && !isTableSettled" class="to-hint-note">
           <text>同桌后续加菜会自动合并，不需要每次付款。</text>
         </view>
       </scroll-view>
@@ -170,9 +187,10 @@ export default {
     tablePickupNo: { type: [String, Number], default: '' },
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
-    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语。
+    // 方案B：餐后付款 / 桌台账单的压缩进度条（4 步）+ 结账状态短语 + 已等待时长。
     tableBillTimeline: { type: Array, default: () => [] },
     tableBillPayStateText: { type: String, default: '' },
+    tableBillWaitText: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
     tableItemCount: { type: Number, default: 0 },
     tableOrderGroups: { type: Array, default: () => [] },
@@ -192,16 +210,6 @@ export default {
     orderItemAmount: { type: Function, required: true },
   },
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
-  computed: {
-    // 方案B：圆点排旁边那句"当前阶段"文字——取进度里正在进行的那一步，
-    // 全部走完（已结账）就显示最后一步。
-    progressCaption() {
-      const steps = this.tableBillTimeline || []
-      const active = steps.find(step => step.active)
-      if (active) return active.label
-      return steps.length ? steps[steps.length - 1].label : ''
-    },
-  },
   methods: {
     emitCloseOrFinish() {
       if (this.isTableSettled) this.$emit('finish')

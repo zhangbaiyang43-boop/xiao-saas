@@ -13,25 +13,29 @@
               <text class="to-desc">{{ tableOrderNextAction }}</text>
             </view>
             <view class="to-ident">
-              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }}桌</text>
+              <text class="to-ident-main">店内 {{ tableNo || orderModeText.unknownTable }} 桌</text>
               <text v-if="currentTableOrder.pickupNo" class="to-ident-line">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
               <text class="to-ident-line">#{{ currentTableOrder.orderNo }}</text>
             </view>
           </view>
 
           <view v-if="tableOrderTimeline.length" class="to-track">
-            <view class="to-track-rail">
-              <view
-                v-for="(step, i) in tableOrderTimeline"
-                :key="step.key"
-                class="to-track-step"
-                :class="{ done: step.done, now: step.active }"
-              >
-                <view class="to-track-node"></view>
-                <view v-if="i < tableOrderTimeline.length - 1" class="to-track-seg"></view>
+            <view class="to-track-bar">
+              <text class="to-track-end">{{ tableOrderTimeline[0].label }}</text>
+              <view class="to-track-rail">
+                <view
+                  v-for="(step, i) in tableOrderTimeline"
+                  :key="step.key"
+                  class="to-track-step"
+                  :class="{ done: step.done, now: step.active }"
+                >
+                  <view class="to-track-node"></view>
+                  <view v-if="i < tableOrderTimeline.length - 1" class="to-track-seg"></view>
+                </view>
               </view>
+              <text class="to-track-end">{{ tableOrderTimeline[tableOrderTimeline.length - 1].label }}</text>
             </view>
-            <text class="to-track-cap">{{ progressCaption }}</text>
+            <text v-if="tableOrderWaitText" class="to-track-wait">{{ tableOrderWaitText }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -42,6 +46,16 @@
               :key="item.specKey || item.id || item.name || idx"
               class="to-drow"
             >
+              <image
+                v-if="orderItemImage(item) && !orderItemImageFailed['cur_' + idx]"
+                class="to-drow-img"
+                :src="orderItemImage(item)"
+                mode="aspectFill"
+                @error="$emit('mark-image-failed', 'cur_' + idx)"
+              />
+              <view v-else class="to-drow-img to-drow-img--ph">
+                <image class="to-drow-img-ph" src="/static/order/dish-placeholder.png" mode="aspectFit" />
+              </view>
               <view class="to-drow-main">
                 <text class="to-drow-name">{{ orderItemName(item) }}</text>
                 <text v-if="orderItemSpecText(item)" class="to-drow-spec">{{ orderItemSpecText(item) }}</text>
@@ -62,7 +76,7 @@
           </view>
         </view>
 
-        <view class="to-submeta">{{ currentTableOrder.createdAt || '-' }} 下单 · 先付后厨</view>
+        <view class="to-submeta">{{ (currentTableOrder.createdAt || '-') }} 下单 · 先付后厨</view>
 
         <view v-if="historyTableOrders.length" class="history-orders-card">
           <!-- P1：本桌合计（当前这一笔 + 历史订单加总），纯展示性小结，不是应付金额——
@@ -137,8 +151,12 @@ export default {
     tableOrderStatusHint: { type: String, default: '' },
     tableOrderProgressSub: { type: String, default: '' },
     tableOrderTimeline: { type: Array, default: () => [] },
+    // 方案B：进度条下的"已等待 X 分钟"（待接单 / 制作中才有值）。
+    tableOrderWaitText: { type: String, default: '' },
     currentOrderItemCount: { type: Number, default: 0 },
     currentOrderMainItemText: { type: String, default: '' },
+    // 菜品行缩略图——跟 TableBillSheet 对齐，取不到落占位图。
+    orderItemImageFailed: { type: Object, default: () => ({}) },
     // P1 修复：本桌合计（当前这一笔 + 历史订单加总），纯展示性小结，不是应付
     // 金额——prepay 每一笔都已经各自付清，不存在欠款。
     orderHistoryTotal: { type: Number, default: 0 },
@@ -153,16 +171,10 @@ export default {
     orderItemQty: { type: Function, required: true },
     orderItemAmount: { type: Function, required: true },
     orderItemCount: { type: Function, required: true },
+    orderItemImage: { type: Function, required: true },
   },
-  emits: ['close', 'toggle-history'],
+  emits: ['close', 'toggle-history', 'mark-image-failed'],
   computed: {
-    // 方案B：圆点排旁边那句"当前阶段"文字。
-    progressCaption() {
-      const steps = this.tableOrderTimeline || []
-      const active = steps.find(step => step.active)
-      if (active) return active.label
-      return steps.length ? steps[steps.length - 1].label : ''
-    },
     // 卡底的收款状态——先付后厨绝大多数是"已在线支付"，但不能对
     // pending_payment / 已结账 的单也这么写死。
     paidStateText() {

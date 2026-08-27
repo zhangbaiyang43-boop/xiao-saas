@@ -327,17 +327,22 @@
   .b-ident{text-align:right;font-size:11.5px;color:var(--ink-faint);line-height:1.5;font-variant-numeric:tabular-nums;}
   .b-ident b{display:block;color:var(--ink);font-weight:600;font-size:12.5px;}
 
-  .b-mini{display:flex;align-items:center;gap:7px;margin:12px 0 2px;}
-  .b-dots{display:flex;align-items:center;gap:0;flex:0 0 auto;}
-  .b-dots i{width:9px;height:9px;border-radius:999px;background:var(--hairline-strong);display:block;}
-  .b-dots span{width:14px;height:2px;background:var(--hairline-strong);display:block;}
+  .b-prog{margin:12px 0 2px;}
+  .b-prog-bar{display:flex;align-items:center;gap:8px;}
+  .b-prog-end{flex:0 0 auto;font-size:10px;color:var(--ink-faint);white-space:nowrap;}
+  .b-dots{display:flex;align-items:center;flex:1;min-width:0;}
+  .b-dots .stp{flex:1;display:flex;align-items:center;min-width:0;}
+  .b-dots .stp:last-child{flex:0 0 auto;}
+  .b-dots i{width:8px;height:8px;border-radius:999px;background:var(--hairline-strong);flex-shrink:0;}
+  .b-dots .seg{flex:1;min-width:12px;height:2px;background:var(--hairline-strong);}
   .b-dots i.on{background:var(--brand);}
-  .b-dots span.on{background:var(--brand);}
+  .b-dots .seg.on{background:var(--brand);}
   .b-dots i.cur{background:var(--status);box-shadow:0 0 0 3px var(--status-tint);}
-  .b-mini .b-mlabel{font-size:11.5px;color:var(--ink-muted);font-weight:600;}
+  .b-prog-wait{display:block;margin-top:6px;text-align:right;font-size:10.5px;color:var(--ink-faint);}
 
   .b-sep{height:1px;background:var(--hairline);margin:12px 0;}
-  .b-drow{display:flex;align-items:baseline;gap:8px;padding:5px 0;font-size:13.5px;}
+  .b-drow{display:flex;align-items:center;gap:9px;padding:6px 0;font-size:13.5px;}
+  .b-thumb{width:34px;height:34px;border-radius:8px;flex:0 0 auto;}
   .b-drow .nm{flex:1;min-width:0;color:var(--ink);}
   .b-drow .sp{color:var(--ink-faint);font-size:11.5px;}
   .b-rtag{
@@ -452,11 +457,13 @@
         </ul>
       </div>
       <div class="ncard">
-        <h3><span class="k">方案 B</span> · 聚合式</h3>
+        <h3><span class="k">方案 B</span> · 聚合式（已按评审调整）</h3>
         <ul>
           <li><b>一张摘要卡</b>：状态胶囊 + 提示 + 身份信息同框，卡内平铺菜品，卡底压合计。</li>
-          <li><b>进度压缩</b>：四个圆点 + 一行文字，不占竖向空间。</li>
-          <li><b>批次弱化</b>：轮次只做行内小标签（<span class="b-rtag" style="display:inline">1单</span>），视觉更安静。</li>
+          <li><b>进度压缩</b>：一排小圆点铺满整行，两端固定文字框住「从哪到哪」，下面右对齐一句 <b>已等待 X 分钟</b> 给等餐的人时间感。</li>
+          <li><b>菜品行 32px 缩略图</b>：纯文字行认菜成本高，尤其大桌多批次；取不到图落占位图。</li>
+          <li><b>批次弱化</b>：单批次不出状态标签（顶部胶囊已经说了）；多批次才用行内小标签（<span class="b-rtag" style="display:inline">1单</span>）。</li>
+          <li><b>加菜提示只在第一单出现</b>：加过一次后顾客已经知道会合并，常驻是噪音。</li>
           <li>适合：快餐 / 小吃 / 单次点单为主、希望面板尽快收起的店。</li>
         </ul>
       </div>
@@ -495,9 +502,10 @@
         {t:'桌牌 1 号'},
         {t:'#2087', num:true}
       ],
-      metaExtra: '今天 11:36 起 · 本桌统一结账',
+      metaExtra: '11:36 下单 · 堂食 · 本桌统一结账',
       steps: ['已下单','商家接单','已上齐','已结账'],
       stepsDone: 2,           // 第 0、1 步完成，第 2 步进行中
+      waitText: '已等待 12 分钟',
       rounds: [
         {no:'第 1 单', time:'11:36', status:'制作中', cls:'', items:[
           {nm:'哇哈哈矿泉水', qty:1, amt:'2.00'},
@@ -526,9 +534,10 @@
         {t:'桌牌 14 号'},
         {t:'#7152', num:true}
       ],
-      metaExtra: '今天 11:38 下单 · 先付后吃',
+      metaExtra: '11:38 下单 · 先付后厨',
       steps: ['已支付','商家接单','已上齐','已完成'],
       stepsDone: 1,           // 已支付完成，等待接单
+      waitText: '已等待 3 分钟',
       rounds: [
         {no:'第 1 单', time:'11:38', status:'待接单', cls:'wait', items:[
           {nm:'辣子鸡', qty:1, amt:'55.80'},
@@ -618,11 +627,19 @@
     steps.forEach((s,i)=>{
       const on = i < done ? 'on' : '';
       const cur = i === done ? 'cur' : '';
+      h += '<span class="stp">';
       h += `<i class="${on} ${cur}"></i>`;
-      if(i < steps.length-1) h += `<span class="${i < done ? 'on':''}"></span>`;
+      if(i < steps.length-1) h += `<span class="seg ${i < done ? 'on':''}"></span>`;
+      h += '</span>';
     });
     h += '</div>';
     return h;
+  }
+
+  function thumbColor(name){
+    let x = 0;
+    for(const ch of String(name)) x = (x * 31 + ch.charCodeAt(0)) >>> 0;
+    return `hsl(${x % 360} 42% 80%)`;
   }
 
   function renderB(d){
@@ -648,15 +665,20 @@
             </div>
           </div>
 
-          <div class="b-mini">
-            ${dotsB(d.steps, d.stepsDone)}
-            <span class="b-mlabel">${esc(d.steps[d.stepsDone-1<0?0:d.stepsDone-1])} · ${esc(d.statusTitle)}</span>
+          <div class="b-prog">
+            <div class="b-prog-bar">
+              <span class="b-prog-end">${esc(d.steps[0])}</span>
+              ${dotsB(d.steps, d.stepsDone)}
+              <span class="b-prog-end">${esc(d.steps[d.steps.length-1])}</span>
+            </div>
+            ${d.waitText ? `<span class="b-prog-wait">${esc(d.waitText)}</span>` : ''}
           </div>
 
           <div class="b-sep"></div>
 
           ${flat.map(it=>`
             <div class="b-drow">
+              <span class="b-thumb" style="background:${thumbColor(it.nm)}"></span>
               <span class="nm">${esc(it.nm)}${it.sp?` <span class="sp">${esc(it.sp)}</span>`:''}</span>
               ${multi?`<span class="b-rtag">${esc(it.tag)}</span>`:''}
               <span class="qty">×${it.qty}</span>
@@ -669,7 +691,7 @@
           </div>
         </div>
         <div class="b-when">${esc(d.metaExtra)}</div>
-        ${d.showMergeNote ? `<div class="b-note">同桌后续加菜自动并入本单，无需重复付款。</div>` : ''}
+        ${d.showMergeNote && d.rounds.length === 1 ? `<div class="b-note">同桌后续加菜自动并入本单，无需重复付款。</div>` : ''}
       </div>
       <div class="footer">
         <button class="btn btn-ghost" type="button">${esc(d.btnGhost)}</button>

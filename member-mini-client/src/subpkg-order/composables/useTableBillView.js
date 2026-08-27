@@ -205,6 +205,35 @@ export function useTableBillView({
     return isPostpayMode.value ? '餐后统一结账' : '待结账'
   })
 
+  // 等餐场景最焦虑的是"还要等多久 / 我等了多久"。createdTs 是毫秒时间戳
+  // （useDiningSession.mapServerOrder 里 new Date().getTime()），这里推一个
+  // 分钟粒度的"已等待"文案；useOrderStatusPoll 每轮轮询会刷新 myOrders，
+  // 分钟级更新够用，不额外挂计时器。
+  const formatWait = (ts) => {
+    const base = Number(ts || 0)
+    if (!base) return ''
+    const mins = Math.floor((Date.now() - base) / 60000)
+    if (mins <= 0) return '刚刚下单'
+    if (mins < 60) return '已等待 ' + mins + ' 分钟'
+    const hours = Math.floor(mins / 60)
+    const rest = mins % 60
+    return '已等待 ' + hours + ' 小时' + (rest ? ' ' + rest + ' 分钟' : '')
+  }
+  const earliestActiveWaitTs = computed(() => {
+    const list = validTableOrders.value
+      .filter(order => ['pending', 'preparing'].includes(normalizeOrderStatus(order.status)))
+      .map(order => Number(order.createdTs || 0))
+      .filter(Boolean)
+    return list.length ? Math.min(...list) : 0
+  })
+  // 只在"还没上齐"（待接单 / 制作中）时给等待时长；上齐或结账后再显示"已等待"很怪。
+  const tableBillWaitText = computed(() => {
+    if (isTableSettled.value) return ''
+    const stage = tableBillStageIndex.value
+    if (stage !== 1 && stage !== 2) return ''
+    return formatWait(earliestActiveWaitTs.value)
+  })
+
   const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
 
   const tableOrderStatusTone = computed(() => {
@@ -286,6 +315,12 @@ export function useTableBillView({
     ].map((step, index) => ({ ...step, done: index < currentIndex, active: index === currentIndex }))
   })
 
+  // 先付后厨单笔订单的"已等待"——只在待接单 / 制作中显示。
+  const tableOrderWaitText = computed(() => {
+    if (!['pending', 'preparing'].includes(currentTableOrderStatus.value)) return ''
+    return formatWait(Number(currentTableOrder.value?.createdTs || 0))
+  })
+
   const currentOrderItemCount = computed(() => orderItemCount(currentTableOrder.value))
   const currentOrderItems = computed(() => currentTableOrder.value?.items || [])
 
@@ -342,6 +377,8 @@ export function useTableBillView({
     tableStatusView,
     tableBillTimeline,
     tableBillPayStateText,
+    tableBillWaitText,
+    tableOrderWaitText,
     currentTableOrderStatus,
     tableOrderStatusTone,
     tableOrderStatusBadge,

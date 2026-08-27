@@ -118,24 +118,42 @@
   line-height: 1.4;
 }
 
-/* 方案B 压缩进度：一排小圆点 + 连接线，后面跟一句当前阶段文字。
-   不是每个点带标签（那是分段式的做法），整条只占一行、塞进卡片里。 */
+/* 方案B 压缩进度：一排小圆点铺满整行 + 两端固定文字框住"从哪到哪"，
+   下面右对齐一句"已等待 X 分钟"给等餐的人一个时间感。不是每点一个标签
+   （那是分段式的做法）。 */
 .to-track {
-  display: flex;
-  align-items: center;
-  gap: 14rpx;
   margin: 22rpx 0 2rpx;
 }
 
-.to-track-rail {
+.to-track-bar {
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  gap: 12rpx;
+}
+
+.to-track-end {
+  flex: 0 0 auto;
+  font-size: 20rpx;
+  line-height: 1;
+  color: var(--text-3);
+}
+
+.to-track-rail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
 }
 
 .to-track-step {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
+
+  &:last-child {
+    flex: 0 0 auto;
+  }
 }
 
 .to-track-node {
@@ -147,10 +165,10 @@
 }
 
 .to-track-seg {
-  width: 32rpx;
+  flex: 1;
+  min-width: 20rpx;
   height: 3rpx;
   background: #e5e7eb;
-  flex-shrink: 0;
 }
 
 .to-track-step.done .to-track-node,
@@ -167,14 +185,12 @@
   background: var(--brand);
 }
 
-.to-track-cap {
-  min-width: 0;
-  color: var(--text-2);
-  font-size: 22rpx;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.to-track-wait {
+  display: block;
+  margin-top: 8rpx;
+  text-align: right;
+  font-size: 21rpx;
+  color: var(--text-3);
 }
 
 .to-divider {
@@ -269,13 +285,34 @@
 
 .to-drow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 14rpx;
-  padding: 10rpx 0;
+  padding: 12rpx 0;
 }
 
 .to-drow--muted {
   opacity: .55;
+}
+
+/* 32px 缩略图——纯文字行认菜成本高，尤其大桌多批次。取不到图就落到占位图。 */
+.to-drow-img {
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 12rpx;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #f3f5f7;
+}
+
+.to-drow-img--ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.to-drow-img-ph {
+  width: 60%;
+  height: 60%;
 }
 
 .to-drow-main {
