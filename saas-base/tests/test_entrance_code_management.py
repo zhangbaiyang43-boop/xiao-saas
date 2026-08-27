@@ -141,6 +141,19 @@ class EntranceCodeManagementTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "请选择"):
             await self._service().build_codes_zip([])
 
+    async def test_response_serializes_bigint_id_as_string(self):
+        # admin-h5 的 axios 用普通 JSON.parse，19 位数字型 ID 会被舍入，
+        # 回传时对不上行。出参里 id 必须是字符串，且精度不丢。
+        from fastapi.encoders import jsonable_encoder
+
+        from app.schemas.entrance_code import EntranceCodeResponse
+
+        service = self._service()
+        code = await service.create_entrance_code(name="A01", channel="TABLE", table_no="A01")
+        payload = jsonable_encoder(EntranceCodeResponse.model_validate(code))
+        self.assertIsInstance(payload["id"], str)
+        self.assertEqual(payload["id"], str(code.id))
+
 
 if __name__ == "__main__":
     unittest.main()

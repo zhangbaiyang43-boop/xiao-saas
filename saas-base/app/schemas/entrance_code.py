@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 
 class CreateEntranceCodeRequest(BaseModel):
@@ -59,6 +59,13 @@ class EntranceCodeResponse(BaseModel):
     table_id: Optional[int] = None
     target_page: str
     zone_type: Optional[str] = None
+
+    # 雪花 ID 是 19 位，超过 JS 的安全整数范围。admin-h5 的 axios 用普通
+    # JSON.parse，数字型 ID 会被舍入，回传时就对不上行（"入口码不存在"）。
+    # 和 orders.py 一样，出参统一把大整数 ID 序列化成字符串。
+    @field_serializer("id", "coupon_template_id", "table_id", when_used="json")
+    def _bigint_id_to_str(self, value: Optional[int]) -> Optional[str]:
+        return None if value is None else str(value)
 
     class Config:
         from_attributes = True
