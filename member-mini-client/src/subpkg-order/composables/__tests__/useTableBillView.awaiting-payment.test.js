@@ -123,6 +123,32 @@ describe('静态合同：面板不再展示孤立的等待时长', () => {
     expect(source).toContain('v-if="isAwaitingPayment" class="to-head-status"')
   })
 
+  it('进度点旁边不再有文字图例——顾客用几次就知道点代表什么', () => {
+    for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).not.toContain('to-legend')
+      expect(source).not.toContain('stageLabels')
+    }
+  })
+
+  it('桌号和桌牌号同一行居中展示（一块桌牌），不再是右上角两行附注', () => {
+    for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).toContain('class="to-plate"')
+      expect(source).not.toContain('to-ident')
+    }
+  })
+
+  it('两个弹层的头部一致：左标题 + 右上角圆形关闭，没有额外的返回箭头', () => {
+    // base-sheet 只要不传 header-left 就是这套默认头部；传了会切到
+    // --leading 分支把标题居中、关闭键挤到标题旁边，两个弹层就长得不一样了。
+    for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).not.toContain('#header-left')
+      expect(source).not.toContain('icon-back')
+    }
+  })
+
   it('未支付有独立配色，不跟"待接单"同色', () => {
     const scss = read('../../components/table-order-card.scss')
     expect(scss).toContain('.to-card--unpaid')

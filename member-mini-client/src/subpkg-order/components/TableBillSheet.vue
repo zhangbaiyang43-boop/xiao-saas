@@ -5,28 +5,17 @@
     title="本桌订单"
     @close="emitCloseOrFinish"
   >
-      <template #header-left>
-        <view class="to-back" @click="emitCloseOrFinish">
-          <text class="iconfont icon-back"></text>
-        </view>
-      </template>
-
       <scroll-view v-if="!loadError" class="to-scroll" scroll-y>
         <view v-if="tableOrderGroups.length" id="table-account-status-anchor" class="to-card" :class="'to-card--' + tableStatusView.tone">
-          <view class="to-head">
-            <view class="to-ident">
-              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }} 桌</text>
-              <text v-if="pickupNoEnabled && tablePickupNo" class="to-ident-line">桌牌 {{ tablePickupNo }} 号</text>
-            </view>
-          </view>
-
-          <!-- 进度图例：四个点各代表哪一步，出现一次。之后每道菜左侧的点
-               自己说话，不再逐条配文字。 -->
-          <view class="to-legend">
-            <view v-for="(label, i) in stageLabels" :key="label" class="to-legend-item">
-              <view class="to-legend-dot" :class="{ on: i === 0 }"></view>
-              <text class="to-legend-t">{{ label }}</text>
-            </view>
+          <!-- 桌号和桌牌号是顾客要对上"这是我这一桌"的两个凭证，做成一块居中的
+               桌牌样式，跟菜品清单区分开。 -->
+          <view class="to-plate">
+            <text class="to-plate-table">{{ tableNo || orderModeText.unknownTable }}</text>
+            <text class="to-plate-unit">桌</text>
+            <template v-if="pickupNoEnabled && tablePickupNo">
+              <view class="to-plate-sep"></view>
+              <text class="to-plate-pickup">桌牌 {{ tablePickupNo }} 号</text>
+            </template>
           </view>
 
           <view class="to-divider"></view>
@@ -222,6 +211,8 @@ export default {
     orderModeText: { type: Object, required: true },
     sharedBillSubLabel: { type: String, default: '' },
     tableBillPayStateText: { type: String, default: '' },
+    // 进度点的个数，跟 useTableBillView.orderStageIndex 的档数同源，避免两处各写一个 4。
+    stageCount: { type: Number, default: 4 },
     tableTotal: { type: Number, default: 0 },
     // 展示口径的份数（这一桌一共点了多少菜），不是结算口径的 tableItemCount。
     displayItemCount: { type: Number, default: 0 },
@@ -246,12 +237,9 @@ export default {
   emits: ['close', 'finish', 'retry-load', 'continue-order', 'checkout', 'mark-image-failed'],
   data() {
     // 纯 UI 展开态，不是业务状态，所以留在组件本地，不往父组件抬。
-    return { showDetail: false, stageLabels: ['下单', '接单', '上齐', '完成'] }
+    return { showDetail: false }
   },
   computed: {
-    stageCount() {
-      return this.stageLabels.length
-    },
     // 同一道菜合并成一行——顾客问的是"点了什么"，不是"这道菜分几次点的"。
     // 合并键的每一个维度都是顾客会区分的东西：
     //   规格不同 = 不同的菜；谁点的不同 = 不能混；进度不同 = 点点要能分别表达；
@@ -316,22 +304,6 @@ export default {
 .table-order-sheet {
   background: var(--bg-subtle);
   padding-bottom: 0;
-}
-
-.to-back {
-  position: absolute;
-  left: 18rpx;
-  top: 12rpx;
-  width: 64rpx;
-  height: 64rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-2);
-
-  text {
-    font-size: 34rpx;
-  }
 }
 
 .to-scroll {

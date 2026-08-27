@@ -7,24 +7,20 @@
         </view>
 
         <view class="to-card" :class="'to-card--' + cardTone">
-          <view class="to-head">
-            <!-- 只有需要顾客动手时才出文字（这里就是"钱还没付"）。
-                 正常流程的状态由每道菜左边的四个点表达，不再配解释句。 -->
-            <view v-if="isAwaitingPayment" class="to-head-status">
-              <text class="to-badge">{{ tableOrderStatusBadge }}</text>
-              <text class="to-desc">{{ tableOrderNextAction }}</text>
-            </view>
-            <view class="to-ident">
-              <text class="to-ident-main">{{ tableNo || orderModeText.unknownTable }} 桌</text>
-              <text v-if="currentTableOrder.pickupNo" class="to-ident-line">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
-            </view>
+          <view class="to-plate">
+            <text class="to-plate-table">{{ tableNo || orderModeText.unknownTable }}</text>
+            <text class="to-plate-unit">桌</text>
+            <template v-if="currentTableOrder.pickupNo">
+              <view class="to-plate-sep"></view>
+              <text class="to-plate-pickup">桌牌 {{ currentTableOrder.pickupNo }} 号</text>
+            </template>
           </view>
 
-          <view class="to-legend">
-            <view v-for="(label, i) in stageLabels" :key="label" class="to-legend-item">
-              <view class="to-legend-dot" :class="{ on: i === 0 }"></view>
-              <text class="to-legend-t">{{ label }}</text>
-            </view>
+          <!-- 只有需要顾客动手时才出文字（这里就是"钱还没付"）。
+               正常流程的状态由每道菜左边的四个点表达，不配解释句。 -->
+          <view v-if="isAwaitingPayment" class="to-head-status">
+            <text class="to-badge">{{ tableOrderStatusBadge }}</text>
+            <text class="to-desc">{{ tableOrderNextAction }}</text>
           </view>
 
           <view class="to-divider"></view>
@@ -166,6 +162,8 @@ export default {
     orderHistoryGroups: { type: Array, default: () => [] },
     // 这一单的钱还没收到（pending_payment 等）——决定卡片配色。
     isAwaitingPayment: { type: Boolean, default: false },
+    // 进度点的个数，跟 useTableBillView.orderStageIndex 的档数同源，避免两处各写一个 4。
+    stageCount: { type: Number, default: 4 },
     currentOrderItemCount: { type: Number, default: 0 },
     currentOrderMainItemText: { type: String, default: '' },
     // 菜品行缩略图——跟 TableBillSheet 对齐，取不到落占位图。
@@ -187,13 +185,7 @@ export default {
     orderItemImage: { type: Function, required: true },
   },
   emits: ['close', 'toggle-history', 'mark-image-failed'],
-  data() {
-    return { stageLabels: ['支付', '接单', '上齐', '完成'] }
-  },
   computed: {
-    stageCount() {
-      return this.stageLabels.length
-    },
     // 全桌菜品合并成一行一道菜。跟 TableBillSheet.mergedItems 同一套规则，
     // 只是这边的数据源是 orderHistoryGroups（prepay 每单各自付清，没有"已付/待付"
     // 之分，所以合并键不带 paid 维度）。

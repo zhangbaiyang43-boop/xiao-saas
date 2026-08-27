@@ -1,9 +1,10 @@
 // 「本桌订单」聚合卡——TableBillSheet 和 OrderHistorySheet 共用的顾客端展示。
 //
-// 默认视图只回答两件事：点了多少菜、要付多少钱。
-//   状态胶囊 + 一句提示 · 桌号/桌牌 · 合并后的菜品清单 · 优惠 · 合计
-// 系统数据（订单号、下单时间、分单、每单各自的状态）收在 `.to-detail` 折叠区，
-// 顾客想看再展开。没有进度条：状态只用一种表达。
+// 默认视图只回答顾客真正在问的三件事：点了什么菜、谁点的、花了多少钱。
+//   居中桌牌（桌号/桌牌号） · 菜品清单（左侧四点进度 + 缩略图 + 谁点的） · 优惠 · 合计
+// 进度只用点表达，不配任何文字说明——顾客用几次就知道点代表什么。
+// 文字只在"顾客必须动手"时出现（比如钱还没付）。
+// 系统数据（订单号、下单时间、分单、每单各自的状态）收在 `.to-detail` 折叠区。
 //
 // 谁的模板里出现 `.to-*` 类名，谁就在自己的 <style> 顶部
 // `@import './table-order-card.scss';`。只放两个弹层都用的卡片样式；
@@ -57,20 +58,68 @@
   --to-soft: #fee2e2;
 }
 
-.to-head {
+/* 桌牌：桌号和桌牌号是顾客对上"这是我这一桌"的两个凭证，也是要报给服务员的号。
+   做成居中的一块牌子——底部一道加粗的强调色横杠像实体桌牌的底座，
+   跟下面的菜品清单在视觉上分层，而不是挤在角落里当附注。 */
+.to-plate {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20rpx;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4rpx;
+  padding: 4rpx 0 16rpx;
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 72rpx;
+    height: 6rpx;
+    margin-left: -36rpx;
+    border-radius: 999rpx;
+    background: var(--to-accent);
+    opacity: .85;
+  }
+}
+
+.to-plate-table {
+  color: var(--text-1);
+  font-size: 44rpx;
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: 1rpx;
+}
+
+.to-plate-unit {
+  color: var(--text-2);
+  font-size: 26rpx;
+  font-weight: 700;
+  margin-right: 4rpx;
+}
+
+.to-plate-sep {
+  align-self: center;
+  width: 2rpx;
+  height: 28rpx;
+  margin: 0 14rpx;
+  border-radius: 2rpx;
+  background: #e2e6ea;
+}
+
+.to-plate-pickup {
+  color: var(--to-accent);
+  font-size: 26rpx;
+  font-weight: 800;
+  letter-spacing: .5rpx;
 }
 
 .to-head-status {
-  min-width: 0;
-  flex: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 8rpx;
+  margin-top: 16rpx;
 }
 
 .to-badge {
@@ -99,95 +148,6 @@
   color: var(--text-3);
   font-size: 25rpx;
   line-height: 1.4;
-}
-
-.to-desc--sub {
-  font-size: 22rpx;
-}
-
-.to-ident {
-  flex-shrink: 0;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2rpx;
-}
-
-.to-ident-main {
-  color: var(--text-1);
-  font-size: 27rpx;
-  font-weight: 900;
-  line-height: 1.3;
-}
-
-.to-ident-line {
-  color: var(--text-3);
-  font-size: 22rpx;
-  line-height: 1.4;
-}
-
-/* 进度图例：四个点分别代表哪一步，整张卡里只出现一次。
-   之后每道菜左侧的四个点自己说话，不再逐条配文字。 */
-.to-legend {
-  display: flex;
-  gap: 22rpx;
-  margin-top: 14rpx;
-}
-
-.to-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6rpx;
-}
-
-.to-legend-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 50%;
-  background: #d7dbe0;
-}
-
-.to-legend-dot.on {
-  background: var(--brand);
-}
-
-.to-legend-t {
-  color: var(--text-3);
-  font-size: 20rpx;
-  line-height: 1;
-}
-
-/* 菜品行左侧的四点进度：一道菜走到哪一步，点亮几个。
-   竖排贴着缩略图，高度跟缩略图对齐，不占横向宽度也不需要文字。 */
-.to-stage {
-  flex-shrink: 0;
-  width: 14rpx;
-  height: 64rpx;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4rpx 0;
-  box-sizing: border-box;
-}
-
-.to-stage-dot {
-  width: 10rpx;
-  height: 10rpx;
-  border-radius: 50%;
-  background: #e3e7ea;
-}
-
-.to-stage-dot.on {
-  background: var(--brand);
-}
-
-/* 已取消 / 已退菜：这道菜没了，不是"进度停在某一步"，
-   所以整条点全部灰掉，不点亮任何一个。 */
-.to-stage--void .to-stage-dot,
-.to-stage--void .to-stage-dot.on {
-  background: #e3e7ea;
 }
 
 .to-divider {

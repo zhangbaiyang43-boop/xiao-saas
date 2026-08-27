@@ -332,6 +332,7 @@
       :order-mode-text="orderModeText"
       :shared-bill-sub-label="sharedBillSubLabel"
       :table-bill-pay-state-text="tableBillPayStateText"
+      :stage-count="ORDER_STAGE_COUNT"
       :table-total="tableTotal"
       :table-item-count="tableItemCount"
       :display-item-count="displayItemCount"
@@ -371,6 +372,7 @@
       :table-order-status-hint="tableOrderStatusHint"
       :order-history-groups="orderHistoryGroups"
       :is-awaiting-payment="isAwaitingPayment"
+      :stage-count="ORDER_STAGE_COUNT"
       :current-order-item-count="currentOrderItemCount"
       :current-order-main-item-text="currentOrderMainItemText"
       :order-history-total="orderHistoryTotal"
@@ -765,7 +767,7 @@ export default {
       isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId,
       tableTotal, tableItemCount, displayItemCount, tableDiscountTotal, tableOrderGroups,
       isTableSettled, canContinueOrder, stillPreparing, checkoutRequested,
-      canCheckout, postpayReadyToSettle, tableStatusView, tableBillPayStateText, isAwaitingPayment, tablePickupNo,
+      canCheckout, postpayReadyToSettle, tableStatusView, tableBillPayStateText, isAwaitingPayment, tablePickupNo, ORDER_STAGE_COUNT,
       currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusBadge, tableOrderStatusIcon,
       tableOrderNextAction, tableOrderPrimaryButtonText, tableOrderStatusTitle,
       tableOrderStatusHint, orderHistoryGroups, currentOrderItemCount, currentOrderItems,
@@ -1459,7 +1461,7 @@ export default {
       switchCategory, switchOrderMode,
       goCheckout, finishOrdering, closeSuccessAndWait, continueOrdering, viewOrderDetail, goCoupons, loadMenu,
       myOrders, showOrders, showAllOrders, pendingOrderCount, statusLabel, doCancelOrder,
-      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, displayItemCount, tableDiscountTotal, tablePickupNo, tableStatusView, tableBillPayStateText, isAwaitingPayment, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
+      isTableAccountMode, isPostpayMode, isSharedBillMode, sharedBillSubLabel, tableSessionId, tableOrderGroups, tableTotal, tableItemCount, displayItemCount, tableDiscountTotal, tablePickupNo, tableStatusView, tableBillPayStateText, isAwaitingPayment, ORDER_STAGE_COUNT, isTableSettled, canContinueOrder, canCheckout, postpayReadyToSettle, stillPreparing, checkoutRequested, tableCheckouting, handleTableContinueOrder, handleTableCheckout,
       currentTableOrder, historyTableOrders, currentTableOrderStatus, tableOrderStatusTone, tableOrderStatusIcon, tableOrderStatusBadge, tableOrderNextAction, tableOrderPrimaryButtonText, tableOrderStatusTitle, tableOrderStatusHint, orderHistoryGroups, orderItemCount, currentOrderItemCount, currentOrderItems, currentOrderMainItemText, orderHistoryTotal, orderHistoryItemCount,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemImageFailed, markOrderItemImageFailed,
       saveMyOrders, loadMyOrders, refreshAllOrderStatuses, ensureDiningSession, syncDiningOrders, restoreCartIfSameContext,
