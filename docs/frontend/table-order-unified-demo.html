@@ -1,0 +1,703 @@
+<title>本桌订单样式提案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700&family=Figtree:wght@400;500;600;700&display=swap">
+
+<style>
+  :root{
+    /* light — warm, slightly green-biased neutrals for a casual dining app */
+    --ground:#f3f6f1;
+    --panel:#ffffff;
+    --panel-2:#f8faf6;
+    --ink:#1b2a20;
+    --ink-muted:#5f6f64;
+    --ink-faint:#93a099;
+    --hairline:#e5eae0;
+    --hairline-strong:#d6ddd0;
+
+    --brand:#12a150;
+    --brand-deep:#0b7a3d;
+    --brand-tint:#e6f4ea;
+
+    --wait:#c47712;
+    --wait-tint:#faf0df;
+    --paid:#2f74c0;
+    --paid-tint:#e7f0fb;
+
+    --frame:#dfe4da;
+    --frame-bezel:#c9d0c2;
+    --shadow:0 22px 60px -24px rgba(20,44,28,.32);
+    --shadow-card:0 10px 26px -14px rgba(20,44,28,.22);
+
+    --sheet-radius:22px;
+  }
+
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0f130d;
+      --panel:#1a1f17;
+      --panel-2:#161b13;
+      --ink:#e9efe6;
+      --ink-muted:#9aa89e;
+      --ink-faint:#6d7b72;
+      --hairline:#2a3228;
+      --hairline-strong:#394236;
+
+      --brand:#40cd80;
+      --brand-deep:#2fae68;
+      --brand-tint:#123020;
+
+      --wait:#e3a24d;
+      --wait-tint:#332711;
+      --paid:#62a6e6;
+      --paid-tint:#142839;
+
+      --frame:#20271d;
+      --frame-bezel:#2c3427;
+      --shadow:0 22px 60px -24px rgba(0,0,0,.66);
+      --shadow-card:0 10px 26px -14px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0f130d;
+    --panel:#1a1f17;
+    --panel-2:#161b13;
+    --ink:#e9efe6;
+    --ink-muted:#9aa89e;
+    --ink-faint:#6d7b72;
+    --hairline:#2a3228;
+    --hairline-strong:#394236;
+
+    --brand:#40cd80;
+    --brand-deep:#2fae68;
+    --brand-tint:#123020;
+
+    --wait:#e3a24d;
+    --wait-tint:#332711;
+    --paid:#62a6e6;
+    --paid-tint:#142839;
+
+    --frame:#20271d;
+    --frame-bezel:#2c3427;
+    --shadow:0 22px 60px -24px rgba(0,0,0,.66);
+    --shadow-card:0 10px 26px -14px rgba(0,0,0,.5);
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"Figtree","PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .wrap{max-width:960px;margin:0 auto;padding:40px 20px 72px;}
+
+  .masthead{margin-bottom:28px;}
+  .eyebrow{
+    font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--brand-deep);margin:0 0 10px;
+  }
+  .masthead h1{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:700;font-size:clamp(26px,4.4vw,36px);line-height:1.15;
+    margin:0 0 10px;text-wrap:balance;letter-spacing:-.01em;
+  }
+  .masthead p{margin:0;max-width:60ch;color:var(--ink-muted);font-size:15px;}
+
+  /* scene switch */
+  .controls{
+    display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+    margin:22px 0 30px;padding:14px 16px;
+    background:var(--panel);border:1px solid var(--hairline);border-radius:16px;
+    box-shadow:var(--shadow-card);
+  }
+  .controls .label{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);}
+  .segmented{display:inline-flex;background:var(--panel-2);border:1px solid var(--hairline);border-radius:11px;padding:3px;gap:2px;}
+  .segmented button{
+    appearance:none;border:0;cursor:pointer;
+    font:inherit;font-weight:600;font-size:13.5px;
+    padding:7px 15px;border-radius:8px;color:var(--ink-muted);background:transparent;
+    transition:background .16s ease,color .16s ease;
+  }
+  .segmented button[aria-pressed="true"]{background:var(--brand);color:#fff;}
+  .segmented button:focus-visible{outline:2px solid var(--brand-deep);outline-offset:2px;}
+  .scene-note{font-size:13px;color:var(--ink-muted);flex:1 1 220px;min-width:200px;}
+  .scene-note b{color:var(--ink);font-weight:600;}
+
+  /* stage */
+  .stage{display:flex;flex-wrap:wrap;gap:34px 30px;justify-content:center;align-items:flex-start;}
+  .col{display:flex;flex-direction:column;align-items:center;gap:14px;width:min(392px,94vw);}
+  .col-head{text-align:center;}
+  .col-head .tag{
+    display:inline-block;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--brand-deep);background:var(--brand-tint);border-radius:999px;padding:4px 12px;margin-bottom:8px;
+  }
+  .col-head h2{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:600;font-size:19px;margin:0 0 4px;
+  }
+  .col-head p{margin:0;font-size:12.5px;color:var(--ink-faint);}
+
+  /* phone frame */
+  .phone{
+    width:100%;
+    background:var(--frame);
+    border:1px solid var(--frame-bezel);
+    border-radius:38px;
+    padding:12px;
+    box-shadow:var(--shadow);
+  }
+  .screen{
+    background:linear-gradient(var(--panel-2),var(--panel-2));
+    border-radius:28px;
+    overflow:hidden;
+    position:relative;
+  }
+  .topbar{
+    height:52px;display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:600;color:var(--ink-faint);
+    background:var(--brand);color:#eafff1;
+  }
+  .menu-hint{
+    padding:14px 18px;font-size:12px;color:var(--ink-faint);
+    background:
+      repeating-linear-gradient(180deg,transparent 0 26px,var(--hairline) 26px 27px);
+    height:78px;
+  }
+
+  /* ---- the sheet (shared shell) ---- */
+  .sheet{
+    position:relative;
+    background:var(--panel);
+    border-top-left-radius:var(--sheet-radius);
+    border-top-right-radius:var(--sheet-radius);
+    box-shadow:0 -14px 34px -20px rgba(20,44,28,.3);
+    padding-bottom:4px;
+    --status:var(--brand);
+    --status-tint:var(--brand-tint);
+  }
+  .sheet.s-wait{--status:var(--wait);--status-tint:var(--wait-tint);}
+  .sheet.s-cook{--status:var(--brand);--status-tint:var(--brand-tint);}
+  .sheet.s-paid{--status:var(--paid);--status-tint:var(--paid-tint);}
+
+  .grab{width:34px;height:4px;border-radius:999px;background:var(--hairline-strong);margin:9px auto 0;}
+  .sheet-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:12px 18px 12px;
+  }
+  .sheet-head h3{
+    margin:0;font-size:16px;font-weight:700;
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+  }
+  .x{
+    width:26px;height:26px;border-radius:999px;border:0;cursor:pointer;
+    background:var(--panel-2);color:var(--ink-faint);font-size:15px;line-height:1;
+    display:grid;place-items:center;
+  }
+  .body{max-height:none;overflow:visible;}
+
+  .rule{height:1px;background:var(--hairline);margin:0 18px;}
+
+  /* status block (Version A: full-bleed band) */
+  .status-band{
+    display:flex;gap:12px;align-items:flex-start;
+    padding:15px 18px;background:var(--status-tint);
+  }
+  .status-ic{
+    flex:0 0 auto;width:30px;height:30px;border-radius:999px;
+    background:var(--status);color:#fff;display:grid;place-items:center;
+    font-size:15px;
+  }
+  .status-tt{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:700;font-size:17px;color:var(--ink);line-height:1.25;
+  }
+  .status-hint{font-size:12.5px;color:var(--ink-muted);margin-top:1px;}
+
+  /* meta line */
+  .meta{
+    display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;
+    padding:12px 18px;font-size:12.5px;color:var(--ink-muted);
+  }
+  .meta .strong{color:var(--ink);font-weight:600;}
+  .meta .dot{color:var(--ink-faint);}
+  .meta .num{font-variant-numeric:tabular-nums;}
+
+  /* stepper */
+  .steps{display:flex;padding:16px 14px 8px;}
+  .step{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;position:relative;min-width:0;}
+  .step::before{
+    content:"";position:absolute;top:8px;left:-50%;width:100%;height:2px;
+    background:var(--hairline-strong);z-index:0;
+  }
+  .step:first-child::before{display:none;}
+  .step.done::before,.step.now::before{background:var(--brand);}
+  .node{
+    position:relative;z-index:1;width:18px;height:18px;border-radius:999px;
+    background:var(--panel);border:2px solid var(--hairline-strong);
+  }
+  .step.done .node{background:var(--brand);border-color:var(--brand);}
+  .step.done .node::after{
+    content:"";position:absolute;inset:0;margin:auto;width:6px;height:6px;border-radius:999px;background:#fff;
+  }
+  .step.now .node{border-color:var(--status);box-shadow:0 0 0 4px var(--status-tint);}
+  .step .slabel{font-size:10.5px;color:var(--ink-faint);text-align:center;letter-spacing:.02em;white-space:nowrap;}
+  .step.done .slabel,.step.now .slabel{color:var(--ink-muted);}
+  .step.now .slabel{color:var(--ink);font-weight:600;}
+
+  /* dish groups */
+  .dish-wrap{padding:12px 18px 4px;}
+  .dish-h{
+    display:flex;align-items:baseline;justify-content:space-between;
+    font-size:13px;font-weight:700;color:var(--ink);margin-bottom:8px;
+  }
+  .dish-h .count{font-weight:600;color:var(--ink-faint);font-size:12px;}
+  .round-h{
+    display:flex;align-items:center;justify-content:space-between;
+    margin:12px 0 6px;font-size:12px;color:var(--ink-muted);
+  }
+  .round-h:first-of-type{margin-top:0;}
+  .round-h .rt{font-variant-numeric:tabular-nums;}
+  .rtag{
+    font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:999px;
+    background:var(--brand-tint);color:var(--brand-deep);
+  }
+  .rtag.wait{background:var(--wait-tint);color:var(--wait);}
+  .rtag.paid{background:var(--paid-tint);color:var(--paid);}
+
+  .drow{display:flex;align-items:baseline;gap:8px;padding:6px 0;font-size:13.5px;}
+  .drow .nm{flex:1;min-width:0;color:var(--ink);}
+  .drow .sp{color:var(--ink-faint);font-size:12px;}
+  .drow .qty{color:var(--ink-faint);font-variant-numeric:tabular-nums;font-size:12.5px;}
+  .drow .amt{font-variant-numeric:tabular-nums;color:var(--ink);min-width:56px;text-align:right;}
+
+  /* total */
+  .total{
+    display:flex;align-items:baseline;justify-content:space-between;
+    padding:13px 18px 6px;
+  }
+  .total .tl{font-size:13px;color:var(--ink-muted);}
+  .total .tv{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:700;font-size:22px;color:var(--ink);font-variant-numeric:tabular-nums;
+  }
+  .total .tv .cur{font-size:14px;font-weight:600;margin-right:1px;}
+  .paysub{padding:0 18px 12px;font-size:12px;color:var(--ink-faint);}
+
+  .fnote{
+    margin:2px 18px 14px;padding:9px 12px;border-radius:10px;
+    background:var(--panel-2);border:1px solid var(--hairline);
+    font-size:11.5px;color:var(--ink-muted);
+  }
+
+  .footer{
+    display:flex;gap:10px;padding:12px 16px 16px;
+    border-top:1px solid var(--hairline);
+  }
+  .btn{
+    flex:1;appearance:none;border:0;cursor:pointer;font:inherit;font-weight:700;
+    font-size:14.5px;padding:12px 10px;border-radius:12px;
+  }
+  .btn-ghost{background:transparent;border:1.5px solid var(--brand);color:var(--brand-deep);flex:0 0 40%;}
+  .btn-primary{background:var(--brand);color:#fff;}
+  .btn-primary[disabled]{background:var(--hairline-strong);color:var(--ink-faint);cursor:not-allowed;}
+  .btn:focus-visible{outline:2px solid var(--brand-deep);outline-offset:2px;}
+
+  /* ---- Version B: one consolidated card ---- */
+  .b-body{padding:14px 16px 4px;}
+  .b-card{
+    background:var(--panel-2);
+    border:1px solid var(--hairline);
+    border-radius:16px;
+    padding:14px 14px 12px;
+  }
+  .b-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .b-status{display:flex;flex-direction:column;gap:3px;}
+  .b-pill{
+    align-self:flex-start;display:inline-flex;align-items:center;gap:5px;
+    font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;
+    background:var(--status-tint);color:var(--status);
+  }
+  .b-pill::before{content:"";width:6px;height:6px;border-radius:999px;background:currentColor;}
+  .b-hint{font-size:12.5px;color:var(--ink-muted);}
+  .b-ident{text-align:right;font-size:11.5px;color:var(--ink-faint);line-height:1.5;font-variant-numeric:tabular-nums;}
+  .b-ident b{display:block;color:var(--ink);font-weight:600;font-size:12.5px;}
+
+  .b-mini{display:flex;align-items:center;gap:7px;margin:12px 0 2px;}
+  .b-dots{display:flex;align-items:center;gap:0;flex:0 0 auto;}
+  .b-dots i{width:9px;height:9px;border-radius:999px;background:var(--hairline-strong);display:block;}
+  .b-dots span{width:14px;height:2px;background:var(--hairline-strong);display:block;}
+  .b-dots i.on{background:var(--brand);}
+  .b-dots span.on{background:var(--brand);}
+  .b-dots i.cur{background:var(--status);box-shadow:0 0 0 3px var(--status-tint);}
+  .b-mini .b-mlabel{font-size:11.5px;color:var(--ink-muted);font-weight:600;}
+
+  .b-sep{height:1px;background:var(--hairline);margin:12px 0;}
+  .b-drow{display:flex;align-items:baseline;gap:8px;padding:5px 0;font-size:13.5px;}
+  .b-drow .nm{flex:1;min-width:0;color:var(--ink);}
+  .b-drow .sp{color:var(--ink-faint);font-size:11.5px;}
+  .b-rtag{
+    font-size:10px;font-weight:600;padding:1px 6px;border-radius:6px;
+    background:var(--brand-tint);color:var(--brand-deep);flex:0 0 auto;
+  }
+  .b-drow .qty{color:var(--ink-faint);font-size:12px;font-variant-numeric:tabular-nums;}
+  .b-drow .amt{font-variant-numeric:tabular-nums;min-width:52px;text-align:right;color:var(--ink);}
+  .b-foot{
+    display:flex;align-items:baseline;justify-content:space-between;
+    margin-top:2px;padding-top:10px;border-top:1px dashed var(--hairline-strong);
+  }
+  .b-foot .fl{font-size:12px;color:var(--ink-muted);}
+  .b-foot .fv{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:700;font-size:20px;color:var(--ink);font-variant-numeric:tabular-nums;
+  }
+  .b-foot .fv .cur{font-size:13px;font-weight:600;}
+  .b-when{padding:10px 4px 2px;font-size:11.5px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+  .b-note{
+    margin:4px 4px 2px;font-size:11px;color:var(--ink-muted);
+  }
+
+  /* notes section */
+  .notes{margin-top:56px;border-top:1px solid var(--hairline);padding-top:32px;}
+  .notes h2{
+    font-family:"Baloo 2","PingFang SC","Noto Sans SC",system-ui,sans-serif;
+    font-weight:600;font-size:20px;margin:0 0 6px;
+  }
+  .notes .lead{margin:0 0 24px;color:var(--ink-muted);font-size:14px;max-width:64ch;}
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-bottom:26px;}
+  .ncard{background:var(--panel);border:1px solid var(--hairline);border-radius:14px;padding:18px 18px 6px;box-shadow:var(--shadow-card);}
+  .ncard h3{margin:0 0 10px;font-size:14px;font-weight:700;}
+  .ncard h3 .k{color:var(--brand-deep);}
+  .ncard ul{margin:0 0 12px;padding-left:18px;}
+  .ncard li{font-size:13px;color:var(--ink-muted);margin-bottom:6px;}
+  .ncard li b{color:var(--ink);font-weight:600;}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:13px;}
+  .cmp-scroll{overflow-x:auto;border:1px solid var(--hairline);border-radius:12px;}
+  table.cmp th,table.cmp td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--hairline);vertical-align:top;}
+  table.cmp thead th{background:var(--panel-2);font-weight:700;color:var(--ink);white-space:nowrap;}
+  table.cmp td{color:var(--ink-muted);}
+  table.cmp td:first-child{color:var(--ink);font-weight:600;white-space:nowrap;}
+  table.cmp tr:last-child td{border-bottom:0;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none!important;}
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">顾客端 · 本桌订单</p>
+    <h1>本桌订单，一套样式两种场景</h1>
+    <p>把「桌贴结账（统一结账）」和「先付后吃」两种下单方式收进同一个面板：补齐前者缺失的进度、订单号、支付状态，收敛后者过载的四宫格与嵌套提示。下面是 A / B 两版方案，切换场景即可对照。</p>
+  </header>
+
+  <div class="controls">
+    <span class="label">场景</span>
+    <div class="segmented" id="sceneSwitch" role="group" aria-label="选择下单场景">
+      <button type="button" data-scene="after" aria-pressed="true">桌贴 · 统一结账</button>
+      <button type="button" data-scene="before" aria-pressed="false">先付后吃</button>
+    </div>
+    <p class="scene-note" id="sceneNote"></p>
+  </div>
+
+  <div class="stage">
+    <div class="col">
+      <div class="col-head">
+        <span class="tag">方案 A</span>
+        <h2>分段式</h2>
+        <p>整幅状态条 · 分单清单 · 独立进度轴</p>
+      </div>
+      <div class="phone">
+        <div class="screen">
+          <div class="topbar">大宝羊肉汤（弘农路店）</div>
+          <div class="menu-hint">菜单 · 招牌 / 火锅 / 烧烤…</div>
+          <div class="sheet" id="sheetA"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="col-head">
+        <span class="tag">方案 B</span>
+        <h2>聚合式</h2>
+        <p>单张摘要卡 · 平铺清单 · 进度压缩为圆点</p>
+      </div>
+      <div class="phone">
+        <div class="screen">
+          <div class="topbar">老王川菜馆 点餐</div>
+          <div class="menu-hint">菜单 · 招牌 / 主食 / 饮品…</div>
+          <div class="sheet" id="sheetB"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="notes">
+    <h2>两版怎么选</h2>
+    <p class="lead">两版信息量完全一致，差别只在结构密度。桌台多轮加菜的店更需要 A 的分单可读性；单次点单为主、追求「看一眼就收起」的店更适合 B。</p>
+
+    <div class="grid2">
+      <div class="ncard">
+        <h3><span class="k">方案 A</span> · 分段式</h3>
+        <ul>
+          <li><b>整幅状态条</b>：颜色随状态变（待接单=琥珀 / 制作中=绿 / 已完成=绿），标题加一句人话提示。</li>
+          <li><b>四步进度轴</b>：已下单 → 接单 → 上齐 → 结账；先付后吃场景首节点换成「已支付」。</li>
+          <li><b>按下单批次分组</b>：每一「单」带时间和自己的状态标签，加菜多轮时不会糊成一片。</li>
+          <li>适合：包间 / 大桌 / 反复加菜的正餐店。</li>
+        </ul>
+      </div>
+      <div class="ncard">
+        <h3><span class="k">方案 B</span> · 聚合式</h3>
+        <ul>
+          <li><b>一张摘要卡</b>：状态胶囊 + 提示 + 身份信息同框，卡内平铺菜品，卡底压合计。</li>
+          <li><b>进度压缩</b>：四个圆点 + 一行文字，不占竖向空间。</li>
+          <li><b>批次弱化</b>：轮次只做行内小标签（<span class="b-rtag" style="display:inline">1单</span>），视觉更安静。</li>
+          <li>适合：快餐 / 小吃 / 单次点单为主、希望面板尽快收起的店。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="cmp-scroll">
+      <table class="cmp">
+        <thead>
+          <tr><th>信息项</th><th>原「桌贴」原型</th><th>原「先付后吃」原型</th><th>统一后</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>当前状态</td><td>只有一个图标 + 一句话</td><td>蓝色大卡 + 嵌套「无需操作」子卡</td><td>一条状态区，颜色编码 + 一句提示，去掉嵌套卡</td></tr>
+          <tr><td>订单进度</td><td>无</td><td>四图标全宽进度轴，占半屏</td><td>A：紧凑四步轴　B：四圆点一行</td></tr>
+          <tr><td>身份标识</td><td>桌号</td><td>桌号 + 桌牌号 + #单号，三处重复</td><td>合成一行：店内桌号 · 桌牌 · #单号</td></tr>
+          <tr><td>关键数值</td><td>金额 + 份数</td><td>四宫格：桌号 / 金额 / 时间 / 份数</td><td>并入一行 meta 文本，金额单独放合计行</td></tr>
+          <tr><td>下单时间</td><td>每单显示</td><td>四宫格里一格</td><td>保留在批次头 / meta 行</td></tr>
+          <tr><td>菜品规格</td><td>未展示</td><td>括号跟在菜名后</td><td>统一：菜名下方浅色副行</td></tr>
+          <tr><td>支付状态</td><td>「待接单」按钮态暗示</td><td>「已支付」进度节点</td><td>合计行下一句明示：待结账 / 已在线支付</td></tr>
+          <tr><td>加菜合并说明</td><td>底部灰条</td><td>无</td><td>仅统一结账场景保留底部灰条</td></tr>
+          <tr><td>操作按钮</td><td>继续加菜 / 制作中不可结账</td><td>我知道了</td><td>按场景切换：继续加菜 + （去结账 / 我知道了）</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+  const SCENES = {
+    after: {
+      sheetClass: 's-cook',
+      statusIcon: '🍳',
+      statusTitle: '制作中',
+      statusHint: '后厨正在备餐，好了会通知你',
+      identLine: [
+        {t:'店内 A01 桌', strong:true},
+        {t:'桌牌 1 号'},
+        {t:'#2087', num:true}
+      ],
+      metaExtra: '今天 11:36 起 · 本桌统一结账',
+      steps: ['已下单','商家接单','已上齐','已结账'],
+      stepsDone: 2,           // 第 0、1 步完成，第 2 步进行中
+      rounds: [
+        {no:'第 1 单', time:'11:36', status:'制作中', cls:'', items:[
+          {nm:'哇哈哈矿泉水', qty:1, amt:'2.00'},
+          {nm:'鸡蛋炒面', qty:1, amt:'10.00'}
+        ]},
+        {no:'第 2 单', time:'11:52', status:'待接单', cls:'wait', items:[
+          {nm:'糖蒜', qty:1, amt:'3.00'}
+        ]}
+      ],
+      count: 3,
+      total: '15.00',
+      totalLabel: '合计 · 待结账',
+      paySub: '离店时在桌台一次结清',
+      showMergeNote: true,
+      btnGhost: '继续加菜',
+      btnPrimary: '制作中，暂不能结账',
+      btnDisabled: true
+    },
+    before: {
+      sheetClass: 's-wait',
+      statusIcon: '🕐',
+      statusTitle: '待接单',
+      statusHint: '商家正在确认订单，马上就好',
+      identLine: [
+        {t:'店内 A12 桌', strong:true},
+        {t:'桌牌 14 号'},
+        {t:'#7152', num:true}
+      ],
+      metaExtra: '今天 11:38 下单 · 先付后吃',
+      steps: ['已支付','商家接单','已上齐','已完成'],
+      stepsDone: 1,           // 已支付完成，等待接单
+      rounds: [
+        {no:'第 1 单', time:'11:38', status:'待接单', cls:'wait', items:[
+          {nm:'辣子鸡', qty:1, amt:'55.80'},
+          {nm:'测试支付', sp:'中辣 · 不要葱', qty:1, amt:'0.01'}
+        ]}
+      ],
+      count: 2,
+      total: '55.81',
+      totalLabel: '合计',
+      paySub: '已在线支付',
+      showMergeNote: false,
+      btnGhost: '继续加菜',
+      btnPrimary: '我知道了',
+      btnDisabled: false
+    }
+  };
+
+  const SCENE_NOTES = {
+    after: '<b>桌贴 / 统一结账：</b>扫码即点，同桌多次加菜自动并单，离店前统一付款。',
+    before: '<b>先付后吃：</b>下单时已在线支付，面板只用来跟进出餐进度。'
+  };
+
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+  function stepperA(steps, done){
+    return `<div class="steps">` + steps.map((s,i)=>{
+      const cls = i < done ? 'done' : (i === done ? 'now' : '');
+      return `<div class="step ${cls}"><span class="node"></span><span class="slabel">${esc(s)}</span></div>`;
+    }).join('') + `</div>`;
+  }
+
+  function roundsA(rounds){
+    return rounds.map(r=>{
+      const head = `<div class="round-h"><span class="rt">${esc(r.no)} · ${esc(r.time)}</span><span class="rtag ${r.cls}">${esc(r.status)}</span></div>`;
+      const rows = r.items.map(it=>`
+        <div class="drow">
+          <span class="nm">${esc(it.nm)}${it.sp?` <span class="sp">${esc(it.sp)}</span>`:''}</span>
+          <span class="qty">×${it.qty}</span>
+          <span class="amt">¥${esc(it.amt)}</span>
+        </div>`).join('');
+      return head + rows;
+    }).join('');
+  }
+
+  function renderA(d){
+    return `
+      <div class="grab"></div>
+      <div class="sheet-head">
+        <h3>本桌订单</h3>
+        <button class="x" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="status-band">
+        <span class="status-ic" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+        </span>
+        <span>
+          <span class="status-tt">${esc(d.statusTitle)}</span>
+          <span class="status-hint">${esc(d.statusHint)}</span>
+        </span>
+      </div>
+      <div class="meta">
+        ${d.identLine.map((p,i)=>`${i?'<span class="dot">·</span>':''}<span class="${p.strong?'strong':''} ${p.num?'num':''}">${esc(p.t)}</span>`).join('')}
+        <span class="dot">·</span><span>${esc(d.metaExtra)}</span>
+      </div>
+      <div class="rule"></div>
+      ${stepperA(d.steps, d.stepsDone)}
+      <div class="rule"></div>
+      <div class="dish-wrap">
+        <div class="dish-h"><span>菜品明细</span><span class="count">共 ${d.count} 份</span></div>
+        ${roundsA(d.rounds)}
+      </div>
+      <div class="rule"></div>
+      <div class="total">
+        <span class="tl">${esc(d.totalLabel)}</span>
+        <span class="tv"><span class="cur">¥</span>${esc(d.total)}</span>
+      </div>
+      <div class="paysub">${esc(d.paySub)}</div>
+      ${d.showMergeNote ? `<div class="fnote">同桌后续加菜会自动并入本单，不需要每次付款。</div>` : ''}
+      <div class="footer">
+        <button class="btn btn-ghost" type="button">${esc(d.btnGhost)}</button>
+        <button class="btn btn-primary" type="button" ${d.btnDisabled?'disabled':''}>${esc(d.btnPrimary)}</button>
+      </div>`;
+  }
+
+  function dotsB(steps, done){
+    let h = '<div class="b-dots" aria-hidden="true">';
+    steps.forEach((s,i)=>{
+      const on = i < done ? 'on' : '';
+      const cur = i === done ? 'cur' : '';
+      h += `<i class="${on} ${cur}"></i>`;
+      if(i < steps.length-1) h += `<span class="${i < done ? 'on':''}"></span>`;
+    });
+    h += '</div>';
+    return h;
+  }
+
+  function renderB(d){
+    const flat = [];
+    d.rounds.forEach(r => r.items.forEach(it => flat.push({...it, tag:r.no.replace(/\s/g,'')})));
+    const multi = d.rounds.length > 1;
+    return `
+      <div class="grab"></div>
+      <div class="sheet-head">
+        <h3>本桌订单</h3>
+        <button class="x" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="b-body">
+        <div class="b-card">
+          <div class="b-top">
+            <div class="b-status">
+              <span class="b-pill">${esc(d.statusTitle)}</span>
+              <span class="b-hint">${esc(d.statusHint)}</span>
+            </div>
+            <div class="b-ident">
+              <b>${esc(d.identLine[0].t)}</b>
+              ${esc(d.identLine[1].t)}<br>${esc(d.identLine[2].t)}
+            </div>
+          </div>
+
+          <div class="b-mini">
+            ${dotsB(d.steps, d.stepsDone)}
+            <span class="b-mlabel">${esc(d.steps[d.stepsDone-1<0?0:d.stepsDone-1])} · ${esc(d.statusTitle)}</span>
+          </div>
+
+          <div class="b-sep"></div>
+
+          ${flat.map(it=>`
+            <div class="b-drow">
+              <span class="nm">${esc(it.nm)}${it.sp?` <span class="sp">${esc(it.sp)}</span>`:''}</span>
+              ${multi?`<span class="b-rtag">${esc(it.tag)}</span>`:''}
+              <span class="qty">×${it.qty}</span>
+              <span class="amt">¥${esc(it.amt)}</span>
+            </div>`).join('')}
+
+          <div class="b-foot">
+            <span class="fl">共 ${d.count} 份 · ${esc(d.paySub)}</span>
+            <span class="fv"><span class="cur">¥</span>${esc(d.total)}</span>
+          </div>
+        </div>
+        <div class="b-when">${esc(d.metaExtra)}</div>
+        ${d.showMergeNote ? `<div class="b-note">同桌后续加菜自动并入本单，无需重复付款。</div>` : ''}
+      </div>
+      <div class="footer">
+        <button class="btn btn-ghost" type="button">${esc(d.btnGhost)}</button>
+        <button class="btn btn-primary" type="button" ${d.btnDisabled?'disabled':''}>${esc(d.btnPrimary)}</button>
+      </div>`;
+  }
+
+  const sheetA = document.getElementById('sheetA');
+  const sheetB = document.getElementById('sheetB');
+  const sceneNote = document.getElementById('sceneNote');
+  const switchEl = document.getElementById('sceneSwitch');
+
+  function apply(scene){
+    const d = SCENES[scene];
+    sheetA.className = 'sheet ' + d.sheetClass;
+    sheetB.className = 'sheet ' + d.sheetClass;
+    sheetA.innerHTML = renderA(d);
+    sheetB.innerHTML = renderB(d);
+    sceneNote.innerHTML = SCENE_NOTES[scene];
+    switchEl.querySelectorAll('button').forEach(b=>{
+      b.setAttribute('aria-pressed', String(b.dataset.scene === scene));
+    });
+  }
+
+  switchEl.addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-scene]');
+    if(btn) apply(btn.dataset.scene);
+  });
+
+  apply('after');
+</script>
