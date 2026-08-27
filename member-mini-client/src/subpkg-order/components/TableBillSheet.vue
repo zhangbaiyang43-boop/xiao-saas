@@ -58,9 +58,11 @@
                 <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
                 <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
               </view>
-              <!-- 谁点的：拼桌时顾客要确认"这道菜是我点的还是同桌点的" -->
+              <!-- 谁点的：服务员代点 / 拼桌第几位。同一列回答同一个问题，
+                   不展开「订单详情」也能一眼看出这道菜是谁加的。 -->
+              <view v-if="row.isStaff" class="to-drow-who to-drow-who--staff">服</view>
               <view
-                v-if="row.participantNo"
+                v-else-if="row.participantNo"
                 class="to-drow-who"
                 :style="{ background: row.participantColor }"
               >{{ row.participantNo }}</view>
@@ -262,6 +264,7 @@ export default {
             item.specKey || name,
             spec,
             group.participantNo || '',
+            group.isStaff ? 'staff' : '',
             stage,
             group.isPrepaid ? 'paid' : '',
             item.isInvalid ? 'void' : '',
@@ -282,6 +285,7 @@ export default {
             image: this.orderItemImage(item),
             participantNo: group.participantNo,
             participantColor: group.participantColor,
+            isStaff: group.isStaff,
             isPrepaid: group.isPrepaid,
             isInvalid: item.isInvalid,
             invalidText: item.invalidText,
@@ -315,7 +319,9 @@ export default {
    底部动作栏作为正常 flex 子元素排在它下面，不需要任何让位 padding。 */
 .to-scroll {
   max-height: calc(86vh - 250rpx - env(safe-area-inset-bottom));
-  padding: 8rpx 24rpx 20rpx;
+  /* 底部留白跟 .to-detail 的 margin-top 一致（16rpx），
+     让「订单详情」卡上下两边的间距看起来一样宽。 */
+  padding: 8rpx 24rpx 16rpx;
   box-sizing: border-box;
 }
 

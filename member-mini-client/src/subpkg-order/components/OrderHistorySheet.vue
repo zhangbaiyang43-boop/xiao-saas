@@ -62,8 +62,9 @@
                 <text v-if="row.spec" class="to-drow-spec">{{ row.spec }}</text>
                 <text v-if="row.isInvalid" class="to-drow-mark">{{ row.invalidText }}</text>
               </view>
+              <view v-if="row.isStaff" class="to-drow-who to-drow-who--staff">服</view>
               <view
-                v-if="row.participantNo"
+                v-else-if="row.participantNo"
                 class="to-drow-who"
                 :style="{ background: row.participantColor }"
               >{{ row.participantNo }}</view>
@@ -202,7 +203,7 @@ export default {
           const name = this.orderItemName(item)
           const spec = this.orderItemSpecText(item) || ''
           const stage = item.isInvalid ? -1 : group.stage
-          const key = [item.specKey || name, spec, group.participantNo || '', stage, item.isInvalid ? 'void' : ''].join('|')
+          const key = [item.specKey || name, spec, group.participantNo || '', group.isStaff ? 'staff' : '', stage, item.isInvalid ? 'void' : ''].join('|')
           const existing = index.get(key)
           if (existing) {
             existing.qty += this.orderItemQty(item)
@@ -219,6 +220,7 @@ export default {
             image: this.orderItemImage(item),
             participantNo: group.participantNo,
             participantColor: group.participantColor,
+            isStaff: group.isStaff,
             isInvalid: item.isInvalid,
             invalidText: item.invalidText,
           }
@@ -253,7 +255,8 @@ export default {
 .orders-list {
   flex: 1;
   width: 100%;
-  padding: 8rpx 32rpx 20rpx;
+  /* 底部留白跟 .to-detail 的 margin-top 一致（16rpx），上下间距一样宽 */
+  padding: 8rpx 32rpx 16rpx;
   box-sizing: border-box;
 }
 

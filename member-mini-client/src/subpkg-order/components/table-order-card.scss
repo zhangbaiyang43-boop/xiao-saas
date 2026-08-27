@@ -462,6 +462,14 @@
   font-weight: 800;
 }
 
+/* 服务员代客加的菜。占"谁点的"同一个位置——它回答的正是同一个问题，
+   顾客结账时才发现一道没印象的菜最容易起争执。用跟折叠区里
+   .to-round-staff 一致的紫色，两处指的是同一件事。 */
+.to-drow-who--staff {
+  background: #a21caf;
+  font-size: 17rpx;
+}
+
 .to-drow-qty {
   flex-shrink: 0;
   color: var(--text-3);

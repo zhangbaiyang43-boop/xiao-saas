@@ -128,6 +128,39 @@ describe('本桌订单卡片：模板用到的类都有对应样式', () => {
     expect(block[0]).not.toMatch(/padding:[^;]*calc\([^)]*(1[6-9]\d|2\d\d)rpx\s*\+\s*env/)
   })
 
+  it('「订单详情」卡上下两边的间距一样宽', () => {
+    // 上边距是 .to-detail 自己的 margin-top；下边距是滚动区的 padding-bottom
+    // （多批次时订单详情是最后一个元素）。两个值必须一致，否则一眼能看出不对称。
+    const shared = read(SHARED_SCSS)
+    const gap = shared.match(/\.to-detail\s*\{[^}]*margin-top:\s*(\d+)rpx/)
+    expect(gap).not.toBeNull()
+    const top = gap[1]
+    for (const [rel, selector] of [
+      ['../TableBillSheet.vue', '.to-scroll'],
+      ['../OrderHistorySheet.vue', '.orders-list'],
+    ]) {
+      const block = read(rel).match(new RegExp('\\' + selector + '\\s*\\{[^}]*\\}'))
+      expect(block, `${rel} 缺少 ${selector}`).not.toBeNull()
+      const bottom = block[0].match(/padding:\s*\d+rpx\s+\d+rpx\s+(\d+)rpx/)
+      expect(bottom, `${rel} ${selector} 的 padding 不是三值写法`).not.toBeNull()
+      expect(bottom[1], `${rel} 底部留白应与 .to-detail 的 margin-top 一致`).toBe(top)
+    }
+  })
+
+  it('服务员代客加的菜在默认视图就能看出来，不用展开订单详情', () => {
+    // 顾客结账时才发现一道没印象的菜最容易起争执——"谁点的"必须默认可见。
+    const shared = read(SHARED_SCSS)
+    expect(shared).toContain('.to-drow-who--staff')
+    for (const rel of ['../TableBillSheet.vue', '../OrderHistorySheet.vue']) {
+      const source = read(rel)
+      expect(source).toContain('to-drow-who--staff')
+      expect(source).toContain('v-if="row.isStaff"')
+      // 合并键必须带上 isStaff，否则服务员代加的和顾客自己点的同一道菜会并成一行
+      expect(source).toContain("group.isStaff ? 'staff' : ''")
+      expect(source).toContain('isStaff: group.isStaff,')
+    }
+  })
+
   it('点亮态和未点亮态是两种颜色，否则进度看不出来', () => {
     const css = read(SHARED_SCSS)
     const base = css.match(/\.to-stage-dot\s*\{[^}]*background:\s*([^;]+);/)
