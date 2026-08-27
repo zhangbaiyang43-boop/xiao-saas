@@ -313,7 +313,11 @@ export default {
 
 .to-scroll {
   max-height: calc(82vh - 176rpx - env(safe-area-inset-bottom));
-  padding: 8rpx 24rpx 188rpx;
+  /* 底部按钮是 position:absolute 悬浮的，滚动内容要留出它的整个高度再让位——
+     按钮区实际是 18rpx(上) + 92rpx(按钮) + 18rpx(下) + 安全区 ≈ 128rpx + env，
+     写死 188rpx 在真机（env≈68rpx）下不够，最后一行会被压住。用 calc 含 env，
+     再加 32rpx 呼吸空间。 */
+  padding: 8rpx 24rpx calc(160rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
