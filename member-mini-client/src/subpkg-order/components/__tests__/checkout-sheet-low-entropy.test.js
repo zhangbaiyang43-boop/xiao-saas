@@ -102,9 +102,12 @@ describe('CheckoutSheet 复用「本桌订单」的 .to-* 点单卡', () => {
     expect(checkout).toContain('<template #footer>')
   })
 
-  it('滚动区用 flex:1 + min-height:0（不加 height:0——那会让 footer 被挤出安全区）', () => {
-    expect(checkout).toMatch(/\.order-confirm-content\s*\{[\s\S]*?\n\s*flex:\s*1;[\s\S]*?\n\s*min-height:\s*0;/)
-    expect(checkout).not.toMatch(/\.order-confirm-content\s*\{[\s\S]*?\n\s*height:\s*0;/)
+  it('滚动区写全 flex:1 + min-height:0 + height:0（mp-weixin scroll-view 才会滚，不会把 footer 顶出屏幕）', () => {
+    const block = checkout.match(/\.order-confirm-content\s*\{([\s\S]*?)\}/)
+    expect(block).not.toBeNull()
+    expect(block[1]).toMatch(/flex:\s*1;/)
+    expect(block[1]).toMatch(/min-height:\s*0;/)
+    expect(block[1]).toMatch(/\bheight:\s*0;/)
   })
 
   it('打开确认弹层时清单默认展开', () => {
