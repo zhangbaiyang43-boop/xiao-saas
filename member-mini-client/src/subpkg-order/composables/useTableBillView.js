@@ -55,7 +55,8 @@ export function useTableBillView({
   // 从源头就是 undefined，不只是子组件没声明 prop 的问题。桌牌号是按桌台会话
   // 发一次（哪个批次拿到号不重要），取第一笔带了 pickup_no 的订单即可，
   // 跟 admin-h5 OrderManage.vue 里 `orders.find(o => o.pickup_no)` 同一套算法。
-  const tablePickupNo = computed(() => tableSessionOrders.value.find(order => order.pickupNo)?.pickupNo || '')
+  // 展示口径：桌牌号是按会话发一次，会话里任何一单带的号都是同一个——包括 prepay 单。
+  const tablePickupNo = computed(() => sessionDisplayOrders.value.find(order => order.pickupNo)?.pickupNo || '')
   const isTableAccountMode = computed(() => paymentMode.value === "table_account")
   const isPostpayMode = computed(() => paymentMode.value === "postpay")
   // 餐后付款和桌台账单，后端其实是同一套机制：同一桌多次下单共用同一个 dining_session，
@@ -70,15 +71,44 @@ export function useTableBillView({
     if (!tableSessionId.value || !orderSessionId) return false
     return orderSessionId === tableSessionId.value
   }
+  const byCreatedTs = (a, b) => Number(a.createdTs || 0) - Number(b.createdTs || 0)
+  const isPrepaidOrder = (order) =>
+    normalizePaymentMode(order?.paymentMode || paymentMode.value) === 'prepay'
+
+  // 展示口径 vs 结算口径，是两件不同的事，必须分开算：
+  //
+  // - sessionDisplayOrders（展示）：本桌会话里的**全部**订单。老板在后台看到的就是
+  //   这一份（settle_table 也是按 dining_session_id 捞全部订单，不分支付方式）。
+  // - tableSessionOrders（结算）：只含 table_account / postpay。先付后厨（prepay）的
+  //   单在下单时已经各自付清，绝不能并进"本桌待结账金额"，否则顾客要为同一道菜付两次钱。
+  //
+  // 原来只有后者一条口径，导致店铺中途切换收款模式后，会话里的 prepay 订单在顾客端
+  // "本桌订单"里**整条消失**——后台 4 单、小程序 3 单，顾客看不到自己点的菜。
+  const sessionDisplayOrders = computed(() =>
+    myOrders.value.filter(isSameDiningSessionOrder).sort(byCreatedTs)
+  )
   const tableSessionOrders = computed(() =>
     myOrders.value
       .filter(order => ['table_account', 'postpay'].includes(normalizePaymentMode(order?.paymentMode || paymentMode.value)))
       .filter(isSameDiningSessionOrder)
-      .sort((a, b) => Number(a.createdTs || 0) - Number(b.createdTs || 0))
+      .sort(byCreatedTs)
   )
   const isOrderInvalid = (order) => ['cancelled', 'rejected'].includes(normalizeOrderStatus(order?.status))
   const isItemInvalid = (item) => ['refunded', 'refund', 'cancelled', 'canceled'].includes(String(item?.status || item?.refund_status || '').toLowerCase())
   const validTableOrders = computed(() => tableSessionOrders.value.filter(order => !isOrderInvalid(order)))
+  const validDisplayOrders = computed(() => sessionDisplayOrders.value.filter(order => !isOrderInvalid(order)))
+  // 会话里已经单独付过款的那部分——只用来向顾客解释"为什么份数对不上本桌应付金额"，
+  // 不参与任何应付金额计算。
+  const prepaidDisplayOrders = computed(() => validDisplayOrders.value.filter(isPrepaidOrder))
+  const prepaidItemCount = computed(() =>
+    prepaidDisplayOrders.value.reduce(
+      (sum, order) => sum + (order.items || []).reduce((n, item) => n + (isItemInvalid(item) ? 0 : orderItemQty(item)), 0),
+      0,
+    )
+  )
+  const prepaidTotal = computed(() =>
+    prepaidDisplayOrders.value.reduce((sum, order) => sum + Number(order.total || 0), 0)
+  )
   const tableTotal = computed(() => {
     if (Number(tableSessionTotal.value) > 0) return Number(tableSessionTotal.value)
     const backendTotal = validTableOrders.value.map(order => Number(order.tableTotal || 0)).find(total => total > 0)
@@ -103,13 +133,16 @@ export function useTableBillView({
     if (!no || no < 1) return PARTICIPANT_COLORS[0]
     return PARTICIPANT_COLORS[(no - 1) % PARTICIPANT_COLORS.length]
   }
+  // 展示口径：会话内全部订单。prepay 的批次带 isPrepaid，界面上标成"已单独付款"，
+  // 让顾客知道这道菜在本桌、但不在这次要结的账里。
   const tableOrderGroups = computed(() =>
-    tableSessionOrders.value.map((order, index) => ({
+    sessionDisplayOrders.value.map((order, index) => ({
       id: order.id || String(index),
       orderNo: order.orderNo || String(order.id || '').slice(-4),
       title: (order.createdAt || '--:--') + (index === 0 ? ' 下单' : ' 加菜'),
       statusText: tableGroupStatusText(order.status, order.status_text),
       tone: tableGroupStatusTone(order.status),
+      isPrepaid: isPrepaidOrder(order),
       discountAmount: Number(order.discountAmount || 0),
       participantNo: order.participantNo || null,
       participantColor: participantColor(order.participantNo),
@@ -131,8 +164,13 @@ export function useTableBillView({
   // 桌台账单/餐后付款都必须等本桌所有有效订单都做完（done）才算"可以结账"，否则会出现
   // 桌台账单顾客点了"去结账"、商家在后台点结账时却被后端 settle-table 以"本桌还有未完成
   // 的订单"拒绝的落差；餐后付款虽然没有"去结账"按钮，但同样的判断决定要不要提示去收银台。
+  //
+  // 口径必须跟后端一致：settle_table 按 dining_session_id 捞**全部**订单，
+  // blocking_orders 里任何一单不在 TABLE_CLOSE_DONE_STATUSES 就整桌 409。所以这里也要
+  // 按会话全量判断——只看 table_account/postpay 会漏掉同会话里还在制作中的 prepay 单，
+  // 那正是上面这段注释想避免的那个落差。
   const allOrdersDone = computed(() =>
-    validTableOrders.value.length > 0 && validTableOrders.value.every(order => normalizeOrderStatus(order.status) === 'done')
+    validDisplayOrders.value.length > 0 && validDisplayOrders.value.every(order => normalizeOrderStatus(order.status) === 'done')
   )
   const stillPreparing = computed(() => tableOrderGroups.value.length > 0 && !isTableSettled.value && !allOrdersDone.value)
   const checkoutRequested = computed(() => Boolean(checkoutRequestedAt.value))
@@ -165,7 +203,9 @@ export function useTableBillView({
       }
     }
     if (!tableOrderGroups.value.length) return { icon: 'icon-list', title: '本桌还没有已点菜品', desc: '先点菜，后续加菜会自动合并', tone: 'settled' }
-    const statuses = validTableOrders.value.map(order => normalizeOrderStatus(order.status))
+    // 展示口径：顶部这句话描述的是"这一桌的菜现在什么情况"，必须涵盖会话里全部订单，
+    // 否则同会话的 prepay 单还在制作中，顶部却会说"菜品已上齐"。
+    const statuses = validDisplayOrders.value.map(order => normalizeOrderStatus(order.status))
     if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '商家正在确认订单，请稍候', tone: 'active' }
     if (statuses.includes('preparing')) return { icon: 'icon-beican', title: '菜品正在制作', desc: '厨房正在制作，可以继续加菜', tone: 'active' }
     if (statuses.includes('done')) {
@@ -184,11 +224,16 @@ export function useTableBillView({
   // 0 还没下单 · 1 已下单待接单 · 2 商家已接单/制作中 · 3 全部上齐待结账 · 4 已结账。
   const tableBillStageIndex = computed(() => {
     if (isTableSettled.value) return 4
-    const statuses = validTableOrders.value.map(order => normalizeOrderStatus(order.status))
+    // 展示口径，同 tableStatusView：进度条画的是整桌出餐进度。
+    const statuses = validDisplayOrders.value.map(order => normalizeOrderStatus(order.status))
     if (!statuses.length) return 0
     if (allOrdersDone.value) return 3
+    // 还有单没被商家接下时，整桌就停在"等接单"，哪怕另一单已经在做了——
+    // 跟 tableStatusView 同一套优先级（它也是先判 pending 再判 preparing）。
+    // 原来这里先判 preparing，导致顶部说"订单已收到，商家正在确认"、
+    // 下面的进度条却已经走到"等上齐"，同一张卡里两处自相矛盾。
+    if (statuses.includes('pending')) return 1
     if (statuses.includes('preparing')) return 2
-    if (statuses.every(status => status === 'pending')) return 1
     return 2
   })
   const tableBillTimeline = computed(() => {
@@ -342,7 +387,11 @@ export function useTableBillView({
     sharedBillSubLabel,
     tableSessionId,
     tableSessionOrders,
+    sessionDisplayOrders,
     validTableOrders,
+    validDisplayOrders,
+    prepaidItemCount,
+    prepaidTotal,
     tableTotal,
     tableItemCount,
     tablePickupNo,

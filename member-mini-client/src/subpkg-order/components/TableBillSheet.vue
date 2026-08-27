@@ -55,6 +55,9 @@
                     :style="{ background: group.participantColor }"
                   >{{ group.participantNo }}</view>
                   <text class="to-round-t">{{ group.title }} · #{{ group.orderNo }}</text>
+                  <!-- 先付后厨的批次已经单独付过款，不在本次结账里。不标出来顾客会
+                       疑惑"为什么份数跟应付金额对不上"。 -->
+                  <text v-if="group.isPrepaid" class="to-round-paid">已单独付款</text>
                   <text v-if="group.discountAmount > 0" class="to-round-discount">优惠 -¥{{ formatPrice(group.discountAmount) }}</text>
                 </view>
                 <!-- 单批次时顶部胶囊已经说了状态，这里的批次标签就是重复信息，隐掉。 -->
@@ -93,6 +96,10 @@
             <text class="to-foot-l">共 {{ tableItemCount }} 份 · {{ isTableSettled ? '已结账' : tableBillPayStateText }}</text>
             <text class="to-foot-v"><text class="to-cur">¥</text>{{ formatPrice(tableTotal) }}</text>
           </view>
+          <!-- 数字必须带场景：合计只算待结账的部分，这里说明差额去哪了。 -->
+          <text v-if="prepaidItemCount > 0" class="to-foot-note">
+            另有 {{ prepaidItemCount }} 份已单独付款 ¥{{ formatPrice(prepaidTotal) }}，不计入本次结账
+          </text>
         </view>
 
         <view v-else class="to-empty">
@@ -191,6 +198,9 @@ export default {
     tableBillPayStateText: { type: String, default: '' },
     tableTotal: { type: Number, default: 0 },
     tableItemCount: { type: Number, default: 0 },
+    // 会话里已单独付款（prepay）的部分——只用于向顾客解释份数差额，不参与应付金额。
+    prepaidItemCount: { type: Number, default: 0 },
+    prepaidTotal: { type: Number, default: 0 },
     tableOrderGroups: { type: Array, default: () => [] },
     orderItemImageFailed: { type: Object, default: () => ({}) },
     canContinueOrder: { type: Boolean, default: false },

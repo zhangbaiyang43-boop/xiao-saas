@@ -256,6 +256,18 @@
   font-weight: 700;
 }
 
+/* 已单独付款的批次（先付后厨）——中性灰底标签，跟"待接单/制作中"这类
+   进行中的状态标签区分开：它讲的是收款，不是出餐进度。 */
+.to-round-paid {
+  flex-shrink: 0;
+  padding: 2rpx 10rpx;
+  border-radius: 8rpx;
+  background: var(--bg-muted);
+  color: var(--text-3);
+  font-size: 20rpx;
+  font-weight: 700;
+}
+
 .to-round-tag {
   flex-shrink: 0;
   color: var(--warning);
@@ -387,6 +399,14 @@
   font-size: 24rpx;
   font-weight: 700;
   margin-right: 2rpx;
+}
+
+.to-foot-note {
+  display: block;
+  margin-top: 8rpx;
+  color: var(--text-3);
+  font-size: 21rpx;
+  line-height: 1.4;
 }
 
 .to-submeta {
