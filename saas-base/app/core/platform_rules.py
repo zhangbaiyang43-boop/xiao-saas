@@ -27,9 +27,9 @@ MICRO_BAND_MAX = 20.0
 # 「不亏钱」不靠拍毛利率去卡单张券，而是靠总闸：近 30 天优惠总额 ≤ GMV × 此比例。
 # 总闸控住了，单张券就能在预算内敢发大一点、制造体感。随强度放开。
 DISCOUNT_BUDGET_RATIO_BY_INTENSITY = {
-    "conservative": 0.02,
-    "standard": 0.04,
-    "aggressive": 0.07,
+    "conservative": 0.03,
+    "standard": 0.05,
+    "aggressive": 0.08,
 }
 # 冷启动：数据太少不设总闸，先把量做起来
 DISCOUNT_BUDGET_MIN_ORDERS = 10
@@ -91,6 +91,16 @@ def _safe_amount(threshold: float, ratio: float, minimum: float = 1.0) -> float:
     return _clean(threshold * capped_ratio, minimum)
 
 
+def _jackpot_amount(threshold: float, ratio_mult: float = 1.0) -> float:
+    """开盲盒的"大额档" / 召回券：直接给到贴近结算红线（实付 MAX_DISCOUNT_RATIO）
+    的力度，让"手气爆棚"肉眼可见地大——不走 _safe_amount 的 SAFE_INTENSITY_CEILING
+    软上限（那条上限是给"每单都发"的常规档留缓冲的，盲盒大额档就是要显眼）。
+    单笔仍由结算时 cap_discount_amount 以真实实付的 20% 兜底，不会亏；整体花费由
+    coupon_service 的 P0-6 月优惠预算总闸控。"""
+    ratio = min(0.18 * ratio_mult, MAX_DISCOUNT_RATIO - 0.01)
+    return _clean(threshold * ratio)
+
+
 def resolve_intensity(intensity: str | None) -> str:
     """把任意输入归一化成合法档位，非法/缺失一律回落到标准档，绝不报错。"""
     if intensity in INTENSITY_PRESETS:
@@ -121,40 +131,50 @@ def build_dynamic_rules(
     # 预算总闸控，不再用拍的毛利率去卡单张券——那样券太小就没"占便宜"体感了。
     amt = _safe_amount
 
-    micro = aov <= MICRO_BAND_MAX  # 低客单价：无门槛立减，不发满减
+    micro = aov <= MICRO_BAND_MAX  # 低客单价：单品店居多，门槛券易变废券
 
-    # ── 进店券：当次用餐有效，促进凑单 / 或（micro）直接立减 ──────────
+    # ── 进店券：当次用餐有效，开盲盒式三档 ────────────────────────────
+    # 设计（见 spec ①②③）：多数抽到"加个菜正好用掉"的小券——门槛贴着客单价、
+    # 面额≈那一个菜的钱，制造"白得一道菜"的占便宜感，顺带把客单价往上带；
+    # 少数（weight 10~12）抽到贴近结算红线的大额券"手气爆棚"，制造惊喜，
+    # 避免"人人有份、金额都差不多=没感觉"。不再给"本来就要付的钱"直接打折
+    # （旧版 micro 全无门槛 / 旧版满1.6×AOV 门槛高于客单价，都已废弃）。
     if micro:
+        e_add_thr = _clean(aov * 1.2 * threshold_mult)
         entry_coupons = [
-            {"name": "今日专享券", "amount": _clean(aov * 0.12), "threshold": 0, "valid_days": 1, "weight": 50},
-            {"name": "幸运优惠券", "amount": _clean(aov * 0.16), "threshold": 0, "valid_days": 1, "weight": 35},
-            {"name": "超值大礼券", "amount": _clean(aov * 0.20), "threshold": 0, "valid_days": 1, "weight": 15},
+            {"name": "无门槛立减", "amount": _clean(aov * 0.12), "threshold": 0,          "valid_days": 1, "weight": 60},
+            {"name": "加菜小券",   "amount": _clean(aov * 0.18), "threshold": e_add_thr,  "valid_days": 1, "weight": 28},
+            {"name": "手气爆棚",   "amount": _clean(aov * 0.20), "threshold": 0,          "valid_days": 1, "weight": 12},
         ]
     else:
-        e_low_thr  = _clean(aov * 1.1 * threshold_mult)
-        e_mid_thr  = _clean(aov * 1.3 * threshold_mult)
-        e_high_thr = _clean(aov * 1.6 * threshold_mult)
+        e_easy_thr = _clean(aov * 0.9  * threshold_mult)   # 已经达标 → 纯小额，无"多花才省"感
+        e_add_thr  = _clean(aov * 1.15 * threshold_mult)   # 加一道菜，面额≈那道菜的钱
+        e_jack_thr = _clean(aov * 1.0  * threshold_mult)   # 正常吃就到，大额
         entry_coupons = [
-            {"name": "今日专享券", "amount": amt(e_low_thr,  0.06 * amount_ratio_mult), "threshold": e_low_thr,  "valid_days": 1, "weight": 50},
-            {"name": "幸运优惠券", "amount": amt(e_mid_thr,  0.07 * amount_ratio_mult), "threshold": e_mid_thr,  "valid_days": 1, "weight": 35},
-            {"name": "超值大礼券", "amount": amt(e_high_thr, 0.08 * amount_ratio_mult), "threshold": e_high_thr, "valid_days": 1, "weight": 15},
+            {"name": "开胃小券", "amount": amt(e_easy_thr, 0.08 * amount_ratio_mult), "threshold": e_easy_thr, "valid_days": 1, "weight": 60},
+            {"name": "加菜小券", "amount": amt(e_add_thr,  0.14 * amount_ratio_mult), "threshold": e_add_thr,  "valid_days": 1, "weight": 28},
+            {"name": "手气爆棚", "amount": _jackpot_amount(e_jack_thr, amount_ratio_mult), "threshold": e_jack_thr, "valid_days": 1, "weight": 12},
         ]
 
-    # ── 复购券：结账后发，门槛 ≈ AOV，绑下次回来（复购本就要求正常消费，micro 也用满减）──
-    r_low_thr   = _clean(aov * 0.9 * threshold_mult)
-    r_mid_thr   = _clean(aov * 1.1 * threshold_mult)
-    r_high_thr  = _clean(aov * 1.4 * threshold_mult)
-    r_low_amt   = amt(r_low_thr,  0.06 * amount_ratio_mult)
-    r_mid_amt   = amt(r_mid_thr,  0.07 * amount_ratio_mult)
-    r_high_amt  = amt(r_high_thr, 0.08 * amount_ratio_mult)
+    # ── 复购券：结账后发，绑下次回来。也做成盲盒——低门槛小券保底 + 大额档
+    # "下次来省一道菜"制造回头动机。门槛收进 0.9~1.25×AOV（旧版 1.4× 高于
+    # 客单价，跟进店券同一个毛病，已收窄）。
+    r_low_thr  = _clean(aov * 0.9  * threshold_mult)
+    r_mid_thr  = _clean(aov * 1.05 * threshold_mult)
+    r_high_thr = _clean(aov * 1.25 * threshold_mult)
+    r_low_amt  = amt(r_low_thr,  0.10 * amount_ratio_mult)
+    r_mid_amt  = amt(r_mid_thr,  0.11 * amount_ratio_mult)
+    r_high_amt = _jackpot_amount(r_high_thr, amount_ratio_mult)
 
-    # ── 新客券：首单后发。micro → 无门槛立减；否则门槛比 AOV 低 20% ──
-    nc_thr = 0 if micro else _clean(aov * 0.8 * threshold_mult)
-    nc_amt = _clean(aov * 0.15) if micro else amt(nc_thr, 0.07 * amount_ratio_mult)
+    # ── 新客券：首单后发，21 天有效——这是"给下次来的理由"，力度要给够。
+    # micro → 无门槛立减；否则门槛比 AOV 低 15%，面额 12%（旧版 7% 太弱）。
+    nc_thr = 0 if micro else _clean(aov * 0.85 * threshold_mult)
+    nc_amt = _clean(aov * 0.18) if micro else amt(nc_thr, 0.12 * amount_ratio_mult)
 
-    # ── 召回券：沉睡客户唤回。micro → 无门槛立减；否则门槛比 AOV 更低 ──
+    # ── 召回券：沉睡客户唤回——最该舍得的一张。门槛压低（0.7×AOV）方便用掉，
+    # 面额直接给到盲盒大额档的力度。micro → 无门槛立减 20%。
     rc_thr = 0 if micro else _clean(aov * 0.7 * threshold_mult)
-    rc_amt = _clean(aov * 0.15) if micro else amt(rc_thr, 0.07 * amount_ratio_mult)
+    rc_amt = _clean(aov * 0.20) if micro else _jackpot_amount(rc_thr, amount_ratio_mult)
 
     # ── 邀请奖励（老带新双边奖励）：邀请人和新顾客两张券共用同一个消费门槛，
     # 门槛比AOV低20%（跟新客券同样的道理，确保新顾客首次到店真能用上，
@@ -191,9 +211,9 @@ def build_dynamic_rules(
             "trigger_amount": 0,
             "weighted_enabled": True,
             "weighted_coupons": [
-                {"name": "下次专享券", "amount": r_low_amt,  "threshold": r_low_thr,  "valid_days": 7,  "weight": 50},
-                {"name": "感谢惠顾券", "amount": r_mid_amt,  "threshold": r_mid_thr,  "valid_days": 7,  "weight": 35},
-                {"name": "超值回馈券", "amount": r_high_amt, "threshold": r_high_thr, "valid_days": 14, "weight": 15},
+                {"name": "下次专享券", "amount": r_low_amt,  "threshold": r_low_thr,  "valid_days": 7,  "weight": 55},
+                {"name": "感谢惠顾券", "amount": r_mid_amt,  "threshold": r_mid_thr,  "valid_days": 10, "weight": 30},
+                {"name": "超值回馈券", "amount": r_high_amt, "threshold": r_high_thr, "valid_days": 15, "weight": 15},
             ],
         },
         "new_customer_coupon": {

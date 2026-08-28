@@ -46,11 +46,19 @@ class AutoMarketingStrategyP0Test(unittest.TestCase):
         for key in ("noodle", "fastfood", "breakfast", "drink"):
             self.assertLessEqual(INDUSTRY_PRESETS[key]["fallback_aov"], MICRO_BAND_MAX)
             rules = build_dynamic_rules(0, "standard", key)
-            # 新客券 + 进店券三档全部无门槛
+            # 新客券无门槛立减
             self.assertEqual(self._new_customer(rules)["threshold"], 0)
-            for tier in self._entry(rules):
-                self.assertEqual(tier["threshold"], 0)
+            tiers = self._entry(rules)
+            # 进店券是盲盒三档：至少两档无门槛（常规 + 手气爆棚），最多一档"加菜小券"带低门槛
+            zero_thr = [t for t in tiers if t["threshold"] == 0]
+            self.assertGreaterEqual(len(zero_thr), 2)
+            for tier in tiers:
                 self.assertGreaterEqual(tier["amount"], 1)
+            # 带门槛的那档门槛必须 > 客单价（逼一次加购），不能低于客单价白送
+            aov = INDUSTRY_PRESETS[key]["fallback_aov"]
+            for tier in tiers:
+                if tier["threshold"] > 0:
+                    self.assertGreater(tier["threshold"], aov)
 
     def test_non_micro_band_still_uses_threshold_coupons(self):
         rules = build_dynamic_rules(0, "standard", "hotpot")  # aov 90
@@ -67,6 +75,50 @@ class AutoMarketingStrategyP0Test(unittest.TestCase):
         # P0-5 撤销：毛利率红线连同 margin 字段一起移除
         for meta in INDUSTRY_PRESETS.values():
             self.assertNotIn("margin", meta)
+
+    # ── ③ 进店券门槛不再高于客单价 ────────────────────────────────────
+    def test_entry_coupon_threshold_never_far_above_aov(self):
+        # 旧 bug：火锅 aov 90，最高档进店券门槛 满144（1.6×aov）→ "多花54省12"负体感
+        rules = build_dynamic_rules(90, "standard", "hotpot")
+        for tier in self._entry(rules):
+            # 任何一档门槛都不允许超过客单价的 1.2 倍
+            self.assertLessEqual(tier["threshold"], 90 * 1.2 + 1)
+
+    # ── ① 进店券带门槛那档：面额 ≈ 门槛与客单价的差（"白得一道菜"）──────
+    def test_entry_addon_tier_discount_roughly_covers_the_gap(self):
+        for aov, industry in [(40, "default"), (90, "hotpot"), (110, "dinner")]:
+            rules = build_dynamic_rules(aov, "standard", industry)
+            addon = next(t for t in self._entry(rules) if t["threshold"] > aov)
+            gap = addon["threshold"] - aov
+            # 折扣至少覆盖差额的 70%，让"加的那道菜"接近白送
+            self.assertGreaterEqual(addon["amount"], gap * 0.7)
+
+    # ── ② 盲盒：手气爆棚档明显大于常规档，且概率低 ──────────────────────
+    def test_entry_blind_box_has_a_real_jackpot_tier(self):
+        for aov, industry in [(40, "default"), (90, "hotpot"), (110, "dinner")]:
+            tiers = self._entry(build_dynamic_rules(aov, "standard", industry))
+            common = max(tiers, key=lambda t: t["weight"])
+            jackpot = max(tiers, key=lambda t: t["amount"])
+            # 大额档权重是最低的（稀有）
+            self.assertEqual(jackpot["weight"], min(t["weight"] for t in tiers))
+            # 大额档面额至少是常规档的 1.6 倍
+            self.assertGreaterEqual(jackpot["amount"], common["amount"] * 1.6)
+
+    def test_recall_coupon_is_the_strongest_relative_to_threshold(self):
+        # 召回券：低门槛 + 贴近结算红线的力度
+        rules = build_dynamic_rules(90, "standard", "hotpot")
+        rc = rules["recall_coupon"]["weighted_coupons"][0]
+        self.assertLess(rc["threshold"], 90)  # 门槛低于客单价，好用掉
+        self.assertGreaterEqual(rc["amount"] / max(rc["threshold"], 1), 0.15)
+
+    def test_intensity_dial_changes_what_consumer_sees(self):
+        # 三档强度必须让进店券的加权期望值肉眼可分
+        def entry_ev(intensity):
+            tiers = self._entry(build_dynamic_rules(90, intensity, "hotpot"))
+            tw = sum(t["weight"] for t in tiers)
+            return sum(t["amount"] * t["weight"] for t in tiers) / tw
+        self.assertLess(entry_ev("conservative"), entry_ev("standard"))
+        self.assertLess(entry_ev("standard"), entry_ev("aggressive"))
 
     # ── P0-2 菜单估价优先 ────────────────────────────────────────────
     def test_get_merchant_aov_prefers_menu_estimate_when_orders_scarce(self):
@@ -96,7 +148,7 @@ class AutoMarketingStrategyP0Test(unittest.TestCase):
         svc._recent_discount_and_gmv = AsyncMock(return_value=(80.0, 1000.0, 30))
         svc.get_marketing_intensity = AsyncMock(return_value="standard")
         self.assertFalse(asyncio.run(svc.within_discount_budget()))
-        self.assertEqual(discount_budget_ratio("standard"), 0.04)
+        self.assertEqual(discount_budget_ratio("standard"), 0.05)
 
     def test_within_discount_budget_true_when_under_ratio(self):
         svc = CouponService(db=None)
