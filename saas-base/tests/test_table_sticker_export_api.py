@@ -106,6 +106,8 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
             {"entranceCodeIds": list(range(101))},
             {"entrance_code_ids": [101]},
             {"ids": [101]},
+            {"entranceCodeIds": [101], "ids": [202]},
+            {"entranceCodeIds": [101], "entrance_code_ids": [202]},
         )
         for payload in invalid_payloads:
             with self.subTest(payload=payload), self.assertRaises(ValidationError):

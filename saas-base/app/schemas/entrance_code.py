@@ -35,6 +35,8 @@ class RegenerateEntranceCodeRequest(BaseModel):
 
 
 class TableStickerExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=False)
+
     entrance_code_ids: list[int] = Field(
         ...,
         min_length=1,
