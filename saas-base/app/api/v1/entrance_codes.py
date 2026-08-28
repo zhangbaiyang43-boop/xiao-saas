@@ -1,9 +1,7 @@
+import base64
 from typing import Annotated
 
-from urllib.parse import quote
-
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from app.core.logger import logger
@@ -279,9 +277,10 @@ async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_
         )
         return error_response(code=422, msg=exc.message)
 
-    # 读进内存后立刻清临时目录，返回普通 Response（不是 FileResponse）：
-    # 三个自定义中间件都基于 BaseHTTPMiddleware，它无法转发 FileResponse 的
-    # http.response.pathsend 零拷贝消息，会把响应体截断，浏览器报 net::ERR_FAILED。
+    # ZIP 以 base64 塞进普通 JSON 返回，不走二进制响应体：
+    # 三层自定义中间件（Auth/Tenant/Logging）都是 BaseHTTPMiddleware，加上 nginx/WAF
+    # 对 application/zip + attachment 的处理，几 MB 的二进制响应体在链路上会被打断，
+    # 浏览器报 net::ERR_FAILED（后端却记 success）。JSON 响应和其它所有接口同路径，稳。
     try:
         zip_bytes = artifact.zip_path.read_bytes()
     finally:
@@ -291,13 +290,11 @@ async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_
         f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} count={len(codes)} "
         f"success=True bytes={len(zip_bytes)}"
     )
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(artifact.download_name)}"
-        },
-    )
+    return success_response(data={
+        "filename": artifact.download_name,
+        "size": len(zip_bytes),
+        "content_base64": base64.b64encode(zip_bytes).decode("ascii"),
+    })
 
 
 @router.get("/{code_id}", response_model=RespVo)

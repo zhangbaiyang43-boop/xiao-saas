@@ -111,7 +111,7 @@ export const batchDownloadEntranceCodes = (ids) =>
 export const exportTableStickers = (entranceCodeIds) => request.post(
   '/v1/entrance-codes/table-stickers/export',
   { entranceCodeIds },
-  { responseType: 'blob', timeout: 120000, meta: { rawResponse: true } },
+  { timeout: 120000 },
 )
 
 export const getChannelEntries = (params) => request.get('/v1/channel-entries/', { params })

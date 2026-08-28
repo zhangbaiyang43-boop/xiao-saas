@@ -177,16 +177,17 @@ test('download helper surfaces the real click error, not a later cleanup error',
   }
 })
 
-test('API request sends only entranceCodeIds and uses an isolated Blob timeout', () => {
+test('API request sends only entranceCodeIds with an isolated long timeout, plain JSON response', () => {
   const api = fs.readFileSync(path.join(root, 'src/api/index.js'), 'utf8')
   assert.match(
     api,
     /exportTableStickers\s*=\s*\(entranceCodeIds\)\s*=>\s*request\.post\(\s*['"]\/v1\/entrance-codes\/table-stickers\/export['"]\s*,\s*\{\s*entranceCodeIds\s*\}\s*,/,
   )
-  // 断言范围限定在 exportTableStickers 自己的定义里——api/index.js 里别的
-  // 请求（如 batchDownloadEntranceCodes）也有 rawResponse，全局匹配会假阳性。
-  const exportDef = api.slice(api.indexOf('exportTableStickers')).split('\n\n')[0]
-  assert.match(exportDef, /responseType:\s*['"]blob['"]/)
+  // 断言限定在 exportTableStickers 自己的定义里，避免匹配到别的请求。
+  const from = api.indexOf('exportTableStickers')
+  const exportDef = api.slice(from, api.indexOf(')', api.indexOf('{ timeout', from)) + 1)
   assert.match(exportDef, /timeout:\s*120000/)
-  assert.match(exportDef, /meta:\s*\{\s*rawResponse:\s*true\s*\}/)
+  // ZIP 走 base64+JSON，不再用二进制响应体（BaseHTTPMiddleware/WAF 会打断大二进制）
+  assert.doesNotMatch(exportDef, /responseType/)
+  assert.doesNotMatch(exportDef, /rawResponse/)
 })

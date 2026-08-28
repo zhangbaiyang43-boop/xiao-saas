@@ -207,31 +207,27 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.code, 401)
         self.assertEqual(response.msg, "未登录或商户信息已失效")
 
-    async def test_valid_export_returns_in_memory_zip_and_cleans_temp_dir(self):
-        # 用普通 Response（非 FileResponse）：三个自定义中间件都是 BaseHTTPMiddleware，
-        # 无法转发 FileResponse 的 pathsend 零拷贝消息，会截断响应体。
+    async def test_valid_export_returns_base64_zip_in_json_and_cleans_temp_dir(self):
+        # ZIP 以 base64 塞进普通 JSON 返回，不走二进制响应体——三层 BaseHTTPMiddleware
+        # + nginx/WAF 对几 MB 的 application/zip 二进制响应会打断链路（net::ERR_FAILED）。
+        import base64
+
         caller_thread_id = threading.get_ident()
         response, observed = await self._export_response()
 
-        self.assertEqual(response.media_type, "application/zip")
-        self.assertIn("attachment", response.headers["content-disposition"])
-        self.assertIn("%E7%94%B2%E5%95%86%E6%88%B7", response.headers["content-disposition"])
-        self.assertEqual(response.body, b"PK\x05\x06" + (b"\x00" * 18))
+        self.assertEqual(response.code, 200)
+        self.assertEqual(response.data["filename"], "甲商户-桌贴.zip")
+        self.assertEqual(response.data["size"], 22)
+        self.assertEqual(
+            base64.b64decode(response.data["content_base64"]),
+            b"PK\x05\x06" + (b"\x00" * 18),
+        )
         self.assertEqual(observed["code_ids"], [TENANT_A_CODE_ID])
         self.assertEqual(observed["merchant_name"], "甲商户")
         self.assertNotEqual(observed["thread_id"], caller_thread_id)
         # 临时目录在返回前就已经读进内存并清掉了
         self.assertEqual(observed["cleanup_count"], 1)
         self.assertFalse(observed["temp_dir"].exists())
-
-        messages = []
-
-        async def send(message):
-            messages.append(message)
-
-        await response(self._http_scope(), self._receive, send)
-        self.assertEqual(messages[0]["type"], "http.response.start")
-        self.assertTrue(any(message["type"] == "http.response.body" for message in messages))
 
     async def test_static_export_route_is_registered_before_dynamic_code_route(self):
         paths = [route.path for route in router.routes]
