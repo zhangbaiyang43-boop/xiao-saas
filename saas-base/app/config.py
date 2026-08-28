@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     # Staff Authentication — H5 password + trusted device (formal path).
     STAFF_TRUST_DEVICE_DAYS: int = 30
     STAFF_ACCESS_TOKEN_MINUTES: int = 120
+    # 核销率闭环调参总开关：关掉后 _marketing_tuning_loop 每周只计算+记日志、不写回
+    # coupon_tuning（apply_tuning 仍会应用已有的覆盖层，不影响安全红线/预算闸）。
+    MARKETING_AUTO_TUNING_ENABLED: bool = True
     # Cookie mode (default): HttpOnly staff_device; JSON must NOT include device_credential.
     STAFF_DEVICE_COOKIE_ENABLED: bool = True
     STAFF_DEVICE_COOKIE_NAME: str = "staff_device"

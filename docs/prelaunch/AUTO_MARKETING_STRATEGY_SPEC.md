@@ -118,7 +118,7 @@ micro 带（客单价 ≤ 20，面馆快餐单品店多）：开胃小券/手气
 |---|---|---|---|
 | **阶段 0 冷启动** | 0-5 单 | 菜单估价（菜品价中位数 ×1.2）→ 业态 fallback_aov 兜底（3.2）：定客单价带 + 券形态 | P0 |
 | **阶段 1** | 5-50 单 | 真实客单价（**原价口径、取中位数**防大单拉偏）替换估价；券形态仍按客单价带 | P0（原价）+ P1（中位数、分时段） |
-| **阶段 2 算法推券** | 50+ 单 | **核销率 + 复购率闭环调参**：某档核销率 <10% → 门槛太高 / 力度太小，自动下调；核销率 >60% 但复购未提升 → 力度过剩，收一点。叠加：分时段、分新老客、流失预警加码、A/B 迭代基线 | P1 / P2 |
+| **阶段 2 算法推券** | 50+ 单 | **核销率 + 复购率闭环调参**（✅ 已实现,`_marketing_tuning_loop` 每周）：某类型核销率 <10% → 门槛自动下调 1 小格;核销率 >65% 且复购率没起来 → 面额收 1 小格。累计乘数夹死 [0.75,1.3]/[0.7,1.4],同类型 14 天冷却,归因 ROI<1 时回滚上一次加码。叠加(未做):分时段、分新老客、A/B 基线 | ✅ 本次 + P1/P2 |
 | **阶段 3 跨店** | 平台有 N 家同业态店 | 新店冷启动直接用"同城同业态"的成熟参数，而不是通用兜底 | P2 |
 
 > 阶段 2 的"算法"不上深度学习：`核销率 / 复购率 / 客单价 / 时段 / 周几` 喂进规则树或梯度提升即可，可解释、可回滚。
@@ -150,13 +150,13 @@ micro 带（客单价 ≤ 20，面馆快餐单品店多）：开胃小券/手气
 | # | 项 | 文件 | 状态 |
 |---|---|---|---|
 | P0-6 | 月优惠预算总闸：`issue_auto_coupon` / `issue_entry_coupon` 发券前查近30天优惠总额 vs GMV原价口径×X%（保守2%/标准4%/激进7%），超则跳过（reason=`本月优惠预算已用尽，暂停自动发券`）；冷启动 <10单 或 <300元 放行 | `coupon_service.within_discount_budget` + `_recent_discount_and_gmv` + `platform_rules.discount_budget_ratio` | ✅ 本次完成 |
-| P0-7 | 经营看板：`/tenant/marketing-preview` 补 `discount_total_month` / `budget_used_ratio` / `repurchase_from_coupon` + admin-h5「智能营销」页渲染 | `app/api/v1/tenant.py` + admin-h5 | 待做 |
+| P0-7 | 经营看板 —— **归因闭环(✅ 已实现)**:`marketing-preview` 补 `attribution`(用券 vs 未用券的回头率/客单价 + 每类型核销率 + 粗略 ROI,`MarketingAnalyticsService.attribution_summary`,纯实时算不落表)+ `tuning`(当前乘数 + 最近调整日志);admin「智能营销」页「发券效果」区渲染 | `app/services/marketing_analytics_service.py` + `app/api/v1/tenant.py` + admin-h5 | ✅ 本次完成 |
 
 ### P1（上线后 1-2 月，数据攒起来）
 
 - 客单价取**中位数**而非均值（`_recent_order_stats` 加 `PERCENTILE`/近似）
 - 分时段客单价（午市 / 晚市 / 夜宵）
-- 核销率闭环：每周跑一次，按每档券的核销率自动升降门槛 / 力度（写回一个 `tenant_config.coupon_tuning` 覆盖层，仍受 P0-6 预算总闸约束）
+- ~~核销率闭环~~ —— **已提前到本次实现**（阶段 2 行）。覆盖层落在 `business_info.coupon_tuning`(不单开表/迁移),`platform_rules.apply_tuning` 在 `build_dynamic_rules` 结果上再乘一道,仍过结算红线 + P0-6 预算闸。总开关 `MARKETING_AUTO_TUNING_ENABLED`。剩余:分时段、分新老客差异化
 - 新老客差异化：新客门槛更低、力度更大
 
 ### P2（有几十家店后）

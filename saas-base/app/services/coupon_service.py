@@ -159,8 +159,17 @@ class CouponService(BaseService):
         business_info = (config.business_info or {}) if config else {}
         return resolve_industry(business_info.get("industry"))
 
+    async def get_coupon_tuning(self) -> dict:
+        """核销率闭环调参的当前覆盖层（每类型 threshold_mult / amount_mult）。
+        存在 business_info.coupon_tuning，不用单开表/迁移。没有则空 dict。"""
+        from app.services.tenant_service import TenantService
+        config = await TenantService(self.db).get_tenant_config(self.tenant_id)
+        business_info = (config.business_info or {}) if config else {}
+        tuning = business_info.get("coupon_tuning")
+        return tuning if isinstance(tuning, dict) else {}
+
     async def get_coupon_rules(self) -> dict:
-        from app.core.platform_rules import build_dynamic_rules
+        from app.core.platform_rules import apply_tuning, build_dynamic_rules
         from app.services.tenant_service import TenantService, normalize_coupon_rules
         tenant_service = TenantService(self.db)
         config = await tenant_service.get_tenant_config(self.tenant_id)
@@ -173,6 +182,8 @@ class CouponService(BaseService):
         intensity = await self.get_marketing_intensity()
         industry = await self.get_industry()
         platform_rules = build_dynamic_rules(aov, intensity, industry)
+        # 核销率闭环调参：把每周微调出来的两个乘数叠加上去（仍受结算红线 + 预算闸约束）
+        platform_rules = apply_tuning(platform_rules, (config.business_info or {}).get("coupon_tuning") if config else None)
         # 商户只有显式 locked 某条则时，才允许静态配置覆盖算法算出来的值；
         # 未 locked 时只认 enabled 开关，金额/门槛始终由算法算——这样商家开
         # 户时写入的那份历史默认值（旧版 DEFAULT_COUPON_RULES 种子数据）不会

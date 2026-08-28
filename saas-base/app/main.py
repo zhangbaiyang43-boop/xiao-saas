@@ -366,6 +366,50 @@ async def _marketing_recall_loop():
         await asyncio.sleep(INTERVAL)
 
 
+async def _marketing_tuning_loop():
+    """每周对每个租户跑一轮核销率闭环调参。
+
+    MarketingAnalyticsService.compute_and_apply_tuning 内部已做：数据不足跳过、
+    同类型 14 天冷却、累计乘数夹死、ROI<1 回滚上一次加码。总开关
+    MARKETING_AUTO_TUNING_ENABLED=false 时 write=False，只计算+记日志、不落库。
+    """
+    import asyncio
+
+    from app.core.database import AsyncSessionLocal
+    from app.core.logger import logger
+    from app.core.plan_capabilities import CAP_MARKETING_AUTOMATION
+    from app.models.tenant import Tenant
+    from app.services.marketing_analytics_service import MarketingAnalyticsService
+    from app.services.optional_entitlement import optional_capability_enabled
+    from sqlalchemy.future import select as _select
+
+    INTERVAL = 7 * 24 * 3600
+    await asyncio.sleep(180)  # 等应用完全起来
+    while True:
+        try:
+            write = bool(settings.MARKETING_AUTO_TUNING_ENABLED)
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(_select(Tenant.tenant_id).where(Tenant.status == True))  # noqa: E712
+                tenant_ids = [row[0] for row in result.all()]
+
+            for tid in tenant_ids:
+                try:
+                    if not await optional_capability_enabled(tid, CAP_MARKETING_AUTOMATION):
+                        continue
+                    async with AsyncSessionLocal() as db:
+                        svc = MarketingAnalyticsService(db)
+                        svc.set_tenant_id(tid)
+                        outcome = await svc.compute_and_apply_tuning(write=write)
+                    acted = [d for d in outcome["decisions"] if d["action"] in ("adjust", "rollback")]
+                    if acted:
+                        logger.info(f"[marketing_tuning] tenant={tid} wrote={outcome['wrote']} roi={outcome['roi']} changes={acted}")
+                except Exception:
+                    logger.exception(f"[marketing_tuning] tenant={tid} failed")
+        except Exception:
+            logger.exception("[marketing_tuning] loop failed")
+        await asyncio.sleep(INTERVAL)
+
+
 async def _coupon_expiry_reminder_loop():
     """扫描顾客主动申请过提醒（remind_requested）、还没发过（remind_sent_at 为空）、
     还没用掉、且快要过期的券，推一条微信订阅消息催回来用。
@@ -486,6 +530,9 @@ async def startup():
 
     # 启动优惠券到期提醒任务（订阅消息未配置模板 ID 时循环内部会直接跳过）
     asyncio.create_task(_coupon_expiry_reminder_loop())
+
+    # 启动核销率闭环调参任务（每周一次；MARKETING_AUTO_TUNING_ENABLED=false 时只算不写）
+    asyncio.create_task(_marketing_tuning_loop())
 
     # Printing has its own retained task so shutdown can cancel it deterministically.
     _print_recovery_task = asyncio.create_task(print_recovery_loop())

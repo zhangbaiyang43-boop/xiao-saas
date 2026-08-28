@@ -290,6 +290,19 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
     intensity_outcomes = await cs.estimate_intensity_outcomes()
     industry = await cs.get_industry()
 
+    from app.services.marketing_analytics_service import MarketingAnalyticsService
+    _mas = MarketingAnalyticsService(db)
+    _mas.set_tenant_id(tenant_id)
+    try:
+        attribution = await _mas.attribution_summary(days=30)
+    except Exception:
+        attribution = None
+    _tuning_raw = await cs.get_coupon_tuning()
+    tuning = {
+        "active": {k: v for k, v in _tuning_raw.items() if not str(k).startswith("_") and isinstance(v, dict)},
+        "log": list(_tuning_raw.get("_log") or [])[-5:],
+    }
+
     # 本月已发券数
     month_start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     issued_result = await db.execute(
@@ -343,6 +356,10 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
         # 阶段二：三档强度（保守/标准/激进）各自的预测结果，
         # 后台"选强度"卡片直接用这个字段渲染，不需要自己再算。
         "intensity_outcomes": intensity_outcomes,
+        # 归因：用券客人 vs 没用券客人的回头率/客单价对比 + 每类型核销率 + 粗略 ROI
+        "attribution": attribution,
+        # 核销率闭环调参：当前生效的每类型乘数 + 最近 5 条调整日志
+        "tuning": tuning,
     })
 
 

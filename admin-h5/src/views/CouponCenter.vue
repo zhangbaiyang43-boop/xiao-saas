@@ -83,6 +83,42 @@
       <p class="section-tip">具体门槛和面额由算法根据你的客单价自动匹配，不需要你操心，绝不会让你亏本。</p>
     </section>
 
+    <!-- 效果 + 系统调参：只在有数据时出现 -->
+    <section
+      v-if="previewLoaded && !previewError && (attributionReady || tuningLogText)"
+      class="panel animate-in"
+      style="animation-delay:.06s"
+    >
+      <div class="section-header">
+        <div>
+          <p class="section-eyebrow">近 30 天</p>
+          <h2>发券效果</h2>
+        </div>
+      </div>
+
+      <div v-if="attributionReady" class="effect-grid">
+        <div class="effect-cell">
+          <span class="effect-num">{{ repeatUsersText }}</span>
+          <span class="effect-label">用券客人回头率</span>
+        </div>
+        <div class="effect-cell">
+          <span class="effect-num">{{ repeatNonUsersText }}</span>
+          <span class="effect-label">未用券客人回头率</span>
+        </div>
+        <div class="effect-cell">
+          <span class="effect-num">¥{{ money(attribution.auto_discount_total) }}</span>
+          <span class="effect-label">优惠成本</span>
+        </div>
+        <div class="effect-cell">
+          <span class="effect-num">{{ roiText }}</span>
+          <span class="effect-label">粗略 ROI</span>
+        </div>
+      </div>
+      <p v-else class="section-tip">数据积累中，满足样本量后展示用券 vs 未用券的对比。</p>
+
+      <p v-if="tuningLogText" class="section-tip effect-tuning">{{ tuningLogText }}</p>
+    </section>
+
     <!-- 高级设置：给真的想自己管的商家，默认折叠，不占主视图 -->
     <van-collapse v-model="activeCollapse" class="advanced-collapse animate-in" style="animation-delay:.08s">
       <van-collapse-item title="高级设置" name="advanced">
@@ -251,6 +287,44 @@ const industryText = computed(() => {
   return opt ? opt.label : '未选择'
 })
 const industryColumns = computed(() => industryOptions.value.map((o) => ({ text: o.label, value: o.key })))
+
+// ── 效果 / 归因 ──────────────────────────────────────────
+const attribution = computed(() => preview.value?.attribution || null)
+const attributionReady = computed(() => {
+  const a = attribution.value
+  return !!a && (a.cohorts?.coupon_users?.n || 0) > 0 && (a.cohorts?.non_users?.n || 0) > 0
+})
+const pctText = (v) => (v === null || v === undefined ? '—' : `${(v * 100).toFixed(0)}%`)
+const repeatUsersText = computed(() => pctText(attribution.value?.cohorts?.coupon_users?.repeat_rate))
+const repeatNonUsersText = computed(() => pctText(attribution.value?.cohorts?.non_users?.repeat_rate))
+const roiText = computed(() => {
+  const r = attribution.value?.roi
+  return r === null || r === undefined ? '数据不足' : `${r >= 0 ? '+' : ''}${r.toFixed(1)}×`
+})
+
+// ── 系统调参日志（说人话，最多两条） ──────────────────────
+const TUNING_RULE_LABEL = {
+  entry_coupon: '进店券', new_customer_coupon: '新客券',
+  consumption_coupon: '复购券', recall_coupon: '召回券',
+}
+const tuningLogText = computed(() => {
+  const log = preview.value?.tuning?.log || []
+  const lines = log.slice(-2).reverse().map((e) => {
+    const name = TUNING_RULE_LABEL[e.rule] || e.rule
+    const tFrom = e.from?.threshold_mult ?? 1
+    const tTo = e.to?.threshold_mult ?? 1
+    const aFrom = e.from?.amount_mult ?? 1
+    const aTo = e.to?.amount_mult ?? 1
+    const rr = e.redemption_rate === null || e.redemption_rate === undefined
+      ? '' : `（核销率 ${(e.redemption_rate * 100).toFixed(0)}%）`
+    if (String(e.reason || '').startsWith('roi_rollback')) return `系统回调了${name}的力度${rr}`
+    if (tTo < tFrom) return `系统把${name}门槛下调了 ${Math.round((1 - tTo / tFrom) * 100)}%${rr}`
+    if (aTo < aFrom) return `系统把${name}面额收了 ${Math.round((1 - aTo / aFrom) * 100)}%${rr}`
+    if (aTo > aFrom) return `系统把${name}面额加了 ${Math.round((aTo / aFrom - 1) * 100)}%${rr}`
+    return `系统微调了${name}${rr}`
+  })
+  return lines.join('；')
+})
 
 const redemptionRateText = computed(() => {
   const rate = preview.value?.redemption_rate
@@ -522,6 +596,24 @@ onMounted(() => { loadPreview(); loadTemplates() })
   font-size: 13px;
   line-height: 1.6;
 }
+
+.effect-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+.effect-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--fill-2, #f6f7f9);
+}
+.effect-num { font-size: 20px; font-weight: 800; color: var(--text-1); }
+.effect-label { font-size: 12px; color: var(--text-3); }
+.effect-tuning { color: #07C160; font-weight: 600; }
 
 /* ── 则卡片：只做说明，无开关无参数 ─────────── */
 .rule-list { display: grid; gap: 10px; }

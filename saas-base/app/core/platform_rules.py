@@ -252,6 +252,70 @@ def build_dynamic_rules(
     }
 
 
+# ── 核销率闭环调参：每租户每类型两个乘数,由 _marketing_tuning_loop 每周微调 ──
+# 只是在 build_dynamic_rules 的结果上再乘一道,不改平台默认公式。累计范围夹死,
+# 且带门槛券面额仍不超门槛 19%(结算时 cap_discount_amount 20% 再兜一层)。
+TUNING_THRESHOLD_MULT_RANGE = (0.75, 1.30)
+TUNING_AMOUNT_MULT_RANGE = (0.70, 1.40)
+TUNING_TUNABLE_KEYS = (
+    "entry_coupon",
+    "new_customer_coupon",
+    "consumption_coupon",
+    "recall_coupon",
+)
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def apply_tuning(rules: dict, tuning: dict | None) -> dict:
+    """把每类型的 {threshold_mult, amount_mult} 叠加到动态规则上。
+
+    tuning 形如 {"entry_coupon": {"threshold_mult": 0.92, "amount_mult": 1.1}, ...}；
+    下划线开头的 key(如 "_log")忽略。非法 / 缺失一律按 1.0 处理,绝不报错。
+    """
+    if not isinstance(tuning, dict) or not tuning:
+        return rules
+    from copy import deepcopy
+
+    out = deepcopy(rules)
+    for rule_key, adj in tuning.items():
+        if not isinstance(rule_key, str) or rule_key.startswith("_"):
+            continue
+        if rule_key not in out or not isinstance(adj, dict):
+            continue
+        try:
+            tmul = _clamp(float(adj.get("threshold_mult", 1.0)), *TUNING_THRESHOLD_MULT_RANGE)
+            amul = _clamp(float(adj.get("amount_mult", 1.0)), *TUNING_AMOUNT_MULT_RANGE)
+        except (TypeError, ValueError):
+            continue
+        for c in out[rule_key].get("weighted_coupons", []) or []:
+            t = float(c.get("threshold", 0) or 0)
+            a = float(c.get("amount", 0) or 0)
+            new_t = round(t * tmul) if t > 0 else 0
+            new_a = max(round(a * amul), 1)
+            if new_t > 0:
+                new_a = min(new_a, max(round(new_t * (MAX_DISCOUNT_RATIO - 0.01)), 1))
+            c["threshold"] = new_t
+            c["amount"] = float(new_a)
+    return out
+
+
+def clamp_tuning_adjustment(adj: dict | None) -> dict:
+    """把一条调参项夹进合法范围,返回 {threshold_mult, amount_mult}(都已 round 到 2 位)。"""
+    adj = adj or {}
+    try:
+        tmul = _clamp(float(adj.get("threshold_mult", 1.0)), *TUNING_THRESHOLD_MULT_RANGE)
+    except (TypeError, ValueError):
+        tmul = 1.0
+    try:
+        amul = _clamp(float(adj.get("amount_mult", 1.0)), *TUNING_AMOUNT_MULT_RANGE)
+    except (TypeError, ValueError):
+        amul = 1.0
+    return {"threshold_mult": round(tmul, 2), "amount_mult": round(amul, 2)}
+
+
 def cap_discount_amount(discount: float, order_total: float, ratio: float = MAX_DISCOUNT_RATIO) -> float:
     """核心红线：任何优惠券结算都必须经过这里。
 
