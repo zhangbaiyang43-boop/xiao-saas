@@ -64,8 +64,13 @@ class CouponService(BaseService):
         from app.models.order import Order
         tenant_id = self.require_tenant_id()
         cutoff = datetime.utcnow() - timedelta(days=AOV_LOOKBACK_DAYS)
+        # 客单价按「应付/原价」口径：Order.total 是扣完优惠券的实付，要把
+        # discount_amount 加回来，否则发券→用券→实付降→AOV 降→券越算越小的向下螺旋。
         result = await self.db.execute(
-            select(func.avg(Order.total), func.count(Order.id)).where(
+            select(
+                func.avg(Order.total + func.coalesce(Order.discount_amount, 0)),
+                func.count(Order.id),
+            ).where(
                 Order.tenant_id == tenant_id,
                 Order.created_at >= cutoff,
                 Order.status.notin_(["cancelled", "rejected"]),
@@ -92,6 +97,14 @@ class CouponService(BaseService):
         business_info = (config.business_info or {}) if config else {}
         return resolve_intensity(business_info.get("marketing_intensity"))
 
+    async def get_industry(self) -> str:
+        """商家开店选的业态（面馆/快餐/火锅…），未设置回落 default。"""
+        from app.core.platform_rules import resolve_industry
+        from app.services.tenant_service import TenantService
+        config = await TenantService(self.db).get_tenant_config(self.tenant_id)
+        business_info = (config.business_info or {}) if config else {}
+        return resolve_industry(business_info.get("industry"))
+
     async def get_coupon_rules(self) -> dict:
         from app.core.platform_rules import build_dynamic_rules
         from app.services.tenant_service import TenantService, normalize_coupon_rules
@@ -104,7 +117,8 @@ class CouponService(BaseService):
         # 动态则：根据该商户实际客单价 + 选择的营销强度生成，新商户用安全兜底值
         aov = await self.get_merchant_aov()
         intensity = await self.get_marketing_intensity()
-        platform_rules = build_dynamic_rules(aov, intensity)
+        industry = await self.get_industry()
+        platform_rules = build_dynamic_rules(aov, intensity, industry)
         # 商户只有显式 locked 某条则时，才允许静态配置覆盖算法算出来的值；
         # 未 locked 时只认 enabled 开关，金额/门槛始终由算法算——这样商家开
         # 户时写入的那份历史默认值（旧版 DEFAULT_COUPON_RULES 种子数据）不会
@@ -211,13 +225,16 @@ class CouponService(BaseService):
 
         aov, order_count = await self._recent_order_stats()
         has_enough_data = order_count >= AOV_MIN_ORDERS
-        effective_aov = aov if has_enough_data else 30.0
+        industry = await self.get_industry()
+        # 数据不足时用业态兜底客单价，不再写死 30
+        from app.core.platform_rules import INDUSTRY_PRESETS
+        effective_aov = aov if has_enough_data else float(INDUSTRY_PRESETS[industry]["fallback_aov"])
         monthly_orders = round(order_count / AOV_LOOKBACK_DAYS * 30, 1)
         current_intensity = await self.get_marketing_intensity()
 
         outcomes = []
         for key in INTENSITY_PRESETS:
-            rules = build_dynamic_rules(effective_aov, key)
+            rules = build_dynamic_rules(effective_aov, key, industry)
             weighted = rules["consumption_coupon"]["weighted_coupons"]
             total_weight = sum(w["weight"] for w in weighted) or 1
             avg_amount = sum(w["amount"] * w["weight"] for w in weighted) / total_weight

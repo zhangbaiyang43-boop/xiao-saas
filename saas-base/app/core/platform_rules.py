@@ -20,6 +20,41 @@ AOV_MIN_ORDERS = 5      # 至少5笔订单才用动态值，否则用兜底
 
 DEFAULT_INTENSITY = "standard"
 
+# 客单价 ≤ 此值的店（面馆/快餐/饮品…）：发无门槛立减，不发满减
+#（一份面就一份，满减是废券）
+MICRO_BAND_MAX = 20.0
+
+# 毛利率红线：券面额不允许吃掉超过「单均毛利 × 此比例」，随强度放开
+MARGIN_SAFETY_BY_INTENSITY = {
+    "conservative": 0.20,
+    "standard": 0.30,
+    "aggressive": 0.40,
+}
+
+# 业态预设：商家开店选一次（business_info.industry），单量 < AOV_MIN_ORDERS 时
+# 用 fallback_aov 替代写死的 30；margin 是保守的毛利率估计，只用于卡券的上限。
+INDUSTRY_PRESETS = {
+    "noodle":    {"label": "面馆/粉店",        "fallback_aov": 14.0, "margin": 0.55},
+    "fastfood":  {"label": "快餐/盖饭/简餐",   "fallback_aov": 18.0, "margin": 0.35},
+    "breakfast": {"label": "早餐",             "fallback_aov": 10.0, "margin": 0.45},
+    "drink":     {"label": "饮品/奶茶",        "fallback_aov": 15.0, "margin": 0.65},
+    "stirfry":   {"label": "小炒/家常菜",      "fallback_aov": 45.0, "margin": 0.50},
+    "hotpot":    {"label": "火锅/麻辣烫",      "fallback_aov": 90.0, "margin": 0.58},
+    "bbq":       {"label": "烧烤",             "fallback_aov": 80.0, "margin": 0.55},
+    "dinner":    {"label": "正餐/中餐厅",      "fallback_aov": 110.0, "margin": 0.52},
+    "default":   {"label": "未选",             "fallback_aov": 40.0, "margin": 0.45},
+}
+
+
+def resolve_industry(industry: str | None) -> str:
+    """归一化业态 key，非法/缺失回落 default。"""
+    return industry if industry in INDUSTRY_PRESETS else "default"
+
+
+def industry_options() -> list[dict]:
+    """给前端「开店选业态」下拉用。"""
+    return [{"key": k, "label": v["label"]} for k, v in INDUSTRY_PRESETS.items() if k != "default"]
+
 # 三档强度 = 一个乘数作用在门槛系数和面额比例上，商家只需要在这三个里选一个。
 # threshold_mult：门槛松紧（越低越容易凑单，让利感越强）
 # amount_ratio_mult：面额相对门槛的比例（越高让利越多）
@@ -54,52 +89,75 @@ def resolve_intensity(intensity: str | None) -> str:
     return DEFAULT_INTENSITY
 
 
-def build_dynamic_rules(aov: float, intensity: str = DEFAULT_INTENSITY) -> dict:
+def build_dynamic_rules(
+    aov: float, intensity: str = DEFAULT_INTENSITY, industry: str = "default"
+) -> dict:
     """
-    根据商户平均客单价(AOV) + 商户选择的营销强度动态生成券则。
-    aov=0 或无历史订单时使用安全兜底值。intensity 非法时回落标准档。
+    根据商户平均客单价(AOV) + 营销强度 + 业态动态生成券则。
+    aov 无历史订单时用业态兜底值。intensity / industry 非法时回落。
+
+    见 docs/prelaunch/AUTO_MARKETING_STRATEGY_SPEC.md
     """
     preset = INTENSITY_PRESETS[resolve_intensity(intensity)]
     threshold_mult = preset["threshold_mult"]
     amount_ratio_mult = preset["amount_ratio_mult"]
 
-    if aov < 10:
-        # 新商户/低价商户兜底：极低门槛，确保券能被用掉
-        aov = 30.0
+    ind = INDUSTRY_PRESETS[resolve_industry(industry)]
+    if not aov or aov < 1:
+        # 冷启动：用业态兜底客单价（面馆 14 / 火锅 90 …），不再写死 30
+        aov = float(ind["fallback_aov"])
 
-    # ── 进店券（Plan B）：当次用餐有效，促进凑单 ──────────────────
-    # 三档加权：50%概率低档（容易达到）、35%中档、15%高档（惊喜感）
-    e_low_thr   = _clean(aov * 1.1 * threshold_mult)
-    e_mid_thr   = _clean(aov * 1.3 * threshold_mult)
-    e_high_thr  = _clean(aov * 1.6 * threshold_mult)
-    e_low_amt   = _safe_amount(e_low_thr,  0.06 * amount_ratio_mult)
-    e_mid_amt   = _safe_amount(e_mid_thr,  0.07 * amount_ratio_mult)
-    e_high_amt  = _safe_amount(e_high_thr, 0.08 * amount_ratio_mult)
+    # 毛利率红线：券面额 ≤ 单均毛利 × 安全比例。快餐毛利 30%、火锅 55%，
+    # 同一套系数风险差很多，这条按业态卡死上限。
+    margin_safety = MARGIN_SAFETY_BY_INTENSITY[resolve_intensity(intensity)]
+    margin_cap = max(round(aov * ind["margin"] * margin_safety), 1)
 
-    # ── 复购券（Plan A）：结账后发，绑定下次回来 ──────────────────
-    # 门槛 ≈ AOV，下次正常消费就能用，减少"用不到"的挫败感
+    def amt(threshold: float, ratio: float) -> float:
+        """门槛×比例 → 过 SAFE_INTENSITY_CEILING → 再过毛利红线。"""
+        return max(min(_safe_amount(threshold, ratio), margin_cap), 1.0)
+
+    micro = aov <= MICRO_BAND_MAX  # 低客单价：无门槛立减，不发满减
+
+    # ── 进店券：当次用餐有效，促进凑单 / 或（micro）直接立减 ──────────
+    if micro:
+        entry_coupons = [
+            {"name": "今日专享券", "amount": max(min(_clean(aov * 0.12), margin_cap), 1.0), "threshold": 0, "valid_days": 1, "weight": 50},
+            {"name": "幸运优惠券", "amount": max(min(_clean(aov * 0.16), margin_cap), 1.0), "threshold": 0, "valid_days": 1, "weight": 35},
+            {"name": "超值大礼券", "amount": float(margin_cap),                              "threshold": 0, "valid_days": 1, "weight": 15},
+        ]
+    else:
+        e_low_thr  = _clean(aov * 1.1 * threshold_mult)
+        e_mid_thr  = _clean(aov * 1.3 * threshold_mult)
+        e_high_thr = _clean(aov * 1.6 * threshold_mult)
+        entry_coupons = [
+            {"name": "今日专享券", "amount": amt(e_low_thr,  0.06 * amount_ratio_mult), "threshold": e_low_thr,  "valid_days": 1, "weight": 50},
+            {"name": "幸运优惠券", "amount": amt(e_mid_thr,  0.07 * amount_ratio_mult), "threshold": e_mid_thr,  "valid_days": 1, "weight": 35},
+            {"name": "超值大礼券", "amount": amt(e_high_thr, 0.08 * amount_ratio_mult), "threshold": e_high_thr, "valid_days": 1, "weight": 15},
+        ]
+
+    # ── 复购券：结账后发，门槛 ≈ AOV，绑下次回来（复购本就要求正常消费，micro 也用满减）──
     r_low_thr   = _clean(aov * 0.9 * threshold_mult)
     r_mid_thr   = _clean(aov * 1.1 * threshold_mult)
     r_high_thr  = _clean(aov * 1.4 * threshold_mult)
-    r_low_amt   = _safe_amount(r_low_thr,  0.06 * amount_ratio_mult)
-    r_mid_amt   = _safe_amount(r_mid_thr,  0.07 * amount_ratio_mult)
-    r_high_amt  = _safe_amount(r_high_thr, 0.08 * amount_ratio_mult)
+    r_low_amt   = amt(r_low_thr,  0.06 * amount_ratio_mult)
+    r_mid_amt   = amt(r_mid_thr,  0.07 * amount_ratio_mult)
+    r_high_amt  = amt(r_high_thr, 0.08 * amount_ratio_mult)
 
-    # ── 新客券：首单后发，门槛比AOV低20%，确保新客能用上 ──────────
-    nc_thr = _clean(aov * 0.8 * threshold_mult)
-    nc_amt = _safe_amount(nc_thr, 0.07 * amount_ratio_mult)
+    # ── 新客券：首单后发。micro → 无门槛立减；否则门槛比 AOV 低 20% ──
+    nc_thr = 0 if micro else _clean(aov * 0.8 * threshold_mult)
+    nc_amt = max(min(_clean(aov * 0.15), margin_cap), 1.0) if micro else amt(nc_thr, 0.07 * amount_ratio_mult)
 
-    # ── 召回券：沉睡客户唤回，门槛比AOV更低，降低回来的门槛 ────────
-    rc_thr = _clean(aov * 0.7 * threshold_mult)
-    rc_amt = _safe_amount(rc_thr, 0.07 * amount_ratio_mult)
+    # ── 召回券：沉睡客户唤回。micro → 无门槛立减；否则门槛比 AOV 更低 ──
+    rc_thr = 0 if micro else _clean(aov * 0.7 * threshold_mult)
+    rc_amt = max(min(_clean(aov * 0.15), margin_cap), 1.0) if micro else amt(rc_thr, 0.07 * amount_ratio_mult)
 
     # ── 邀请奖励（老带新双边奖励）：邀请人和新顾客两张券共用同一个消费门槛，
     # 门槛比AOV低20%（跟新客券同样的道理，确保新顾客首次到店真能用上，
     # 邀请人下次消费也大概率能达到）。两边面额各自走同一套安全上限，
     # 默认关闭——是否开启邀请裂变是商户的决定，不该被平台替他做主。
     ir_thr = _clean(aov * 0.8 * threshold_mult)
-    ir_inviter_amt = _safe_amount(ir_thr, 0.08 * amount_ratio_mult)
-    ir_invitee_amt = _safe_amount(ir_thr, 0.08 * amount_ratio_mult)
+    ir_inviter_amt = amt(ir_thr, 0.08 * amount_ratio_mult)
+    ir_invitee_amt = amt(ir_thr, 0.08 * amount_ratio_mult)
 
     # ── 员工推荐佣金：员工/亲友带来的新顾客首次到店消费后，给推荐人一笔现金佣金
     # （不是券）。不走 _safe_amount 那套"面额不超过订单实际金额某比例"的安全上限——
@@ -115,17 +173,13 @@ def build_dynamic_rules(aov: float, intensity: str = DEFAULT_INTENSITY) -> dict:
     # 客单价附近保证下次正常消费就能用，面额比其他自动券更慷慨——这是顾客真金
     # 白银攒出来的里程碑奖励，不是获客/召回场景下"随手发发看"的小额撒券。
     pr_thr = _clean(aov * 1.0 * threshold_mult)
-    pr_amt = _safe_amount(pr_thr, 0.12 * amount_ratio_mult)
+    pr_amt = amt(pr_thr, 0.12 * amount_ratio_mult)
 
     return {
         "entry_coupon": {
             "enabled": True,
             "weighted_enabled": True,
-            "weighted_coupons": [
-                {"name": "今日专享券", "amount": e_low_amt,  "threshold": e_low_thr,  "valid_days": 1, "weight": 50},
-                {"name": "幸运优惠券", "amount": e_mid_amt,  "threshold": e_mid_thr,  "valid_days": 1, "weight": 35},
-                {"name": "超值大礼券", "amount": e_high_amt, "threshold": e_high_thr, "valid_days": 1, "weight": 15},
-            ],
+            "weighted_coupons": entry_coupons,
         },
         "consumption_coupon": {
             "enabled": True,
@@ -141,7 +195,7 @@ def build_dynamic_rules(aov: float, intensity: str = DEFAULT_INTENSITY) -> dict:
             "enabled": True,
             "weighted_enabled": True,
             "weighted_coupons": [
-                {"name": "新客专享券", "amount": nc_amt, "threshold": nc_thr, "valid_days": 3, "weight": 100},
+                {"name": "新客专享券", "amount": nc_amt, "threshold": nc_thr, "valid_days": 21, "weight": 100},
             ],
         },
         "recall_coupon": {

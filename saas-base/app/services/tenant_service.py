@@ -60,6 +60,10 @@ DEFAULT_BUSINESS_INFO = {
     "service_scope": "",
     "longitude": "",
     "latitude": "",
+    # 营销：业态 + 强度。业态用于冷启动兜底客单价 + 毛利率红线（见 platform_rules
+    # 的 INDUSTRY_PRESETS）；强度是保守/标准/激进旋钮。都留空则用 default / standard。
+    "industry": "",
+    "marketing_intensity": "",
     # 实体桌牌：默认关闭，避免升级影响不需要桌牌的老商户
     "pickup_no_enabled": False,
     "pickup_no_count": 30,
