@@ -142,9 +142,6 @@ export const toastText = {
   reminderOk: '好的，到期前会提醒你',
   reminderFailed: '设置失败，请重试',
   deliveryUnavailable: '外卖配送正在完善，当前先支持堂食点餐',
-  entryCoupon(amountText, thresholdText) {
-    return '已发放进店券 ¥' + amountText + '，满' + thresholdText + '元可用'
-  },
 }
 
 export const modalText = {

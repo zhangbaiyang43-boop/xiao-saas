@@ -453,6 +453,7 @@ class CouponService(BaseService):
         tpl = await self.db.get(_Tpl, existing.template_id)
         return {
             "coupon_id": str(existing.id),
+            "name": (tpl.name if tpl else None) or "今日专享券",
             "amount": float(tpl.value) if tpl else 0,
             "threshold": float(tpl.min_amount) if tpl else 0,
             "expire_time": to_utc_iso(existing.expire_time),
@@ -495,6 +496,7 @@ class CouponService(BaseService):
                 sent = result["sent"][0]
                 return {
                     "coupon_id": sent["id"],
+                    "name": name,
                     "amount": amount,
                     "threshold": threshold,
                     "expire_time": to_utc_iso(sent.get("expire_time")),

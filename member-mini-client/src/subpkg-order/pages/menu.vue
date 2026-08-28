@@ -322,6 +322,15 @@
       @keep-browsing="storeClosed = false"
     />
 
+    <EntryCouponReveal
+      :open="showEntryReveal"
+      :name="entryReveal?.name"
+      :amount="entryReveal?.amount"
+      :threshold="entryReveal?.threshold"
+      :format-price="formatPrice"
+      @close="showEntryReveal = false"
+    />
+
     <TableBillSheet
       v-if="showOrders && isSharedBillMode"
       :load-error="loadError"
@@ -467,6 +476,7 @@ import DishList from '../components/DishList.vue'
 import CartBar from '../components/CartBar.vue'
 import CouponBar from '../components/CouponBar.vue'
 import WelcomeCouponSheet from '../components/WelcomeCouponSheet.vue'
+import EntryCouponReveal from '../components/EntryCouponReveal.vue'
 import { useOrderFormatters } from '../composables/useOrderFormatters.js'
 import { useWelcomeCoupon } from '../composables/useWelcomeCoupon.js'
 import { useMemberCard } from '../composables/useMemberCard.js'
@@ -539,7 +549,7 @@ const wxLogin = () => new Promise((resolve, reject) => {
 })
 
 export default {
-  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, MemberCheckoutChoice, DishList, CartBar, CouponBar, WelcomeCouponSheet, ShopHeader, BottomNav, LoadingStates },
+  components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, MemberCheckoutChoice, DishList, CartBar, CouponBar, WelcomeCouponSheet, EntryCouponReveal, ShopHeader, BottomNav, LoadingStates },
   setup() {
     const {
       formatPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
@@ -1261,6 +1271,8 @@ export default {
     }
 
     const entryCoupon = ref(null)   // { coupon_id, amount, threshold, expire_time }
+    const entryReveal = ref(null)   // 本次扫码抽到的那张进店券，用于开奖层
+    const showEntryReveal = ref(false)
     const couponReminderTemplateId = ref('')   // 空字符串表示还没配置订阅消息模板，"提醒我"按钮不显示
     const newCustomerCouponPreview = ref(null)   // { name, amount, min_amount, valid_days }，未登录也能看到的首单钩子数字
     // 首单钩子文案：登录按钮、会员Tab、点餐页顶部三处统一读这一个 computed，
@@ -1332,18 +1344,11 @@ export default {
           const d = res.data
           applyShopInfoState(d)
           writeShopInfoCache(d)
-          // 进店券到账提示和距离计算必须只在这次真实网络响应里触发一次——如果
-          // 挪进 applyShopInfoState，缓存命中那次调用也会触发，会出现重复弹
-          // toast、重复请求距离接口的问题。
+          // 进店券开奖和距离计算必须只在这次真实网络响应里触发一次——如果挪进
+          // applyShopInfoState，缓存命中那次调用也会触发，会重复弹层/重复请求距离。
           if (d.entry_coupon?.is_new) {
-            uni.showToast({
-              title: toastText.entryCoupon(
-                formatPrice(d.entry_coupon.amount),
-                Number(d.entry_coupon.threshold || 0).toFixed(0),
-              ),
-              icon: 'none',
-              duration: 3000,
-            })
+            entryReveal.value = d.entry_coupon
+            showEntryReveal.value = true
           }
           if (d.lat && d.lng) loadDistance(d.lat, d.lng)
           return true
@@ -1473,7 +1478,7 @@ export default {
       homeStatusDesc, homeOrderButtonText, homeCouponHint, canStartOrdering, featuredDish, featuredDishTag, canHomeAdd, homeLastOrderItems,
       handleHomeStartOrder, handleFeaturedAdd, handleHomeReorderItem, handleHomeReorderAll,
       loadMemberStatus, refreshCustomerAuthState, loadShopSettings,
-      deliveryEnabled, entryCoupon, newCustomerCouponPreview, newCustomerHookText,
+      deliveryEnabled, entryCoupon, entryReveal, showEntryReveal, newCustomerCouponPreview, newCustomerHookText,
       showSpecSheet, specDish, specQty, selectedSpecs, specTotalPrice,
       isSpecSelected, toggleSpec, toggleExtra, cancelSpec, handleSpecPrimary, confirmSpec, specCartItems, specStep, specSteps, specRadioGroups, specExtraOptions, filteredRemarkChips, selectedExtras, itemRemark, showItemRemarkExtra, toggleItemRemarkChip, selectedSpecSummary, selectedSpecFullSummary, specBasePrice, specDishDesc, canGoNextSpec, specPrimaryText,
       isFeatured,
