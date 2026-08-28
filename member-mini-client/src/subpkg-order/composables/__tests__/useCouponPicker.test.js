@@ -29,6 +29,32 @@ describe('useCouponPicker', () => {
       expect(picker.bestCouponValue.value).toBe(15)
       expect(picker.couponBarText.value).toBe('您有2张优惠券，最高减¥15.00')
     })
+
+    it('购物车还空着 / 没够门槛时，横幅仍展示券面额而不是 ¥0', () => {
+      // BUG: 用户刚扫码进店，购物车为空，两张满减券 → 旧逻辑 bestCouponValue=0 →
+      // "您有2张优惠券，最高减¥0"，看起来券没用。应展示最大面额。
+      const { picker } = setup({
+        coupons: [
+          { id: 'c1', value: 5, min_amount: 18 },
+          { id: 'c2', value: 3, min_amount: 39 },
+        ],
+        totalPrice: 0,
+      })
+      expect(picker.bestCouponValue.value).toBe(5)
+      expect(picker.couponBarText.value).toBe('您有2张优惠券，最高减¥5.00')
+      // 但选中后真正的折扣仍是 0（没到门槛），横幅只是招徕
+      picker.pickCoupon(picker.couponPickerList.value.find((c) => c.id === 'c1'))
+      expect(picker.discountAmount.value).toBe(0)
+    })
+
+    it('PERCENT 券按当前购物车口径估面额', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'p1', type: 'PERCENT', value: 10, min_amount: 0 }],
+        totalPrice: 100,
+      })
+      // 10% of 100 = 10，未超 20% 封顶
+      expect(picker.bestCouponValue.value).toBe(10)
+    })
   })
 
   describe('discountAmount / finalPrice', () => {

@@ -37,9 +37,20 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
     return Math.min(rawDiscount, Math.round(cartTotal * MAX_DISCOUNT_RATIO * 100) / 100)
   }
 
+  // 顶部横幅"最高减¥X"是**招徕文案**，X 取手上券的最大面额（跟券选择器里那张券
+  // 印的数字一致），不是"当前购物车实际能减多少"——购物车还空着 / 还没够门槛时，
+  // 按实际能减算会得到 ¥0，横幅就变成"您有2张券，最高减¥0"，等于告诉顾客券没用。
+  // 门槛差多少由券选择器展示（"还差18元可用"）。PERCENT 券没有购物车就没有确定
+  // 金额，按当前购物车口径估。真正落地的折扣仍由 discountAmount 用
+  // calculateCouponDiscount 算，该封顶还是封顶。
+  const couponFaceValue = (coupon) => {
+    if (!coupon) return 0
+    if (coupon.type === 'PERCENT') return calculateCouponDiscount(coupon, getTotalPrice())
+    return Number(coupon.value || coupon.amount || 0)
+  }
   const bestCouponValue = computed(() => {
     if (!availableCoupons.value.length) return 0
-    return Math.max(...availableCoupons.value.map(c => calculateCouponDiscount(c, getTotalPrice())))
+    return Math.max(0, ...availableCoupons.value.map(couponFaceValue))
   })
   const couponBarText = computed(() => `您有${availableCoupons.value.length}张优惠券，最高减¥${formatPrice(bestCouponValue.value)}`)
   const couponBarPrefix = computed(() => `您有${availableCoupons.value.length}张优惠券，最高减`)
