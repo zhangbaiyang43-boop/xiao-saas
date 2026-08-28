@@ -80,13 +80,67 @@ class CouponService(BaseService):
         avg_val, count = row[0], row[1] or 0
         return float(avg_val or 0), int(count)
 
+    async def _menu_price_estimate(self) -> float:
+        """冷启动客单价估计：在售菜品价格的中位数 × 1.2（人均点一份多一点）。
+        没有菜单返回 0，调用方再退到业态兜底。"""
+        from app.models.menu_item import MenuItem
+        tenant_id = self.require_tenant_id()
+        rows = await self.db.execute(
+            select(MenuItem.price).where(
+                MenuItem.tenant_id == tenant_id,
+                MenuItem.available.is_(True),
+                MenuItem.price > 0,
+            ).order_by(MenuItem.price)
+        )
+        prices = [float(p) for (p,) in rows.all() if p]
+        if not prices:
+            return 0.0
+        mid = len(prices) // 2
+        median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
+        return round(median * 1.2, 2)
+
     async def get_merchant_aov(self) -> float:
-        """计算该商户近30天平均客单价，订单数不足时返回0（调用方兜底）。"""
+        """该店的有效客单价估计（原价口径）。
+        ≥ AOV_MIN_ORDERS 单：用真实近30天均值；
+        否则：用菜单菜品价格中位数 × 1.2 估计；连菜单都没有：返回 0（业态兜底）。"""
         from app.core.platform_rules import AOV_MIN_ORDERS
         avg_val, count = await self._recent_order_stats()
-        if count < AOV_MIN_ORDERS or not avg_val:
-            return 0.0
-        return avg_val
+        if count >= AOV_MIN_ORDERS and avg_val:
+            return avg_val
+        return await self._menu_price_estimate()
+
+    async def _recent_discount_and_gmv(self) -> tuple[float, float, int]:
+        """近30天 (优惠总额, GMV原价口径, 订单数)。"""
+        from app.models.order import Order
+        tenant_id = self.require_tenant_id()
+        cutoff = datetime.utcnow() - timedelta(days=30)
+        row = (await self.db.execute(
+            select(
+                func.coalesce(func.sum(func.coalesce(Order.discount_amount, 0)), 0),
+                func.coalesce(func.sum(Order.total + func.coalesce(Order.discount_amount, 0)), 0),
+                func.count(Order.id),
+            ).where(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= cutoff,
+                Order.status.notin_(["cancelled", "rejected"]),
+            )
+        )).one()
+        return float(row[0] or 0), float(row[1] or 0), int(row[2] or 0)
+
+    async def within_discount_budget(self) -> bool:
+        """月优惠预算总闸：近30天优惠总额 ≤ GMV × X%（X 随强度）。
+        数据太少（冷启动）不设限，先把量做起来。这是「不亏钱」的总账防线，
+        单张券的面额不再靠拍毛利率去卡。"""
+        from app.core.platform_rules import (
+            DISCOUNT_BUDGET_MIN_GMV,
+            DISCOUNT_BUDGET_MIN_ORDERS,
+            discount_budget_ratio,
+        )
+        discount, gmv, count = await self._recent_discount_and_gmv()
+        if count < DISCOUNT_BUDGET_MIN_ORDERS or gmv < DISCOUNT_BUDGET_MIN_GMV:
+            return True
+        intensity = await self.get_marketing_intensity()
+        return discount <= gmv * discount_budget_ratio(intensity)
 
     async def get_marketing_intensity(self) -> str:
         """商家选择的营销强度档位（保守/标准/激进），未设置时回落标准档。"""
@@ -226,9 +280,10 @@ class CouponService(BaseService):
         aov, order_count = await self._recent_order_stats()
         has_enough_data = order_count >= AOV_MIN_ORDERS
         industry = await self.get_industry()
-        # 数据不足时用业态兜底客单价，不再写死 30
+        # 客单价口径跟 get_merchant_aov 完全一致：够单量用真实均值，否则菜单菜品
+        # 价中位数×1.2，连菜单都没有再退到业态兜底客单价（不再写死 30）。
         from app.core.platform_rules import INDUSTRY_PRESETS
-        effective_aov = aov if has_enough_data else float(INDUSTRY_PRESETS[industry]["fallback_aov"])
+        effective_aov = await self.get_merchant_aov() or float(INDUSTRY_PRESETS[industry]["fallback_aov"])
         monthly_orders = round(order_count / AOV_LOOKBACK_DAYS * 30, 1)
         current_intensity = await self.get_marketing_intensity()
 
@@ -325,10 +380,13 @@ class CouponService(BaseService):
     ) -> dict:
         rules = await self.get_coupon_rules()
         rule_config = rules.get(rule_type, {})
-        
+
         if not rule_config.get("enabled", False):
             return {"success_count": 0, "reason": "则未开启"}
-        
+
+        if not await self.within_discount_budget():
+            return {"success_count": 0, "reason": "本月优惠预算已用尽，暂停自动发券"}
+
         if rule_type == "consumption_coupon" and consumption_amount is not None:
             trigger_amount = rule_config.get("trigger_amount", 0)
             if float(consumption_amount) < float(trigger_amount):
@@ -406,6 +464,8 @@ class CouponService(BaseService):
         rules = await self.get_coupon_rules()
         rule_config = rules.get("entry_coupon", {})
         if not rule_config.get("enabled", False):
+            return None
+        if not await self.within_discount_budget():
             return None
 
         # 去重：今天是否已持有进店券。用分布式锁包住"查+发"两步——两次几乎同时的

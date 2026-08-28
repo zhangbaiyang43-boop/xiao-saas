@@ -32,13 +32,15 @@
 | B | **冷启动兜底写死 30 元**（`aov < 10 → aov = 30`） | 面馆客单 12，兜底 30 算出的满减券用不上 |
 | C | **所有业态都发"满X减Y"** | 对一碗面（就点一份）满减是废券 |
 | D | **新客券有效期只有 3 天** | 新客券的意义是"给下次来的理由"，3 天太短 |
-| E | **没有毛利率约束** | 快餐毛利 30%、火锅毛利 55%，同一套系数风险完全不同 |
-| F | **没有优惠预算总闸** | 极端情况下当月优惠总额可能吃掉过多毛利 |
+| ~~E~~ | ~~没有毛利率约束~~ —— **不做**：毛利数据靠商家手填、不可靠；卡券只会压小体感。改用 F 的总闸从总账兜。 | — |
+| F | **没有优惠预算总闸** | 极端情况下近30天优惠总额可能吃掉过多毛利 —— **已修**（P0-6） |
 | G | **商家看不到成本** | 商家不知道自己在发券 / 发了多少 / 花了多少 / ROI |
 
-## 3. 核心框架：客单价带 × 毛利率
+## 3. 核心框架：客单价带 × 数据自适应
 
-不再用一条线性公式 `aov × 系数`，改为按**客单价带**决定券形态，按**业态毛利率**卡死安全上限。
+不再用一条线性公式 `aov × 系数`，改为按**客单价带**决定券形态。
+「不亏钱」不靠拍毛利率去卡单张券（毛利数据不可靠、且会把券压小到没体感），
+而是靠**月优惠预算总闸**（近 30 天优惠总额 ≤ GMV × X%）。
 
 ### 3.1 客单价带 → 券形态
 
@@ -49,32 +51,34 @@
 | **medium** | 50-120 | 双人正餐 / 火锅 / 大盘鸡 | 满减 10-18 元 | 满减，门槛 ≈ 客单价 ×0.9-1.2 |
 | **large** | > 120 | 聚餐 / 宴请 | 满减 25-40 元（比例低、数字大） | 阶梯满减（满 200 减 30） |
 
-### 3.2 业态预设（冷启动兜底，也带出毛利率）
+### 3.2 冷启动客单价：从菜单算，业态只兜底兜底
 
-`platform_rules.INDUSTRY_PRESETS`，商家开店选业态（`business_info.industry`），单量 < 5 时用它替代写死的 30。
+单量 < `AOV_MIN_ORDERS`(5) 时，客单价按优先级取：
 
-| industry key | 名称 | 兜底客单价(元) | 毛利率 | 默认券形态 |
-|---|---|---|---|---|
-| `noodle` | 面馆 / 粉店 | 14 | 0.55 | 立减 |
-| `fastfood` | 快餐 / 盖饭 / 简餐 | 18 | 0.35 | 立减 |
-| `breakfast` | 早餐 | 10 | 0.45 | 立减 |
-| `drink` | 饮品 / 奶茶 | 15 | 0.65 | 立减 |
-| `stirfry` | 小炒 / 家常菜 | 45 | 0.50 | 满减 |
-| `hotpot` | 火锅 / 麻辣烫 | 90 | 0.58 | 满减 |
-| `bbq` | 烧烤 | 80 | 0.55 | 满减 |
-| `dinner` | 正餐 / 中餐厅 | 110 | 0.52 | 满减 |
-| `default` | 未选 | 40 | 0.45 | 满减 |
+1. **菜单菜品价格中位数 × 1.2**（`coupon_service._menu_price_estimate`）——人均点一份多一点，商家录菜单时系统已经知道，不用问业态。
+2. 连菜单都没有 → `INDUSTRY_PRESETS[industry].fallback_aov`（`business_info.industry`，商家可选；未选=default=40）。这张表**不再带毛利率**。
 
-> 毛利率是**保守估计**（偏低），用于卡券的上限，不是给商家看的经营数据。
+| industry key | 名称 | 兜底兜底客单价(元) |
+|---|---|---|
+| `noodle` | 面馆/粉店 | 14 |
+| `fastfood` | 快餐/盖饭/简餐 | 18 |
+| `breakfast` | 早餐 | 10 |
+| `drink` | 饮品/奶茶 | 15 |
+| `stirfry` | 小炒/家常菜 | 45 |
+| `hotpot` | 火锅/麻辣烫 | 90 |
+| `bbq` | 烧烤 | 80 |
+| `dinner` | 正餐/中餐厅 | 110 |
+| `default` | 未选 | 40 |
 
-### 3.3 面额上限：三道 + 总闸
+### 3.3 不亏钱：两道单券红线 + 一个总闸
 
 1. **结算红线**（已有 `cap_discount_amount`）：单券实际减免 ≤ 本单实付 × 20%。
-2. **模板红线**（已有 `assert_template_economics_safe`）：面额 ≤ 门槛 × 20%。
-3. **毛利率红线**（P0 新增）：面额 ≤ 客单价 × 业态毛利率 × 安全比例。
-   - 安全比例随强度：保守 0.20 / 标准 0.30 / 激进 0.40（即券最多吃掉单均毛利的 20%/30%/40%）。
-   - 例：快餐客单 18、毛利 0.35 → 单均毛利 6.3 → 券上限 标准档 6.3×0.30 ≈ 1.9 元。
-4. **月优惠预算总闸**（P0 新增）：`当月优惠总额 ≤ 当月 GMV × X%`（保守 2% / 标准 4% / 激进 7%）。超过则暂停自动发券，后台看板提示；下月 1 号重置。
+2. **模板红线**（已有 `assert_template_economics_safe`）：面额 ≤ 门槛 × 20%（无门槛立减靠结算红线兜）。
+3. **月优惠预算总闸**（P0-6）：`近 30 天优惠总额 ≤ 近 30 天 GMV(原价口径) × X%`（保守 2% / 标准 4% / 激进 7%）。超过 → `issue_auto_coupon` / `issue_entry_coupon` 直接不发，reason=`本月优惠预算已用尽`。
+   - 滚动 30 天窗口，自然重置，避免「月初预算全空→全部拦截」。
+   - 冷启动不设限：`订单数 < 10` 或 `GMV < 300` 放行，先把量做起来。
+
+> ~~毛利率红线~~ —— **P0 审计后撤销**。毛利数据不可靠，且它把券压小到没「占便宜」体感，与核心诉求相反。不亏钱交给上面的总闸。
 
 ### 3.4 有效期
 
@@ -90,8 +94,8 @@
 
 | 阶段 | 数据量 | 策略来源 | 何时做 |
 |---|---|---|---|
-| **阶段 0 冷启动** | 0-5 单 | 业态预设兜底（3.2）：客单价带 + 毛利率 + 券形态 | P0 |
-| **阶段 1** | 5-50 单 | 真实客单价（**原价口径、取中位数**防大单拉偏）替换兜底；券形态/毛利约束仍按业态 | P0（原价）+ P1（中位数、分时段） |
+| **阶段 0 冷启动** | 0-5 单 | 菜单估价（菜品价中位数 ×1.2）→ 业态 fallback_aov 兜底（3.2）：定客单价带 + 券形态 | P0 |
+| **阶段 1** | 5-50 单 | 真实客单价（**原价口径、取中位数**防大单拉偏）替换估价；券形态仍按客单价带 | P0（原价）+ P1（中位数、分时段） |
 | **阶段 2 算法推券** | 50+ 单 | **核销率 + 复购率闭环调参**：某档核销率 <10% → 门槛太高 / 力度太小，自动下调；核销率 >60% 但复购未提升 → 力度过剩，收一点。叠加：分时段、分新老客、流失预警加码、A/B 迭代基线 | P1 / P2 |
 | **阶段 3 跨店** | 平台有 N 家同业态店 | 新店冷启动直接用"同城同业态"的成熟参数，而不是通用兜底 | P2 |
 
@@ -114,23 +118,23 @@
 | # | 项 | 文件 | 测试要求 |
 |---|---|---|---|
 | P0-1 | AOV 改**原价口径** `avg(total + COALESCE(discount_amount,0))` | `coupon_service._recent_order_stats` | 断言：有券折扣的历史订单，AOV 用原价 |
-| P0-2 | `INDUSTRY_PRESETS` + `build_dynamic_rules(aov, intensity, industry)` + `business_info.industry` 字段 + `coupon_service` 传入 | `platform_rules.py` / `tenant_service.DEFAULT_BUSINESS_INFO` / `coupon_service.get_coupon_rules` | 断言：选 `noodle`、0 单 → 用 14 元兜底 |
+| P0-2 | 冷启动客单价：`coupon_service._menu_price_estimate`（菜品价中位数 ×1.2）优先，无菜单退到 `INDUSTRY_PRESETS[industry].fallback_aov`；`business_info.industry` 字段 + `build_dynamic_rules(aov, intensity, industry)` | `coupon_service.get_merchant_aov` / `platform_rules.py` / `tenant_service.DEFAULT_BUSINESS_INFO` | 断言：0 单 + 有菜单 → 用菜单估价；0 单 + 无菜单 + `noodle` → 用 14 兜底 |
 | P0-3 | 客单价带 ≤ 20 → 进店券/新客券发**无门槛立减**（`threshold = 0`），不发满减 | `platform_rules.build_dynamic_rules` | 断言：aov=14 → new_customer 券 `threshold == 0` |
 | P0-4 | 新客券 `valid_days` 3 → 21 | `platform_rules.build_dynamic_rules` | 断言：new_customer weighted `valid_days == 21` |
-| P0-5 | 毛利率红线：面额 ≤ 客单价 × 毛利率 × 安全比例（随强度 0.2/0.3/0.4） | `platform_rules.build_dynamic_rules` | 断言：快餐 fastfood + 激进档，new_customer 面额 ≤ 单均毛利 × 0.4 |
+| ~~P0-5~~ | ~~毛利率红线~~ —— **审计后撤销**：毛利数据不可靠，且会把券压小到没体感，与「让消费者占便宜」冲突。`MARGIN_SAFETY_BY_INTENSITY` 与 `INDUSTRY_PRESETS[*].margin` 已删。不亏钱改由 P0-6 总闸兜。 | `platform_rules.build_dynamic_rules` | 断言：`INDUSTRY_PRESETS` 各业态不再带 `margin` 键 |
 
 ### P0.5（上线前后，紧接着做）
 
-| # | 项 | 文件 |
-|---|---|---|
-| P0-6 | 月优惠预算总闸：`issue_auto_coupon` 发券前查当月优惠总额 vs GMV×X%，超则跳过（reason=`预算已用尽`） | `coupon_service.issue_auto_coupon` + 一个 `_month_discount_budget_ok()` |
-| P0-7 | 经营看板：`/tenant/marketing-preview` 补 `discount_total_month` / `budget_used_ratio` / `repurchase_from_coupon` + admin-h5「智能营销」页渲染 | `app/api/v1/tenant.py` + admin-h5 |
+| # | 项 | 文件 | 状态 |
+|---|---|---|---|
+| P0-6 | 月优惠预算总闸：`issue_auto_coupon` / `issue_entry_coupon` 发券前查近30天优惠总额 vs GMV原价口径×X%（保守2%/标准4%/激进7%），超则跳过（reason=`本月优惠预算已用尽，暂停自动发券`）；冷启动 <10单 或 <300元 放行 | `coupon_service.within_discount_budget` + `_recent_discount_and_gmv` + `platform_rules.discount_budget_ratio` | ✅ 本次完成 |
+| P0-7 | 经营看板：`/tenant/marketing-preview` 补 `discount_total_month` / `budget_used_ratio` / `repurchase_from_coupon` + admin-h5「智能营销」页渲染 | `app/api/v1/tenant.py` + admin-h5 | 待做 |
 
 ### P1（上线后 1-2 月，数据攒起来）
 
 - 客单价取**中位数**而非均值（`_recent_order_stats` 加 `PERCENTILE`/近似）
 - 分时段客单价（午市 / 晚市 / 夜宵）
-- 核销率闭环：每周跑一次，按每档券的核销率自动升降门槛 / 力度（写回一个 `tenant_config.coupon_tuning` 覆盖层，仍受毛利红线约束）
+- 核销率闭环：每周跑一次，按每档券的核销率自动升降门槛 / 力度（写回一个 `tenant_config.coupon_tuning` 覆盖层，仍受 P0-6 预算总闸约束）
 - 新老客差异化：新客门槛更低、力度更大
 
 ### P2（有几十家店后）
@@ -142,4 +146,4 @@
 
 - **端到端**：建店（选业态）→ 扫码入会 → 打开菜单 → 首单支付，逐张检查实际发出的券：面额 / 门槛 / 有效期 / 券名，与本 Spec 对得上。
 - **券质量监控**（P0.5 一并加）：每周统计「有效期 < 7 天的新客券占比」「券名非白名单占比」「单券名义力度 > 20% 占比」，非零即告警。
-- **不亏验证**：造一批不同客单价 / 业态的样例订单，跑发券 + 结算，确认没有一单减免超过实付 20%、且当月累计优惠不超预算。
+- **不亏验证**：造一批不同客单价的样例订单，跑发券 + 结算，确认没有一单减免超过实付 20%、且近30天累计优惠不超预算总闸。

@@ -251,6 +251,7 @@ class CouponLoopContractsTest(unittest.TestCase):
         service.set_tenant_id("tenant-001")
 
         with patch.object(service, "get_coupon_rules", AsyncMock(return_value=self._consumption_rule_config())), \
+             patch.object(service, "within_discount_budget", AsyncMock(return_value=True)), \
              patch.object(service, "get_available_auto_coupon", AsyncMock(return_value=object())), \
              patch.object(service, "send_coupons_with_result", AsyncMock()) as send_mock, \
              patch("app.services.coupon_service.settings.REDIS_ENABLED", False):
@@ -270,6 +271,7 @@ class CouponLoopContractsTest(unittest.TestCase):
         send_result = {"success_count": 1, "sent": [{"id": "coupon-1"}]}
 
         with patch.object(service, "get_coupon_rules", AsyncMock(return_value=self._consumption_rule_config())), \
+             patch.object(service, "within_discount_budget", AsyncMock(return_value=True)), \
              patch.object(service, "get_available_auto_coupon", AsyncMock(return_value=None)), \
              patch.object(service, "_get_or_create_auto_coupon_template", AsyncMock(return_value=fake_template)), \
              patch.object(service, "send_coupons_with_result", AsyncMock(return_value=send_result)) as send_mock, \

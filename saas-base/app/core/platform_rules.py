@@ -24,26 +24,35 @@ DEFAULT_INTENSITY = "standard"
 #（一份面就一份，满减是废券）
 MICRO_BAND_MAX = 20.0
 
-# 毛利率红线：券面额不允许吃掉超过「单均毛利 × 此比例」，随强度放开
-MARGIN_SAFETY_BY_INTENSITY = {
-    "conservative": 0.20,
-    "standard": 0.30,
-    "aggressive": 0.40,
+# 「不亏钱」不靠拍毛利率去卡单张券，而是靠总闸：近 30 天优惠总额 ≤ GMV × 此比例。
+# 总闸控住了，单张券就能在预算内敢发大一点、制造体感。随强度放开。
+DISCOUNT_BUDGET_RATIO_BY_INTENSITY = {
+    "conservative": 0.02,
+    "standard": 0.04,
+    "aggressive": 0.07,
+}
+# 冷启动：数据太少不设总闸，先把量做起来
+DISCOUNT_BUDGET_MIN_ORDERS = 10
+DISCOUNT_BUDGET_MIN_GMV = 300.0
+
+# 业态预设：仅用于「连菜单都没有」的兜底兜底客单价。
+# 冷启动客单价优先用「菜单菜品价格中位数 × 1.2」算（见 coupon_service），
+# 这张表只是最后一层保险，不再带毛利率（毛利数据不可靠，不用它卡券）。
+INDUSTRY_PRESETS = {
+    "noodle":    {"label": "面馆/粉店",        "fallback_aov": 14.0},
+    "fastfood":  {"label": "快餐/盖饭/简餐",   "fallback_aov": 18.0},
+    "breakfast": {"label": "早餐",             "fallback_aov": 10.0},
+    "drink":     {"label": "饮品/奶茶",        "fallback_aov": 15.0},
+    "stirfry":   {"label": "小炒/家常菜",      "fallback_aov": 45.0},
+    "hotpot":    {"label": "火锅/麻辣烫",      "fallback_aov": 90.0},
+    "bbq":       {"label": "烧烤",             "fallback_aov": 80.0},
+    "dinner":    {"label": "正餐/中餐厅",      "fallback_aov": 110.0},
+    "default":   {"label": "未选",             "fallback_aov": 40.0},
 }
 
-# 业态预设：商家开店选一次（business_info.industry），单量 < AOV_MIN_ORDERS 时
-# 用 fallback_aov 替代写死的 30；margin 是保守的毛利率估计，只用于卡券的上限。
-INDUSTRY_PRESETS = {
-    "noodle":    {"label": "面馆/粉店",        "fallback_aov": 14.0, "margin": 0.55},
-    "fastfood":  {"label": "快餐/盖饭/简餐",   "fallback_aov": 18.0, "margin": 0.35},
-    "breakfast": {"label": "早餐",             "fallback_aov": 10.0, "margin": 0.45},
-    "drink":     {"label": "饮品/奶茶",        "fallback_aov": 15.0, "margin": 0.65},
-    "stirfry":   {"label": "小炒/家常菜",      "fallback_aov": 45.0, "margin": 0.50},
-    "hotpot":    {"label": "火锅/麻辣烫",      "fallback_aov": 90.0, "margin": 0.58},
-    "bbq":       {"label": "烧烤",             "fallback_aov": 80.0, "margin": 0.55},
-    "dinner":    {"label": "正餐/中餐厅",      "fallback_aov": 110.0, "margin": 0.52},
-    "default":   {"label": "未选",             "fallback_aov": 40.0, "margin": 0.45},
-}
+
+def discount_budget_ratio(intensity: str | None) -> float:
+    return DISCOUNT_BUDGET_RATIO_BY_INTENSITY[resolve_intensity(intensity)]
 
 
 def resolve_industry(industry: str | None) -> str:
@@ -104,26 +113,22 @@ def build_dynamic_rules(
 
     ind = INDUSTRY_PRESETS[resolve_industry(industry)]
     if not aov or aov < 1:
-        # 冷启动：用业态兜底客单价（面馆 14 / 火锅 90 …），不再写死 30
+        # 冷启动兜底兜底：调用方（coupon_service）拿不到菜单价格估计时才走到这里
         aov = float(ind["fallback_aov"])
 
-    # 毛利率红线：券面额 ≤ 单均毛利 × 安全比例。快餐毛利 30%、火锅 55%，
-    # 同一套系数风险差很多，这条按业态卡死上限。
-    margin_safety = MARGIN_SAFETY_BY_INTENSITY[resolve_intensity(intensity)]
-    margin_cap = max(round(aov * ind["margin"] * margin_safety), 1)
-
-    def amt(threshold: float, ratio: float) -> float:
-        """门槛×比例 → 过 SAFE_INTENSITY_CEILING → 再过毛利红线。"""
-        return max(min(_safe_amount(threshold, ratio), margin_cap), 1.0)
+    # 面额只过两道：SAFE_INTENSITY_CEILING（_safe_amount 内，门槛的 15%）+ 结算时
+    # cap_discount_amount（实付的 20%）。"不亏钱"的总账靠 coupon_service 的月优惠
+    # 预算总闸控，不再用拍的毛利率去卡单张券——那样券太小就没"占便宜"体感了。
+    amt = _safe_amount
 
     micro = aov <= MICRO_BAND_MAX  # 低客单价：无门槛立减，不发满减
 
     # ── 进店券：当次用餐有效，促进凑单 / 或（micro）直接立减 ──────────
     if micro:
         entry_coupons = [
-            {"name": "今日专享券", "amount": max(min(_clean(aov * 0.12), margin_cap), 1.0), "threshold": 0, "valid_days": 1, "weight": 50},
-            {"name": "幸运优惠券", "amount": max(min(_clean(aov * 0.16), margin_cap), 1.0), "threshold": 0, "valid_days": 1, "weight": 35},
-            {"name": "超值大礼券", "amount": float(margin_cap),                              "threshold": 0, "valid_days": 1, "weight": 15},
+            {"name": "今日专享券", "amount": _clean(aov * 0.12), "threshold": 0, "valid_days": 1, "weight": 50},
+            {"name": "幸运优惠券", "amount": _clean(aov * 0.16), "threshold": 0, "valid_days": 1, "weight": 35},
+            {"name": "超值大礼券", "amount": _clean(aov * 0.20), "threshold": 0, "valid_days": 1, "weight": 15},
         ]
     else:
         e_low_thr  = _clean(aov * 1.1 * threshold_mult)
@@ -145,11 +150,11 @@ def build_dynamic_rules(
 
     # ── 新客券：首单后发。micro → 无门槛立减；否则门槛比 AOV 低 20% ──
     nc_thr = 0 if micro else _clean(aov * 0.8 * threshold_mult)
-    nc_amt = max(min(_clean(aov * 0.15), margin_cap), 1.0) if micro else amt(nc_thr, 0.07 * amount_ratio_mult)
+    nc_amt = _clean(aov * 0.15) if micro else amt(nc_thr, 0.07 * amount_ratio_mult)
 
     # ── 召回券：沉睡客户唤回。micro → 无门槛立减；否则门槛比 AOV 更低 ──
     rc_thr = 0 if micro else _clean(aov * 0.7 * threshold_mult)
-    rc_amt = max(min(_clean(aov * 0.15), margin_cap), 1.0) if micro else amt(rc_thr, 0.07 * amount_ratio_mult)
+    rc_amt = _clean(aov * 0.15) if micro else amt(rc_thr, 0.07 * amount_ratio_mult)
 
     # ── 邀请奖励（老带新双边奖励）：邀请人和新顾客两张券共用同一个消费门槛，
     # 门槛比AOV低20%（跟新客券同样的道理，确保新顾客首次到店真能用上，
