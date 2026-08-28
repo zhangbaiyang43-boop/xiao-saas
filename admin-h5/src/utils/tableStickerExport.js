@@ -37,10 +37,13 @@ export const triggerBlobDownload = (blob, filename) => {
     document.body.appendChild(anchor)
     anchor.click()
   } finally {
+    // 清理失败不代表下载失败：吞掉 remove() 的异常，别盖住上面 click() 可能
+    // 抛出的真实下载错误，也别把"下载已触发、只是没删掉 anchor"误报成失败。
     try {
       anchor?.remove()
-    } finally {
-      setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch {
+      /* ignore cleanup failure */
     }
+    setTimeout(() => URL.revokeObjectURL(url), 0)
   }
 }

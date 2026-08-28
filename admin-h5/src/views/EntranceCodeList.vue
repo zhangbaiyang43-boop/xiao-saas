@@ -72,6 +72,7 @@
             </a-checkbox>
             <div class="bulk-actions">
               <a-button size="small" type="primary" :loading="batchBusy === 'download'" :disabled="!selectedIds.length" @click="onBatchDownload">批量下载</a-button>
+              <a-button size="small" :loading="batchBusy === 'sticker'" :disabled="!selectedIds.length" @click="openStickerExport">印刷版桌贴</a-button>
               <a-button size="small" :loading="batchBusy === 'disable'" :disabled="!selectedIds.length" @click="onBatchDisable">批量停用</a-button>
               <a-popconfirm title="删除后已张贴的贴纸会失效，且扫码统计一并清除。确定删除选中的码？" ok-text="删除" cancel-text="取消" @confirm="onBatchDelete">
                 <a-button size="small" danger :loading="batchBusy === 'delete'" :disabled="!selectedIds.length">批量删除</a-button>
@@ -186,6 +187,14 @@
         </a-button>
       </a-form>
     </a-drawer>
+
+    <TableStickerExportDialog
+      v-model:open="showStickerDialog"
+      :exportable="stickerExportable"
+      :excluded="stickerExcluded"
+      :loading="batchBusy === 'sticker'"
+      @confirm="onConfirmStickerExport"
+    />
   </div>
 </template>
 
@@ -195,7 +204,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { PlusOutlined, QrcodeOutlined, FileImageOutlined, FireOutlined, WarningOutlined, InfoCircleOutlined, SortAscendingOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
-import { batchDownloadEntranceCodes, createEntranceCode, deleteEntranceCode, getActivationStatus, getEntranceCodeSummary, getEntranceCodes, regenerateEntranceCode, updateEntranceCodeStatus } from '../api'
+import TableStickerExportDialog from '../components/TableStickerExportDialog.vue'
+import { classifyTableStickerCode, parseBlobErrorMessage, triggerBlobDownload } from '../utils/tableStickerExport'
+import { batchDownloadEntranceCodes, createEntranceCode, deleteEntranceCode, exportTableStickers, getActivationStatus, getEntranceCodeSummary, getEntranceCodes, regenerateEntranceCode, updateEntranceCodeStatus } from '../api'
 
 const route = useRoute()
 const router = useRouter()
@@ -210,6 +221,7 @@ const statusBusy = ref(null)
 const deleteBusy = ref(null)
 const batchBusy = ref('')
 const showCreateDialog = ref(false)
+const showStickerDialog = ref(false)
 const codes = ref([])
 const summary = ref({ code_count: 0, scan_count: 0, member_count: 0 })
 const form = reactive({ name: '', channel: 'TABLE', table_no: '', zone_type: '' })
@@ -462,6 +474,48 @@ const onBatchDownload = async () => {
     saveBlob(blob, fname)
   } catch { message.error('下载失败') }
   finally { batchBusy.value = '' }
+}
+
+// ---- 印刷版桌贴导出（服务端渲染 PNG + PDF + ZIP）----
+const selectedCodeObjects = computed(() => codes.value.filter(c => selectedIds.value.includes(c.id)))
+const stickerExportable = computed(() => selectedCodeObjects.value.filter(c => classifyTableStickerCode(c).valid))
+const stickerExcluded = computed(() => selectedCodeObjects.value
+  .map(c => ({ code: c, verdict: classifyTableStickerCode(c) }))
+  .filter(x => !x.verdict.valid)
+  .map(x => ({
+    name: x.code.table_no ? `${x.code.table_no} 桌` : (x.code.name || '入口码'),
+    reason: x.verdict.reason,
+  })))
+
+const openStickerExport = () => {
+  if (!selectedIds.value.length) return
+  showStickerDialog.value = true
+}
+
+const onConfirmStickerExport = async () => {
+  const ids = stickerExportable.value.map(c => c.id)
+  if (!ids.length) { message.warning('没有可导出的桌贴码'); return }
+  batchBusy.value = 'sticker'
+  try {
+    const res = await exportTableStickers(ids)
+    const blob = res?.data
+    if (!blob) { message.error('桌贴生成失败，请稍后重试'); return }
+    if (blob.type && blob.type.includes('json')) {
+      message.error(await parseBlobErrorMessage(blob))
+      return
+    }
+    let fname = '桌贴.zip'
+    const cd = res.headers?.['content-disposition'] || ''
+    const m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd)
+    if (m) { try { fname = decodeURIComponent(m[1]) } catch { /* keep default */ } }
+    triggerBlobDownload(blob, fname)
+    showStickerDialog.value = false
+    message.success('桌贴已生成，开始下载')
+  } catch (e) {
+    const body = e?.response?.data
+    if (body && typeof body.text === 'function') message.error(await parseBlobErrorMessage(body))
+    else message.error('桌贴生成失败，请稍后重试')
+  } finally { batchBusy.value = '' }
 }
 
 const onToggleStatus = async code => {

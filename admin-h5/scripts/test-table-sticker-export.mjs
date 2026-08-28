@@ -122,7 +122,7 @@ test('download helper still revokes the object URL when clicking fails', async (
   }
 })
 
-test('download helper still revokes the object URL when anchor cleanup fails', async () => {
+test('download helper swallows anchor cleanup failure once the download has fired', async () => {
   const originalUrl = globalThis.URL
   const originalDocument = globalThis.document
   const events = []
@@ -140,9 +140,37 @@ test('download helper still revokes the object URL when anchor cleanup fails', a
   }
 
   try {
-    assert.throws(() => triggerBlobDownload(new Blob(['zip']), '桌贴.zip'), /remove blocked/)
+    // click() succeeded -> the download fired; a failing remove() must not surface as an error.
+    assert.doesNotThrow(() => triggerBlobDownload(new Blob(['zip']), '桌贴.zip'))
     await new Promise(resolve => setTimeout(resolve, 0))
     assert.deepEqual(events, ['append', 'click', 'revoke:blob:cleanup-failed'])
+  } finally {
+    globalThis.URL = originalUrl
+    globalThis.document = originalDocument
+  }
+})
+
+test('download helper surfaces the real click error, not a later cleanup error', async () => {
+  const originalUrl = globalThis.URL
+  const originalDocument = globalThis.document
+  const events = []
+  const anchor = {
+    click: () => { throw new Error('click blocked') },
+    remove: () => { throw new Error('remove blocked') },
+  }
+  globalThis.URL = {
+    createObjectURL: () => 'blob:both-failed',
+    revokeObjectURL: value => events.push(`revoke:${value}`),
+  }
+  globalThis.document = {
+    createElement: () => anchor,
+    body: { appendChild: () => events.push('append') },
+  }
+
+  try {
+    assert.throws(() => triggerBlobDownload(new Blob(['zip']), '桌贴.zip'), /click blocked/)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.deepEqual(events, ['append', 'revoke:blob:both-failed'])
   } finally {
     globalThis.URL = originalUrl
     globalThis.document = originalDocument
@@ -155,6 +183,10 @@ test('API request sends only entranceCodeIds and uses an isolated Blob timeout',
     api,
     /exportTableStickers\s*=\s*\(entranceCodeIds\)\s*=>\s*request\.post\(\s*['"]\/v1\/entrance-codes\/table-stickers\/export['"]\s*,\s*\{\s*entranceCodeIds\s*\}\s*,/,
   )
-  assert.match(api, /exportTableStickers[\s\S]*responseType:\s*['"]blob['"][\s\S]*timeout:\s*120000/)
-  assert.match(api, /meta:\s*\{\s*rawResponse:\s*true\s*\}/)
+  // 断言范围限定在 exportTableStickers 自己的定义里——api/index.js 里别的
+  // 请求（如 batchDownloadEntranceCodes）也有 rawResponse，全局匹配会假阳性。
+  const exportDef = api.slice(api.indexOf('exportTableStickers')).split('\n\n')[0]
+  assert.match(exportDef, /responseType:\s*['"]blob['"]/)
+  assert.match(exportDef, /timeout:\s*120000/)
+  assert.match(exportDef, /meta:\s*\{\s*rawResponse:\s*true\s*\}/)
 })
