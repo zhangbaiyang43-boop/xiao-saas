@@ -28,6 +28,17 @@
         >{{ opt.label }}</div>
       </div>
 
+      <div
+        v-if="previewLoaded && !previewError"
+        class="industry-row tap-shrink"
+        :class="{ 'industry-row--unset': currentIndustry === 'default', 'industry-row--disabled': switchingIndustry }"
+        @click="!switchingIndustry && (showIndustryPicker = true)"
+      >
+        <span class="industry-row-label">业态</span>
+        <span class="industry-row-value">{{ industryText }}</span>
+        <van-icon name="arrow" />
+      </div>
+
       <p class="hero-desc">{{ heroDesc }}</p>
 
       <div v-if="previewLoaded && !previewError" class="hero-stat-row">
@@ -126,6 +137,15 @@
     </van-collapse>
     </div>
 
+    <van-popup v-model:show="showIndustryPicker" position="bottom" round>
+      <van-picker
+        title="选择业态"
+        :columns="industryColumns"
+        @confirm="onIndustrySelect"
+        @cancel="showIndustryPicker = false"
+      />
+    </van-popup>
+
     <!-- 手动建券弹窗 -->
     <van-popup v-model:show="showForm" round position="bottom" :style="{ maxHeight: '90vh' }">
       <div class="form-sheet">
@@ -213,6 +233,8 @@ const templates = ref([])
 const loadingTemplates = ref(false)
 const templatesError = ref(false)
 const switchingIntensity = ref(false)
+const showIndustryPicker = ref(false)
+const switchingIndustry = ref(false)
 const activeCollapse = ref([])
 const showForm = ref(false)
 const savingForm = ref(false)
@@ -220,6 +242,15 @@ const savingForm = ref(false)
 const form = reactive({ name: '', value: 5, min_amount: 30, total_stock: 100, valid_days: 7 })
 
 const currentIntensity = computed(() => preview.value?.intensity_outcomes?.current_intensity || 'standard')
+
+// ── 业态：冷启动客单价"连菜单都没有"时的兜底来源，商家选一次即可 ──────
+const industryOptions = computed(() => preview.value?.industry_options || [])
+const currentIndustry = computed(() => preview.value?.industry || 'default')
+const industryText = computed(() => {
+  const opt = industryOptions.value.find((o) => o.key === currentIndustry.value)
+  return opt ? opt.label : '未选择'
+})
+const industryColumns = computed(() => industryOptions.value.map((o) => ({ text: o.label, value: o.key })))
 
 const redemptionRateText = computed(() => {
   const rate = preview.value?.redemption_rate
@@ -289,6 +320,23 @@ async function switchIntensity(key) {
     showFailToast('切换失败，请稍后重试')
   } finally {
     switchingIntensity.value = false
+  }
+}
+
+async function onIndustrySelect({ selectedOptions }) {
+  showIndustryPicker.value = false
+  const key = selectedOptions?.[0]?.value
+  if (!key || key === currentIndustry.value || switchingIndustry.value) return
+  switchingIndustry.value = true
+  try {
+    const res = await updateTenantSettings({ industry: key })
+    if (res?.code !== 200) { showFailToast(res?.msg || '保存失败'); return }
+    await loadPreview()
+    showSuccessToast('已更新')
+  } catch {
+    showFailToast('保存失败，请稍后重试')
+  } finally {
+    switchingIndustry.value = false
   }
 }
 
@@ -427,6 +475,23 @@ onMounted(() => { loadPreview(); loadTemplates() })
   opacity: .6;
   pointer-events: none;
 }
+
+.industry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.16);
+  font-size: 13px;
+  cursor: pointer;
+}
+.industry-row-label { color: rgba(255,255,255,.75); font-weight: 700; }
+.industry-row-value { flex: 1; color: #fff; font-weight: 700; }
+.industry-row--unset .industry-row-value { color: rgba(255,255,255,.7); font-weight: 400; }
+.industry-row .van-icon { color: rgba(255,255,255,.7); font-size: 14px; }
+.industry-row--disabled { opacity: .6; pointer-events: none; }
 
 .hero-desc { font-size: 13px; opacity: .9; margin: 0 0 14px; line-height: 1.5; }
 

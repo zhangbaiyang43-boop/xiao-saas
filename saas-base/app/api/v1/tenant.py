@@ -281,11 +281,14 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
     if error:
         return error
 
+    from app.core.platform_rules import industry_options as _industry_options
+
     TenantContext.set_tenant_id(tenant_id)
     cs = CouponService(db)
     aov = await cs.get_merchant_aov()
     rules = await cs.get_coupon_rules()
     intensity_outcomes = await cs.estimate_intensity_outcomes()
+    industry = await cs.get_industry()
 
     # 本月已发券数
     month_start = _dt.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -325,6 +328,10 @@ async def get_marketing_preview(db: AsyncSession = Depends(get_db)):
 
     return success_response(data={
         "aov": round(aov, 1) if aov else None,
+        # 业态：冷启动客单价"连菜单都没有"时的兜底来源；商家在"智能营销"页选一次。
+        # industry 为 "default" 表示商家还没选。industry_options 是可选清单（不含 default）。
+        "industry": industry,
+        "industry_options": _industry_options(),
         "issued_this_month": issued_this_month,
         "redeemed_this_month": redeemed_this_month,
         "redemption_rate": redemption_rate,
