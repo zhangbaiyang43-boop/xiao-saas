@@ -12,6 +12,9 @@ import warnings
 import zipfile
 
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from sqlalchemy import select
+
+from app.models.entrance_code import EntranceCode
 
 
 DPI = 300
@@ -185,6 +188,37 @@ class TableStickerExportService:
     def __init__(self, db=None, entrance_code_dir=ENTRANCE_CODE_DIR):
         self.db = db
         self.entrance_code_dir = Path(entrance_code_dir).resolve()
+
+    async def load_valid_codes(self, tenant_id: str, entrance_code_ids: list[int]):
+        result = await self.db.execute(
+            select(EntranceCode).where(
+                EntranceCode.tenant_id == tenant_id,
+                EntranceCode.id.in_(entrance_code_ids),
+            )
+        )
+        by_id = {int(code.id): code for code in result.scalars().all()}
+        if len(by_id) != len(entrance_code_ids):
+            raise TableStickerExportError(
+                "TABLE_CODE_INVALID",
+                "桌码状态已变化，请刷新后重新选择",
+            )
+
+        ordered = [by_id[value] for value in entrance_code_ids]
+        for code in ordered:
+            if (
+                code.channel != "TABLE"
+                or code.entry_type != "table"
+                or code.status != 1
+                or code.env_version != "release"
+                or code.generation_status != "SUCCESS"
+                or not str(code.table_no or "").strip()
+                or not str(code.image_url or "").strip()
+            ):
+                raise TableStickerExportError(
+                    "TABLE_CODE_INVALID",
+                    "桌码状态已变化，请刷新后重新选择",
+                )
+        return ordered
 
     def render_sticker(self, code, *, merchant_name: str | None = None) -> Image.Image:
         table_no = (getattr(code, "table_no", "") or "").strip()

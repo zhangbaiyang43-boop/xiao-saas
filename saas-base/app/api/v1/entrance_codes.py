@@ -1,6 +1,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from app.core.logger import logger
 from app.core.tenant_context import TenantContext
@@ -11,9 +14,11 @@ from app.schemas.entrance_code import (
     CreateEntranceCodeRequest,
     EntranceCodeResponse,
     RegenerateEntranceCodeRequest,
+    TableStickerExportRequest,
     UpdateEntranceCodeStatusRequest,
 )
 from app.services.entrance_code_service import EntranceCodeService
+import app.services.table_sticker_export_service as table_sticker_export_service
 from app.services.tenant_service import TenantService
 from app.core.response import RespVo, error_response, success_response
 
@@ -249,6 +254,39 @@ async def list_entrance_codes(
         limit=page_size,
     )
     return success_response(data={"items": [EntranceCodeResponse.model_validate(i) for i in items], "total": len(items)})
+
+
+@router.post("/table-stickers/export")
+async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_db)):
+    tenant_id = TenantContext.get_tenant_id()
+    if not tenant_id:
+        return error_response(code=401, msg="未登录或商户信息已失效")
+
+    service = table_sticker_export_service.TableStickerExportService(db)
+    try:
+        codes = await service.load_valid_codes(tenant_id, data.entrance_code_ids)
+        tenant = await TenantService(db).get_tenant(tenant_id)
+        artifact = await run_in_threadpool(
+            service.build_bundle,
+            codes,
+            tenant.name if tenant else "商户",
+        )
+    except table_sticker_export_service.TableStickerExportError as exc:
+        logger.warning(
+            f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} "
+            f"count={len(data.entrance_code_ids)} success=False error_code={exc.code}"
+        )
+        return error_response(code=422, msg=exc.message)
+
+    logger.info(
+        f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} count={len(codes)} success=True"
+    )
+    return FileResponse(
+        path=artifact.zip_path,
+        media_type="application/zip",
+        filename=artifact.download_name,
+        background=BackgroundTask(artifact.cleanup),
+    )
 
 
 @router.get("/{code_id}", response_model=RespVo)

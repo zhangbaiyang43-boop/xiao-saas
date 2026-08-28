@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class CreateEntranceCodeRequest(BaseModel):
@@ -32,6 +32,23 @@ class ResolveEntranceRequest(BaseModel):
 
 class RegenerateEntranceCodeRequest(BaseModel):
     env_version: str = Field("release", description="develop/trial/release")
+
+
+class TableStickerExportRequest(BaseModel):
+    entrance_code_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        validation_alias=AliasChoices("entranceCodeIds"),
+        serialization_alias="entranceCodeIds",
+    )
+
+    @field_validator("entrance_code_ids")
+    @classmethod
+    def reject_duplicate_ids(cls, values):
+        if len(values) != len(set(values)):
+            raise ValueError("桌码不能重复")
+        return values
 
 
 class EntranceCodeResponse(BaseModel):
