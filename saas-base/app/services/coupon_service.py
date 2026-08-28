@@ -94,10 +94,13 @@ class CouponService(BaseService):
 
     async def get_coupon_rules(self) -> dict:
         from app.core.platform_rules import build_dynamic_rules
-        from app.services.tenant_service import TenantService
+        from app.services.tenant_service import TenantService, normalize_coupon_rules
         tenant_service = TenantService(self.db)
         config = await tenant_service.get_tenant_config(self.tenant_id)
-        merchant_rules = (config.coupon_rules or {}) if config else {}
+        # 商户配置只认 enabled 开关；金额/门槛/有效期一律走 build_dynamic_rules。
+        # normalize 把历史胖配置（含 locked / 写死金额 / weighted_coupons）就地清成
+        # 只剩 enabled，老商户不用跑迁移也能立刻用上动态规则。
+        merchant_rules = normalize_coupon_rules(config.coupon_rules) if config else {}
         # 动态则：根据该商户实际客单价 + 选择的营销强度生成，新商户用安全兜底值
         aov = await self.get_merchant_aov()
         intensity = await self.get_marketing_intensity()

@@ -205,12 +205,29 @@ class CouponLoopContractsTest(unittest.TestCase):
         self.assertEqual(unlocked["new_customer_coupon"]["threshold"], 10)
         self.assertTrue(unlocked["new_customer_coupon"]["unlocked_at"])
 
-    def test_default_auto_coupon_rules_all_use_weighted_random(self):
-        from app.services.tenant_service import DEFAULT_COUPON_RULES
+    def test_default_coupon_seed_only_carries_enabled_toggles(self):
+        # 只保留一套规则：建店种子里不再有金额/门槛/有效期/weighted_coupons/locked，
+        # 这些全部交给 platform_rules.build_dynamic_rules() 动态算。
+        from app.services.tenant_service import (
+            DEFAULT_COUPON_RULES,
+            COUPON_RULE_KEYS,
+            normalize_coupon_rules,
+        )
 
-        for rule_key in ["new_customer_coupon", "consumption_coupon", "recall_coupon"]:
-            self.assertTrue(DEFAULT_COUPON_RULES[rule_key]["weighted_enabled"])
-            self.assertEqual(len(DEFAULT_COUPON_RULES[rule_key]["weighted_coupons"]), 3)
+        for rule_key in COUPON_RULE_KEYS:
+            rule = DEFAULT_COUPON_RULES[rule_key]
+            self.assertEqual(set(rule.keys()), {"enabled"})
+            self.assertIsInstance(rule["enabled"], bool)
+
+        # normalize 把历史胖配置（含 locked / 写死金额）就地清成只剩 enabled
+        fat = {
+            "new_customer_coupon": {
+                "enabled": False, "amount": 5, "threshold": 18, "valid_days": 1,
+                "locked": True, "weighted_enabled": True,
+                "weighted_coupons": [{"name": "超过80%用户", "amount": 5, "threshold": 18, "weight": 100}],
+            },
+        }
+        self.assertEqual(normalize_coupon_rules(fat), {"new_customer_coupon": {"enabled": False}})
 
     # ── 去重回归：客户手上还有未用的同类型自动券，不应该再发新的 ──────────
     # 背景：consumption_coupon（每笔订单支付成功都会触发）和 recall_coupon

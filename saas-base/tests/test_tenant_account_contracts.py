@@ -122,7 +122,7 @@ class TenantAccountContractsTest(unittest.TestCase):
             config,
             profile={"name": "新店名", "password_hash": "ignore"},
             member_rules={"points_per_yuan": 2},
-            coupon_rules={"consume_coupon": {"enabled": True, "amount": 8}},
+            coupon_rules={"consume_coupon": {"enabled": True, "amount": 8}},  # amount 会被 normalize 丢弃，只留 enabled
             business_info={"notice": "周末正常营业"},
             plugin_settings={"points": {"default_enabled": True}},
         ))
@@ -130,7 +130,7 @@ class TenantAccountContractsTest(unittest.TestCase):
         self.assertEqual(tenant.name, "新店名")
         self.assertEqual(tenant.password_hash, "hashed")
         self.assertEqual(config.member_rules["points_per_yuan"], 2)
-        self.assertEqual(config.coupon_rules["consume_coupon"]["amount"], 8)
+        self.assertEqual(config.coupon_rules["consume_coupon"], {"enabled": True})
         self.assertEqual(config.business_info["notice"], "周末正常营业")
         self.assertEqual(config.plugin_settings["points"]["default_enabled"], True)
 

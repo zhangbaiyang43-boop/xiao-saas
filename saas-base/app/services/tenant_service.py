@@ -24,56 +24,34 @@ DEFAULT_MEMBER_RULES = {
     "fast_upgrade_amount": 99,
 }
 
-DEFAULT_COUPON_RULES = {
-    "new_customer_coupon": {
-        "enabled": True,
-        "amount": 2,
-        "threshold": 10,
-        "valid_days": 1,
-        "weighted_enabled": True,
-        "locked": False,
-        "weighted_coupons": [
-            {"name": "\u5e78\u8fd0\u5238", "amount": 1, "threshold": 10, "valid_days": 1, "weight": 50},
-            {"name": "\u4eca\u65e5\u624b\u6c14\u4e0d\u9519", "amount": 2, "threshold": 10, "valid_days": 1, "weight": 35},
-            {"name": "\u8d85\u8fc780%\u7528\u6237", "amount": 4, "threshold": 10, "valid_days": 1, "weight": 15},
-        ],
-    },
-    "consumption_coupon": {
-        "enabled": True,
-        "amount": 3,
-        "threshold": 16,
-        "trigger_amount": 16,
-        "valid_days": 2,
-        "weighted_enabled": True,
-        "locked": False,
-        "weighted_coupons": [
-            {"name": "幸运券", "amount": 2, "threshold": 16, "valid_days": 2, "weight": 50},
-            {"name": "今日手气不错", "amount": 3, "threshold": 16, "valid_days": 2, "weight": 35},
-            {"name": "超过80%用户", "amount": 5, "threshold": 16, "valid_days": 2, "weight": 15},
-        ],
-    },
-    "birthday_coupon": {"enabled": False, "amount": 20, "threshold": 0, "valid_days": 15},
-    "recall_coupon": {
-        "enabled": True,
-        "amount": 3,
-        "threshold": 10,
-        "inactive_days": 7,
-        "valid_days": 2,
-        "weighted_enabled": True,
-        "locked": False,
-        "weighted_coupons": [
-            {"name": "\u5e78\u8fd0\u5238", "amount": 2, "threshold": 10, "valid_days": 2, "weight": 50},
-            {"name": "\u4eca\u65e5\u624b\u6c14\u4e0d\u9519", "amount": 3, "threshold": 10, "valid_days": 2, "weight": 35},
-            {"name": "\u8d85\u8fc780%\u7528\u6237", "amount": 5, "threshold": 10, "valid_days": 2, "weight": 15},
-        ],
-    },
-    "catering_repurchase_template": {
-        "key": "catering_10",
-        "name": "餐饮复购10元客单",
-        "customer_price": 10,
-        "algorithm": "new_after_20_percent_recall_30_percent",
-    },
-}
+# 券的面额 / 门槛 / 有效期 / 加权组合一律由 platform_rules.build_dynamic_rules()
+# 按商户实际客单价 + 营销强度(保守/标准/激进)动态计算，商家不配置这些。
+# 建店种子里每个「发券时机」只保留一个 enabled 开关，供商家在「智能营销」页
+# 按需关闭某个时机。任何写死的金额/券名/有效期都不再存在，彻底消除两套规则打架。
+COUPON_RULE_KEYS = (
+    "entry_coupon",
+    "new_customer_coupon",
+    "consumption_coupon",
+    "recall_coupon",
+    "points_reward_coupon",
+)
+
+DEFAULT_COUPON_RULES = {key: {"enabled": True} for key in COUPON_RULE_KEYS}
+
+
+def normalize_coupon_rules(rules: dict | None) -> dict:
+    """把 tenant_config.coupon_rules 收敛成「只有 enabled 开关」的形状。
+
+    历史上建店会写入一份带金额/门槛/有效期/weighted_coupons/locked 的胖配置，
+    和 platform_rules 动态算出来的值打架（表现为顾客拿到写死的 ¥ 5满18、1天过期、
+    券名叫"超过80%用户"）。这里把任何经济性字段一律丢掉，只留 enabled——
+    读写 coupon_rules 的每条路径都过一遍，老商户下次访问即自愈，无需单独迁移。
+    """
+    out: dict = {}
+    for key, rule in (rules or {}).items():
+        if isinstance(rule, dict):
+            out[key] = {"enabled": bool(rule.get("enabled", True))}
+    return out
 
 DEFAULT_BUSINESS_INFO = {
     "business_hours": "09:00-21:00",
@@ -247,7 +225,9 @@ class TenantService:
         if config:
             defaults = self.build_default_config()
             config.member_rules = deep_merge(defaults["member_rules"], config.member_rules)
-            config.coupon_rules = deep_merge(defaults["coupon_rules"], getattr(config, "coupon_rules", None))
+            config.coupon_rules = normalize_coupon_rules(
+                deep_merge(defaults["coupon_rules"], getattr(config, "coupon_rules", None))
+            )
             config.business_info = deep_merge(defaults["business_info"], getattr(config, "business_info", None))
             config.plugin_settings = deep_merge(defaults["plugin_settings"], config.plugin_settings)
             return config
@@ -289,9 +269,12 @@ class TenantService:
     ) -> tuple[Tenant, TenantConfig]:
         await self.update_tenant_profile(tenant, **(profile or {}))
         defaults = self.build_default_config()
-        coupon_rules = apply_coupon_rule_locks(config.coupon_rules, coupon_rules)
         config.member_rules = deep_merge(defaults["member_rules"], deep_merge(config.member_rules, member_rules))
-        config.coupon_rules = deep_merge(defaults["coupon_rules"], deep_merge(config.coupon_rules, coupon_rules))
+        # 券的经济性由 platform_rules 动态算，商户配置只认 enabled 开关——
+        # normalize 兜底：不管前端传了什么金额/门槛/locked，落库只留 enabled。
+        config.coupon_rules = normalize_coupon_rules(
+            deep_merge(defaults["coupon_rules"], deep_merge(config.coupon_rules, coupon_rules))
+        )
         config.business_info = deep_merge(defaults["business_info"], deep_merge(config.business_info, business_info))
         config.plugin_settings = deep_merge(defaults["plugin_settings"], deep_merge(config.plugin_settings, plugin_settings))
 
