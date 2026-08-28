@@ -24,17 +24,12 @@
     <view class="coupon-nudge-main" @click="couponNudgeState.satisfied ? $emit('open-coupon-picker') : $emit('coupon-add-on')">
       <text class="coupon-nudge-icon iconfont icon-youhuiquan"></text>
       <view class="coupon-nudge-copy">
-        <template v-if="couponNudgeState.satisfied">
-          <text class="coupon-nudge-title">已享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}优惠</text>
-        </template>
-        <template v-else>
-          <text class="coupon-nudge-title">再加 <text class="coupon-nudge-strong">¥{{ couponNudgeState.diffText }}</text>，立享满{{ couponNudgeState.thresholdText }}减{{ couponNudgeState.discountText }}</text>
-        </template>
-        <text class="coupon-nudge-sub">当前 ¥{{ formatPrice(totalPrice) }} / 门槛 ¥{{ couponNudgeState.thresholdText }}</text>
+        <text v-if="couponNudgeState.satisfied" class="coupon-nudge-title">已省 ¥{{ couponNudgeState.discountText }}</text>
+        <text v-else class="coupon-nudge-title">加 <text class="coupon-nudge-strong">¥{{ couponNudgeState.diffText }}</text> 的菜，省 ¥{{ couponNudgeState.discountText }}</text>
       </view>
     </view>
     <view v-if="!couponNudgeState.satisfied" class="coupon-nudge-action" @click="$emit('coupon-add-on')">
-      <text>去凑单</text>
+      <text>去加菜</text>
     </view>
     <view v-else class="coupon-nudge-action coupon-nudge-action--plain" @click="$emit('open-coupon-picker')">
       <text>换券</text>
@@ -152,6 +147,12 @@ export default {
   align-items: center;
   gap: 14rpx;
   box-sizing: border-box;
+  animation: coupon-nudge-rise .3s cubic-bezier(.22, 1, .36, 1) both;
+}
+
+@keyframes coupon-nudge-rise {
+  from { transform: translateY(20rpx); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 
@@ -224,24 +225,6 @@ export default {
 .coupon-nudge-strong {
   color: #ef3f24;
   font-weight: 900;
-}
-
-
-
-.coupon-nudge-sub {
-  margin-top: 2rpx;
-  color: #9a6a21;
-  font-size: 20rpx;
-  line-height: 28rpx;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-
-.coupon-nudge-bar--done .coupon-nudge-sub {
-  color: #43a36b;
 }
 
 

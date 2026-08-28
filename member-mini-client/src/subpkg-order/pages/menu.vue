@@ -329,6 +329,7 @@
       :threshold="entryReveal?.threshold"
       :format-price="formatPrice"
       @close="showEntryReveal = false"
+      @add-dish="onRevealAddDish"
     />
 
     <TableBillSheet
@@ -1169,6 +1170,12 @@ export default {
       const target = preferred || fallbackDish?.category || categories.value[0]
       if (target) switchCategory(target)
     }
+
+    // 开奖层点"去加菜"：先收掉弹层，等它退场再滚到便宜菜分类，避免两个动画打架。
+    const onRevealAddDish = () => {
+      showEntryReveal.value = false
+      setTimeout(goCouponAddOn, 90)
+    }
     const {
       categoryScrollTop, ignoreScroll, switchCategory, handleActiveCategoryChange,
       handleProgrammaticScrollSettled,
@@ -1455,7 +1462,7 @@ export default {
       orderRemarkExpanded, toggleOrderRemarkExpanded, orderRemarkSummary,
       availableCoupons, selectedCouponId, selectedCoupon, discountAmount, finalPrice,
       showCouponPicker, couponPickerList, couponPickerAmount, couponPickerCondText, openCouponPicker, closeCouponPicker, pickCoupon,
-      couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn,
+      couponBarVisible, bestCouponValue, couponBarText, couponBarPrefix, couponBarAmount, couponNudgeState, goCouponAddOn, onRevealAddDish,
       openCart, refreshAvailableCoupons,
       activeCategory, scrollTarget, categoryScrollTop, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       successItems, successTotal, successMemberValue,

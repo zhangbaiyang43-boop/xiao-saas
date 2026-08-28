@@ -40,9 +40,11 @@ export const buildCouponNudgeState = ({ totalPrice = 0, totalCount = 0, coupons 
     return toState({ coupon: eligible[0], satisfied: true })
   }
 
+  // 触发范围跟着券面额走：一张减 ¥14 的券，只要差 ¥14 以内就提示——因为加的那道
+  // 菜的钱正好被券抵掉。nudgeRange 只当下限（小额券仍按 15 元兜底）。
   const closest = usefulCoupons
     .map(coupon => ({ coupon, diff: couponThreshold(coupon) - total }))
-    .filter(item => item.diff > 0 && item.diff <= nudgeRange)
+    .filter(item => item.diff > 0 && item.diff <= Math.max(nudgeRange, couponDiscount(item.coupon)))
     .sort((a, b) => a.diff - b.diff || couponDiscount(b.coupon) - couponDiscount(a.coupon))[0]
 
   return closest ? toState({ coupon: closest.coupon, diff: closest.diff, satisfied: false }) : { visible: false }

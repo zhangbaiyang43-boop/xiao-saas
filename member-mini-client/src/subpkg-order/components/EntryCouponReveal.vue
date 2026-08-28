@@ -10,7 +10,8 @@
         <text class="ecr-cond">{{ condText }}</text>
         <view class="ecr-dash"></view>
         <text class="ecr-valid">今日有效</text>
-        <view class="ecr-btn" @click="$emit('close')"><text>收下</text></view>
+        <view v-if="hasThreshold" class="ecr-btn tap-shrink" @click="$emit('add-dish')"><text>去加菜</text></view>
+        <view v-else class="ecr-btn tap-shrink" @click="$emit('close')"><text>收下</text></view>
       </view>
     </view>
   </base-overlay>
@@ -20,8 +21,9 @@
 import BaseOverlay from '@/components/base-overlay/base-overlay.vue'
 
 // 进店券开奖层：扫码进店抽到的那张券当场亮出来（盲盒三档 加菜小券 / 手气不错 /
-// 手气爆棚 …）。纯展示，无业务逻辑；点"收下"或点遮罩都只 emit close。
-// 抽到"手气爆棚"走金色描边，其余走常规红。文案只放数据，不写解释句。
+// 手气爆棚 …）。纯展示，无业务逻辑。带门槛的券按钮是"去加菜"（emit add-dish，
+// 父组件关层 + 滚到便宜菜分类）；无门槛立减按钮是"收下"（emit close）。点遮罩
+// 一律 close。抽到"手气爆棚"走金色描边，其余走常规红。文案只放数据，不写解释句。
 export default {
   name: 'EntryCouponReveal',
   components: { BaseOverlay },
@@ -32,17 +34,19 @@ export default {
     threshold: { type: [Number, String], default: 0 },
     formatPrice: { type: Function, required: true },
   },
-  emits: ['close'],
+  emits: ['close', 'add-dish'],
   computed: {
     isJackpot() {
       return this.name === '手气爆棚'
+    },
+    hasThreshold() {
+      return (Number(this.threshold) || 0) > 0
     },
     amountText() {
       return this.formatPrice(Number(this.amount) || 0)
     },
     condText() {
-      const t = Number(this.threshold) || 0
-      return t > 0 ? `满${t.toFixed(0)}可用` : '无门槛'
+      return this.hasThreshold ? `满${Number(this.threshold).toFixed(0)}可用` : '无门槛'
     },
   },
 }
