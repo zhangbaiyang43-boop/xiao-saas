@@ -514,7 +514,7 @@ def test_render_sticker_uses_nearest_resize_to_preserve_qr_pixels():
         service, code = _service_and_code(directory, "/static/entrance-codes/table.png")
         rendered = service.render_sticker(code)
         try:
-            qr_crop = rendered.crop((264, 468, 916, 1120))
+            qr_crop = rendered.crop((184, 458, 996, 1270))
             try:
                 colors = set(qr_crop.getdata())
             finally:

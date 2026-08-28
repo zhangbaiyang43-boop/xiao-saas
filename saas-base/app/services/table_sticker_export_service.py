@@ -23,9 +23,9 @@ STICKER_HEIGHT = 1417
 A4_WIDTH = 2480
 A4_HEIGHT = 3508
 A4_SLOTS = ((36, 314), (1263, 314), (36, 1777), (1263, 1777))
-QR_CONTAINER_SIZE = 752
-QR_CONTENT_SIZE = 652
-QR_QUIET_ZONE = 50
+QR_CONTAINER_SIZE = 896
+QR_CONTENT_SIZE = 812
+QR_QUIET_ZONE = 42
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_DIMENSION = 4096
 SAFE_IMAGE_PREFIX = "/static/entrance-codes/"
@@ -293,7 +293,7 @@ class TableStickerExportService:
                     qr_image.close()
 
                 qr_left = (STICKER_WIDTH - QR_CONTAINER_SIZE) // 2
-                qr_top = 418
+                qr_top = 416
                 canvas.paste(qr_card, (qr_left, qr_top))
             finally:
                 qr_card.close()
@@ -302,7 +302,7 @@ class TableStickerExportService:
             footer_bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
             footer_width = footer_bbox[2] - footer_bbox[0]
             draw.text(
-                ((STICKER_WIDTH - footer_width) // 2, 1312),
+                ((STICKER_WIDTH - footer_width) // 2, 1330),
                 footer_text,
                 font=footer_font,
                 fill="#111418",

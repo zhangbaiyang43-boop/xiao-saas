@@ -667,7 +667,7 @@ class EntranceCodeService(BaseService):
                 "page": page,
                 "check_path": False,
                 "env_version": env_version,
-                "width": 430,
+                "width": 1280,
             }
         ).encode("utf-8")
         request = urllib.request.Request(
