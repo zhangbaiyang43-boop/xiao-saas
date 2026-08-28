@@ -512,9 +512,14 @@ const onConfirmStickerExport = async () => {
     showStickerDialog.value = false
     message.success('桌贴已生成，开始下载')
   } catch (e) {
+    const status = e?.response?.status
     const body = e?.response?.data
-    if (body && typeof body.text === 'function') message.error(await parseBlobErrorMessage(body))
-    else message.error('桌贴生成失败，请稍后重试')
+    let msg = ''
+    if (body && typeof body.text === 'function') msg = await parseBlobErrorMessage(body)
+    if (!msg || msg === '桌贴生成失败，请稍后重试') {
+      msg = status ? `桌贴生成失败（${status}），请稍后重试` : '桌贴生成失败，请检查网络后重试'
+    }
+    message.error(msg)
   } finally { batchBusy.value = '' }
 }
 

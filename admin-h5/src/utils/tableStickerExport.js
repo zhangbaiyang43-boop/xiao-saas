@@ -21,7 +21,7 @@ export const selectedExportableCodes = (codes, selectedIds) => {
 export const parseBlobErrorMessage = async (blob) => {
   try {
     const data = JSON.parse(await blob.text())
-    return data?.msg || data?.message || FALLBACK_ERROR_MESSAGE
+    return data?.msg || data?.message || data?.detail || FALLBACK_ERROR_MESSAGE
   } catch {
     return FALLBACK_ERROR_MESSAGE
   }
