@@ -492,26 +492,46 @@ const openStickerExport = () => {
   showStickerDialog.value = true
 }
 
+const asBlob = async (data) => {
+  if (data instanceof Blob) return data
+  if (data instanceof ArrayBuffer) return new Blob([data])
+  if (data && typeof data === 'object' && typeof data.arrayBuffer !== 'function') {
+    // axios 的自定义 transformResponse 偶发把 body 当字符串/对象透传
+    return new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: 'application/json' })
+  }
+  return data ?? null
+}
+
 const onConfirmStickerExport = async () => {
   const ids = stickerExportable.value.map(c => c.id)
   if (!ids.length) { message.warning('没有可导出的桌贴码'); return }
   batchBusy.value = 'sticker'
   try {
     const res = await exportTableStickers(ids)
-    const blob = res?.data
-    if (!blob) { message.error('桌贴生成失败，请稍后重试'); return }
-    if (blob.type && blob.type.includes('json')) {
-      message.error(await parseBlobErrorMessage(blob))
+    const blob = await asBlob(res?.data)
+    if (!blob || typeof blob.size !== 'number') {
+      console.error('[sticker-export] unexpected response', res)
+      message.error('桌贴生成失败：响应异常')
+      return
+    }
+    // 后端出错时是 HTTP 200 + 一小段 JSON（error_response 语义）；成功的 zip 至少几百 KB。
+    if (blob.size < 50 * 1024) {
+      const text = await blob.text().catch(() => '')
+      let parsed = null
+      try { parsed = JSON.parse(text) } catch { /* not json */ }
+      console.error('[sticker-export] small response body', { size: blob.size, type: blob.type, text: text.slice(0, 500) })
+      message.error((parsed && (parsed.msg || parsed.message)) || '桌贴生成失败，请稍后重试')
       return
     }
     let fname = '桌贴.zip'
-    const cd = res.headers?.['content-disposition'] || ''
+    const cd = res.headers?.['content-disposition'] || res.headers?.get?.('content-disposition') || ''
     const m = /filename\*=UTF-8''([^;]+)/i.exec(cd) || /filename="?([^";]+)"?/i.exec(cd)
     if (m) { try { fname = decodeURIComponent(m[1]) } catch { /* keep default */ } }
     triggerBlobDownload(blob, fname)
     showStickerDialog.value = false
     message.success('桌贴已生成，开始下载')
   } catch (e) {
+    console.error('[sticker-export] request failed', e)
     const status = e?.response?.status
     const body = e?.response?.data
     let msg = ''
