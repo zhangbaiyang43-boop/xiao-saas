@@ -105,6 +105,7 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
             observed["merchant_name"] = merchant_name
             temp_dir = Path(tempfile.mkdtemp(prefix="table-stickers-api-test-"))
             self.addCleanup(shutil.rmtree, temp_dir, True)
+            observed["temp_dir"] = temp_dir
             zip_path = temp_dir / "bundle.zip"
             zip_path.write_bytes(b"PK\x05\x06" + (b"\x00" * 18))
 
@@ -206,17 +207,22 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.code, 401)
         self.assertEqual(response.msg, "未登录或商户信息已失效")
 
-    async def test_valid_export_returns_zip_from_threadpool_and_background_cleans_it(self):
+    async def test_valid_export_returns_in_memory_zip_and_cleans_temp_dir(self):
+        # 用普通 Response（非 FileResponse）：三个自定义中间件都是 BaseHTTPMiddleware，
+        # 无法转发 FileResponse 的 pathsend 零拷贝消息，会截断响应体。
         caller_thread_id = threading.get_ident()
         response, observed = await self._export_response()
 
-        artifact_dir = Path(response.path).parent
         self.assertEqual(response.media_type, "application/zip")
         self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertIn("%E7%94%B2%E5%95%86%E6%88%B7", response.headers["content-disposition"])
+        self.assertEqual(response.body, b"PK\x05\x06" + (b"\x00" * 18))
         self.assertEqual(observed["code_ids"], [TENANT_A_CODE_ID])
         self.assertEqual(observed["merchant_name"], "甲商户")
         self.assertNotEqual(observed["thread_id"], caller_thread_id)
-        self.assertTrue(artifact_dir.exists())
+        # 临时目录在返回前就已经读进内存并清掉了
+        self.assertEqual(observed["cleanup_count"], 1)
+        self.assertFalse(observed["temp_dir"].exists())
 
         messages = []
 
@@ -224,25 +230,8 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
             messages.append(message)
 
         await response(self._http_scope(), self._receive, send)
-
-        self.assertEqual(observed["cleanup_count"], 1)
-        self.assertFalse(artifact_dir.exists())
         self.assertEqual(messages[0]["type"], "http.response.start")
         self.assertTrue(any(message["type"] == "http.response.body" for message in messages))
-
-    async def test_export_cleanup_runs_once_when_client_disconnects_during_file_send(self):
-        response, observed = await self._export_response()
-        artifact_dir = Path(response.path).parent
-
-        async def send(message):
-            if message["type"] == "http.response.body":
-                raise ConnectionError("client disconnected")
-
-        with self.assertRaisesRegex(ConnectionError, "client disconnected"):
-            await response(self._http_scope(), self._receive, send)
-
-        self.assertEqual(observed["cleanup_count"], 1)
-        self.assertFalse(artifact_dir.exists())
 
     async def test_static_export_route_is_registered_before_dynamic_code_route(self):
         paths = [route.path for route in router.routes]

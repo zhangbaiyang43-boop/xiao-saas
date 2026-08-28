@@ -1,8 +1,9 @@
 from typing import Annotated
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
+from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
 from app.core.logger import logger
@@ -23,17 +24,6 @@ from app.services.tenant_service import TenantService
 from app.core.response import RespVo, error_response, success_response
 
 router = APIRouter(prefix="/api/v1/entrance-codes", tags=["入口码"])
-
-
-class _CleanupFileResponse(FileResponse):
-    async def __call__(self, scope, receive, send):
-        background = self.background
-        self.background = None
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            if background is not None:
-                await background()
 
 
 @router.get("/resolve", response_model=RespVo)
@@ -289,14 +279,24 @@ async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_
         )
         return error_response(code=422, msg=exc.message)
 
+    # 读进内存后立刻清临时目录，返回普通 Response（不是 FileResponse）：
+    # 三个自定义中间件都基于 BaseHTTPMiddleware，它无法转发 FileResponse 的
+    # http.response.pathsend 零拷贝消息，会把响应体截断，浏览器报 net::ERR_FAILED。
+    try:
+        zip_bytes = artifact.zip_path.read_bytes()
+    finally:
+        artifact.cleanup()
+
     logger.info(
-        f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} count={len(codes)} success=True"
+        f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} count={len(codes)} "
+        f"success=True bytes={len(zip_bytes)}"
     )
-    return _CleanupFileResponse(
-        path=artifact.zip_path,
+    return Response(
+        content=zip_bytes,
         media_type="application/zip",
-        filename=artifact.download_name,
-        background=BackgroundTask(artifact.cleanup),
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(artifact.download_name)}"
+        },
     )
 
 
