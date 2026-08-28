@@ -723,10 +723,16 @@ def test_bundle_composes_four_a4_slots_and_crop_marks(monkeypatch):
             assert len(captured_a4) == 1
             page = captured_a4[0]
             try:
-                for x, y in ((59, 337), (1240, 337), (59, 1754), (1240, 1754)):
+                expected_slots = ((36, 314), (1263, 314), (36, 1777), (1263, 1777))
+                assert export_service.A4_SLOTS == expected_slots
+                for x, y in expected_slots:
                     assert page.getpixel((x + 100, y + 100)) == (225, 29, 72)
-                    assert page.getpixel((x, y - 20)) == (107, 114, 128)
-                    assert page.getpixel((x - 20, y)) == (107, 114, 128)
+                    assert page.getpixel((x, y - 10)) == (107, 114, 128)
+                    assert page.getpixel((x - 10, y)) == (107, 114, 128)
+                    assert page.getpixel((x + 5, y + 5)) == (225, 29, 72)
+                    assert page.getpixel((x + 1175, y + 5)) == (225, 29, 72)
+                    assert page.getpixel((x + 5, y + 1411)) == (225, 29, 72)
+                    assert page.getpixel((x + 1175, y + 1411)) == (225, 29, 72)
             finally:
                 page.close()
         finally:

@@ -19,7 +19,7 @@ STICKER_WIDTH = 1181
 STICKER_HEIGHT = 1417
 A4_WIDTH = 2480
 A4_HEIGHT = 3508
-A4_SLOTS = ((59, 337), (1240, 337), (59, 1754), (1240, 1754))
+A4_SLOTS = ((36, 314), (1263, 314), (36, 1777), (1263, 1777))
 QR_CONTAINER_SIZE = 752
 QR_CONTENT_SIZE = 652
 QR_QUIET_ZONE = 50
@@ -90,9 +90,9 @@ class _PdfPageWriter:
             rgb = page.convert("RGB")
             try:
                 width, height = rgb.size
-                encoded = BytesIO()
-                rgb.save(encoded, "JPEG", quality=95, subsampling=0)
-                image_data = encoded.getvalue()
+                with BytesIO() as encoded:
+                    rgb.save(encoded, "JPEG", quality=95, subsampling=0)
+                    image_data = encoded.getvalue()
             finally:
                 rgb.close()
 
@@ -154,8 +154,8 @@ def _append_pdf_page(writer: _PdfPageWriter, image_path: Path, first: bool) -> N
 
 
 def _draw_crop_marks(draw: ImageDraw.ImageDraw, x: int, y: int) -> None:
-    mark = 34
-    gap = 10
+    mark = 18
+    gap = 5
     color = "#6B7280"
     width = 2
     for px in (x, x + STICKER_WIDTH):
