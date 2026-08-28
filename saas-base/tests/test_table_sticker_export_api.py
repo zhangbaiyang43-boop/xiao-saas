@@ -1,8 +1,10 @@
 import asyncio
+import shutil
 import tempfile
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pydantic import ValidationError
@@ -16,7 +18,6 @@ from app.models.base import Base
 from app.models.entrance_code import EntranceCode
 from app.models.tenant import Tenant
 from app.schemas.entrance_code import TableStickerExportRequest
-from app.services.table_sticker_export_service import ExportArtifact
 
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
@@ -95,6 +96,61 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
         await self.db.close()
         await self.engine.dispose()
 
+    async def _export_response(self):
+        observed = {"cleanup_count": 0}
+
+        def fake_build_bundle(service, codes, merchant_name):
+            observed["thread_id"] = threading.get_ident()
+            observed["code_ids"] = [code.id for code in codes]
+            observed["merchant_name"] = merchant_name
+            temp_dir = Path(tempfile.mkdtemp(prefix="table-stickers-api-test-"))
+            self.addCleanup(shutil.rmtree, temp_dir, True)
+            zip_path = temp_dir / "bundle.zip"
+            zip_path.write_bytes(b"PK\x05\x06" + (b"\x00" * 18))
+
+            def cleanup():
+                observed["cleanup_count"] += 1
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+            return SimpleNamespace(
+                zip_path=zip_path,
+                temp_dir=temp_dir,
+                download_name="甲商户-桌贴.zip",
+                cleanup=cleanup,
+            )
+
+        with patch.object(
+            entrance_codes_api.table_sticker_export_service.TableStickerExportService,
+            "build_bundle",
+            autospec=True,
+            side_effect=fake_build_bundle,
+        ):
+            response = await export_table_stickers(
+                TableStickerExportRequest.model_validate({"entranceCodeIds": [str(TENANT_A_CODE_ID)]}),
+                db=self.db,
+            )
+        return response, observed
+
+    @staticmethod
+    def _http_scope():
+        return {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/entrance-codes/table-stickers/export",
+            "raw_path": b"/api/v1/entrance-codes/table-stickers/export",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+
+    @staticmethod
+    async def _receive():
+        return {"type": "http.disconnect"}
+
     async def test_request_model_only_accepts_camel_case_with_one_to_one_hundred_unique_ids(self):
         request = TableStickerExportRequest.model_validate({"entranceCodeIds": ["101", "102"]})
         self.assertEqual(request.entrance_code_ids, [101, 102])
@@ -152,27 +208,7 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_valid_export_returns_zip_from_threadpool_and_background_cleans_it(self):
         caller_thread_id = threading.get_ident()
-        observed = {}
-
-        def fake_build_bundle(service, codes, merchant_name):
-            observed["thread_id"] = threading.get_ident()
-            observed["code_ids"] = [code.id for code in codes]
-            observed["merchant_name"] = merchant_name
-            temp_dir = Path(tempfile.mkdtemp(prefix="table-stickers-api-test-"))
-            zip_path = temp_dir / "bundle.zip"
-            zip_path.write_bytes(b"PK\x05\x06" + (b"\x00" * 18))
-            return ExportArtifact(zip_path=zip_path, temp_dir=temp_dir, download_name="甲商户-桌贴.zip")
-
-        with patch.object(
-            entrance_codes_api.table_sticker_export_service.TableStickerExportService,
-            "build_bundle",
-            autospec=True,
-            side_effect=fake_build_bundle,
-        ):
-            response = await export_table_stickers(
-                TableStickerExportRequest.model_validate({"entranceCodeIds": [str(TENANT_A_CODE_ID)]}),
-                db=self.db,
-            )
+        response, observed = await self._export_response()
 
         artifact_dir = Path(response.path).parent
         self.assertEqual(response.media_type, "application/zip")
@@ -182,8 +218,30 @@ class TableStickerExportApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(observed["thread_id"], caller_thread_id)
         self.assertTrue(artifact_dir.exists())
 
-        await response.background()
+        messages = []
 
+        async def send(message):
+            messages.append(message)
+
+        await response(self._http_scope(), self._receive, send)
+
+        self.assertEqual(observed["cleanup_count"], 1)
+        self.assertFalse(artifact_dir.exists())
+        self.assertEqual(messages[0]["type"], "http.response.start")
+        self.assertTrue(any(message["type"] == "http.response.body" for message in messages))
+
+    async def test_export_cleanup_runs_once_when_client_disconnects_during_file_send(self):
+        response, observed = await self._export_response()
+        artifact_dir = Path(response.path).parent
+
+        async def send(message):
+            if message["type"] == "http.response.body":
+                raise ConnectionError("client disconnected")
+
+        with self.assertRaisesRegex(ConnectionError, "client disconnected"):
+            await response(self._http_scope(), self._receive, send)
+
+        self.assertEqual(observed["cleanup_count"], 1)
         self.assertFalse(artifact_dir.exists())
 
     async def test_static_export_route_is_registered_before_dynamic_code_route(self):

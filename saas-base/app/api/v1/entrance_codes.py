@@ -25,6 +25,17 @@ from app.core.response import RespVo, error_response, success_response
 router = APIRouter(prefix="/api/v1/entrance-codes", tags=["入口码"])
 
 
+class _CleanupFileResponse(FileResponse):
+    async def __call__(self, scope, receive, send):
+        background = self.background
+        self.background = None
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            if background is not None:
+                await background()
+
+
 @router.get("/resolve", response_model=RespVo)
 async def resolve_entrance_code(
     scene: str,
@@ -281,7 +292,7 @@ async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_
     logger.info(
         f"[TABLE_STICKER_EXPORT] tenant_id={tenant_id} count={len(codes)} success=True"
     )
-    return FileResponse(
+    return _CleanupFileResponse(
         path=artifact.zip_path,
         media_type="application/zip",
         filename=artifact.download_name,
