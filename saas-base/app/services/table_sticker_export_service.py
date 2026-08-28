@@ -23,9 +23,9 @@ STICKER_HEIGHT = 1417
 A4_WIDTH = 2480
 A4_HEIGHT = 3508
 A4_SLOTS = ((36, 314), (1263, 314), (36, 1777), (1263, 1777))
-QR_CONTAINER_SIZE = 872
-QR_CONTENT_SIZE = 792
-QR_QUIET_ZONE = 40
+QR_CONTAINER_SIZE = 924
+QR_CONTENT_SIZE = 840
+QR_QUIET_ZONE = 42
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_DIMENSION = 4096
 SAFE_IMAGE_PREFIX = "/static/entrance-codes/"
@@ -233,37 +233,32 @@ class TableStickerExportService:
             canvas = Image.new("RGB", (STICKER_WIDTH, STICKER_HEIGHT), "white")
             draw = ImageDraw.Draw(canvas)
 
+            # 不画外框：亚克力成品的边本身就是「边框」，画在纸边 0.5mm 处只会被切歪
             draw.rounded_rectangle(
-                (2, 2, 1178, 1414),
-                radius=56,
-                outline="#E6E9EC",
-                width=3,
-            )
-            draw.rounded_rectangle(
-                (62, 62, 1119, 188),
-                radius=34,
+                (62, 56, 1119, 176),
+                radius=32,
                 fill="#07C160",
             )
             merchant_font, merchant_label = self._fit_merchant_font(
                 draw,
                 merchant_label,
                 max_width=961,
-                max_height=74,
+                max_height=70,
             )
-            self._draw_centered_text(draw, (110, 82, 1071, 168), merchant_label, merchant_font, fill="white")
+            self._draw_centered_text(draw, (110, 74, 1071, 158), merchant_label, merchant_font, fill="white")
 
-            footer_font = self._font(48)
-            hint_font = self._font(32)
+            footer_font = self._font(44)
+            hint_font = self._font(24)
             table_body = self._normalize_table_no(table_no)
-            unit_font = self._font(58)
+            unit_font = self._font(56)
             # 桌号牌：居中、深绿底白字（高对比），红棕色细描边呼应店招
-            badge_box = (438, 200, 743, 340)
+            badge_box = (438, 188, 743, 316)
             body_font = self._fit_table_font(
                 draw,
                 table_body,
                 unit_font=unit_font,
                 max_total_width=(badge_box[2] - badge_box[0]) - (BADGE_HORIZONTAL_PADDING * 2),
-                max_height=128,
+                max_height=118,
             )
             draw.rounded_rectangle(
                 badge_box,
@@ -293,15 +288,15 @@ class TableStickerExportService:
                     qr_image.close()
 
                 qr_left = (STICKER_WIDTH - QR_CONTAINER_SIZE) // 2
-                qr_top = 356
+                qr_top = 344
                 canvas.paste(qr_card, (qr_left, qr_top))
             finally:
                 qr_card.close()
 
-            self._draw_hcentered_line(draw, "微信扫码，本桌点单", footer_font, 1240, "#111418")
-            self._draw_hcentered_line(draw, "加菜也扫这里", footer_font, 1300, "#111418")
+            self._draw_hcentered_line(draw, "微信扫码，本桌点单", footer_font, 1272, "#111418")
+            self._draw_hcentered_line(draw, "加菜也扫这里", footer_font, 1324, "#111418")
             self._draw_hcentered_line(
-                draw, "扫码 → 选菜 → 下单 · 有事招呼服务员", hint_font, 1360, "#9AA3AD"
+                draw, "扫码 → 选菜 → 下单 · 有事招呼服务员", hint_font, 1374, "#7A828C"
             )
 
             return canvas

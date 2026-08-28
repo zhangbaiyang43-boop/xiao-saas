@@ -296,7 +296,6 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
         )
         try:
             assert _region_has_color(rendered, (300, 100, 340, 140), (7, 193, 96), tolerance=4)
-            assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
             # 桌号牌：深绿底 #059646 + 红棕描边 #9A3412
             assert _region_has_color(rendered, (452, 214, 468, 230), (5, 150, 70), tolerance=8)
             assert _region_has_color(rendered, (438, 250, 442, 270), (154, 52, 18), tolerance=14)
@@ -317,7 +316,7 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
             badge_calls = [
                 call
                 for call in captured_text_calls
-                if 180 <= call["xy"][1] <= 360
+                if 150 <= call["xy"][1] <= 360
             ]
             assert any(call["text"] == "A08" and 100 <= (call["font_size"] or 0) <= 140 for call in badge_calls)
             assert any(call["text"] == "桌" and 50 <= (call["font_size"] or 0) <= 66 for call in badge_calls)
@@ -331,8 +330,8 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
             line2 = [c for c in captured_text_calls if c["text"] == "加菜也扫这里"]
             hint = [c for c in captured_text_calls if c["text"] == "扫码 → 选菜 → 下单 · 有事招呼服务员"]
             assert len(line1) == 1 and len(line2) == 1 and len(hint) == 1
-            assert line1[0]["font_size"] == 48 and line2[0]["font_size"] == 48
-            assert hint[0]["font_size"] == 32
+            assert line1[0]["font_size"] == 44 and line2[0]["font_size"] == 44
+            assert hint[0]["font_size"] == 24
             assert line1[0]["xy"][1] >= 1200
             assert line2[0]["xy"][1] > line1[0]["xy"][1]
             assert hint[0]["xy"][1] > line2[0]["xy"][1]
@@ -531,7 +530,7 @@ def test_render_sticker_uses_nearest_resize_to_preserve_qr_pixels():
             rendered.close()
 
 
-def test_render_sticker_visual_contract_includes_outer_border_and_merchant_cap(monkeypatch):
+def test_render_sticker_has_no_outer_border_and_caps_merchant_name(monkeypatch):
     captured_text_calls = []
     original_text = ImageDraw.ImageDraw.text
 
@@ -555,8 +554,9 @@ def test_render_sticker_visual_contract_includes_outer_border_and_merchant_cap(m
 
         rendered = service.render_sticker(code, merchant_name="大宝羊肉汤")
         try:
-            assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
-            assert not _region_has_color(rendered, (18, 80, 24, 120), (230, 233, 236), tolerance=8)
+            # 不再画外框：贴纸边缘应是纯白，没有那圈浅灰描边
+            assert _region_has_color(rendered, (4, 100, 12, 160), (255, 255, 255), tolerance=0)
+            assert not _region_has_color(rendered, (4, 100, 12, 160), (230, 233, 236), tolerance=8)
             merchant_calls = [call for call in captured_text_calls if call["text"] == "大宝羊肉汤"]
             assert len(merchant_calls) == 1
             assert merchant_calls[0]["font_size"] == 50
