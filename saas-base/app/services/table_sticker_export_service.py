@@ -23,9 +23,9 @@ STICKER_HEIGHT = 1417
 A4_WIDTH = 2480
 A4_HEIGHT = 3508
 A4_SLOTS = ((36, 314), (1263, 314), (36, 1777), (1263, 1777))
-QR_CONTAINER_SIZE = 896
-QR_CONTENT_SIZE = 812
-QR_QUIET_ZONE = 42
+QR_CONTAINER_SIZE = 872
+QR_CONTENT_SIZE = 792
+QR_QUIET_ZONE = 40
 MAX_SOURCE_BYTES = 10 * 1024 * 1024
 MAX_SOURCE_DIMENSION = 4096
 SAFE_IMAGE_PREFIX = "/static/entrance-codes/"
@@ -239,7 +239,6 @@ class TableStickerExportService:
                 outline="#E6E9EC",
                 width=3,
             )
-            self._draw_dashed_guide(draw, (28, 28, 1153, 1389), radius=34, dash=18, gap=12, fill="#CFD6DD", width=3)
             draw.rounded_rectangle(
                 (62, 62, 1119, 188),
                 radius=34,
@@ -253,32 +252,33 @@ class TableStickerExportService:
             )
             self._draw_centered_text(draw, (110, 82, 1071, 168), merchant_label, merchant_font, fill="white")
 
-            title_font = self._font(59)
-            footer_font = self._font(44)
+            footer_font = self._font(48)
+            hint_font = self._font(32)
             table_body = self._normalize_table_no(table_no)
-            unit_font = self._font(56)
+            unit_font = self._font(58)
+            # 桌号牌：居中、深绿底白字（高对比），红棕色细描边呼应店招
+            badge_box = (438, 200, 743, 340)
             body_font = self._fit_table_font(
                 draw,
                 table_body,
                 unit_font=unit_font,
-                max_total_width=(1109 - 797) - (BADGE_HORIZONTAL_PADDING * 2),
-                max_height=126,
+                max_total_width=(badge_box[2] - badge_box[0]) - (BADGE_HORIZONTAL_PADDING * 2),
+                max_height=128,
             )
-
-            draw.text((84, 248), "扫码点餐", font=title_font, fill="#111418")
             draw.rounded_rectangle(
-                (797, 220, 1109, 400),
-                radius=28,
-                fill="#EAFAF0",
-                outline="#07C160",
+                badge_box,
+                radius=30,
+                fill="#059646",
+                outline="#9A3412",
                 width=4,
             )
             self._draw_table_badge_text(
                 draw,
-                (797, 220, 1109, 400),
+                badge_box,
                 table_body,
                 body_font,
                 unit_font,
+                text_fill="white",
             )
 
             qr_card = Image.new("RGB", (QR_CONTAINER_SIZE, QR_CONTAINER_SIZE), "white")
@@ -293,19 +293,15 @@ class TableStickerExportService:
                     qr_image.close()
 
                 qr_left = (STICKER_WIDTH - QR_CONTAINER_SIZE) // 2
-                qr_top = 416
+                qr_top = 356
                 canvas.paste(qr_card, (qr_left, qr_top))
             finally:
                 qr_card.close()
 
-            footer_text = "微信扫码 · 本桌下单，加菜也扫这里"
-            footer_bbox = draw.textbbox((0, 0), footer_text, font=footer_font)
-            footer_width = footer_bbox[2] - footer_bbox[0]
-            draw.text(
-                ((STICKER_WIDTH - footer_width) // 2, 1330),
-                footer_text,
-                font=footer_font,
-                fill="#111418",
+            self._draw_hcentered_line(draw, "微信扫码，本桌点单", footer_font, 1240, "#111418")
+            self._draw_hcentered_line(draw, "加菜也扫这里", footer_font, 1300, "#111418")
+            self._draw_hcentered_line(
+                draw, "扫码 → 选菜 → 下单 · 有事招呼服务员", hint_font, 1360, "#9AA3AD"
             )
 
             return canvas
@@ -543,6 +539,7 @@ class TableStickerExportService:
         table_body: str,
         body_font: ImageFont.FreeTypeFont,
         unit_font: ImageFont.FreeTypeFont,
+        text_fill: str = "#05913F",
     ) -> None:
         left, top, right, bottom = box
         body_bbox = draw.textbbox((0, 0), table_body, font=body_font)
@@ -557,8 +554,8 @@ class TableStickerExportService:
         baseline_top = top + ((bottom - top) - max(body_height, unit_height)) // 2 + 8
         body_y = baseline_top - body_bbox[1]
         unit_y = baseline_top + (body_height - unit_height) + 10 - unit_bbox[1]
-        draw.text((start_x, body_y), table_body, font=body_font, fill="#05913F")
-        draw.text((start_x + body_width + BADGE_TEXT_GAP, unit_y), BADGE_UNIT_TEXT, font=unit_font, fill="#05913F")
+        draw.text((start_x, body_y), table_body, font=body_font, fill=text_fill)
+        draw.text((start_x + body_width + BADGE_TEXT_GAP, unit_y), BADGE_UNIT_TEXT, font=unit_font, fill=text_fill)
 
     @staticmethod
     def _table_badge_text_layout(
@@ -626,6 +623,18 @@ class TableStickerExportService:
         text_height = bbox[3] - bbox[1]
         x = left + ((right - left) - text_width) // 2
         y = top + ((bottom - top) - text_height) // 2 - bbox[1]
+        draw.text((x, y), text, font=font, fill=fill)
+
+    @staticmethod
+    def _draw_hcentered_line(
+        draw: ImageDraw.ImageDraw,
+        text: str,
+        font: ImageFont.FreeTypeFont,
+        y: int,
+        fill: str,
+    ) -> None:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        x = (STICKER_WIDTH - (bbox[2] - bbox[0])) // 2 - bbox[0]
         draw.text((x, y), text, font=font, fill=fill)
 
     @staticmethod

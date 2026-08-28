@@ -296,39 +296,46 @@ def test_render_sticker_visual_contract_matches_approved_demo(monkeypatch):
         )
         try:
             assert _region_has_color(rendered, (300, 100, 340, 140), (7, 193, 96), tolerance=4)
-            assert _region_has_color(rendered, (28, 80, 32, 120), (207, 214, 221), tolerance=8)
             assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
-            assert _region_has_color(rendered, (830, 350, 860, 380), (234, 250, 240), tolerance=6)
-            assert _region_has_color(rendered, (797, 270, 805, 300), (7, 193, 96), tolerance=6)
-            assert _region_has_color(rendered, (226, 430, 244, 448), (255, 255, 255), tolerance=0)
+            # 桌号牌：深绿底 #059646 + 红棕描边 #9A3412
+            assert _region_has_color(rendered, (452, 214, 468, 230), (5, 150, 70), tolerance=8)
+            assert _region_has_color(rendered, (438, 250, 442, 270), (154, 52, 18), tolerance=14)
+            # 二维码：静区（卡片左沿到内容左沿之间）留白，内容区纯黑
+            assert _region_has_color(rendered, (165, 410, 180, 425), (255, 255, 255), tolerance=0)
             assert _region_has_color(rendered, (320, 500, 340, 520), (0, 0, 0), tolerance=0)
 
             merchant_calls = [
                 call
                 for call in captured_text_calls
-                if call["xy"][1] < 200 and call["text"] not in {"扫码点餐"}
+                if call["xy"][1] < 200
             ]
             assert merchant_calls
             assert merchant_calls[0]["text"].endswith("...")
+            # "扫码点餐" 已删除
+            assert all(call["text"] != "扫码点餐" for call in captured_text_calls)
 
             badge_calls = [
                 call
                 for call in captured_text_calls
-                if 200 <= call["xy"][1] <= 420
+                if 180 <= call["xy"][1] <= 360
             ]
-            assert any(call["text"] == "A08" and 110 <= (call["font_size"] or 0) < 130 for call in badge_calls)
-            assert any(call["text"] == "桌" and 50 <= (call["font_size"] or 0) <= 65 for call in badge_calls)
+            assert any(call["text"] == "A08" and 100 <= (call["font_size"] or 0) <= 140 for call in badge_calls)
+            assert any(call["text"] == "桌" and 50 <= (call["font_size"] or 0) <= 66 for call in badge_calls)
             assert all(call["text"] != "A08桌" for call in badge_calls)
             badge_text_calls = [call for call in badge_calls if call["text"] in {"A08", "桌"}]
             combined_left, _, combined_right, _ = _measure_drawn_text_bounds(badge_text_calls)
-            assert combined_left >= 797 + 16
-            assert combined_right <= 1109 - 16
+            assert combined_left >= 438 + 16
+            assert combined_right <= 743 - 16
 
-            footer_calls = [call for call in captured_text_calls if call["text"] == "微信扫码 · 本桌下单，加菜也扫这里"]
-            assert len(footer_calls) == 1
-            assert footer_calls[0]["font_size"] == 44
-            assert footer_calls[0]["xy"][1] >= 1300
-            assert all(call["text"] != "加菜也扫这里" for call in captured_text_calls)
+            line1 = [c for c in captured_text_calls if c["text"] == "微信扫码，本桌点单"]
+            line2 = [c for c in captured_text_calls if c["text"] == "加菜也扫这里"]
+            hint = [c for c in captured_text_calls if c["text"] == "扫码 → 选菜 → 下单 · 有事招呼服务员"]
+            assert len(line1) == 1 and len(line2) == 1 and len(hint) == 1
+            assert line1[0]["font_size"] == 48 and line2[0]["font_size"] == 48
+            assert hint[0]["font_size"] == 32
+            assert line1[0]["xy"][1] >= 1200
+            assert line2[0]["xy"][1] > line1[0]["xy"][1]
+            assert hint[0]["xy"][1] > line2[0]["xy"][1]
         finally:
             rendered.close()
 
@@ -491,8 +498,8 @@ def test_render_sticker_keeps_combined_badge_text_inside_badge(table_no, monkeyp
             badge_calls = [call for call in captured if call["text"] in {service._normalize_table_no(table_no), "桌"}]
             assert [call["text"] for call in badge_calls] == [service._normalize_table_no(table_no), "桌"]
             combined_left, _, combined_right, _ = _measure_drawn_text_bounds(badge_calls)
-            assert combined_left >= 797 + 16
-            assert combined_right <= 1109 - 16
+            assert combined_left >= 438 + 16
+            assert combined_right <= 743 - 16
         finally:
             rendered.close()
 
@@ -514,7 +521,7 @@ def test_render_sticker_uses_nearest_resize_to_preserve_qr_pixels():
         service, code = _service_and_code(directory, "/static/entrance-codes/table.png")
         rendered = service.render_sticker(code)
         try:
-            qr_crop = rendered.crop((184, 458, 996, 1270))
+            qr_crop = rendered.crop((194, 396, 986, 1188))
             try:
                 colors = set(qr_crop.getdata())
             finally:
@@ -550,7 +557,6 @@ def test_render_sticker_visual_contract_includes_outer_border_and_merchant_cap(m
         try:
             assert _region_has_color(rendered, (2, 80, 6, 120), (230, 233, 236), tolerance=8)
             assert not _region_has_color(rendered, (18, 80, 24, 120), (230, 233, 236), tolerance=8)
-            assert _region_has_color(rendered, (28, 80, 32, 120), (207, 214, 221), tolerance=8)
             merchant_calls = [call for call in captured_text_calls if call["text"] == "大宝羊肉汤"]
             assert len(merchant_calls) == 1
             assert merchant_calls[0]["font_size"] == 50
