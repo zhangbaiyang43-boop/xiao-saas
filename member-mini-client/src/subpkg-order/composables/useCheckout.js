@@ -449,6 +449,8 @@ export function useCheckout({
     memberBenefitsRefreshPending.value = false
   }
 
+  const isDemoCheckout = () => String(uni.getStorageSync('channel') || '').trim().toUpperCase() === 'DEMO'
+
   // P0-A: 会员是否加入是可选项，MEMBERSHIP_IS_OPTIONAL=YES——只有还没登录会员
   // 的顾客点结算，才弹出"加入会员并继续 / 直接支付"的选择层；已经是会员的、
   // 或者已经有待支付订单要恢复的（P0-9：绝不能把新会员的券偷偷套到旧订单上），
@@ -466,6 +468,12 @@ export function useCheckout({
     }
     clearStalePrepayOrderForPayLater()
     if (pendingOrderId.value) return confirmPay()
+    // Demo 只演示扫码点单和商家履约，不引导入会，也不把体验订单带入会员权益流程。
+    if (isDemoCheckout()) {
+      showMemberCheckoutChoice.value = false
+      submitOrder()
+      return
+    }
     if (memberBenefitsRefreshPending.value) {
       retryRequiredMemberBenefitsAndCheckout()
       return

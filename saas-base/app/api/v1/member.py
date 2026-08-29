@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 
 from app.api.v1.consumptions import serialize_consumption
 from app.api.v1.orders import build_order_financial_capabilities, order_status_text
+from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger
 from app.core.pagination import build_page, normalize_pagination
@@ -166,6 +167,10 @@ async def login_or_create(
     
     if not tenant or not tenant.status:
         return error_response(code=404, msg="商家不存在或已停用")
+
+    demo_tenant_id = (settings.DEMO_TENANT_ID or "").strip()
+    if demo_tenant_id and tenant_id == demo_tenant_id:
+        return error_response(code=403, msg="体验模式无需登录会员")
 
     TenantContext.set_tenant_id(tenant_id)
     customer_service = CustomerService(db)

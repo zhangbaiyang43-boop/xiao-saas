@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "your-secret-key-here-must-be-at-least-32-characters"
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
+    # Passwordless linked Demo. An empty tenant id keeps allocation disabled.
+    DEMO_TENANT_ID: str = ""
+    DEMO_SESSION_MINUTES: int = 30
+    DEMO_LAUNCH_DAYS: int = 365
+    DEMO_TABLE_POOL_SIZE: int = 20
+    DEMO_START_IP_LIMIT_PER_MINUTE: int = 5
+    DEMO_START_CODE_LIMIT_PER_MINUTE: int = 20
     
     WECHAT_APP_ID: str = ""
     WECHAT_APP_: str = ""

@@ -89,11 +89,16 @@ export default {
     const isRouting = ref(false)
 
     const saveContext = (ctx) => {
+      const channel = String(ctx.channel || 'TABLE').trim().toUpperCase()
+      ctx.channel = channel
       // 换了一家店（tenant_id 变了）就必须清掉上一家的登录态，否则"会员"tab 会
       // 用旧店的 token 悄悄查出旧店的积分/优惠券，新店这一单也会因为查不到匹配
       // 租户的客户身份而静默不发积分/优惠券，用户不会有任何提示。
       const previousTenantId = uni.getStorageSync('tenant_id') || ''
-      if (ctx.tenant_id && previousTenantId && previousTenantId !== ctx.tenant_id) {
+      // Demo 必须始终以游客身份体验，避免手机里残留的正式门店会员身份影响演示。
+      if (channel === 'DEMO') {
+        clearCustomerSession()
+      } else if (ctx.tenant_id && previousTenantId && previousTenantId !== ctx.tenant_id) {
         clearCustomerSession()
       }
       if (ctx.scene) uni.setStorageSync('entrance_scene', ctx.scene)
@@ -108,7 +113,7 @@ export default {
       // 万一顾客先点了邀请链接、又换成扫桌上的普通桌码，邀请关系不该因此丢失。
       if (ctx.invite_code) uni.setStorageSync('invite_code', ctx.invite_code)
       uni.setStorageSync('entry_type', ctx.entry_type || 'table')
-      uni.setStorageSync('channel', ctx.channel || 'TABLE')
+      uni.setStorageSync('channel', channel)
       uni.setStorageSync('order_mode', ctx.order_mode || 'dine_in')
       uni.setStorageSync('entry_return_context', JSON.stringify(ctx))
     }

@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/auth'
 import { beginPageNavigation, completePageNavigation } from '../utils/adminPerformance'
 
 const Login = () => import('../views/Login.vue')
+const DemoWorkbench = () => import('../views/DemoWorkbench.vue')
 const ActivationHome = () => import('../views/ActivationHome.vue')
 const Layout = () => import('../views/Layout.vue')
 const Dashboard = () => import('../views/Dashboard.vue')
@@ -44,6 +45,7 @@ const ownerOnly = { requiresPermission: '*' }
 
 const routes = [
   { path: '/login', name: 'Login', component: Login },
+  { path: '/demo', name: 'DemoWorkbench', component: DemoWorkbench },
   { path: '/activation', name: 'ActivationHome', component: ActivationHome, meta: ownerOnly },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
@@ -131,6 +133,7 @@ router.afterEach((to, _from, failure) => {
 
 router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'
+  const isDemo = to.path === '/demo'
   const isOrder = to.path === '/order'
   const isSuper = to.path === '/super'
   const isH5 = to.path.startsWith('/h5/')
@@ -138,7 +141,7 @@ router.beforeEach(async (to, from, next) => {
   const isQueueStatus = to.path === '/queue/status'
   const auth = useAuthStore()
 
-  if (isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus) {
+  if (isDemo || isOrder || isSuper || isH5 || isQueueDisplay || isQueueStatus) {
     next()
     return
   }

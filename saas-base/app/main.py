@@ -12,6 +12,7 @@ from app.api.v1.consumptions import router as consumption_router
 from app.api.v1.customers import router as customer_router
 from app.api.v1.distribution import router as distribution_router
 from app.api.v1.dining_sessions import router as dining_session_router
+from app.api.v1.demo import router as demo_router
 from app.api.v1.entrance_codes import router as entrance_code_router
 from app.api.v1.login import router as login_router
 from app.api.v1.merchant_accounts import router as merchant_accounts_router
@@ -100,6 +101,7 @@ app.include_router(customer_router)
 app.include_router(distribution_router)
 app.include_router(staff_referral_router)
 app.include_router(dining_session_router)
+app.include_router(demo_router)
 app.include_router(consumption_router)
 # coupon_template_router / coupon_router / verify_router 不在这里重复注册——
 # CouponPlugin.get_routers()（下面 plugin_manager.load_plugins() 里）已经注册
