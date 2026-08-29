@@ -2,6 +2,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from app.config import settings
 from app.core.logger import logger
 from app.core.merchant_auth import resolve_merchant_request_auth, staff_route_allowed
 from app.core.permissions import ROLE_OWNER
@@ -87,6 +88,7 @@ WHITELIST = {
     "/api/v1/orders/wxpay-notify",
     "/api/v1/billing/wxpay-notify",
     "/api/v1/dining-sessions/resolve",
+    "/api/v1/demo/sessions/start",
     "/api/v1/perf/report",
 }
 
@@ -160,6 +162,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
         request.state.account_id = None
         request.state.account_name = None
         request.state.account_username = None
+
+        if payload.get("type") == "demo_merchant":
+            expected_tenant = (settings.DEMO_TENANT_ID or "").strip()
+            allowed = bool(
+                expected_tenant
+                and request.url.path.startswith("/api/v1/demo/")
+                and payload.get("tenant_id") == expected_tenant
+                and payload.get("scope") == "demo_order_fulfillment"
+                and payload.get("dining_session_id")
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content=RespVo(code=403, msg="体验凭证无权访问此功能").to_response(),
+                )
+            request.state.demo_session_id = str(payload["dining_session_id"])
+            request.state.demo_table_no = str(payload.get("table_no") or "")
+            if not await _is_tenant_active(expected_tenant):
+                return JSONResponse(
+                    status_code=403,
+                    content=RespVo(code=403, msg="体验门店不可用").to_response(),
+                )
+            return await call_next(request)
 
         if payload.get("type") == "merchant":
             auth_state, err = await resolve_merchant_request_auth(payload)
