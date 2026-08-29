@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>双端联动体验卡</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..48,400;12..48,600;12..48,700;12..48,800&family=Noto+Sans+SC:wght@400;500;700;900&display=swap">
+  <style>
+    /* ============ reset ============ */
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body { margin: 0; }
+    button { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+
+    /* ============ tokens ============ */
+    :root {
+      color-scheme: light dark;
+
+      /* card — a physical ink-on-paper object, constant in both themes */
+      --paper: #FCFCFA;
+      --ink: #16211B;
+      --ink-soft: #3B473F;
+      --muted: #5C6862;
+      --line: #DCE4DE;
+      --wash: #EDF6F0;
+      --brand: #07C160;
+      --brand-ink: #046A38;
+      --amber: #8F5406;
+      --ph-line: #B4C0B7;
+      --ph-ink: #6B7671;
+      --ph-bg: #F2F5F2;
+      --boss-bg: #ECEFEC;
+
+      /* chrome — follows the viewer's theme */
+      --canvas: #E7EEE9;
+      --chrome-surface: #FFFFFF;
+      --chrome-ink: #1A2620;
+      --chrome-muted: #58645D;
+      --chrome-line: #D2DBD5;
+      --chrome-accent: #046A38;
+
+      --face-radius: 3mm;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --canvas: #0F130E;
+        --chrome-surface: #1A201A;
+        --chrome-ink: #E9EFE9;
+        --chrome-muted: #9BA79E;
+        --chrome-line: #2B342B;
+        --chrome-accent: #37D07F;
+      }
+    }
+    :root[data-theme="dark"] {
+      --canvas: #0F130E;
+      --chrome-surface: #1A201A;
+      --chrome-ink: #E9EFE9;
+      --chrome-muted: #9BA79E;
+      --chrome-line: #2B342B;
+      --chrome-accent: #37D07F;
+    }
+
+    /* ============ shell ============ */
+    body {
+      background: var(--canvas);
+      color: var(--chrome-ink);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      line-height: 1.6;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 18px;
+      padding: 12px clamp(14px, 3vw, 36px);
+      background: color-mix(in srgb, var(--chrome-surface) 92%, transparent);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--chrome-line);
+    }
+    .toolbar h1 {
+      margin: 0 auto 0 0;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .toolbar h1 span {
+      display: block;
+      margin-top: 2px;
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      color: var(--chrome-muted);
+    }
+    .seg {
+      display: inline-flex;
+      padding: 3px;
+      border: 1px solid var(--chrome-line);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--chrome-surface) 60%, transparent);
+    }
+    .seg button {
+      border: 0;
+      padding: 7px 13px;
+      border-radius: 7px;
+      font-size: 13px;
+      background: transparent;
+      color: var(--chrome-muted);
+      cursor: pointer;
+      transition: background-color 140ms ease, color 140ms ease;
+    }
+    .seg button:hover { color: var(--chrome-ink); }
+    .seg button[aria-pressed="true"] {
+      background: var(--chrome-ink);
+      color: var(--chrome-surface);
+    }
+    .print-btn {
+      border: 0;
+      padding: 9px 18px;
+      border-radius: 9px;
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      background: var(--chrome-accent);
+      cursor: pointer;
+      transition: filter 140ms ease, transform 120ms ease;
+    }
+    .print-btn:hover { filter: brightness(1.06); }
+    .print-btn:active { transform: translateY(1px); }
+
+    :where(button):focus-visible {
+      outline: 2px solid var(--brand);
+      outline-offset: 2px;
+    }
+
+    .stage {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: clamp(20px, 4vw, 44px) clamp(14px, 4vw, 44px) 64px;
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      margin-bottom: 30px;
+    }
+    .intro h2 {
+      margin: 0;
+      font-size: clamp(21px, 3.4vw, 30px);
+      font-weight: 900;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      text-wrap: balance;
+    }
+    .intro p {
+      margin: 0;
+      max-width: 60ch;
+      color: var(--chrome-muted);
+      font-size: 14px;
+    }
+    .spec {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .spec code {
+      font-family: "Bricolage Grotesque", ui-monospace, monospace;
+      font-size: 11.5px;
+      padding: 4px 9px;
+      border: 1px solid var(--chrome-line);
+      border-radius: 999px;
+      color: var(--chrome-muted);
+      background: color-mix(in srgb, var(--chrome-surface) 55%, transparent);
+      white-space: nowrap;
+    }
+
+    /* ============ faces layout ============ */
+    .faces {
+      display: flex;
+      flex-wrap: wrap;
+      gap: clamp(22px, 4vw, 52px);
+      align-items: flex-start;
+      overflow-x: auto;
+      padding-bottom: 6px;
+    }
+    .face-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 0 0 auto;
+    }
+    .face-label {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--chrome-muted);
+    }
+    .face-label strong {
+      color: var(--chrome-ink);
+      font-size: 14px;
+    }
+    .face-label span {
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    /* dashed box around the face = 3mm bleed guide (screen only) */
+    .bleed {
+      padding: 3mm;
+      border: 1px dashed color-mix(in srgb, var(--chrome-muted) 55%, transparent);
+      border-radius: calc(var(--face-radius) + 2mm);
+      background: repeating-linear-gradient(
+        -45deg,
+        transparent 0 6px,
+        color-mix(in srgb, var(--chrome-muted) 8%, transparent) 6px 7px
+      );
+    }
+
+    .face {
+      position: relative;
+      width: 105mm;
+      height: 148mm;
+      overflow: hidden;
+      border-radius: var(--face-radius);
+      background: var(--paper);
+      color: var(--ink);
+      box-shadow: 0 18px 44px rgba(15, 32, 22, 0.18);
+      font-size: 11px;
+    }
+    /* 5mm safe-margin guide (screen only) */
+    .face .safe {
+      position: absolute;
+      inset: 5mm;
+      border: 1px dashed color-mix(in srgb, var(--brand) 34%, transparent);
+      border-radius: 2mm;
+      pointer-events: none;
+      z-index: 6;
+    }
+
+    .face-inner {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      gap: 2.3mm;
+      height: 100%;
+      padding: 7mm 7.5mm;
+    }
+
+    /* ============ shared card pieces ============ */
+    .brandbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 14.5px;
+      font-weight: 900;
+      letter-spacing: -0.01em;
+    }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--brand);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .kicker {
+      text-align: right;
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 8px;
+      font-weight: 600;
+      line-height: 1.5;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .kicker b {
+      display: block;
+      color: var(--brand-ink);
+      letter-spacing: 0.06em;
+    }
+
+    .head {
+      margin: 0;
+      font-size: 17.5px;
+      font-weight: 900;
+      line-height: 1.3;
+      letter-spacing: -0.01em;
+      text-wrap: balance;
+    }
+    .head em {
+      font-style: normal;
+      color: var(--brand-ink);
+    }
+    .sub {
+      margin: 0;
+      font-size: 9.5px;
+      line-height: 1.6;
+      color: var(--ink-soft);
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .eyebrow::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--line);
+    }
+    .pill-30 {
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    .pill-30 b { font-size: 11px; font-variant-numeric: tabular-nums; }
+
+    /* placeholders */
+    .ph {
+      display: inline-block;
+      padding: 2px 6px;
+      border: 1px dashed var(--ph-line);
+      border-radius: 4px;
+      background: var(--ph-bg);
+      color: var(--ph-ink);
+      font-size: 8.5px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+    .ph-block {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 4px 8px;
+      border: 1px dashed var(--ph-line);
+      border-radius: 6px;
+      background: var(--ph-bg);
+      color: var(--ph-ink);
+      font-size: 8.5px;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+
+    /* QR */
+    .qr {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 35mm;
+      height: 35mm;
+      flex: 0 0 auto;
+      border: 1.5px solid var(--ink);
+      border-radius: 8px;
+      background-color: #fff;
+      background-image:
+        linear-gradient(90deg, rgba(22, 33, 27, 0.10) 50%, transparent 50%),
+        linear-gradient(rgba(22, 33, 27, 0.10) 50%, transparent 50%);
+      background-size: 5.5mm 5.5mm;
+    }
+    .qr::before {
+      content: "";
+      position: absolute;
+      inset: 3mm;
+      border: 2.5px solid var(--ink);
+      border-radius: 2px;
+    }
+    .qr span {
+      position: relative;
+      z-index: 2;
+      max-width: 28mm;
+      padding: 3px 5px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.94);
+      color: var(--ph-ink);
+      font-size: 7.5px;
+      font-weight: 700;
+      line-height: 1.3;
+      text-align: center;
+    }
+    .qr-sm { width: 21mm; height: 21mm; }
+    .qr-sm::before { inset: 2.2mm; border-width: 1.6px; }
+    .qr-sm span { max-width: 17mm; font-size: 6px; padding: 2px 3px; }
+
+    /* ============ FRONT ============ */
+    .qr-panel {
+      display: grid;
+      grid-template-columns: 35mm 1fr;
+      gap: 4mm;
+      align-items: center;
+      padding: 3.4mm;
+      border: 1px solid color-mix(in srgb, var(--brand) 26%, var(--line));
+      border-radius: 9px;
+      background: var(--wash);
+    }
+    .qr-copy strong {
+      display: block;
+      font-size: 15px;
+      font-weight: 900;
+      line-height: 1.25;
+    }
+    .qr-copy .go {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--brand-ink);
+    }
+    .qr-copy small {
+      display: block;
+      margin-top: 5px;
+      font-size: 8.5px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    .need2 {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 4mm;
+      align-items: center;
+      padding: 2.8mm 3.4mm;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .two-phone { display: block; width: 28mm; height: auto; }
+    .need2 p {
+      margin: 0;
+      font-size: 8.5px;
+      line-height: 1.5;
+      color: var(--ink-soft);
+    }
+    .need2 p b { color: var(--ink); }
+
+    .ticks {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1.6mm;
+    }
+    .ticks li {
+      display: grid;
+      grid-template-columns: 13px 1fr;
+      gap: 6px;
+      align-items: start;
+      font-size: 9px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+    .ticks li::before {
+      content: "✓";
+      color: var(--brand-ink);
+      font-weight: 900;
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    .foot {
+      margin-top: auto;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4mm;
+      align-items: end;
+      padding-top: 2.6mm;
+      border-top: 1px solid var(--line);
+    }
+    .foot-l { font-size: 8.5px; line-height: 1.5; color: var(--muted); }
+    .foot-l .lab {
+      display: block;
+      margin-bottom: 3px;
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 7.5px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .foot-r { text-align: right; }
+
+    .cau {
+      font-size: 7.5px;
+      line-height: 1.45;
+      color: var(--amber);
+      text-align: center;
+    }
+
+    /* ============ BACK ============ */
+    .relay {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5mm;
+    }
+    .relay li {
+      display: grid;
+      grid-template-columns: 6mm 1fr;
+      gap: 2.6mm;
+      align-items: start;
+    }
+    .relay .n {
+      display: grid;
+      place-items: center;
+      width: 6mm;
+      height: 6mm;
+      border-radius: 999px;
+      border: 1.3px solid var(--ink);
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 9px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .relay .rtxt {
+      padding-top: 0.3mm;
+      font-size: 9px;
+      line-height: 1.4;
+      color: var(--ink);
+      word-break: keep-all;
+    }
+    .tag {
+      display: inline-block;
+      margin-right: 5px;
+      padding: 1.5px 6px;
+      border-radius: 999px;
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      vertical-align: 1px;
+    }
+    .tag.cust { color: var(--brand-ink); background: var(--wash); }
+    .tag.boss { color: var(--ink); background: var(--boss-bg); }
+
+    .relay li.sync {
+      grid-template-columns: 7mm 1fr;
+    }
+    .relay li.sync .spine {
+      grid-column: 1;
+      justify-self: center;
+      width: 0;
+      border-left: 1px dashed var(--ink);
+      height: 4mm;
+    }
+    .relay li.sync .sync-pill {
+      grid-column: 2;
+      align-self: center;
+      justify-self: start;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: var(--paper);
+      font-size: 8px;
+      font-weight: 700;
+    }
+    .relay li.sync .sync-pill b {
+      font-family: "Bricolage Grotesque", system-ui, sans-serif;
+      font-size: 9.5px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .terms {
+      padding: 3mm 3.4mm;
+      border-radius: 8px;
+      background: var(--wash);
+    }
+    .terms h4 {
+      margin: 0 0 1.8mm;
+      font-size: 8.5px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--brand-ink);
+      text-transform: uppercase;
+      font-family: "Bricolage Grotesque", "Noto Sans SC", system-ui, sans-serif;
+    }
+    .terms ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 1.2mm;
+    }
+    .terms li {
+      display: grid;
+      grid-template-columns: 9px 1fr;
+      gap: 5px;
+      font-size: 8.2px;
+      line-height: 1.42;
+      color: var(--ink-soft);
+      word-break: keep-all;
+    }
+    .terms li::before {
+      content: "";
+      width: 3.5px;
+      height: 3.5px;
+      margin-top: 4.5px;
+      border-radius: 999px;
+      background: var(--brand);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+
+    /* ============ narrow screens ============ */
+    @media (max-width: 520px) {
+      .toolbar h1 { width: 100%; }
+      .seg { flex: 1; }
+      .seg button { flex: 1; }
+      .print-btn { width: 100%; }
+    }
+
+    /* ============ print — 105×148 trim centered on a 111×154 page (3mm bleed) ============ */
+    @page { size: 111mm 154mm; margin: 0; }
+    @media print {
+      body { background: #fff; }
+      .toolbar, .intro, .face-label, .note { display: none !important; }
+      .stage { width: auto; margin: 0; padding: 0; }
+      .faces { display: block; gap: 0; overflow: visible; }
+      .bleed {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 111mm;
+        height: 154mm;
+        padding: 3mm;
+        border: 0;
+        border-radius: 0;
+        background: var(--paper);
+        break-after: page;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .face-wrap:last-of-type .bleed { break-after: auto; }
+      .face-wrap[hidden] { display: none !important; }
+      .face {
+        width: 105mm;
+        height: 148mm;
+        border-radius: 0;
+        box-shadow: none;
+      }
+      .face .safe { display: none; }
+      .face-inner, .qr-panel, .terms, .tag.cust, .tag.boss,
+      .relay li.sync .sync-pill, .brand-mark {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+
+    .note {
+      width: min(880px, 100%);
+      margin: 34px auto 0;
+      padding: 16px 18px;
+      border-left: 3px solid var(--brand);
+      border-radius: 0 10px 10px 0;
+      background: var(--chrome-surface);
+      color: var(--chrome-muted);
+      font-size: 12.5px;
+      line-height: 1.7;
+    }
+    .note b { color: var(--chrome-ink); }
+  </style>
+</head>
+<body>
+  <header class="toolbar">
+    <h1>双端联动体验卡<span>A6 · 双面 · 数据待填框架</span></h1>
+    <div class="seg" role="group" aria-label="选择要看的面">
+      <button type="button" data-view="front" aria-pressed="true">正面</button>
+      <button type="button" data-view="back" aria-pressed="false">反面</button>
+      <button type="button" data-view="both" aria-pressed="false">两面同看</button>
+    </div>
+    <button type="button" class="print-btn" data-print>打印当前视图</button>
+  </header>
+
+  <main class="stage">
+    <section class="intro">
+      <h2>先把版式搭好，再填数据</h2>
+      <p>“顾客扫码下单 → 商家工作台出餐”双端演示的 A6 体验卡框架。灰色虚线块是待替换的占位——把二维码、销售联系方式、演示门店名和体验卡编号填进去即可付印。</p>
+      <div class="spec" aria-label="印刷规格">
+        <code>成品 105 × 148 mm</code>
+        <code>出血 3 mm（111 × 154 mm）</code>
+        <code>安全边距 5 mm</code>
+        <code>300 g 哑粉纸 + 双面哑膜</code>
+        <code>二维码 ≥ 35 mm</code>
+        <code>圆角 3 mm 可选</code>
+      </div>
+    </section>
+
+    <div class="faces">
+      <!-- ============================ FRONT ============================ -->
+      <div class="face-wrap" data-face="front">
+        <div class="face-label"><strong>正面</strong><span>Front · 邀请 + 老板码</span></div>
+        <div class="bleed">
+          <article class="face" aria-label="体验卡正面">
+            <div class="safe" aria-hidden="true"></div>
+            <div class="face-inner">
+
+              <div class="brandbar">
+                <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+                <div class="kicker">双端联动体验<b>Linked Demo</b></div>
+              </div>
+
+              <div class="eyebrow">老板体验卡 · Owner Pass <span class="pill-30">单场 <b>30</b> 分钟</span></div>
+
+              <h1 class="head">扫码开始，看完<em>顾客下单 → 商家出餐</em>的真实全过程</h1>
+              <p class="sub">不是演示视频，是真链路：你在工作台接单，另一台手机当顾客点餐。</p>
+
+              <div class="qr-panel">
+                <div class="qr" role="img" aria-label="老板二维码占位"><span>老板码<br>正式印刷前替换</span></div>
+                <div class="qr-copy">
+                  <strong>老板扫码</strong>
+                  <span class="go">进入 Demo 工作台</span>
+                  <small>微信扫一扫 · 无需登录正式商家后台<br>每次扫码自动生成本桌专属顾客点餐码</small>
+                </div>
+              </div>
+
+              <div class="need2">
+                <svg class="two-phone" viewBox="0 0 132 44" role="img" aria-label="两台手机通过点餐链路相连">
+                  <rect x="1.5" y="4" width="26" height="36" rx="4.5" fill="none" stroke="#16211B" stroke-width="1.6"/>
+                  <line x1="8" y1="10" x2="21" y2="10" stroke="#16211B" stroke-width="1.4" stroke-linecap="round"/>
+                  <rect x="6.5" y="15" width="16" height="18" rx="2" fill="#ECEFEC"/>
+                  <rect x="104.5" y="4" width="26" height="36" rx="4.5" fill="none" stroke="#07C160" stroke-width="1.6"/>
+                  <line x1="111" y1="10" x2="124" y2="10" stroke="#07C160" stroke-width="1.4" stroke-linecap="round"/>
+                  <rect x="109.5" y="15" width="16" height="18" rx="2" fill="#EDF6F0"/>
+                  <line x1="31" y1="22" x2="101" y2="22" stroke="#8A968F" stroke-width="1.4" stroke-dasharray="2 3" stroke-linecap="round"/>
+                  <circle cx="66" cy="22" r="3.4" fill="#07C160"/>
+                </svg>
+                <p>本次体验需要<b>两台手机</b>：这台看商家工作台，另一台扫下一步生成的顾客点餐码。现场可让同事或客人配合。</p>
+              </div>
+
+              <ul class="ticks">
+                <li>真实端到端链路，不是前端模拟</li>
+                <li>专用演示门店，不接触任何真实商户数据</li>
+                <li>全程不发生真实支付 · 退款 · 出票打印</li>
+              </ul>
+
+              <div class="foot">
+                <div class="foot-l">
+                  <span class="lab">现场联系人</span>
+                  <span class="ph">待填：销售姓名</span> <span class="ph">待填：手机 / 微信</span>
+                </div>
+                <div class="foot-r">
+                  <span class="lab" style="text-align:right;display:block;">体验卡编号</span>
+                  <span class="ph">待填：No. ____</span>
+                </div>
+              </div>
+
+              <p class="cau">此二维码为占位示意，正式印刷前须替换为线上启动地址</p>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <!-- ============================ BACK ============================ -->
+      <div class="face-wrap" data-face="back" hidden>
+        <div class="face-label"><strong>反面</strong><span>Back · 怎么演示</span></div>
+        <div class="bleed">
+          <article class="face" aria-label="体验卡反面">
+            <div class="safe" aria-hidden="true"></div>
+            <div class="face-inner">
+
+              <div class="brandbar">
+                <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+                <div class="kicker">怎么演示<b>How It Runs</b></div>
+              </div>
+
+              <h1 class="head">一张桌子，两块屏幕，<em>一次真实的点餐</em></h1>
+              <p class="sub">两端连同一张演示桌，顾客一提交，工作台约 2 秒内就能看到。</p>
+
+              <ol class="relay">
+                <li>
+                  <span class="n">1</span>
+                  <span class="rtxt"><span class="tag cust">顾客端</span>扫桌上的点餐码，进入演示菜单</span>
+                </li>
+                <li>
+                  <span class="n">2</span>
+                  <span class="rtxt"><span class="tag cust">顾客端</span>选菜下单 —— 后付模式，不唤起微信支付</span>
+                </li>
+                <li class="sync" aria-hidden="true">
+                  <span class="spine"></span>
+                  <span class="sync-pill"><b>≤ 2s</b> 工作台自动同步新单</span>
+                </li>
+                <li>
+                  <span class="n">3</span>
+                  <span class="rtxt"><span class="tag boss">老板端</span>工作台弹出新单，点「接单」</span>
+                </li>
+                <li>
+                  <span class="n">4</span>
+                  <span class="rtxt"><span class="tag boss">老板端</span>「制作完成」→「确认上菜」</span>
+                </li>
+                <li>
+                  <span class="n">5</span>
+                  <span class="rtxt"><span class="tag cust">顾客端</span>实时看到「制作中 / 已上菜」状态</span>
+                </li>
+              </ol>
+
+              <div class="terms">
+                <h4>本次体验说明</h4>
+                <ul>
+                  <li><span>演示门店：<span class="ph">待填：门店名</span>，菜单与桌位已预置</span></li>
+                  <li><span>单场 30 分钟，到点后本次入口失效，可重新扫码开始</span></li>
+                  <li><span>后付模式：全程不发生真实支付、退款</span></li>
+                  <li><span>不连接任何真实打印机，不产生出票</span></li>
+                  <li><span>演示桌共 20 张，满员时请稍候再试</span></li>
+                </ul>
+              </div>
+
+              <div class="foot">
+                <div class="foot-l">
+                  <span class="lab">编号 / 有效期</span>
+                  <span class="ph">待填：No. ____</span> <span class="ph">待填：有效期至 ____</span>
+                </div>
+                <div class="foot-r">
+                  <span class="lab" style="text-align:right;display:block;">可选</span>
+                  <span class="ph">待填：客服二维码</span>
+                </div>
+              </div>
+
+              <p class="cau">演示订单仅用于体验，不计入任何真实经营统计</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <aside class="note">
+      <b>这是结构与文案框架，不是终稿。</b>屏幕预览里深灰虚线框 = 3&nbsp;mm 出血、绿色虚线 = 5&nbsp;mm 安全边距，仅供检查；点“打印当前视图”时安全线隐藏、纸面自动扩展到 111&nbsp;×&nbsp;154&nbsp;mm 含出血，另存 PDF 即可交印。付印前替换两个二维码为真实地址、填入联系方式 / 门店名 / 编号，并向印刷店指定 300&nbsp;g 哑粉纸 + 双面哑膜（避免灯光反射影响扫码）；圆角 3&nbsp;mm 可保留或改直角。
+    </aside>
+  </main>
+
+  <script>
+    (function () {
+      var wraps = Array.prototype.slice.call(document.querySelectorAll('.face-wrap'));
+      var segButtons = Array.prototype.slice.call(document.querySelectorAll('[data-view]'));
+
+      function setView(view) {
+        wraps.forEach(function (w) {
+          w.hidden = (view !== 'both') && (w.dataset.face !== view);
+        });
+        segButtons.forEach(function (b) {
+          b.setAttribute('aria-pressed', String(b.dataset.view === view));
+        });
+      }
+
+      segButtons.forEach(function (b) {
+        b.addEventListener('click', function () { setView(b.dataset.view); });
+      });
+
+      document.querySelector('[data-print]').addEventListener('click', function () {
+        window.print();
+      });
+
+      setView('front');
+    })();
+  </script>
+</body>
+</html>
