@@ -10,7 +10,7 @@ from app.models.coupon import Coupon
 from app.models.coupon_template import CouponTemplate
 from app.services.anti_fraud_service import AntiFraudService
 from app.utils.id_generator import generate_coupon_code, generate_snowflake_id
-from app.core.logger import logger
+from app.core.logger import log_coupon_transition, logger
 from app.core.lock import try_acquire_lock, redis_lock
 from app.core.time_utils import to_utc_iso
 
@@ -1489,7 +1489,18 @@ async def _set_order_coupon_status_if_locked(order, db: AsyncSession, status: st
     )
     coupon = coupon_result.scalar_one_or_none()
     if coupon and coupon.status == "LOCKED":
+        from_status = coupon.status
         coupon.status = status
+        reason = "order_redeem" if status == "USED" else "order_release"
+        log_coupon_transition(
+            coupon_id=coupon.id,
+            tenant_id=str(order.tenant_id),
+            member_id=getattr(order, "customer_id", None),
+            order_id=getattr(order, "id", None),
+            from_status=from_status,
+            to_status=status,
+            reason=reason,
+        )
 
 
 async def _unlock_order_coupon_if_locked(order, db: AsyncSession) -> None:

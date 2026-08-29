@@ -3,7 +3,18 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.core.logger import logger
+from app.core.request_context import RequestContext
 from app.core.response import RespVo
+
+
+def _request_id_of(request: Request) -> str:
+    return getattr(request.state, "request_id", None) or RequestContext.get_request_id() or "unknown"
+
+
+def _error_content(code: int, msg: str, request_id: str, data=None) -> dict:
+    payload = RespVo(code=code, msg=msg, data=data).to_response()
+    payload["request_id"] = request_id
+    return payload
 
 
 class BusinessException(Exception):
@@ -14,30 +25,38 @@ class BusinessException(Exception):
 
 
 async def business_exception_handler(request: Request, exc: BusinessException):
+    request_id = _request_id_of(request)
     logger.warning(
         f"Business exception: {exc.message}",
         extra={
-            "request_id": getattr(request.state, "request_id", "unknown"),
+            "event": "BUSINESS_EXCEPTION",
+            "request_id": request_id,
             "code": exc.code,
+            "method": request.method,
+            "path": request.url.path,
         },
     )
     return JSONResponse(
         status_code=200,
-        content=RespVo(code=exc.code, msg=exc.message, data=None).to_response(),
+        content=_error_content(exc.code, exc.message, request_id),
     )
 
 
 async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = _request_id_of(request)
     logger.warning(
         f"HTTP exception: {exc.detail}",
         extra={
-            "request_id": getattr(request.state, "request_id", "unknown"),
+            "event": "HTTP_EXCEPTION",
+            "request_id": request_id,
             "status_code": exc.status_code,
+            "method": request.method,
+            "path": request.url.path,
         },
     )
     return JSONResponse(
         status_code=exc.status_code,
-        content=RespVo(code=exc.status_code, msg=str(exc.detail), data=None).to_response(),
+        content=_error_content(exc.status_code, str(exc.detail), request_id),
     )
 
 
@@ -52,26 +71,36 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
             }
         )
 
+    request_id = _request_id_of(request)
     logger.warning(
         f"Validation error: {errors}",
-        extra={"request_id": getattr(request.state, "request_id", "unknown")},
+        extra={
+            "event": "VALIDATION_ERROR",
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+        },
     )
 
     return JSONResponse(
         status_code=422,
-        content=RespVo(code=422, msg="参数校验失败", data=errors).to_response(),
+        content=_error_content(422, "参数校验失败", request_id, data=errors),
     )
 
 
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error(
-        f"Unexpected error: {str(exc)}",
+    request_id = _request_id_of(request)
+    logger.exception(
+        "UNHANDLED_EXCEPTION",
         extra={
-            "request_id": getattr(request.state, "request_id", "unknown"),
-            "exception": str(exc),
+            "event": "UNHANDLED_EXCEPTION",
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "error_type": type(exc).__name__,
         },
     )
     return JSONResponse(
         status_code=500,
-        content=RespVo(code=500, msg=str(exc) or "系统异常", data=None).to_response(),
+        content=_error_content(500, "系统异常，请稍后重试", request_id),
     )

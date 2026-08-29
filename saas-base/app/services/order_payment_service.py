@@ -11,13 +11,28 @@ from sqlalchemy.future import select
 from starlette.requests import Request
 
 from app.config import settings
-from app.core.logger import logger, safe_log
+from app.core.logger import log_coupon_transition, log_order_status_changed, logger, safe_log
 from app.core.plan_capabilities import CAP_COUPONS, CAP_DISTRIBUTION_REFERRAL, CAP_MEMBERSHIP
 from app.core.response import RespVo, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order
 from app.services.base_service import BaseService
 from app.services.coupon_service import CouponService
+
+
+def _summarize_wxpay_verify_reasons(reasons: list[str]) -> str:
+    if not reasons:
+        return "UNKNOWN_VERIFY_FAILURE"
+    for candidate in (
+        "UNSUPPORTED_EVENT_TYPE",
+        "DECRYPT_FAILED",
+        "SIGNATURE_VERIFY_FAILED",
+        "INVALID_CALLBACK",
+        "CERTIFICATE_MISMATCH",
+    ):
+        if candidate in reasons:
+            return candidate
+    return reasons[-1]
 from app.services.optional_entitlement import optional_capability_enabled
 from app.services.order_print_service import _print_paid_order_ticket
 
@@ -307,6 +322,7 @@ class OrderPaymentService(BaseService):
         customer_id = order.customer_id
         TenantContext.set_tenant_id(str(order.tenant_id))
         coupon_data = None
+        redeemed_coupon_id = None
 
         # Coupon write-off
         if order.coupon_id and customer_id:
@@ -323,6 +339,7 @@ class OrderPaymentService(BaseService):
             if locked_coupon and locked_coupon.status == "LOCKED":
                 locked_coupon.status = "USED"
                 locked_coupon.use_time = datetime.now(timezone.utc)
+                redeemed_coupon_id = locked_coupon.id
                 # 老带新双边奖励的发放判定（CommissionService.record_after_verify）之前只挂在
                 # 店员手动核销（verify.py/pos.py）上；自助点餐支付在这里核销优惠券却从没调用
                 # 过它，导致走小程序自助下单支付（PRODUCT_RULES.md 里明确的主路径）的被邀请
@@ -360,6 +377,7 @@ class OrderPaymentService(BaseService):
 
         # 标记支付成功
         effective_method = payment_method
+        old_status = order.status
         order.payment_status = "paid"
         order.payment_method = effective_method
         order.payment_time = datetime.now(timezone.utc).isoformat()
@@ -380,6 +398,25 @@ class OrderPaymentService(BaseService):
                 reason="payment_success",
             )
         await self.db.flush()
+        log_order_status_changed(
+            order_id=order.id,
+            tenant_id=str(order.tenant_id),
+            old_status=old_status,
+            new_status=order.status,
+            actor="system",
+            source="payment_success",
+            reason=effective_method,
+        )
+        if redeemed_coupon_id:
+            log_coupon_transition(
+                coupon_id=redeemed_coupon_id,
+                tenant_id=str(order.tenant_id),
+                member_id=customer_id,
+                order_id=order.id,
+                from_status="LOCKED",
+                to_status="USED",
+                reason="payment_success",
+            )
 
 
         # DB-only coupon/member effects remain inside the outer payment transaction.
@@ -621,8 +658,18 @@ class OrderPaymentService(BaseService):
             )
             coupon = coupon_result.scalar_one_or_none()
             if coupon and coupon.status in ("LOCKED", "USED"):
+                from_status = coupon.status
                 coupon.status = "UNUSED"
                 coupon.use_time = None
+                log_coupon_transition(
+                    coupon_id=coupon.id,
+                    tenant_id=str(order.tenant_id),
+                    member_id=order.customer_id,
+                    order_id=order.id,
+                    from_status=from_status,
+                    to_status="UNUSED",
+                    reason="payment_refund",
+                )
 
         if order.customer_id:
             try:
@@ -918,8 +965,13 @@ class OrderPaymentService(BaseService):
                 if not pay_params or any(f not in pay_params for f in required_fields):
                     missing_fields = [f for f in required_fields if f not in (pay_params or {})]
                     logger.error(
-                        "[WXPAY_PARAMS_INVALID] order_id=%s tenant_id=%s pay_params_type=%s missing_fields=%s pay_params=%s",
-                        order.id, order.tenant_id, type(pay_params).__name__, missing_fields, str(pay_params)[:500] if pay_params else None,
+                        "[WXPAY_PARAMS_INVALID] order_id=%s tenant_id=%s pay_params_type=%s missing_fields=%s has_pay_params=%s",
+                        order.id, order.tenant_id, type(pay_params).__name__, missing_fields, bool(pay_params),
+                        extra={
+                            "event": "WXPAY_PARAMS_INVALID",
+                            "order_id": order.id,
+                            "tenant_id": order.tenant_id,
+                        },
                     )
                     raise HTTPException(status_code=502, detail={"success": False, "code": "WXPAY_PARAMS_INVALID", "message": "微信支付参数生成失败"})
                 return success_response(
@@ -952,8 +1004,6 @@ class OrderPaymentService(BaseService):
 
     async def wxpay_notify(self, request: Request) -> dict[str, str]:
         """Handle WeChat Pay notify for direct merchant mode."""
-        import traceback
-
         from app.models.tenant import Tenant
         from app.services.wxpay_service import WxPayService
 
@@ -964,6 +1014,7 @@ class OrderPaymentService(BaseService):
             resource = None
             tenant_id = request.query_params.get("tenant_id")
             matched_tenant = None
+            verify_reasons: list[str] = []
             if tenant_id:
                 tenant_result = await self.db.execute(
                     select(Tenant).where(
@@ -977,6 +1028,10 @@ class OrderPaymentService(BaseService):
                     svc = WxPayService(matched_tenant)
                     if svc.enabled:
                         resource = svc.verify_notify(headers, raw_body)
+                        if not resource:
+                            verify_reasons.append(getattr(svc, "last_verify_reason", "UNKNOWN_VERIFY_FAILURE"))
+                    else:
+                        verify_reasons.append("CERTIFICATE_MISMATCH")
 
             if not resource:
                 tenant_result = await self.db.execute(
@@ -986,13 +1041,19 @@ class OrderPaymentService(BaseService):
                 for t in tenants:
                     svc = WxPayService(t)
                     if not svc.enabled:
+                        verify_reasons.append("CERTIFICATE_MISMATCH")
                         continue
                     resource = svc.verify_notify(headers, raw_body)
                     if resource:
                         matched_tenant = t
                         break
+                    verify_reasons.append(getattr(svc, "last_verify_reason", "UNKNOWN_VERIFY_FAILURE"))
             if not resource:
-                logger.warning("wxpay notify verify failed: no matched merchant cert")
+                reason = _summarize_wxpay_verify_reasons(verify_reasons)
+                logger.warning(
+                    "WXPAY_CALLBACK_VERIFY_FAILED",
+                    extra={"event": "WXPAY_CALLBACK_VERIFY_FAILED", "reason": reason},
+                )
                 return {"code": "FAIL", "message": "验证失败"}
 
             out_trade_no = resource.get("out_trade_no", "")
@@ -1001,6 +1062,13 @@ class OrderPaymentService(BaseService):
                 logger.info,
                 "WXPAY_CALLBACK_RECEIVED tenant_id=%s out_trade_no=%s trade_state=%s",
                 getattr(matched_tenant, "tenant_id", None), out_trade_no, trade_state,
+                extra={
+                    "event": "WXPAY_CALLBACK_RECEIVED",
+                    "tenant_id": getattr(matched_tenant, "tenant_id", None),
+                    "out_trade_no": out_trade_no,
+                    "trade_state": trade_state,
+                    "transaction_id": resource.get("transaction_id") or None,
+                },
             )
             if trade_state != "SUCCESS":
                 return {"code": "SUCCESS", "message": "ok"}
@@ -1019,6 +1087,17 @@ class OrderPaymentService(BaseService):
             )
             order = result.scalar_one_or_none()
             if not order:
+                logger.error(
+                    "WXPAY_CALLBACK_ORDER_NOT_FOUND",
+                    extra={
+                        "event": "WXPAY_CALLBACK_ORDER_NOT_FOUND",
+                        "tenant_id": getattr(matched_tenant, "tenant_id", None),
+                        "out_trade_no": out_trade_no,
+                        "transaction_id": resource.get("transaction_id") or None,
+                        "trade_state": trade_state,
+                        "reason": "ORDER_NOT_FOUND",
+                    },
+                )
                 return {"code": "SUCCESS", "message": "ok"}
             if matched_tenant and str(order.tenant_id) != str(matched_tenant.tenant_id):
                 logger.warning(
@@ -1057,6 +1136,16 @@ class OrderPaymentService(BaseService):
                     await self.db.commit()
                 else:
                     await self.db.rollback()
+                logger.warning(
+                    "WXPAY_CALLBACK_DUPLICATE",
+                    extra={
+                        "event": "WXPAY_CALLBACK_DUPLICATE",
+                        "tenant_id": str(order.tenant_id),
+                        "order_id": order.id,
+                        "transaction_id": transaction_id,
+                        "payment_status": order.payment_status,
+                    },
+                )
                 return {"code": "SUCCESS", "message": "ok"}
 
             if order.status == "pending_payment" and order.payment_mode == "prepay":
@@ -1070,5 +1159,8 @@ class OrderPaymentService(BaseService):
 
         except Exception as e:
             await self.db.rollback()
-            logger.error(f"wxpay_notify error: {e}\n{traceback.format_exc()}")
-            return {"code": "FAIL", "message": str(e)}
+            logger.exception(
+                "WXPAY_CALLBACK_FAILED",
+                extra={"event": "WXPAY_CALLBACK_FAILED", "error_type": type(e).__name__},
+            )
+            return {"code": "FAIL", "message": "error"}

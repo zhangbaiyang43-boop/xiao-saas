@@ -7,7 +7,7 @@ from app.api.v1.consumptions import serialize_consumption
 from app.api.v1.orders import build_order_financial_capabilities, order_status_text
 from app.config import settings
 from app.core.database import get_db
-from app.core.logger import logger
+from app.core.logger import logger, mask_phone
 from app.core.pagination import build_page, normalize_pagination
 from app.core.response import RespVo, error_response, success_response
 from app.core.security import create_customer_access_token
@@ -323,8 +323,10 @@ async def send_verify_code(request: Request, phone: str, db: AsyncSession = Depe
     cache_key = f"phone_code:{tenant_id}:{phone}"
     await redis_client.setex(cache_key, 300, code)
     
-    # TODO: 后续接入真实短信服务，当前仅记录日志
-    print(f"[SMS] 验证码通知: 手机号 {phone} 的验证码为 {code}")
+    logger.info(
+        "MEMBER_OTP_ISSUED",
+        extra={"event": "MEMBER_OTP_ISSUED", "phone": mask_phone(phone)},
+    )
     
     return success_response(data={"expires_in": 300}, msg="验证码已发送")
 

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.logger import logger
 from app.core.entitlement_guard import require_capability_response
 from app.core.pagination import build_page, normalize_pagination
 from app.core.plan_capabilities import CAP_COUPONS
@@ -25,7 +26,10 @@ async def serialize_coupon_record(
         try:
             template = await coupon_service.get_template(coupon.template_id)
         except Exception as e:
-            print(f"Warning: failed to get template {coupon.template_id}: {e}")
+            logger.warning(
+                "COUPON_SERIALIZE_TEMPLATE_FAILED",
+                extra={"event": "COUPON_SERIALIZE_TEMPLATE_FAILED", "error_type": type(e).__name__},
+            )
 
         try:
             if hasattr(customer_service, "get_customer_any_status"):
@@ -33,14 +37,20 @@ async def serialize_coupon_record(
             else:
                 customer = await customer_service.get_customer(coupon.customer_id)
         except Exception as e:
-            print(f"Warning: failed to get customer {coupon.customer_id}: {e}")
+            logger.warning(
+                "COUPON_SERIALIZE_CUSTOMER_FAILED",
+                extra={"event": "COUPON_SERIALIZE_CUSTOMER_FAILED", "error_type": type(e).__name__},
+            )
 
         identity_phone = ""
         if customer_service and hasattr(customer_service, "get_customer_identity_phone"):
             try:
                 identity_phone = await customer_service.get_customer_identity_phone(coupon.customer_id) or ""
             except Exception as e:
-                print(f"Warning: failed to get customer identity phone {coupon.customer_id}: {e}")
+                logger.warning(
+                    "COUPON_SERIALIZE_PHONE_FAILED",
+                    extra={"event": "COUPON_SERIALIZE_PHONE_FAILED", "error_type": type(e).__name__},
+                )
 
         return {
             "id": str(coupon.id),
@@ -65,7 +75,10 @@ async def serialize_coupon_record(
             "updated_at": to_utc_iso(coupon.updated_at),
         }
     except Exception as e:
-        print(f"Error serializing coupon record: {e}")
+        logger.warning(
+            "COUPON_SERIALIZE_FAILED",
+            extra={"event": "COUPON_SERIALIZE_FAILED", "error_type": type(e).__name__},
+        )
         return {
             "id": str(coupon.id),
             "tenant_id": coupon.tenant_id,
@@ -209,10 +222,11 @@ async def list_issued_coupons(
 
         return success_response(data=build_page(records, total, skip, limit), msg="ok")
     except Exception as e:
-        print(f"Error in list_issued_coupons: {e}")
-        import traceback
-        traceback.print_exc()
-        return error_response(code=500, msg=f"查询发券记录失败: {str(e)}")
+        logger.exception(
+            "LIST_ISSUED_COUPONS_FAILED",
+            extra={"event": "LIST_ISSUED_COUPONS_FAILED", "error_type": type(e).__name__},
+        )
+        return error_response(code=500, msg="查询发券记录失败")
 
 
 @router.post("/{coupon_id}/recall", response_model=RespVo)

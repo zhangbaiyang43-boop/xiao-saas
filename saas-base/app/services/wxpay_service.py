@@ -82,6 +82,7 @@ class WxPayService:
         verification, refund) is untouched by this parameter.
         """
         self._client = None
+        self.last_verify_reason = "UNKNOWN_VERIFY_FAILURE"
         if (
             getattr(tenant, "wx_pay_enabled", False)
             and getattr(tenant, "wx_mchid", None)
@@ -275,14 +276,25 @@ class WxPayService:
         验证微信回调签名，返回解密后的通知数据，验签失败返回 None。
         注意：回调中只有 out_trade_no，需要先查订单拿到商家信息再构建本实例。
         """
+        resource, reason = self.verify_notify_classified(headers, body)
+        self.last_verify_reason = reason
+        return resource
+
+    def verify_notify_classified(self, headers: dict, body: bytes) -> tuple[Optional[dict], str]:
+        """Same security path as verify_notify, with a stable failure reason.
+
+        Reasons are diagnostic only. Callers must not change accept/reject
+        behavior based on these strings.
+        """
         if not self.enabled:
-            return None
+            return None, "CERTIFICATE_MISMATCH"
         try:
             result = self._client.callback(headers, body)
-            if result and result.get("event_type") == "TRANSACTION.SUCCESS":
-                return result.get("resource", {})
-            return None
-        except Exception as e:
-            logger.error(f"微信支付回调验签失败: {e}")
-            return None
+        except Exception:
+            return None, "SIGNATURE_VERIFY_FAILED"
+        if not result:
+            return None, "INVALID_CALLBACK"
+        if result.get("event_type") == "TRANSACTION.SUCCESS":
+            return result.get("resource", {}) or {}, "OK"
+        return None, "UNSUPPORTED_EVENT_TYPE"
 

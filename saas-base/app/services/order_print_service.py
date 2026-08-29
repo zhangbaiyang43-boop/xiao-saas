@@ -9,7 +9,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.future import select
 
-from app.core.logger import logger
+from app.core.logger import logger, safe_log
 from app.core.tenant_context import TenantContext
 from app.models.order import Order
 
@@ -61,6 +61,27 @@ def can_reprint_order(order: Order, print_type: str = "kitchen") -> tuple[bool, 
         if payment_mode in ("postpay", "table_account"):
             return True, None
     return False, "unsupported print type"
+
+
+_PRINT_SKIPPED_INFO_REASONS = {"ALREADY_SUCCESS", "WAITING_PICKUP_NO"}
+
+
+def _log_print_skipped(order, *, reason: str, printer_id=None) -> None:
+    level = "info" if reason in _PRINT_SKIPPED_INFO_REASONS else "warning"
+    log_fn = logger.info if level == "info" else logger.warning
+    safe_log(
+        log_fn,
+        "PRINT_SKIPPED",
+        extra={
+            "event": "PRINT_SKIPPED",
+            "order_id": getattr(order, "id", None) if order is not None else None,
+            "tenant_id": str(getattr(order, "tenant_id", "") or "") or None if order is not None else None,
+            "printer_id": printer_id,
+            "payment_status": getattr(order, "payment_status", None) if order is not None else None,
+            "order_status": getattr(order, "status", None) if order is not None else None,
+            "reason": reason,
+        },
+    )
 
 
 def evaluate_print_eligibility(
@@ -722,6 +743,7 @@ async def _print_paid_order_ticket(
 ) -> dict:
     """Durable initial print or independent manual reprint."""
     if not order:
+        _log_print_skipped(None, reason="ORDER_NOT_FOUND")
         return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
     tenant_id = str(order.tenant_id)
     if not manual and not _fresh_session:
@@ -743,6 +765,7 @@ async def _print_paid_order_ticket(
                 )
                 fresh_order = fresh_result.scalar_one_or_none()
                 if not fresh_order:
+                    _log_print_skipped(order, reason="ORDER_NOT_FOUND")
                     return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
                 return await _print_paid_order_ticket(
                     fresh_order,
@@ -760,6 +783,7 @@ async def _print_paid_order_ticket(
         manual and eligibility.get("code") == "ALREADY_SUCCESS"
     ):
         code = eligibility.get("code") or "NOT_PRINTABLE"
+        _log_print_skipped(order, reason=code)
         if code == "ALREADY_SUCCESS":
             return {"success": True, "skipped": True, "status": "printed"}
         return {"success": False, "skipped": True, "code": code}
@@ -774,6 +798,7 @@ async def _print_paid_order_ticket(
         from app.services.optional_entitlement import optional_capability_enabled
 
         if not await optional_capability_enabled(tenant_id, CAP_KITCHEN_PRINT):
+            _log_print_skipped(order, reason="PLAN_CAPABILITY_DISABLED")
             return {"success": False, "skipped": True, "code": "PLAN_CAPABILITY_DISABLED"}
 
     meta = _get_print_meta(order)
@@ -863,12 +888,24 @@ async def _print_paid_order_ticket(
     logger.info(
         "PRINT_TRIGGERED order_id=%s printer_id=%s attempt=%s reason=%s",
         order.id, printer_identifier, attempt_no, reason,
+        extra={
+            "event": "PRINT_TRIGGERED",
+            "order_id": order.id,
+            "printer_id": printer_identifier,
+            "reason": reason,
+        },
     )
     try:
         task_id = await _execute_provider_with_frozen_route(claimed_order, db, initial)
         logger.info(
             "PRINT_SUCCEEDED order_id=%s printer_id=%s attempt=%s provider_task_id=%s",
             order.id, printer_identifier, attempt_no, task_id,
+            extra={
+                "event": "PRINT_SUCCEEDED",
+                "order_id": order.id,
+                "printer_id": printer_identifier,
+                "provider_task_id": task_id,
+            },
         )
         return await _persist_initial_print_result(
             db,
@@ -880,9 +917,16 @@ async def _print_paid_order_ticket(
     except Exception as exc:
         status = "UNKNOWN" if _is_unknown_print_exception(exc) else "FAILED"
         error_code = str(getattr(exc, "code", None) or str(exc) or type(exc).__name__)
-        logger.warning(
+        logger.error(
             "PRINT_FAILED order_id=%s printer_id=%s attempt=%s result=%s error_category=%s",
             order.id, printer_identifier, attempt_no, status, error_code,
+            extra={
+                "event": "PRINT_FAILED",
+                "order_id": order.id,
+                "printer_id": printer_identifier,
+                "error_code": error_code,
+                "error_type": type(exc).__name__,
+            },
         )
         return await _persist_initial_print_result(
             db,
@@ -1130,6 +1174,7 @@ async def _print_paid_order_ticket_background(
             )
             order = order_result.scalar_one_or_none()
             if not order:
+                _log_print_skipped(None, reason="ORDER_NOT_FOUND")
                 return
             await _print_paid_order_ticket(order, bg_db, reason=reason, _fresh_session=True)
             await bg_db.commit()

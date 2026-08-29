@@ -7,6 +7,7 @@ from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from app.core.logger import log_coupon_transition, log_order_status_changed
 from app.core.response import RespVo, error_response, success_response
 from app.core.tenant_context import TenantContext
 from app.models.order import Order, OrderItem, set_termination_audit_if_unset
@@ -318,7 +319,9 @@ class OrderLifecycleService(BaseService):
         if order.status not in ("pending_payment", "pending"):
             return error_response(code=400, msg="订单已支付或已完成，无法取消")
         await _restore_order_stock(order, self.db)
+        old_status = order.status
         order.status = "cancelled"
+        cancel_source = "customer_cancel" if order.customer_id else "participant_cancel"
         if order.customer_id:
             set_termination_audit_if_unset(
                 order, actor_type="customer", actor_id=order.customer_id,
@@ -329,10 +332,12 @@ class OrderLifecycleService(BaseService):
                 order, actor_type="participant", actor_id=order.participant_id,
                 actor_role=None, source="participant_cancel",
             )
+        released_coupon_id = None
         if order.coupon_id:
             coupon = await self.db.get(_Coupon, order.coupon_id)
             if coupon and coupon.status == "LOCKED":
                 coupon.status = "UNUSED"
+                released_coupon_id = coupon.id
         # 桌牌属 DiningSession：仅当会话内已无有效履约订单时释放租约
         if order.dining_session_id:
             from app.models.dining import DiningSession
@@ -343,6 +348,25 @@ class OrderLifecycleService(BaseService):
                 str(order.tenant_id), session
             )
         await self.db.commit()
+        log_order_status_changed(
+            order_id=order.id,
+            tenant_id=str(order.tenant_id),
+            old_status=old_status,
+            new_status="cancelled",
+            actor="customer" if order.customer_id else "participant",
+            source=cancel_source,
+            reason=cancel_source,
+        )
+        if released_coupon_id:
+            log_coupon_transition(
+                coupon_id=released_coupon_id,
+                tenant_id=str(order.tenant_id),
+                member_id=order.customer_id,
+                order_id=order.id,
+                from_status="LOCKED",
+                to_status="UNUSED",
+                reason=cancel_source,
+            )
         return success_response(data={"id": str(order.id), "status": "cancelled"}, msg="order cancelled")
 
     async def refund_paid_order(
@@ -374,12 +398,22 @@ class OrderLifecycleService(BaseService):
 
         if getattr(order, "refund_status", None) == "success":
             if order.status not in {"cancelled", "rejected"}:
+                old_status = order.status
                 order.status = "cancelled"
                 set_termination_audit_if_unset(
                     order, actor_type="account", actor_id=account_id, actor_role=role,
                     source="merchant_refund",
                 )
                 await self.db.commit()
+                log_order_status_changed(
+                    order_id=order.id,
+                    tenant_id=str(order.tenant_id),
+                    old_status=old_status,
+                    new_status="cancelled",
+                    actor="account",
+                    source="merchant_refund",
+                    reason="idempotent_refund",
+                )
             return success_response(
                 data={
                     "id": str(order.id),
@@ -425,6 +459,16 @@ class OrderLifecycleService(BaseService):
                     str(order.tenant_id), session
                 )
         await self.db.commit()
+        if current_status in ORDER_REFUND_TERMINAL_FROM:
+            log_order_status_changed(
+                order_id=order.id,
+                tenant_id=str(order.tenant_id),
+                old_status=current_status,
+                new_status=order.status,
+                actor="account",
+                source="merchant_refund",
+                reason="merchant_paid_order_refund",
+            )
         return success_response(
             data={
                 "id": str(order.id),
@@ -953,6 +997,17 @@ class OrderLifecycleService(BaseService):
             await PickupNoService(self.db).release_if_no_holding_orders(tenant_id, session)
         await self.db.commit()
         await self.db.refresh(order)
+        log_order_status_changed(
+            order_id=order.id,
+            tenant_id=str(order.tenant_id),
+            old_status=current_status,
+            new_status=order.status,
+            actor="account",
+            source="merchant_reject" if body.status == "rejected" else (
+                "merchant_cancel" if body.status == "cancelled" else "merchant_status_update"
+            ),
+            reason=f"{current_status}->{body.status}",
+        )
         if just_settled:
             await _record_order_consumption(order, self.db)
         if entered_done:
@@ -1195,6 +1250,15 @@ class OrderLifecycleService(BaseService):
             total += float(o.total or 0)
         await self.db.commit()
         for o in newly_settled_orders:
+            log_order_status_changed(
+                order_id=o.id,
+                tenant_id=str(o.tenant_id),
+                old_status="done",
+                new_status="settled",
+                actor="account",
+                source="table_settle",
+                reason="table_settle",
+            )
             await _record_order_consumption(o, self.db)
 
         # P0-10-02: the settled-order snapshot the response carries here is the

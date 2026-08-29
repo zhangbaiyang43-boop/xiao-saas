@@ -15,7 +15,7 @@ from sqlalchemy.future import select
 from app.config import settings
 from app.core.database import get_db
 from app.core.entitlement_guard import require_capability_response
-from app.core.logger import logger, safe_log
+from app.core.logger import log_coupon_transition, log_order_status_changed, logger, safe_log
 from app.core.plan_capabilities import CAP_KITCHEN_PRINT
 from app.core.platform_rules import cap_discount_amount
 from app.core.response import RespVo, error_response, success_response
@@ -777,15 +777,35 @@ async def _cleanup_stale_pending_payment_orders(tenant_id: str, db: AsyncSession
         if not locked or getattr(locked, "payment_status", None) == "paid":
             continue
         await _restore_order_stock(locked, db)
+        old_status = locked.status
         locked.status = "cancelled"
         set_termination_audit_if_unset(
             locked, actor_type="system", actor_id=None, actor_role=None,
             source="synchronous_stale_cleanup",
         )
+        log_order_status_changed(
+            order_id=locked.id,
+            tenant_id=str(locked.tenant_id),
+            old_status=old_status,
+            new_status="cancelled",
+            actor="system",
+            source="synchronous_stale_cleanup",
+            reason="pending_payment_timeout",
+        )
         if locked.coupon_id:
             stale_coupon = await db.get(Coupon, locked.coupon_id)
             if stale_coupon and stale_coupon.status == "LOCKED":
+                from_status = stale_coupon.status
                 stale_coupon.status = "UNUSED"
+                log_coupon_transition(
+                    coupon_id=stale_coupon.id,
+                    tenant_id=str(locked.tenant_id),
+                    member_id=locked.customer_id,
+                    order_id=locked.id,
+                    from_status=from_status,
+                    to_status="UNUSED",
+                    reason="pending_payment_timeout",
+                )
     if stale_ids:
         await db.flush()
 
@@ -1191,7 +1211,23 @@ async def _persist_create_order_and_build_response(
         logger.info,
         "ORDER_CREATED tenant_id=%s order_id=%s client_request_id=%s dining_session_id=%s table_no=%s",
         tenant_id, order.id, request_id, dining_session_id, body.table,
+        extra={
+            "event": "ORDER_CREATED",
+            "order_id": order.id,
+            "tenant_id": tenant_id,
+            "client_request_id": request_id,
+        },
     )
+    if order.coupon_id:
+        log_coupon_transition(
+            coupon_id=order.coupon_id,
+            tenant_id=str(tenant_id),
+            member_id=customer_id,
+            order_id=order.id,
+            from_status="UNUSED",
+            to_status="LOCKED",
+            reason="create_order",
+        )
     # 出票挪到 commit 之后、且不 await——顾客提交订单不该等一次第三方打印机 API。
     # 必须在 commit 之后才调度：后台任务用的是独立 session，提前调度会因为这笔订单
     # 在别的 session 里还看不见（还没提交）而被 _print_paid_order_ticket 误判成

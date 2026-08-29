@@ -50,7 +50,7 @@ from app.core.exceptions import (
     general_exception_handler,
     validation_exception_handler,
 )
-from app.core.logger import logger
+from app.core.logger import log_coupon_transition, log_order_status_changed, logger
 from app.core.rate_limiter import RateLimitExceeded, limiter, tenant_limiter
 from app.core.response import RespVo, success_response
 from app.core.schema_compat import ensure_bigint_ids, ensure_coupon_template_description, ensure_distribution_schema, ensure_queue_ticket_schema, ensure_tenant_schema
@@ -86,7 +86,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Super-Token"],
-    expose_headers=["X-Process-Time-Ms", "X-Workbench-Cursor"],
+    expose_headers=["X-Process-Time-Ms", "X-Workbench-Cursor", "X-Request-ID"],
 )
 
 app.include_router(login_router)
@@ -222,16 +222,38 @@ async def _stale_order_cleanup_once():
             if not locked or getattr(locked, "payment_status", None) == "paid":
                 continue
             await _restore_order_stock(locked, db)
+            old_status = locked.status
             locked.status = "cancelled"
             set_termination_audit_if_unset(
                 locked, actor_type="system", actor_id=None, actor_role=None,
                 source="stale_order_cleanup",
             )
+            released_coupon_id = None
             if locked.coupon_id:
                 coupon = await db.get(_Coupon, locked.coupon_id)
                 if coupon and coupon.status == "LOCKED":
                     coupon.status = "UNUSED"
+                    released_coupon_id = coupon.id
             await db.commit()
+            log_order_status_changed(
+                order_id=locked.id,
+                tenant_id=str(locked.tenant_id),
+                old_status=old_status,
+                new_status="cancelled",
+                actor="system",
+                source="stale_order_cleanup",
+                reason="pending_payment_timeout",
+            )
+            if released_coupon_id:
+                log_coupon_transition(
+                    coupon_id=released_coupon_id,
+                    tenant_id=str(locked.tenant_id),
+                    member_id=locked.customer_id,
+                    order_id=locked.id,
+                    from_status="LOCKED",
+                    to_status="UNUSED",
+                    reason="stale_order_cleanup",
+                )
 
 
 PENDING_PAYMENT_RECONCILE_AFTER_SECONDS = 90

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.database import get_db
-from app.core.logger import logger
+from app.core.logger import logger, mask_phone
 from app.core.rate_limiter import login_limit, public_limit
 from app.core.response import RespVo, error_response, success_response
 from app.core.permissions import ROLE_OWNER, permission_list
@@ -134,7 +134,10 @@ async def register(request: Request, data: RegisterRequest, db: AsyncSession = D
     except PhoneAlreadyRegisteredError:
         return error_response(code=400, msg="手机号已注册，请直接登录")
     except Exception:
-        logger.error(f"registration provisioning failed, phone={data.phone}")
+        logger.exception(
+            "REGISTRATION_PROVISIONING_FAILED",
+            extra={"event": "REGISTRATION_PROVISIONING_FAILED", "phone": mask_phone(data.phone)},
+        )
         return error_response(code=500, msg="注册失败，请稍后重试")
 
     tenant = result.tenant

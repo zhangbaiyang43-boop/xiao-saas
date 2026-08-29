@@ -241,7 +241,7 @@ class PrintTraceTest(unittest.TestCase):
         self.source = (root / "app/services/order_print_service.py").read_text(encoding="utf-8-sig")
 
     def test_print_trigger_and_result_events_are_logged(self):
-        for event_name in ("PRINT_TRIGGERED", "PRINT_SUCCEEDED", "PRINT_FAILED"):
+        for event_name in ("PRINT_TRIGGERED", "PRINT_SUCCEEDED", "PRINT_FAILED", "PRINT_SKIPPED"):
             self.assertIn(event_name, self.source, f"{event_name} not found in order_print_service.py")
 
     def test_print_recovery_attempt_is_logged(self):

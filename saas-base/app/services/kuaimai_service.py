@@ -458,17 +458,17 @@ async def _post_kuaimai_payload(kuaimai_url: str, payload: Dict[str, Any], app_s
         import httpx
 
         async with httpx.AsyncClient(timeout=8) as client:
-            logger.warning("[KUAIMAI_REQUEST_SEND] about to send HTTP POST")
+            logger.info("[KUAIMAI_REQUEST_SEND] about to send HTTP POST")
             resp = await client.post(
                 kuaimai_url,
                 json=payload,
                 headers={"Content-Type": "application/json"},
             )
-            logger.warning("[KUAIMAI_REQUEST_SENT] HTTP POST completed")
+            logger.info("[KUAIMAI_REQUEST_SENT] HTTP POST completed")
 
             body = _parse_kuaimai_response(resp)
 
-            logger.warning(
+            logger.info(
                 "[KUAIMAI_RESPONSE_PARSED] body_keys=%s status=%s code=%s",
                 list(body.keys()),
                 body.get("status"),
@@ -477,7 +477,7 @@ async def _post_kuaimai_payload(kuaimai_url: str, payload: Dict[str, Any], app_s
 
             if _is_successful_business_response(body):
                 task_id = _extract_task_id(body)
-                logger.warning("[KUAIMAI_SUCCESS] task_id=%s", task_id)
+                logger.info("[KUAIMAI_SUCCESS] task_id=%s", task_id)
                 return {
                     "success": True,
                     "provider": "kuaimai",
@@ -487,8 +487,8 @@ async def _post_kuaimai_payload(kuaimai_url: str, payload: Dict[str, Any], app_s
 
             if body.get("code") == 4015:
                 logger.warning(
-                    "[KUAIMAI_SIGN_DEBUG] sign=%s sign_keys=%s timestamp=%s",
-                    payload.get("sign"),
+                    "[KUAIMAI_SIGN_DEBUG] has_sign=%s sign_keys=%s timestamp=%s",
+                    bool(payload.get("sign")),
                     [key for key in sorted(payload.keys()) if key != "sign"],
                     payload.get("timestamp"),
                 )
@@ -684,14 +684,14 @@ async def print_template_order(
     generated_sign = hashlib.md5(raw_sign_input.encode("utf-8")).hexdigest()
     payload["sign"] = generated_sign
 
-    logger.warning(
-        "[KUAIMAI_SIGN_INPUT] keys=%s timestamp=%s timestamp_length=%d render_data_sha256=%s secret_length=%d generated_sign=%s",
+    logger.info(
+        "[KUAIMAI_SIGN_INPUT] keys=%s timestamp=%s timestamp_length=%d render_data_sha256=%s secret_length=%d has_sign=%s",
         sign_keys,
         payload["timestamp"],
         len(payload["timestamp"]),
         render_data_hash,
         len(app_secret),
-        generated_sign,
+        bool(generated_sign),
     )
 
     kuaimai_url = f"{KUAIMAI_API_BASE}{KUAIMAI_ESC_TEMPLATE_PRINT_PATH}"
@@ -706,8 +706,8 @@ async def print_template_order(
 
     render_data_parsed = json.loads(render_data_json)
     top_level_keys = list(render_data_parsed.keys())
-    logger.warning(
-        "[KUAIMAI_BROWSER_PARITY] payload_keys=%s timestamp=%s sn_masked=%s templateId=%s renderData_length=%d renderData_sha256=%s renderData_top_level_keys=%s sign=%s request_content_type=application/json",
+    logger.info(
+        "[KUAIMAI_BROWSER_PARITY] payload_keys=%s timestamp=%s sn_masked=%s templateId=%s renderData_length=%d renderData_sha256=%s renderData_top_level_keys=%s has_sign=%s request_content_type=application/json",
         list(payload.keys()),
         payload["timestamp"],
         _mask_string(sn),
@@ -715,7 +715,7 @@ async def print_template_order(
         len(render_data_json),
         render_data_hash,
         top_level_keys,
-        generated_sign,
+        bool(generated_sign),
     )
 
     items_value = render_data_parsed.get("items")

@@ -5,6 +5,7 @@ import urllib.parse
 import urllib.request
 
 from app.config import settings
+from app.core.logger import logger
 
 
 class WechatService:
@@ -52,7 +53,14 @@ class WechatService:
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
-            print(f"Wechat code2session error: {exc}")
+            logger.warning(
+                "WECHAT_CODE2SESSION_FAILED",
+                extra={
+                    "event": "WECHAT_CODE2SESSION_FAILED",
+                    "error_type": type(exc).__name__,
+                    "reason": "request_failed",
+                },
+            )
             return self._mock_or_raise(code, "wechat code2session request failed")
 
         if data.get("errcode"):
