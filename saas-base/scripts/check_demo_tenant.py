@@ -66,10 +66,48 @@ def mark(ok: bool | None) -> str:
     return "[warn]"
 
 
+async def find_tenants(keyword: str) -> None:
+    """List tenants whose name matches, to help locate the demo tenant_id."""
+    engine = create_async_engine(settings.DATABASE_URL)
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                sa.text(
+                    """
+                    SELECT tenant_id, name, status, payment_mode, created_at
+                    FROM tenant
+                    WHERE name LIKE :kw
+                    ORDER BY created_at
+                    LIMIT 50
+                    """
+                ),
+                {"kw": f"%{keyword}%"},
+            )
+        ).all()
+    await engine.dispose()
+    if not rows:
+        print(f"没有 name 含 '{keyword}' 的租户")
+        return
+    print(f"name 含 '{keyword}' 的租户 (tenant_id | name | status | payment_mode | 注册时间):")
+    for tid, name, status, pm, created in rows:
+        print(f"  {tid:<20} | {name!r:<24} | status={bool(status)} | {pm} | {created}")
+    print("\n拿到 tenant_id 后: python scripts/check_demo_tenant.py <tenant_id>")
+
+
 async def main() -> None:
-    tenant_id = (sys.argv[1] if len(sys.argv) > 1 else settings.DEMO_TENANT_ID or "").strip()
+    args = sys.argv[1:]
+    if args and args[0] == "--find":
+        await find_tenants(args[1] if len(args) > 1 else "演示")
+        return
+
+    tenant_id = (args[0] if args else settings.DEMO_TENANT_ID or "").strip()
     if not tenant_id:
-        raise SystemExit("用法: python scripts/check_demo_tenant.py <tenant_id>  (或先在 .env 配置 DEMO_TENANT_ID)")
+        raise SystemExit(
+            "用法:\n"
+            "  python scripts/check_demo_tenant.py <tenant_id>       # 检查某个租户\n"
+            "  python scripts/check_demo_tenant.py --find [关键词]    # 按店名找 tenant_id（默认关键词 演示）\n"
+            "  (不带参数时读取 .env 的 DEMO_TENANT_ID)"
+        )
 
     configured = (settings.DEMO_TENANT_ID or "").strip()
     verdict_fail = False
