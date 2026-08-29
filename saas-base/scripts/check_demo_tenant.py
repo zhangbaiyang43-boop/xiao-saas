@@ -32,9 +32,18 @@ import asyncio
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# Make `app` importable no matter where this file is dropped / how it's run:
+# try the repo layout (scripts/..), then the current working dir and its
+# parent. Whichever actually contains app/config.py wins.
+for _cand in (
+    Path(__file__).resolve().parents[1],
+    Path.cwd(),
+    Path.cwd().parent,
+):
+    if (_cand / "app" / "config.py").is_file():
+        if str(_cand) not in sys.path:
+            sys.path.insert(0, str(_cand))
+        break
 
 try:  # this report is Chinese-heavy; don't let a non-UTF-8 console mangle it
     sys.stdout.reconfigure(encoding="utf-8")
