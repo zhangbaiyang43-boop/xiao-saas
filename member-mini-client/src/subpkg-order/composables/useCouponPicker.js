@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { parseServerTime } from '@/utils/beijingTime'
 
 // 从 menu.vue 拆出来的优惠券横幅 + 优惠券选择器状态。逻辑跟原来在 menu.vue 里
 // 的一字未改，只是搬了个位置。
@@ -65,8 +66,8 @@ export function useCouponPicker({ availableCoupons, getTotalPrice, isCustomerLog
   const compareCouponPriority = (a, b) => {
     const discountDiff = calculateCouponDiscount(b, getTotalPrice()) - calculateCouponDiscount(a, getTotalPrice())
     if (discountDiff !== 0) return discountDiff
-    const aExpire = new Date(a.expire_time || a.valid_end_time || '2099-01-01').getTime()
-    const bExpire = new Date(b.expire_time || b.valid_end_time || '2099-01-01').getTime()
+    const aExpire = (parseServerTime(a.expire_time || a.valid_end_time) || new Date('2099-01-01')).getTime()
+    const bExpire = (parseServerTime(b.expire_time || b.valid_end_time) || new Date('2099-01-01')).getTime()
     const expiryDiff = aExpire - bExpire
     if (expiryDiff !== 0) return expiryDiff
     return String(a.id || '').localeCompare(String(b.id || ''))

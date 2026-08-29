@@ -462,6 +462,7 @@ import {
   recordSample,
 } from '@/utils/perf'
 import { reportError } from '@/utils/monitor'
+import { pickUsableCoupons } from '@/utils/coupons'
 import OrderBubble from '@/components/order-bubble/order-bubble.vue'
 import MemberCard from '../components/MemberCard.vue'
 import SpecSheet from '../components/SpecSheet.vue'
@@ -1199,9 +1200,9 @@ export default {
       }
       try {
         const res = await getCustomerCoupons('UNUSED')
-        const now = Date.now()
-        const list = (res?.data || []).filter(c => new Date(c.expire_time || c.valid_end_time || '2099-01-01').getTime() > now)
-        availableCoupons.value = list
+        // 跟 loadMemberStatus 用同一套"能不能用"口径（pickUsableCoupons），
+        // 否则会出现"会员页显示 N 张、结算页 0 张"。
+        availableCoupons.value = pickUsableCoupons(res?.data)
         if (forceBest) {
           selectBestEligibleCoupon()
           return

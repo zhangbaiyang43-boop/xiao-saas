@@ -1,4 +1,5 @@
 import { formatOrderStatusText } from '@/utils/orderStatus'
+import { parseServerTime, formatBeijingDate } from '@/utils/beijingTime'
 
 // 从 menu.vue 拆出来的纯格式化/展示函数——菜品图片、价格、规格判断、订单明细
 // 文案、优惠券文案。全部是纯函数（输入什么就算什么，不读、不改任何页面状态），
@@ -67,11 +68,13 @@ export function useOrderFormatters() {
   const couponValidityText = (coupon) => {
     const raw = coupon?.expire_time || coupon?.valid_end_time || coupon?.end_time || ''
     if (!raw) return '当前可用'
-    const end = new Date(raw)
-    if (Number.isNaN(end.getTime())) return '当前可用'
-    const now = new Date()
-    if (end.toDateString() === now.toDateString()) return '今日有效'
-    return '有效期至' + String(end.getMonth() + 1).padStart(2, '0') + '.' + String(end.getDate()).padStart(2, '0')
+    // 后端 expire_time 是裸 UTC，必须走 parseServerTime，否则差 8 小时，
+    // 会把明天到期的显示成"今日有效"、把今天到期的显示成明天。日期比较也按北京口径。
+    const end = parseServerTime(raw)
+    if (!end) return '当前可用'
+    const endDate = formatBeijingDate(end)       // YYYY-MM-DD
+    if (endDate === formatBeijingDate(new Date())) return '今日有效'
+    return '有效期至' + endDate.slice(5, 7) + '.' + endDate.slice(8, 10)
   }
   const couponPickerAmount = (c) => formatPrice(c.value || c.amount || 0)
   const couponPickerCondText = (c) => {

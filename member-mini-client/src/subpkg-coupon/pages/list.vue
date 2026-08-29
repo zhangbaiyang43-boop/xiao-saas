@@ -75,6 +75,8 @@
 import { computed, ref } from 'vue'
 import { getCustomerCoupons } from '@/api/coupon'
 import { couponStatusText, formatDate, formatMoney } from '@/utils'
+import { parseServerTime } from '@/utils/beijingTime'
+import { pickUsableCoupons } from '@/utils/coupons'
 import StateLoading from '@/components/state-loading/state-loading.vue'
 import StateError from '@/components/state-error/state-error.vue'
 import StateEmpty from '@/components/state-empty/state-empty.vue'
@@ -128,8 +130,13 @@ export default {
       error.value = ''
       try {
         const res = await getCustomerCoupons(activeTab.value)
-        if (res.code === 200) coupons.value = normalizeList(res.data, activeTab.value)
-        else error.value = res.msg || '优惠券加载失败'
+        if (res.code === 200) {
+          let list = normalizeList(res.data, activeTab.value)
+          // 「可用」Tab：后端只按 status=UNUSED 过滤，不看真实过期时间——把
+          // 已过期（裸 UTC 解析）的剔掉，别再显示成"今日有效 · 立即使用"。
+          if (activeTab.value === 'UNUSED') list = pickUsableCoupons(list)
+          coupons.value = list
+        } else error.value = res.msg || '优惠券加载失败'
       } catch (err) {
         error.value = err.message || '网络不稳定，请稍后再试'
       } finally {
@@ -160,9 +167,9 @@ export default {
 
     const isExpiringSoon = (coupon) => {
       if (coupon.status !== 'UNUSED') return false
-      const exp = coupon.expire_time || coupon.valid_end_time
-      if (!exp) return false
-      const diff = new Date(exp) - Date.now()
+      const end = parseServerTime(coupon.expire_time || coupon.valid_end_time)
+      if (!end) return false
+      const diff = end.getTime() - Date.now()
       return diff > 0 && diff < 3 * 24 * 60 * 60 * 1000
     }
 
