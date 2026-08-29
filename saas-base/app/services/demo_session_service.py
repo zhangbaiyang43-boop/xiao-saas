@@ -110,7 +110,11 @@ class DemoSessionService(BaseService):
                         EntranceCode.status == 1,
                     )
                     .order_by(EntranceCode.table_no, EntranceCode.id)
-                    .with_for_update(skip_locked=True)
+                    # plain FOR UPDATE, not SKIP LOCKED: production MySQL is < 8.0.
+                    # Concurrent demo starts serialize on the locked row instead
+                    # of skipping it; the attempted_code_ids exclusion + active-
+                    # session re-check below still pick a different free table.
+                    .with_for_update()
                     .limit(1)
                 )
                 if attempted_code_ids:
