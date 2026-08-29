@@ -287,45 +287,8 @@
             </a-radio-group>
           </div>
         </div>
-        <a-form-item label="卖点简介">
-          <div style="display:flex;gap:8px;align-items:flex-start">
-            <a-textarea v-model:value="form.desc" placeholder="例如：现做鲜奶茶，口感顺滑，推荐少冰三分糖" :rows="2" style="flex:1" />
-            <a-button size="small" :loading="aiDescLoading" @click="doGenAiDesc" style="margin-top:2px;white-space:nowrap;flex-shrink:0">
-              ✨ AI写卖点
-            </a-button>
-          </div>
-        </a-form-item>
-        <a-form-item label="菜品标签">
-          <div style="margin-bottom:8px;display:flex;gap:8px;flex-wrap:wrap">
-            <span
-              v-for="preset in tagPresets"
-              :key="preset"
-              class="tag-preset-chip"
-              :class="{ 'tag-preset-chip--on': selectedTags.includes(preset) }"
-              @click="toggleTag(preset)"
-            >{{ preset }}</span>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <a-input
-              v-model:value="customTagInput"
-              size="small"
-              placeholder="自定义标签，如：月销500份"
-              style="flex:1"
-              @keydown.enter.prevent="addCustomTag"
-            />
-            <a-button size="small" @click="addCustomTag">添加</a-button>
-          </div>
-          <div v-if="selectedTags.length" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-            <a-tag
-              v-for="tag in selectedTags"
-              :key="tag"
-              closable
-              color="green"
-              @close="removeTag(tag)"
-            >{{ tag }}</a-tag>
-          </div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:4px">最多选3个，显示在点餐页菜品名称下方</div>
-        </a-form-item>
+        <!-- 经营必填：改一道菜最常动的就是价格/分类/上架，聚在最上面，
+             不用往下滚就能改完；卖点/标签这类"配一次"的内容挪到下面。 -->
         <a-row :gutter="12">
           <a-col :span="12">
             <a-form-item label="价格（元）" name="price" :rules="[{ required: true, message: '请输入价格' }]">
@@ -349,6 +312,48 @@
         </a-row>
         <a-form-item label="是否上架" style="margin-bottom:12px">
           <a-switch v-model:checked="form.available" checked-children="上架" un-checked-children="下架" />
+        </a-form-item>
+
+        <!-- 让顾客更想点：卖点和标签是"配一次"的内容，排在必填项之后 -->
+        <div class="drawer-section-label">让顾客更想点（可选）</div>
+        <a-form-item label="卖点简介">
+          <div class="drawer-field-row">
+            <a-textarea v-model:value="form.desc" placeholder="例如：现做鲜奶茶，口感顺滑，推荐少冰三分糖" :rows="2" style="flex:1" />
+            <a-button size="small" :loading="aiDescLoading" @click="doGenAiDesc" class="drawer-field-row-btn">
+              ✨ AI写卖点
+            </a-button>
+          </div>
+        </a-form-item>
+        <a-form-item label="菜品标签">
+          <div class="tag-preset-row">
+            <span
+              v-for="preset in tagPresets"
+              :key="preset"
+              class="tag-preset-chip"
+              :class="{ 'tag-preset-chip--on': selectedTags.includes(preset) }"
+              @click="toggleTag(preset)"
+            >{{ preset }}</span>
+          </div>
+          <div class="tag-custom-row">
+            <a-input
+              v-model:value="customTagInput"
+              size="small"
+              placeholder="自定义标签，如：月销500份"
+              style="flex:1"
+              @keydown.enter.prevent="addCustomTag"
+            />
+            <a-button size="small" @click="addCustomTag">添加</a-button>
+          </div>
+          <div v-if="selectedTags.length" class="tag-selected-row">
+            <a-tag
+              v-for="tag in selectedTags"
+              :key="tag"
+              closable
+              color="green"
+              @close="removeTag(tag)"
+            >{{ tag }}</a-tag>
+          </div>
+          <div class="drawer-hint">最多选3个，显示在点餐页菜品名称下方</div>
         </a-form-item>
 
         <!-- 更多设置：会员价/划线价/排序/库存/规格都是"配一次很少再动"的字段，改价格/
@@ -1399,6 +1404,22 @@ onMounted(() => {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* 编辑抽屉：让优先级看得见——必填项在上，"让顾客更想点"用一条浅标题隔开，
+   之下才是卖点/标签，再往下是折叠的更多设置。 */
+.drawer-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: .06em;
+  margin: 4px 0 10px;
+}
+.drawer-field-row { display: flex; gap: 8px; align-items: flex-start; }
+.drawer-field-row-btn { margin-top: 2px; white-space: nowrap; flex-shrink: 0; }
+.tag-preset-row { margin-bottom: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.tag-custom-row { display: flex; gap: 6px; align-items: center; }
+.tag-selected-row { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+.drawer-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 
 .preview-block {
   margin-bottom: 16px;
