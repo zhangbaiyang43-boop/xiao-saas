@@ -1,0 +1,872 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开心点单老板体验卡 A/B Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --brand: #07c160;
+      --brand-dark: #057a3e;
+      --ink: #17221b;
+      --muted: #647069;
+      --line: #dce5df;
+      --paper: #ffffff;
+      --canvas: #eef2ef;
+      --soft: #effaf4;
+      --warning: #9b5a08;
+      --radius: 16px;
+      font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background: var(--canvas);
+    }
+
+    button { font: inherit; }
+
+    [hidden] { display: none !important; }
+
+    .toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-height: 72px;
+      padding: 12px clamp(16px, 3vw, 40px);
+      border-bottom: 1px solid #d7dfda;
+      background: rgba(255, 255, 255, 0.96);
+    }
+
+    .toolbar-title {
+      min-width: 220px;
+      margin-right: auto;
+    }
+
+    .toolbar-title strong {
+      display: block;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+
+    .toolbar-title span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f7f9f8;
+    }
+
+    .control-button,
+    .print-button {
+      min-height: 36px;
+      border: 0;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+    }
+
+    .control-button {
+      padding: 0 13px;
+      color: #59635d;
+      background: transparent;
+    }
+
+    .control-button:hover { color: var(--ink); }
+
+    .control-button.is-active {
+      color: #ffffff;
+      background: var(--ink);
+    }
+
+    .print-button {
+      padding: 0 18px;
+      color: #ffffff;
+      font-weight: 700;
+      background: var(--brand-dark);
+    }
+
+    .print-button:hover { background: #046a36; }
+
+    .print-button:active,
+    .control-button:active { transform: translateY(1px); }
+
+    .page-shell {
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      padding: 32px clamp(16px, 4vw, 48px) 56px;
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .intro h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.08;
+      letter-spacing: -0.045em;
+    }
+
+    .intro p {
+      max-width: 650px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .print-spec {
+      padding: 12px 16px;
+      border: 1px solid #cdd8d1;
+      border-radius: 12px;
+      color: #38443d;
+      background: #ffffff;
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: nowrap;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: clamp(24px, 4vw, 56px);
+      align-items: start;
+    }
+
+    .card-pair {
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+    }
+
+    .variant-note {
+      width: min(100%, 105mm);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .variant-note strong {
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .print-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: 105mm;
+      height: 148mm;
+      overflow: hidden;
+      border: 1px solid #d4ddd7;
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: 0 20px 50px rgba(27, 45, 34, 0.13);
+    }
+
+    .print-card::after {
+      content: "";
+      position: absolute;
+      inset: 5mm;
+      z-index: 5;
+      border: 1px dashed rgba(7, 193, 96, 0.22);
+      border-radius: 10px;
+      pointer-events: none;
+    }
+
+    .card-inner {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      padding: 10mm 9mm 9mm;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border-radius: 8px;
+      color: #ffffff;
+      background: var(--brand);
+      font-size: 15px;
+    }
+
+    .card-type {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .hero-copy {
+      margin: 7mm 0 0;
+      font-size: 31px;
+      line-height: 1.13;
+      letter-spacing: -0.055em;
+    }
+
+    .hero-copy em {
+      display: block;
+      color: var(--brand-dark);
+      font-style: normal;
+    }
+
+    .hero-support {
+      margin: 4mm 0 0;
+      color: #4c5851;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .benefit-list {
+      margin: 5mm 0 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--line);
+    }
+
+    .benefit-list li {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 3.2mm 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .benefit-list b {
+      color: var(--brand-dark);
+      font-size: 12px;
+    }
+
+    .scan-area {
+      display: grid;
+      grid-template-columns: 38mm 1fr;
+      gap: 5mm;
+      align-items: center;
+      margin-top: auto;
+      padding-top: 4mm;
+    }
+
+    .print-card[data-side="front"] .card-inner {
+      padding-top: 8mm;
+      padding-bottom: 7mm;
+    }
+
+    .qr-placeholder {
+      position: relative;
+      display: grid;
+      width: 38mm;
+      height: 38mm;
+      place-items: center;
+      overflow: hidden;
+      border: 2px solid #1c2a21;
+      border-radius: 10px;
+      background-color: #ffffff;
+      background-image:
+        linear-gradient(90deg, rgba(23, 34, 27, 0.12) 50%, transparent 50%),
+        linear-gradient(rgba(23, 34, 27, 0.12) 50%, transparent 50%);
+      background-size: 7mm 7mm;
+    }
+
+    .qr-placeholder::before,
+    .qr-placeholder::after {
+      content: "";
+      position: absolute;
+      inset: 4mm;
+      border: 3px solid #1c2a21;
+    }
+
+    .qr-placeholder::after {
+      inset: auto 4mm 4mm auto;
+      width: 7mm;
+      height: 7mm;
+      background: #ffffff;
+    }
+
+    .qr-placeholder span {
+      position: relative;
+      z-index: 2;
+      max-width: 29mm;
+      padding: 5px 6px;
+      border: 1px solid #d7dfda;
+      border-radius: 6px;
+      color: #29342d;
+      background: rgba(255, 255, 255, 0.96);
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 1.35;
+      text-align: center;
+    }
+
+    .scan-copy strong {
+      display: block;
+      font-size: 19px;
+      line-height: 1.35;
+      letter-spacing: -0.03em;
+    }
+
+    .scan-copy p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .demo-warning {
+      margin-top: 4mm;
+      color: var(--warning);
+      font-size: 9px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .variant-b-front .hero-copy { margin-top: 8mm; }
+
+    .variant-b-front .qr-focus {
+      display: grid;
+      grid-template-columns: 46mm 1fr;
+      gap: 6mm;
+      align-items: center;
+      margin-top: 6mm;
+      padding: 5mm;
+      border: 1px solid #cfe9db;
+      border-radius: 14px;
+      background: var(--soft);
+    }
+
+    .variant-b-front .qr-placeholder {
+      width: 46mm;
+      height: 46mm;
+    }
+
+    .qr-focus strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
+    .qr-focus p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .proof-line {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: auto;
+      padding-top: 4mm;
+      border-top: 1px solid var(--line);
+      color: #405048;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .proof-line span::before {
+      content: "✓";
+      margin-right: 4px;
+      color: var(--brand-dark);
+    }
+
+    .back-title {
+      max-width: 85mm;
+      margin: 10mm 0 0;
+      font-size: 27px;
+      line-height: 1.18;
+      letter-spacing: -0.045em;
+    }
+
+    .print-card[data-side="back"] .card-inner {
+      padding-top: 8mm;
+      padding-bottom: 7mm;
+    }
+
+    .print-card[data-side="back"] .back-title { margin-top: 6mm; }
+
+    .back-title em {
+      color: var(--brand-dark);
+      font-style: normal;
+    }
+
+    .check-list {
+      margin-top: 5mm;
+      border-top: 1px solid var(--ink);
+    }
+
+    .check-item {
+      display: grid;
+      grid-template-columns: 13mm 1fr;
+      gap: 4mm;
+      padding: 3.2mm 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .check-number {
+      color: var(--brand-dark);
+      font-size: 21px;
+      font-weight: 900;
+    }
+
+    .check-item strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .check-item p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .value-chain {
+      margin-top: 4mm;
+      padding: 4mm;
+      border-radius: 12px;
+      color: #ffffff;
+      background: var(--brand-dark);
+      font-size: 15px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .contact-strip {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4mm;
+      align-items: end;
+      margin-top: auto;
+      padding-top: 4mm;
+      border-top: 1px solid var(--line);
+    }
+
+    .contact-strip strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .contact-strip p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.55;
+    }
+
+    .contact-box {
+      min-width: 33mm;
+      padding: 3mm;
+      border: 1px dashed #aab8af;
+      border-radius: 9px;
+      color: #59665e;
+      font-size: 10px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .decision-flow {
+      display: grid;
+      grid-template-columns: 1fr 18px 1fr 18px 1fr;
+      align-items: center;
+      margin-top: 7mm;
+    }
+
+    .decision-step {
+      display: grid;
+      min-height: 27mm;
+      place-items: center;
+      padding: 3mm;
+      border: 1px solid #cfe0d6;
+      border-radius: 12px;
+      background: var(--soft);
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 1.45;
+      text-align: center;
+    }
+
+    .decision-arrow {
+      color: var(--brand-dark);
+      font-size: 17px;
+      font-weight: 900;
+      text-align: center;
+    }
+
+    .low-pressure {
+      margin-top: 6mm;
+      padding: 4mm 0;
+      border-top: 1px solid var(--ink);
+      border-bottom: 1px solid var(--ink);
+    }
+
+    .low-pressure strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1.35;
+    }
+
+    .low-pressure p {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .fit-note {
+      margin: 5mm 0 0;
+      color: #405048;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.6;
+    }
+
+    .fit-note::before {
+      content: "✓";
+      margin-right: 6px;
+      color: var(--brand-dark);
+    }
+
+    .footnote {
+      width: min(100%, 880px);
+      margin: 34px auto 0;
+      padding: 18px 20px;
+      border-left: 4px solid var(--brand);
+      border-radius: 0 12px 12px 0;
+      color: #4e5a53;
+      background: #ffffff;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    @media (max-width: 900px) {
+      .toolbar { flex-wrap: wrap; }
+      .toolbar-title { width: 100%; }
+      .intro { grid-template-columns: 1fr; }
+      .print-spec { justify-self: start; }
+      .comparison { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 480px) {
+      .toolbar { gap: 8px; }
+      .control-group { width: 100%; }
+      .control-button { flex: 1; }
+      .print-button { width: 100%; }
+      .page-shell { padding-inline: 8px; overflow: hidden; }
+      .intro { padding-inline: 8px; }
+      .comparison,
+      .card-pair { width: 100%; min-width: 0; }
+      .print-card {
+        width: 100%;
+        height: auto;
+        min-height: 0;
+        aspect-ratio: 105 / 148;
+      }
+      .card-inner { padding-inline: 6vw; }
+      .hero-copy { font-size: clamp(24px, 7.4vw, 31px); }
+      .hero-support { font-size: clamp(12px, 3.4vw, 14px); }
+      .benefit-list li { padding-block: 2.1vw; font-size: clamp(12px, 3.3vw, 14px); }
+      .scan-area { grid-template-columns: 32vw 1fr; gap: 4vw; }
+      .scan-area .qr-placeholder { width: 32vw; height: 32vw; }
+      .scan-copy strong { font-size: clamp(15px, 4.3vw, 19px); }
+      .variant-b-front .qr-focus { grid-template-columns: 38vw 1fr; gap: 4vw; padding: 4vw; }
+      .variant-b-front .qr-placeholder { width: 38vw; height: 38vw; }
+      .back-title { font-size: clamp(22px, 6.6vw, 27px); }
+      .check-item { grid-template-columns: 10vw 1fr; gap: 3vw; }
+      .check-item strong { font-size: clamp(13px, 3.7vw, 15px); }
+      .decision-flow { grid-template-columns: 1fr 14px 1fr 14px 1fr; }
+      .decision-step { min-height: 23vw; padding: 2vw; font-size: clamp(11px, 3.2vw, 13px); }
+    }
+
+    @page {
+      size: A6 portrait;
+      margin: 0;
+    }
+
+    @media print {
+      body { background: #ffffff; }
+      .toolbar,
+      .intro,
+      .variant-note,
+      .footnote { display: none !important; }
+      .page-shell { width: auto; margin: 0; padding: 0; }
+      .comparison { display: block; }
+      .card-pair { display: block; }
+      .card-pair[hidden],
+      .print-card[hidden] { display: none !important; }
+      .print-card {
+        width: 105mm;
+        height: 148mm;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+        break-after: page;
+      }
+      .print-card:last-of-type { break-after: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="toolbar" aria-label="体验卡预览工具栏">
+    <div class="toolbar-title">
+      <strong>开心点单老板体验卡</strong>
+      <span>A/B文案对比与A6打印预览</span>
+    </div>
+
+    <div class="control-group" aria-label="选择版本">
+      <button class="control-button" type="button" data-select-variant="a">A版</button>
+      <button class="control-button" type="button" data-select-variant="b">B版</button>
+      <button class="control-button is-active" type="button" data-select-variant="compare">并排对比</button>
+    </div>
+
+    <div class="control-group" aria-label="选择卡片面">
+      <button class="control-button is-active" type="button" data-select-side="front">正面</button>
+      <button class="control-button" type="button" data-select-side="back">背面</button>
+    </div>
+
+    <button class="print-button" type="button" data-print>打印当前视图</button>
+  </header>
+
+  <main class="page-shell">
+    <section class="intro">
+      <div>
+        <h1>让饭店老板先扫、先试、再决定</h1>
+        <p>A版直击顾客下单与商家接单的联动效果，B版用两部手机降低理解门槛。正式印刷前，只需替换真实商家体验台二维码和联系方式。</p>
+      </div>
+      <div class="print-spec">成品 105 × 148 mm<br>建议 300g 哑粉纸双面</div>
+    </section>
+
+    <section class="comparison" aria-live="polite">
+      <div class="card-pair" data-variant="a">
+        <div class="variant-note">
+          <strong>A版</strong>
+          <span>效率痛点直击</span>
+        </div>
+
+        <article class="print-card" data-side="front" aria-label="A版正面">
+          <div class="card-inner">
+            <div class="brand-row">
+              <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+              <span class="card-type">餐馆老板体验卡</span>
+            </div>
+
+            <h2 class="hero-copy">老板扫码看后台<em>顾客下单马上出现</em></h2>
+            <p class="hero-support">用两部手机，把扫码点单、商家接单和上菜完整走一遍。</p>
+
+            <ul class="benefit-list">
+              <li><b>01</b><span>老板手机打开商家体验台</span></li>
+              <li><b>02</b><span>另一台手机扫描顾客点餐码</span></li>
+              <li><b>03</b><span>订单自动出现，现场接单上菜</span></li>
+            </ul>
+
+            <div class="scan-area">
+              <div class="qr-placeholder" role="img" aria-label="演示二维码占位"><span>演示二维码占位<br>正式印刷前替换</span></div>
+              <div class="scan-copy">
+                <strong>老板扫码进入Demo工作台</strong>
+                <p>进入后生成本次专属顾客点餐码</p>
+              </div>
+            </div>
+            <div class="demo-warning">当前二维码不可扫码，请勿直接印刷</div>
+          </div>
+        </article>
+
+        <article class="print-card" data-side="back" aria-label="A版背面" hidden>
+          <div class="card-inner">
+            <div class="brand-row">
+              <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+              <span class="card-type">体验时重点看</span>
+            </div>
+
+            <h2 class="back-title">两部手机，现场走完这<em>3步</em></h2>
+
+            <div class="check-list">
+              <div class="check-item">
+                <span class="check-number">01</span>
+                <div><strong>老板先扫体验卡</strong><p>手机直接进入Demo工作台，不需要商家账号。</p></div>
+              </div>
+              <div class="check-item">
+                <span class="check-number">02</span>
+                <div><strong>另一台手机扫顾客码</strong><p>顾客选菜提交，订单会自动出现在老板端。</p></div>
+              </div>
+              <div class="check-item">
+                <span class="check-number">03</span>
+                <div><strong>老板现场处理订单</strong><p>依次体验接单、制作完成和确认上菜。</p></div>
+              </div>
+            </div>
+
+            <div class="value-chain">顾客下单 → 商家接单 → 制作完成 → 确认上菜</div>
+
+            <div class="contact-strip">
+              <div><strong>本地可协助落地</strong><p>录菜单、放桌码、教店员，开店就能用。</p></div>
+              <div class="contact-box">业务微信<br>正式印刷前填写</div>
+            </div>
+          </div>
+        </article>
+      </div>
+
+      <div class="card-pair" data-variant="b">
+        <div class="variant-note">
+          <strong>B版</strong>
+          <span>先体验再决定</span>
+        </div>
+
+        <article class="print-card variant-b-front" data-side="front" aria-label="B版正面">
+          <div class="card-inner">
+            <div class="brand-row">
+              <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+              <span class="card-type">餐馆老板体验卡</span>
+            </div>
+
+            <h2 class="hero-copy">两部手机1分钟<em>前台后台一起体验</em></h2>
+            <p class="hero-support">不用听长介绍，现场看顾客下单后商家端会发生什么。</p>
+
+            <div class="qr-focus">
+              <div class="qr-placeholder" role="img" aria-label="演示二维码占位"><span>演示二维码占位<br>正式印刷前替换</span></div>
+              <div>
+                <strong>老板扫码进入Demo工作台</strong>
+                <p>进入后生成本次专属顾客点餐码</p>
+              </div>
+            </div>
+
+            <div class="proof-line">
+              <span>顾客扫码下单</span>
+              <span>商家2秒见单</span>
+              <span>接单上菜全流程</span>
+            </div>
+            <div class="demo-warning">当前二维码不可扫码，请勿直接印刷</div>
+          </div>
+        </article>
+
+        <article class="print-card" data-side="back" aria-label="B版背面" hidden>
+          <div class="card-inner">
+            <div class="brand-row">
+              <div class="brand"><span class="brand-mark">开</span>开心点单</div>
+              <span class="card-type">不着急做决定</span>
+            </div>
+
+            <h2 class="back-title">先体验，<em>再决定</em></h2>
+
+            <div class="decision-flow">
+              <div class="decision-step">老板手机<br>扫体验卡</div>
+              <div class="decision-arrow">→</div>
+              <div class="decision-step">另一手机<br>扫顾客码</div>
+              <div class="decision-arrow">→</div>
+              <div class="decision-step">处理订单<br>完成上菜</div>
+            </div>
+
+            <div class="low-pressure">
+              <strong>不用听一大段介绍，也不用当场购买。</strong>
+              <p>你只需要判断三件事：顾客会不会点、商家能不能及时看到、接单到上菜是否顺手。</p>
+            </div>
+
+            <p class="fit-note">合适就帮你录菜单、配置桌码和培训店员，不合适不用购买。</p>
+
+            <div class="contact-strip">
+              <div><strong>想进一步了解</strong><p>加业务微信，发店名即可安排演示。</p></div>
+              <div class="contact-box">业务微信<br>正式印刷前填写</div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <aside class="footnote">
+      这是一份结构与文案Demo。灰色虚线是5mm安全区，仅用于屏幕检查；正式印刷时需要替换真实二维码、联系方式，并交给印刷店增加3mm出血。
+    </aside>
+  </main>
+
+  <script>
+    const state = { variant: 'compare', side: 'front' };
+    const pairs = [...document.querySelectorAll('.card-pair')];
+    const cards = [...document.querySelectorAll('.print-card')];
+    const variantButtons = [...document.querySelectorAll('[data-select-variant]')];
+    const sideButtons = [...document.querySelectorAll('[data-select-side]')];
+
+    function render() {
+      pairs.forEach((pair) => {
+        pair.hidden = state.variant !== 'compare' && pair.dataset.variant !== state.variant;
+      });
+
+      cards.forEach((card) => {
+        card.hidden = card.dataset.side !== state.side;
+      });
+
+      variantButtons.forEach((button) => {
+        const active = button.dataset.selectVariant === state.variant;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+
+      sideButtons.forEach((button) => {
+        const active = button.dataset.selectSide === state.side;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    variantButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        state.variant = button.dataset.selectVariant;
+        render();
+      });
+    });
+
+    sideButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        state.side = button.dataset.selectSide;
+        render();
+      });
+    });
+
+    document.querySelector('[data-print]').addEventListener('click', () => window.print());
+    render();
+  </script>
+</body>
+</html>
