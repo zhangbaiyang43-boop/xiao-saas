@@ -174,6 +174,9 @@ class Settings(BaseSettings):
     
     LOCK_DEFAULT_TIMEOUT: int = 10
     LOCK_RETRY_DELAY: int = 100
+
+    # Empty URL disables ops alerts (no-op). Independent of WEWORK_* CRM credentials.
+    OPS_ALERT_WEBHOOK_URL: str = ""
     
     def model_post_init(self, __context) -> None:
         if not self.WECHAT_APP_ and self.WECHAT_APP_ID:

@@ -136,12 +136,24 @@ def _build_handlers():
     return console_handler, file_handler
 
 
+def _ensure_ops_alert_filter(target: logging.Logger) -> None:
+    try:
+        from app.core.ops_alert import OpsAlertFilter
+    except Exception:
+        return
+    for handler in target.handlers:
+        if any(isinstance(item, OpsAlertFilter) for item in handler.filters):
+            continue
+        handler.addFilter(OpsAlertFilter())
+
+
 def _attach_handlers(target: logging.Logger, handlers) -> None:
     target.setLevel(logging.INFO)
     target.handlers.clear()
     for handler in handlers:
         target.addHandler(handler)
     target.propagate = False
+    _ensure_ops_alert_filter(target)
 
 
 def setup_logger():
@@ -156,12 +168,16 @@ def setup_logger():
     named = logging.getLogger("saas-member")
     app_logger = logging.getLogger("app")
     if _LOGGING_CONFIGURED and named.handlers and app_logger.handlers:
+        _ensure_ops_alert_filter(named)
+        _ensure_ops_alert_filter(app_logger)
         return named
 
     handlers = _build_handlers()
     _attach_handlers(named, handlers)
     _attach_handlers(app_logger, handlers)
     _LOGGING_CONFIGURED = True
+    _ensure_ops_alert_filter(named)
+    _ensure_ops_alert_filter(app_logger)
     return named
 
 
