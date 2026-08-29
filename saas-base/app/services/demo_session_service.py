@@ -15,6 +15,7 @@ from app.core.security import (
 )
 from app.models.dining import DiningSession
 from app.models.entrance_code import EntranceCode
+from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
 from app.services.base_service import BaseService
 from app.services.dining_session_service import DiningSessionService
@@ -33,6 +34,14 @@ class DemoPoolFullError(RuntimeError):
 
 
 class DemoInvalidLaunchError(RuntimeError):
+    pass
+
+
+class DemoOrderNotFoundError(RuntimeError):
+    pass
+
+
+class DemoActionDeniedError(RuntimeError):
     pass
 
 
@@ -167,3 +176,173 @@ class DemoSessionService(BaseService):
 
         await self.db.rollback()
         raise DemoPoolFullError("体验人数较多，请稍后再试")
+
+    async def get_session_snapshot(
+        self, tenant_id: str, dining_session_id: int | str
+    ) -> dict:
+        session_result = await self.db.execute(
+            select(DiningSession).where(
+                DiningSession.id == int(dining_session_id),
+                DiningSession.tenant_id == tenant_id,
+            )
+        )
+        session = session_result.scalar_one_or_none()
+        if session is None:
+            raise DemoOrderNotFoundError("体验会话不存在")
+
+        orders_result = await self.db.execute(
+            select(Order)
+            .where(
+                Order.tenant_id == tenant_id,
+                Order.dining_session_id == int(dining_session_id),
+            )
+            .order_by(Order.created_at, Order.id)
+        )
+        orders = list(orders_result.scalars().all())
+        items_by_order = await self._load_items_by_order(orders)
+        return {
+            "diningSessionId": str(session.id),
+            "tableNo": session.table_no or "",
+            "sessionStatus": session.status,
+            "orders": [
+                self._serialize_demo_order(order, items_by_order.get(order.id, []))
+                for order in orders
+            ],
+        }
+
+    async def update_order_status(
+        self,
+        *,
+        tenant_id: str,
+        dining_session_id: int | str,
+        order_id: int | str,
+        status: str,
+    ) -> dict:
+        if status not in {"preparing", "done"}:
+            raise DemoActionDeniedError("体验模式不允许此订单状态")
+        order = await self._load_scoped_order(
+            tenant_id=tenant_id,
+            dining_session_id=dining_session_id,
+            order_id=order_id,
+        )
+
+        from app.api.v1.orders import OrderStatusUpdate
+        from app.services.order_lifecycle_service import OrderLifecycleService
+
+        lifecycle = OrderLifecycleService(self.db)
+        lifecycle.set_tenant_id(tenant_id)
+        result = await lifecycle.update_order_status(
+            int(order.id),
+            OrderStatusUpdate(status=status),
+            account_id=None,
+            role="demo",
+        )
+        if result.code == 404:
+            raise DemoOrderNotFoundError("订单不存在")
+        if result.code != 200:
+            raise DemoActionDeniedError(result.msg)
+        return await self._load_serialized_order(
+            tenant_id=tenant_id,
+            dining_session_id=dining_session_id,
+            order_id=order.id,
+        )
+
+    async def serve_order(
+        self,
+        *,
+        tenant_id: str,
+        dining_session_id: int | str,
+        order_id: int | str,
+    ) -> dict:
+        order = await self._load_scoped_order(
+            tenant_id=tenant_id,
+            dining_session_id=dining_session_id,
+            order_id=order_id,
+        )
+
+        from app.services.order_lifecycle_service import OrderLifecycleService
+
+        lifecycle = OrderLifecycleService(self.db)
+        lifecycle.set_tenant_id(tenant_id)
+        result = await lifecycle.serve_order(
+            int(order.id), account_id=None, role="demo"
+        )
+        if result.code == 404:
+            raise DemoOrderNotFoundError("订单不存在")
+        if result.code != 200:
+            raise DemoActionDeniedError(result.msg)
+        return await self._load_serialized_order(
+            tenant_id=tenant_id,
+            dining_session_id=dining_session_id,
+            order_id=order.id,
+        )
+
+    async def _load_scoped_order(
+        self,
+        *,
+        tenant_id: str,
+        dining_session_id: int | str,
+        order_id: int | str,
+    ) -> Order:
+        result = await self.db.execute(
+            select(Order).where(
+                Order.id == int(order_id),
+                Order.tenant_id == tenant_id,
+                Order.dining_session_id == int(dining_session_id),
+            )
+        )
+        order = result.scalar_one_or_none()
+        if order is None:
+            raise DemoOrderNotFoundError("订单不存在")
+        return order
+
+    async def _load_serialized_order(
+        self,
+        *,
+        tenant_id: str,
+        dining_session_id: int | str,
+        order_id: int | str,
+    ) -> dict:
+        order = await self._load_scoped_order(
+            tenant_id=tenant_id,
+            dining_session_id=dining_session_id,
+            order_id=order_id,
+        )
+        items_by_order = await self._load_items_by_order([order])
+        return self._serialize_demo_order(order, items_by_order.get(order.id, []))
+
+    async def _load_items_by_order(
+        self, orders: list[Order]
+    ) -> dict[int, list[OrderItem]]:
+        if not orders:
+            return {}
+        order_ids = [order.id for order in orders]
+        result = await self.db.execute(
+            select(OrderItem)
+            .where(OrderItem.order_id.in_(order_ids))
+            .order_by(OrderItem.id)
+        )
+        items_by_order: dict[int, list[OrderItem]] = {}
+        for item in result.scalars().all():
+            items_by_order.setdefault(item.order_id, []).append(item)
+        return items_by_order
+
+    @staticmethod
+    def _serialize_demo_order(order: Order, items: list[OrderItem]) -> dict:
+        return {
+            "orderId": str(order.id),
+            "displayOrderNo": str(order.id)[-4:],
+            "tableNo": order.table_no or "",
+            "status": order.status,
+            "servedAt": order.served_at.isoformat() if order.served_at else None,
+            "createdAt": order.created_at.isoformat() if order.created_at else None,
+            "remark": order.remark or "",
+            "items": [
+                {
+                    "name": item.name,
+                    "quantity": item.qty,
+                    "remark": item.item_remark or "",
+                }
+                for item in items
+            ],
+        }

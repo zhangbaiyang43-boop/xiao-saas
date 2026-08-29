@@ -10,9 +10,12 @@ from app.core.security import create_demo_launch_code
 from app.models.base import Base
 from app.models.dining import DiningSession
 from app.models.entrance_code import EntranceCode
+from app.models.order import Order, OrderItem
 from app.models.tenant import Tenant
 from app.services.demo_session_service import (
+    DemoActionDeniedError,
     DemoInvalidLaunchError,
+    DemoOrderNotFoundError,
     DemoPoolFullError,
     DemoRateLimitedError,
     DemoSessionService,
@@ -230,6 +233,212 @@ class DemoSessionAllocationTest(unittest.IsolatedAsyncioTestCase):
     async def test_empty_demo_tenant_disables_allocation(self):
         with self.assertRaises(DemoUnavailableError):
             await self.service.start_session(self.launch_code, "127.0.0.1")
+
+
+class DemoOrderScopeTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with self.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        session_factory = sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
+        self.db = session_factory()
+        self.db.add_all(
+            [
+                Tenant(
+                    tenant_id="demo-tenant",
+                    name="开心点单体验店",
+                    password_hash="x",
+                    status=True,
+                    is_open=True,
+                    payment_mode="postpay",
+                ),
+                Tenant(
+                    tenant_id="other-tenant",
+                    name="其他门店",
+                    password_hash="x",
+                    status=True,
+                    is_open=True,
+                    payment_mode="postpay",
+                ),
+            ]
+        )
+        now = datetime.utcnow()
+        self.session_a = DiningSession(
+            tenant_id="demo-tenant",
+            table_no="DEMO-01",
+            status="OPEN",
+            active_key="demo-tenant:DEMO-01",
+            started_at=now,
+            last_activity_at=now,
+        )
+        self.session_b = DiningSession(
+            tenant_id="demo-tenant",
+            table_no="DEMO-02",
+            status="OPEN",
+            active_key="demo-tenant:DEMO-02",
+            started_at=now,
+            last_activity_at=now,
+        )
+        self.other_session = DiningSession(
+            tenant_id="other-tenant",
+            table_no="OTHER-01",
+            status="OPEN",
+            active_key="other-tenant:OTHER-01",
+            started_at=now,
+            last_activity_at=now,
+        )
+        self.db.add_all([self.session_a, self.session_b, self.other_session])
+        await self.db.flush()
+
+        self.order_a = self.make_order(
+            tenant_id="demo-tenant",
+            session=self.session_a,
+            phone="13800000000",
+            wx_transaction_id="wx-secret-a",
+        )
+        self.order_b = self.make_order(
+            tenant_id="demo-tenant",
+            session=self.session_b,
+            phone="13900000000",
+            wx_transaction_id="wx-secret-b",
+        )
+        self.other_order = self.make_order(
+            tenant_id="other-tenant",
+            session=self.other_session,
+            phone="13700000000",
+            wx_transaction_id="wx-secret-other",
+        )
+        self.db.add_all([self.order_a, self.order_b, self.other_order])
+        await self.db.flush()
+        self.db.add_all(
+            [
+                OrderItem(
+                    id=generate_snowflake_id(),
+                    order_id=self.order_a.id,
+                    name="招牌牛肉饭",
+                    price="28.00",
+                    qty=2,
+                    item_remark="少辣",
+                ),
+                OrderItem(
+                    id=generate_snowflake_id(),
+                    order_id=self.order_b.id,
+                    name="酸辣粉",
+                    price="18.00",
+                    qty=1,
+                ),
+            ]
+        )
+        await self.db.commit()
+        self.service = DemoSessionService(self.db)
+
+    async def asyncTearDown(self):
+        await self.db.close()
+        await self.engine.dispose()
+
+    @staticmethod
+    def make_order(
+        *, tenant_id: str, session: DiningSession, phone: str, wx_transaction_id: str
+    ) -> Order:
+        return Order(
+            tenant_id=tenant_id,
+            table_no=session.table_no,
+            dining_session_id=session.id,
+            status="pending",
+            payment_status="unpaid",
+            payment_mode="postpay",
+            total="56.00",
+            remark="不要香菜",
+            phone=phone,
+            wx_transaction_id=wx_transaction_id,
+        )
+
+    async def test_snapshot_returns_only_token_session_and_no_pii(self):
+        data = await self.service.get_session_snapshot(
+            "demo-tenant", self.session_a.id
+        )
+
+        self.assertEqual(data["diningSessionId"], str(self.session_a.id))
+        self.assertEqual(data["tableNo"], "DEMO-01")
+        self.assertEqual(
+            [order["orderId"] for order in data["orders"]], [str(self.order_a.id)]
+        )
+        self.assertEqual(
+            data["orders"][0]["items"],
+            [{"name": "招牌牛肉饭", "quantity": 2, "remark": "少辣"}],
+        )
+        forbidden = {
+            "phone",
+            "openid",
+            "customerId",
+            "transactionId",
+            "paymentTransactionId",
+            "paymentStatus",
+        }
+        self.assertTrue(forbidden.isdisjoint(data["orders"][0]))
+        self.assertNotIn("13800000000", str(data))
+        self.assertNotIn("wx-secret-a", str(data))
+
+    async def test_cross_session_status_update_looks_not_found(self):
+        with self.assertRaises(DemoOrderNotFoundError):
+            await self.service.update_order_status(
+                tenant_id="demo-tenant",
+                dining_session_id=self.session_a.id,
+                order_id=self.order_b.id,
+                status="preparing",
+            )
+
+    async def test_only_pending_preparing_done_transitions_are_exposed(self):
+        preparing = await self.service.update_order_status(
+            tenant_id="demo-tenant",
+            dining_session_id=self.session_a.id,
+            order_id=self.order_a.id,
+            status="preparing",
+        )
+        done = await self.service.update_order_status(
+            tenant_id="demo-tenant",
+            dining_session_id=self.session_a.id,
+            order_id=self.order_a.id,
+            status="done",
+        )
+
+        self.assertEqual(preparing["status"], "preparing")
+        self.assertEqual(done["status"], "done")
+        with self.assertRaises(DemoActionDeniedError):
+            await self.service.update_order_status(
+                tenant_id="demo-tenant",
+                dining_session_id=self.session_a.id,
+                order_id=self.order_a.id,
+                status="settled",
+            )
+
+    async def test_serve_is_scoped_and_idempotent(self):
+        self.order_a.status = "done"
+        await self.db.commit()
+
+        first = await self.service.serve_order(
+            tenant_id="demo-tenant",
+            dining_session_id=self.session_a.id,
+            order_id=self.order_a.id,
+        )
+        second = await self.service.serve_order(
+            tenant_id="demo-tenant",
+            dining_session_id=self.session_a.id,
+            order_id=self.order_a.id,
+        )
+
+        self.assertTrue(first["servedAt"])
+        self.assertEqual(second["servedAt"], first["servedAt"])
+
+    async def test_cross_tenant_order_looks_not_found(self):
+        with self.assertRaises(DemoOrderNotFoundError):
+            await self.service.serve_order(
+                tenant_id="demo-tenant",
+                dining_session_id=self.session_a.id,
+                order_id=self.other_order.id,
+            )
 
 
 if __name__ == "__main__":
