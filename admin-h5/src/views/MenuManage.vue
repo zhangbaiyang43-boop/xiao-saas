@@ -127,13 +127,18 @@
               <span v-else>{{ dish.emoji || '🍽️' }}</span>
               <div v-if="!dish.image && dish.available" class="no-img-badge">建议上传图片</div>
             </div>
-            <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-                <span style="font-size:14px;font-weight:600"
-                  :style="!dish.available ? { color:'var(--text-3)', textDecoration:'line-through' } : {}">{{ dish.name }}</span>
+            <!-- 一行里扫的是"这是哪道菜、能不能点、多少钱"——菜名+状态、价格
+                 放最前两行；分类/排序/库存和卖点简介是次要信息，压在下面。 -->
+            <div class="dish-body">
+              <div class="dish-name-row">
+                <span class="dish-name" :class="{ 'dish-name--off': !dish.available }">{{ dish.name }}</span>
                 <a-tag v-if="!dish.available" color="default" size="small">已下架</a-tag>
                 <a-tag v-else-if="dish.stock !== null && dish.stock !== undefined && dish.stock <= 0" color="red" size="small">售罄</a-tag>
                 <a-tag v-if="dish.spec_groups && dish.spec_groups.length" color="purple" size="small">有格</a-tag>
+              </div>
+              <div class="dish-price-row">
+                <span class="dish-price" :class="{ 'dish-price--off': !dish.available }">¥{{ dish.price }}</span>
+                <span v-if="dish.member_price" class="dish-member-price">会员¥{{ dish.member_price }}</span>
               </div>
               <div class="dish-meta">
                 <span class="dish-cat-text">{{ dish.category || '默认' }}</span>
@@ -141,10 +146,6 @@
                 <span v-if="dish.stock !== null && dish.stock !== undefined && dish.stock > 0" class="dish-stock-text">· 库存 {{ dish.stock }}</span>
               </div>
               <div class="dish-desc" :class="{ 'dish-desc--empty': !displayDesc(dish, true) }">{{ displayDesc(dish) }}</div>
-              <div style="display:flex;align-items:baseline;gap:6px;margin-top:4px">
-                <span style="font-size:16px;font-weight:900" :style="{ color: dish.available ? 'var(--text-1)' : 'var(--text-3)' }">¥{{ dish.price }}</span>
-                <span v-if="dish.member_price" style="font-size:12px;color:var(--brand);font-weight:600">会员¥{{ dish.member_price }}</span>
-              </div>
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0">
               <!-- 售罄/恢复 -->
@@ -267,26 +268,6 @@
             </a-form-item>
           </a-col>
         </a-row>
-        <!-- 分享到菜品库：这是锦上添花的次要动作，不该跟"菜品名称"这种核心字段同一
-             视觉权重。改成图片上传后自动出现的一条轻量提示条（虚线边框+浅底色），
-             一眼能看出这是"顺手勾选"而不是必填项。 -->
-        <div v-if="form.image" class="library-share-strip">
-          <label class="library-share-toggle">
-            <a-checkbox v-model:checked="form.shareToLibrary" />
-            <span>分享这张图给其他商户复用（只分享菜名和图片）</span>
-          </label>
-          <div v-if="form.shareToLibrary" class="library-share-options">
-            <a-select v-model:value="form.libraryCuisineType" size="small" style="width:130px">
-              <a-select-option value="sichuan">川菜</a-select-option>
-              <a-select-option value="bbq">烧烤</a-select-option>
-              <a-select-option value="universal">标准品/通用</a-select-option>
-            </a-select>
-            <a-radio-group v-model:value="form.libraryKind" size="small">
-              <a-radio-button value="dish">现做菜品</a-radio-button>
-              <a-radio-button value="standard">标准品（图片完全一致）</a-radio-button>
-            </a-radio-group>
-          </div>
-        </div>
         <!-- 经营必填：改一道菜最常动的就是价格/分类/上架，聚在最上面，
              不用往下滚就能改完；卖点/标签这类"配一次"的内容挪到下面。 -->
         <a-row :gutter="12">
@@ -355,6 +336,26 @@
           </div>
           <div class="drawer-hint">最多选3个，显示在点餐页菜品名称下方</div>
         </a-form-item>
+
+        <!-- 分享到菜品库：最次要的"顺手勾选"动作，排在所有内容字段之后、更多设置
+             之前。只在上传过图片时出现，一条虚线提示条，不跟核心字段抢注意力。 -->
+        <div v-if="form.image" class="library-share-strip">
+          <label class="library-share-toggle">
+            <a-checkbox v-model:checked="form.shareToLibrary" />
+            <span>分享这张图给其他商户复用（只分享菜名和图片）</span>
+          </label>
+          <div v-if="form.shareToLibrary" class="library-share-options">
+            <a-select v-model:value="form.libraryCuisineType" size="small" style="width:130px">
+              <a-select-option value="sichuan">川菜</a-select-option>
+              <a-select-option value="bbq">烧烤</a-select-option>
+              <a-select-option value="universal">标准品/通用</a-select-option>
+            </a-select>
+            <a-radio-group v-model:value="form.libraryKind" size="small">
+              <a-radio-button value="dish">现做菜品</a-radio-button>
+              <a-radio-button value="standard">标准品（图片完全一致）</a-radio-button>
+            </a-radio-group>
+          </div>
+        </div>
 
         <!-- 更多设置：会员价/划线价/排序/库存/规格都是"配一次很少再动"的字段，改价格/
              上下架这种高频编辑场景根本用不上，默认折叠减少认知负担；如果这道菜本来就
@@ -1253,6 +1254,16 @@ onMounted(() => {
   padding: 12px 16px;
 }
 
+/* 菜品行内的优先级：菜名+状态 → 价格 → 分类/排序/库存 → 卖点 */
+.dish-body { flex: 1; min-width: 0; }
+.dish-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.dish-name { font-size: 14px; font-weight: 600; color: var(--text-1); }
+.dish-name--off { color: var(--text-3); text-decoration: line-through; }
+.dish-price-row { display: flex; align-items: baseline; gap: 6px; margin: 2px 0; }
+.dish-price { font-size: 16px; font-weight: 900; color: var(--text-1); }
+.dish-price--off { color: var(--text-3); }
+.dish-member-price { font-size: 12px; font-weight: 600; color: var(--brand); }
+
 .dish-emoji-box {
   width: 60px;
   height: 60px;
@@ -1314,7 +1325,8 @@ onMounted(() => {
   font-size: 12px;
 }
 
-.dish-stock-text { font-size: 11px; font-weight: 600; color: var(--warning); }
+/* 库存数字是信息不是告警，跟"分类·排序"同一档灰，不再用橙色抢眼 */
+.dish-stock-text { font-size: 12px; color: var(--text-3); }
 .dish-edit-btn { color: #2563eb; padding: 0 6px; }  /* 蓝=编辑，与全站 tag-preparing 同色 */
 
 /* 分类原来用彩色 a-tag 药丸展示，跟菜名同一视觉权重抢注意力；改成纯文字，
