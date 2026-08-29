@@ -124,8 +124,8 @@ class SettlementRacesTest(unittest.IsolatedAsyncioTestCase):
 
         create_res = await create_order(self._order_body(), make_customer_request(), db=self.db)
 
-        self.assertEqual(create_res.code, 400)
-        self.assertIn("dining session not found", create_res.msg)
+        self.assertEqual(create_res.code, 409)  # 会话过期→可恢复码
+        self.assertIn("本桌会话已过期", create_res.msg)
         # SA must not have gained a new order after settlement closed it.
         count_result = await self.db.execute(select(Order).where(Order.dining_session_id == self.sa.id))
         self.assertEqual(len({o.id for o in count_result.scalars().all()}), 1)  # only the pre-existing done order
@@ -189,8 +189,8 @@ class SettlementRacesTest(unittest.IsolatedAsyncioTestCase):
         stale_cart_body = self._order_body()  # dining_session_id=self.sa.id, baked in at setUp
         result = await create_order(stale_cart_body, make_customer_request(), db=self.db)
 
-        self.assertEqual(result.code, 400)
-        self.assertIn("dining session not found", result.msg)
+        self.assertEqual(result.code, 409)  # 会话过期→可恢复码，小程序据此重建会话重试
+        self.assertIn("本桌会话已过期", result.msg)
         # must never have silently landed on SB instead.
         sb_orders = await self.db.execute(select(Order).where(Order.dining_session_id == sb_id))
         self.assertEqual(list(sb_orders.scalars().all()), [])

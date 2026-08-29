@@ -816,14 +816,14 @@ class OrderPaymentService(BaseService):
             result = await self.db.execute(order_query)
             order = result.scalar_one_or_none()
             if not order:
-                raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "order not found"})
+                raise HTTPException(status_code=404, detail={"success": False, "code": "ORDER_NOT_FOUND", "message": "订单不存在"})
             if getattr(order, "payment_mode", "prepay") != "prepay":
                 raise HTTPException(status_code=400, detail={"success": False, "code": "PAYMENT_NOT_REQUIRED", "message": "该订单无需在线支付"})
             if order.status != "pending_payment":
                 raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
             if order.customer_id:
                 if not customer_id or int(customer_id) != int(order.customer_id):
-                    raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+                    raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "无权操作该订单"})
             elif order.participant_id:
                 from app.models.dining import DiningParticipant
                 from app.services.dining_session_service import hash_participant_token
@@ -838,9 +838,9 @@ class OrderPaymentService(BaseService):
                     )
                     owns_order = participant_result.scalar_one_or_none() is not None
                 if not owns_order:
-                    raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+                    raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "无权操作该订单"})
             else:
-                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "forbidden"})
+                raise HTTPException(status_code=403, detail={"success": False, "code": "FORBIDDEN", "message": "无权操作该订单"})
 
             tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == order.tenant_id))
             tenant = tenant_result.scalar_one_or_none()
@@ -858,7 +858,7 @@ class OrderPaymentService(BaseService):
                 )
                 order = locked_order_result.scalar_one_or_none()
                 if not order or order.status != "pending_payment":
-                    raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
+                    raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
 
                 free_coupon_data, _ = await self._on_payment_success(order, payment_method="free")
                 await self.db.commit()
@@ -891,7 +891,7 @@ class OrderPaymentService(BaseService):
                 )
                 order = locked_order_result.scalar_one_or_none()
                 if not order or order.status != "pending_payment":
-                    raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "order already paid or cancelled"})
+                    raise HTTPException(status_code=400, detail={"success": False, "code": "ORDER_ALREADY_PAID", "message": "该订单已支付或已取消"})
                 await self.db.commit()
 
                 if not openid and body.js_code:

@@ -666,7 +666,9 @@ async def _resolve_create_order_dining_context(
         )
         locked_session = session_result.scalar_one_or_none()
         if locked_session is None:
-            return error_response(code=400, msg="dining session not found"), customer_id, None, None, None, None, None
+            # 409（跟"本桌身份已失效"同类）：缓存的会话过期/串店/已结账，小程序据此
+            # 静默重建会话并自动重试一次；文案也要是中文，别把内部串漏给顾客。
+            return error_response(code=409, msg="本桌会话已过期，请重新扫码进入本桌"), customer_id, None, None, None, None, None
         session_for_pickup = locked_session
 
         participant_filters = [
@@ -712,7 +714,8 @@ async def _resolve_create_order_dining_context(
         locked_session.last_activity_at = _dt.utcnow()
 
     if is_table_account and not dining_session_id:
-        return error_response(code=400, msg="桌台账单模式需要重新扫码进入本桌"), customer_id, None, None, None, None, None
+        # 409：同上，让小程序自动重建会话重试一次，而不是直接把顾客怼死
+        return error_response(code=409, msg="本桌会话已过期，请重新扫码进入本桌"), customer_id, None, None, None, None, None
 
     return None, customer_id, dining_session_id, dining_participant_id, order_type, parent_order_id, session_for_pickup
 

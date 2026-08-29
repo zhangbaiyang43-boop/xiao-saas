@@ -130,8 +130,8 @@ class AppendOrderReadsDiningSessionUnderLockTest(unittest.IsolatedAsyncioTestCas
 
         result = await create_order(self._order_body(), make_request(), db=self.db)
 
-        self.assertEqual(result.code, 400)
-        self.assertIn("dining session not found", result.msg)
+        self.assertEqual(result.code, 409)  # 会话过期→可恢复码，小程序据此重建会话重试
+        self.assertIn("本桌会话已过期", result.msg)
 
 
 if __name__ == "__main__":
