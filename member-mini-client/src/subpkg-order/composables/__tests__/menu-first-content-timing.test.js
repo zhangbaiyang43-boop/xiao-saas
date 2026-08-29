@@ -55,7 +55,7 @@ describe('P0-MENU-PERFORMANCE-IMPLEMENTATION-PHASE-02', () => {
       menuSource.indexOf('const menuCacheKey'),
     )
     expect(loadShopFn).toContain('if (cachedData) applyShopInfoState(cachedData)')
-    expect(loadShopFn).toContain('await getShopInfo(shopId.value)')
+    expect(loadShopFn).toContain('await getShopInfo(shopId.value, tableNo.value)')
     expect(loadShopFn).toContain('return Boolean(cachedData)')
   })
 

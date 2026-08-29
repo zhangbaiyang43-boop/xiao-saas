@@ -152,7 +152,7 @@ def serialize_item(item: MenuItem, specs_map: Optional[dict] = None):
 
 
 @router.get("/shop/info")
-async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(get_db)):
+async def get_shop_info(shop: str, request: Request, table: str = "", db: AsyncSession = Depends(get_db)):
     TenantContext.set_tenant_id(shop)
     svc = TenantService(db)
     tenant = await svc.get_tenant(shop)
@@ -160,6 +160,14 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         return error_response(code=404, msg="商家不存在")
     config = await svc.get_tenant_config(shop)
     biz = (config.business_info or {}) if config else {}
+
+    # 收款模式按「这张桌」算:桌码分区(简餐区/正餐区)优先于店铺整体默认。传了
+    # table 才可能被分区覆盖;没传就是店铺默认,跟以前一样。
+    from app.services.entrance_code_service import resolve_effective_payment_mode
+
+    effective_payment_mode = await resolve_effective_payment_mode(
+        db, shop, getattr(tenant, "payment_mode", "prepay") or "prepay", table
+    )
 
     # 静默发放进店券、新客券预览、邀请奖励开关三者互不依赖，并发执行以缩短
     # shop/info 响应时间；各任务使用独立 AsyncSession，不能共用外层 db。
@@ -219,7 +227,7 @@ async def get_shop_info(shop: str, request: Request, db: AsyncSession = Depends(
         "pickup_enabled": biz.get("pickup_enabled", False),
         "delivery_enabled": biz.get("delivery_enabled", False),
         "delivery_fee": biz.get("delivery_fee", 0),
-        "payment_mode": getattr(tenant, "payment_mode", "prepay") or "prepay",
+        "payment_mode": effective_payment_mode,
         "remark_chips": biz.get("remark_chips", ["不要辣", "微辣", "不要香菜", "不要葱", "少盐", "打包"]),
         "order_remark_chips": biz.get("order_remark_chips", ["一起上菜", "全部打包", "加双筷子", "不用餐具", "有儿童用餐"]),
         "category_order": biz.get("category_order", []),

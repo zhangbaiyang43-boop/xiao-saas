@@ -14,6 +14,9 @@ TENANT_MODEL_SOURCE = (ROOT / "app" / "models" / "tenant.py").read_text(encoding
 ORDER_MODEL_SOURCE = (ROOT / "app" / "models" / "order.py").read_text(encoding="utf-8-sig")
 TENANT_API_SOURCE = (ROOT / "app" / "api" / "v1" / "tenant.py").read_text(encoding="utf-8-sig")
 MENU_API_SOURCE = (ROOT / "app" / "api" / "v1" / "menu.py").read_text(encoding="utf-8-sig")
+ENTRANCE_CODE_SERVICE_SOURCE = (
+    ROOT / "app" / "services" / "entrance_code_service.py"
+).read_text(encoding="utf-8-sig")
 MINIAPP_MENU_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "pages" / "menu.vue"
 ).read_text(encoding="utf-8-sig")
@@ -85,10 +88,15 @@ class PaymentModeContractsTest(unittest.TestCase):
         resolve_source = function_source(ORDERS_SOURCE, "_resolve_create_order_payment_mode")
         persist_source = function_source(ORDERS_SOURCE, "_persist_create_order_and_build_response")
         self.assertIn("tenant.payment_mode", resolve_source)
+        # 分区覆盖逻辑抽进了共享 resolver，两条路径(建单 / shop-info)复用同一份
+        self.assertIn("resolve_effective_payment_mode", resolve_source)
         self.assertIn('is_postpay = payment_mode == "postpay"', resolve_source)
         self.assertIn('is_table_account = payment_mode == "table_account"', resolve_source)
-        self.assertIn('payment_mode = "prepay"', resolve_source)
         self.assertIn('"need_payment": payment_mode == "prepay"', persist_source)
+        resolver_source = function_source(ENTRANCE_CODE_SERVICE_SOURCE, "resolve_effective_payment_mode")
+        self.assertIn("EntranceCode.zone_type", resolver_source)
+        self.assertIn('"quick": "prepay"', ENTRANCE_CODE_SERVICE_SOURCE)
+        self.assertIn('"full": "table_account"', ENTRANCE_CODE_SERVICE_SOURCE)
 
     def test_unpaid_pay_later_orders_can_enter_kitchen_and_print(self):
         source = function_source(ORDERS_SOURCE, "_persist_create_order_and_build_response")
@@ -104,7 +112,10 @@ class PaymentModeContractsTest(unittest.TestCase):
     def test_shop_info_exposes_payment_mode_for_checkout_copy(self):
         source = function_source(MENU_API_SOURCE, "get_shop_info")
         self.assertIn('"payment_mode"', source)
-        self.assertIn('getattr(tenant, "payment_mode", "prepay")', source)
+        # 按「这张桌」算：分区(简餐区/正餐区)覆盖店铺默认，跟建单口径一致
+        self.assertIn("resolve_effective_payment_mode", source)
+        self.assertIn("effective_payment_mode", source)
+        self.assertRegex(source, r"async def get_shop_info\([^)]*\btable\b")
 
     def test_frontend_only_pays_when_backend_requires_payment(self):
         self.assertIn("data.need_payment !== false", USE_CHECKOUT_SOURCE)

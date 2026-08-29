@@ -1328,7 +1328,8 @@ export default {
       }
     }
 
-    const shopInfoCacheKey = () => 'shop_info_cache_' + (shopId.value || '')
+    // 缓存 key 带上桌号：收款模式可能被桌码分区覆盖，不同桌的 shop/info 可能不一样
+    const shopInfoCacheKey = () => 'shop_info_cache_' + (shopId.value || '') + '_' + (tableNo.value || '')
     const readShopInfoCache = () => {
       try {
         const cached = uni.getStorageSync(shopInfoCacheKey())
@@ -1346,7 +1347,7 @@ export default {
       const cachedData = readShopInfoCache()
       if (cachedData) applyShopInfoState(cachedData)
       try {
-        const res = await getShopInfo(shopId.value)
+        const res = await getShopInfo(shopId.value, tableNo.value)
         if (res?.code === 200 && res?.data) {
           const d = res.data
           applyShopInfoState(d)

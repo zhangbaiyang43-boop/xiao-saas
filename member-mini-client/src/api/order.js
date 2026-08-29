@@ -3,8 +3,10 @@ import request from './request'
 export const getMenuItems = (shopId) =>
   request({ url: '/v1/menu/items', method: 'GET', data: { shop: shopId } })
 
-export const getShopInfo = (shopId) =>
-  request({ url: '/v1/shop/info', method: 'GET', data: { shop: shopId } })
+// 带上 table：收款模式(提交桌台/立即支付)可能被桌码分区覆盖，按钮文案要按「这张桌」算，
+// 不然会出现「按钮写提交桌台、点了却跳微信支付」。
+export const getShopInfo = (shopId, tableNo = '') =>
+  request({ url: '/v1/shop/info', method: 'GET', data: { shop: shopId, table: tableNo || '' } })
 
 export const createOrder = (data, options = {}) =>
   request({ url: '/v1/orders', method: 'POST', data, authRedirect: options.authRedirect })

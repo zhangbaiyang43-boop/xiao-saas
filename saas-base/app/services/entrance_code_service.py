@@ -22,6 +22,35 @@ ENTRANCE_CODE_DIR = os.path.join(STATIC_ROOT, "entrance-codes")
 MINIAPP_ENTRY_PAGE = "pages/entry/index"
 DEFAULT_NEW_CUSTOMER_COUPON_NAME = "scan_new_customer_coupon"
 
+_PAYMENT_MODES = ("prepay", "postpay", "table_account")
+# 桌码分区 → 强制收款模式。zone_type 为空则跟随店铺整体默认，不覆盖。
+_ZONE_TYPE_TO_MODE = {"quick": "prepay", "full": "table_account"}
+
+
+async def resolve_effective_payment_mode(db, tenant_id: str, tenant_default: str, table_no: str | None) -> str:
+    """这张桌实际生效的收款模式：桌码分区(简餐区/正餐区)优先于店铺整体默认。
+
+    /shop/info 和建单两条路径都用它,保证小程序按钮文案(提交桌台 / 立即支付)
+    跟建单时后端真正走的模式一致——否则会出现"按钮写提交桌台、点了却跳微信支付"。
+    """
+    mode = tenant_default if tenant_default in _PAYMENT_MODES else "prepay"
+    table_no = (table_no or "").strip()
+    if not table_no:
+        return mode
+    row = await db.execute(
+        select(EntranceCode.zone_type)
+        .where(
+            EntranceCode.tenant_id == tenant_id,
+            EntranceCode.table_no == table_no,
+            EntranceCode.entry_type == "table",
+            EntranceCode.status == 1,
+        )
+        .order_by(EntranceCode.created_at.desc())
+        .limit(1)
+    )
+    zone_type = row.scalar_one_or_none()
+    return _ZONE_TYPE_TO_MODE.get(zone_type, mode)
+
 
 class EntranceCodeService(BaseService):
     def _resolve_target_page(self, entry_type: str) -> str:

@@ -518,29 +518,17 @@ async def _prepare_create_order_tenant_and_replay(
 async def _resolve_create_order_payment_mode(
     tenant: Tenant, tenant_id: str, body: OrderCreate, db: AsyncSession
 ) -> PaymentModeFlags:
-    """Resolve payment_mode and derived flags from tenant defaults and table zone."""
-    payment_mode = str(tenant.payment_mode if tenant else "prepay")
-    table_no_for_zone = (body.table or "").strip()
-    if table_no_for_zone:
-        from app.models.entrance_code import EntranceCode
+    """Resolve payment_mode and derived flags from tenant defaults and table zone.
 
-        zone_result = await db.execute(
-            select(EntranceCode.zone_type)
-            .where(
-                EntranceCode.tenant_id == tenant_id,
-                EntranceCode.table_no == table_no_for_zone,
-                EntranceCode.entry_type == "table",
-                EntranceCode.status == 1,
-            )
-            .order_by(EntranceCode.created_at.desc())
-            .limit(1)
-        )
-        zone_type = zone_result.scalar_one_or_none()
-        # zone_type 为空（没配置分区）时保持原来的 tenant.payment_mode，老商户/老桌码行为不变。
-        if zone_type == "quick":
-            payment_mode = "prepay"
-        elif zone_type == "full":
-            payment_mode = "table_account"
+    分区(简餐区/正餐区)优先于店铺整体默认的这段逻辑抽进
+    entrance_code_service.resolve_effective_payment_mode,/shop/info 复用同一份,
+    避免小程序按钮文案跟建单实际模式对不上。
+    """
+    from app.services.entrance_code_service import resolve_effective_payment_mode
+
+    payment_mode = await resolve_effective_payment_mode(
+        db, tenant_id, str(tenant.payment_mode if tenant else "prepay"), body.table
+    )
     payment_mode = payment_mode if payment_mode in ("prepay", "postpay", "table_account") else "prepay"
     is_postpay = payment_mode == "postpay"
     is_table_account = payment_mode == "table_account"
