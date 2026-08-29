@@ -29,6 +29,7 @@ If <tenant_id> is omitted it falls back to settings.DEMO_TENANT_ID.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -56,6 +57,16 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.config import settings
 
 REQUIRED_POOL = 20
+
+
+def configured_demo_tenant() -> str:
+    """The DEMO_TENANT_ID the app would use -- read defensively so this
+    script also runs on a checkout whose app/config.py predates the field
+    (i.e. before the linked-Demo code is deployed)."""
+    value = getattr(settings, "DEMO_TENANT_ID", None)
+    if not value:
+        value = os.environ.get("DEMO_TENANT_ID")
+    return (value or "").strip()
 
 
 def mark(ok: bool | None) -> str:
@@ -100,7 +111,7 @@ async def main() -> None:
         await find_tenants(args[1] if len(args) > 1 else "演示")
         return
 
-    tenant_id = (args[0] if args else settings.DEMO_TENANT_ID or "").strip()
+    tenant_id = (args[0] if args else configured_demo_tenant()).strip()
     if not tenant_id:
         raise SystemExit(
             "用法:\n"
@@ -109,7 +120,7 @@ async def main() -> None:
             "  (不带参数时读取 .env 的 DEMO_TENANT_ID)"
         )
 
-    configured = (settings.DEMO_TENANT_ID or "").strip()
+    configured = configured_demo_tenant()
     verdict_fail = False
 
     engine = create_async_engine(settings.DATABASE_URL)
