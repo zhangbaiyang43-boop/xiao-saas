@@ -1,13 +1,20 @@
 <template>
   <div class="page-wrap">
-    <!-- 顶部栏 -->
+    <!-- 顶部栏：一个主动作（加菜品）+ 导入收进下拉，不在窄屏头部并排堆按钮 -->
     <div class="page-header">
       <div>
         <span class="page-title">菜单管理</span>
       </div>
-      <div style="display:flex;gap:8px">
-        <a-button size="small" @click="openLibraryImport">菜品库导入</a-button>
-        <a-button size="small" @click="showAiImport = true">AI识别导入</a-button>
+      <div class="page-header-actions">
+        <a-dropdown :trigger="['click']">
+          <a-button size="small">导入 <DownOutlined /></a-button>
+          <template #overlay>
+            <a-menu>
+              <a-menu-item key="library" @click="openLibraryImport">菜品库导入</a-menu-item>
+              <a-menu-item key="ai" @click="showAiImport = true">AI 识别导入</a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
         <a-button type="primary" size="small" @click="openAdd">
           <template #icon><PlusOutlined /></template>
           加菜品
@@ -20,22 +27,27 @@
       <button type="button" class="onboarding-back-link" @click="router.push('/activation')">返回开店引导</button>
     </div>
 
-    <div class="summary-bar animate-in">
-      <div class="summary-item">
-        <span class="summary-num">{{ allDishes.length }}</span>
-        <span class="summary-label">全部商品</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-num">{{ availableCount }}</span>
-        <span class="summary-label">前台可售</span>
-      </div>
-      <div class="summary-item">
-        <span class="summary-num" :style="soldOutCount > 0 ? { color: '#ef4444' } : {}">{{ soldOutCount }}</span>
-        <span class="summary-label">已售罄</span>
-      </div>
+    <!-- 概览：跟今日页统一用 stat-grid，白卡浮在灰底上，不再是带分隔线的整片白条 -->
+    <div class="section-block animate-in">
+      <a-card :bordered="false" :body-style="{ padding: '4px 0' }">
+        <div class="stat-grid">
+          <div class="stat-cell">
+            <span class="stat-num">{{ allDishes.length }}</span>
+            <span class="stat-label">全部商品</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-num">{{ availableCount }}</span>
+            <span class="stat-label">前台可售</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-num" :class="{ 'stat-num--danger': soldOutCount > 0 }">{{ soldOutCount }}</span>
+            <span class="stat-label">已售罄</span>
+          </div>
+        </div>
+      </a-card>
     </div>
-    <div v-if="soldOutCount > 0" style="padding:0 16px 12px">
-      <a-button block @click="restoreAll" style="border-radius:10px;font-weight:600;color:#07C160;border-color:#07C160">
+    <div v-if="soldOutCount > 0" class="section-block">
+      <a-button block class="restore-all-btn" @click="restoreAll">
         一键恢复全部供应（{{ soldOutCount }} 个）
       </a-button>
     </div>
@@ -126,7 +138,7 @@
               <div class="dish-meta">
                 <span class="dish-cat-text">{{ dish.category || '默认' }}</span>
                 <span v-if="Number(dish.sort_order || 0) > 0" class="sort-text">· 排序 {{ dish.sort_order }}</span>
-                <span v-if="dish.stock !== null && dish.stock !== undefined && dish.stock > 0" style="font-size:11px;color:#d97706;font-weight:600">· 库存 {{ dish.stock }}</span>
+                <span v-if="dish.stock !== null && dish.stock !== undefined && dish.stock > 0" class="dish-stock-text">· 库存 {{ dish.stock }}</span>
               </div>
               <div class="dish-desc" :class="{ 'dish-desc--empty': !displayDesc(dish, true) }">{{ displayDesc(dish) }}</div>
               <div style="display:flex;align-items:baseline;gap:6px;margin-top:4px">
@@ -145,7 +157,7 @@
                    避免跟售罄/编辑挤在一起，忙的时候手指快容易碰到。 -->
               <div style="display:flex;gap:2px">
                 <a-tooltip title="编辑">
-                  <a-button type="text" size="small" aria-label="编辑" @click="openEdit(dish)" style="color:#2563eb;padding:0 6px">
+                  <a-button type="text" size="small" aria-label="编辑" @click="openEdit(dish)" class="dish-edit-btn">
                     <EditOutlined />
                   </a-button>
                 </a-tooltip>
@@ -375,7 +387,7 @@
                 <a-tooltip title="显示为删除线价格，让顾客感知实惠。如原价¥18，现价¥14.9，显示「省¥3」" placement="top">
                   <a-input-number v-model:value="form.original_price" placeholder="留空不显示" :min="0" style="width:100%" prefix="¥" @change="formDirty = true" />
                 </a-tooltip>
-                <div v-if="form.original_price && form.price && Number(form.original_price) > Number(form.price)" style="font-size:12px;color:#07C160;margin-top:4px">
+                <div v-if="form.original_price && form.price && Number(form.original_price) > Number(form.price)" style="font-size:12px;color:var(--brand);margin-top:4px">
                   顾客看到：省 ¥{{ (Number(form.original_price) - Number(form.price)).toFixed(1) }}
                 </div>
               </a-form-item>
@@ -575,7 +587,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { PlusOutlined, EditOutlined, CopyOutlined, EllipsisOutlined } from '@ant-design/icons-vue'
+import { PlusOutlined, EditOutlined, CopyOutlined, EllipsisOutlined, DownOutlined } from '@ant-design/icons-vue'
 import { getMenuItems, createMenuItem, updateMenuItem, deleteMenuItem, uploadDishImage, getTenantSettings, updateTenantSettings, updateMenuItemStock, parseMenuText, importMenuBatch, generateDishDesc, searchDishLibrary, contributeDishToLibrary, importDishLibraryBatch } from '../api'
 import { markPageContentReady } from '../utils/adminPerformance'
 
@@ -1139,6 +1151,18 @@ onMounted(() => {
   border-bottom: 1px solid var(--border);
 }
 .page-title { font-size: 18px; font-weight: 700; color: var(--text-1); }
+.page-header-actions { display: flex; align-items: center; gap: 8px; }
+
+/* 概览卡：红字沿用全站危险色 token */
+.stat-num--danger { color: var(--danger) !important; }
+
+/* 一键恢复：跟卡片同圆角，品牌描边，不再内联写死 hex */
+.restore-all-btn {
+  border-radius: var(--radius-card);
+  font-weight: 600;
+  color: var(--brand);
+  border-color: var(--brand);
+}
 
 .onboarding-banner {
   display: flex;
@@ -1162,41 +1186,10 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.summary-bar {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--bg-card);
-  border-bottom: 1px solid var(--border);
-}
-
-.summary-item {
-  padding: 10px 8px;
-  border-radius: 12px;
-  background: var(--brand-light);
-  border: 1px solid var(--border);
-}
-
-.summary-num {
-  display: block;
-  color: var(--brand);
-  font-size: 20px;
-  line-height: 1;
-  font-weight: 800;
-}
-
-.summary-label {
-  display: block;
-  margin-top: 6px;
-  color: var(--text-2);
-  font-size: 12px;
-}
-
+/* 分类筛选：去掉整片白条 + 分隔线，让胶囊直接浮在灰底页面上，
+   跟今日/接单页"卡片浮在灰底"的节奏一致 */
 .cat-bar {
-  background: var(--bg-card);
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 12px 16px 4px;
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: none;
@@ -1228,7 +1221,7 @@ onMounted(() => {
   cursor: pointer;
   border: 1px solid var(--border);
   color: var(--text-2);
-  background: var(--bg-page);
+  background: var(--bg-card);
   transition: transform .15s, all .15s;
   &:active { transform: scale(.95); }
 }
@@ -1274,9 +1267,9 @@ onMounted(() => {
   padding: 3px 10px;
   border-radius: 20px;
   font-size: 12px;
-  border: 1px solid #d1fae5;
-  background: #f0fdf4;
-  color: #065f46;
+  border: 1px solid var(--brand-mid);
+  background: var(--brand-light);
+  color: var(--success);
   cursor: pointer;
   user-select: none;
   transition: all .15s, transform .15s;
@@ -1284,9 +1277,9 @@ onMounted(() => {
 }
 
 .tag-preset-chip--on {
-  background: #07C160;
+  background: var(--brand);
   color: #fff;
-  border-color: #07C160;
+  border-color: var(--brand);
 }
 
 .no-img-badge {
@@ -1294,7 +1287,7 @@ onMounted(() => {
   bottom: -8px;
   left: 50%;
   transform: translateX(-50%);
-  background: #f59e0b;
+  background: var(--warning);
   color: #fff;
   font-size: 9px;
   font-weight: 600;
@@ -1315,6 +1308,9 @@ onMounted(() => {
   color: var(--text-3);
   font-size: 12px;
 }
+
+.dish-stock-text { font-size: 11px; font-weight: 600; color: var(--warning); }
+.dish-edit-btn { color: #2563eb; padding: 0 6px; }  /* 蓝=编辑，与全站 tag-preparing 同色 */
 
 /* 分类原来用彩色 a-tag 药丸展示，跟菜名同一视觉权重抢注意力；改成纯文字，
    跟排序/库存这些次要信息同一量级，价格和菜名才是这一行真正该先看到的东西。 */
@@ -1357,10 +1353,10 @@ onMounted(() => {
   &:active { background: var(--bg-page); }
 }
 .sold-out-btn--restore {
-  border-color: #07C160;
-  color: #07C160;
-  background: #f0fdf4;
-  &:active { background: #dcfce7; }
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-light);
+  &:active { background: var(--brand-light); }
 }
 
 .more-settings-toggle {
@@ -1439,7 +1435,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  &:hover { border-color: #07C160; }
+  &:hover { border-color: var(--brand); }
 }
 .dish-upload-preview {
   width: 100%;
@@ -1574,12 +1570,12 @@ onMounted(() => {
   border-radius: 6px;
   padding: 2px;
   transition: background .12s;
-  &:hover { background: #f0fdf4; }
+  &:hover { background: var(--brand-light); }
 }
 
 .emoji-option--active {
-  background: #dcfce7;
-  outline: 2px solid #07C160;
+  background: var(--brand-light);
+  outline: 2px solid var(--brand);
 }
 
 .spec-group {
