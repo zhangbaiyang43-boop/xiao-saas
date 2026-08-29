@@ -229,7 +229,7 @@
                 <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
                 <a-tag v-if="isHighlighted(order.id)" size="small" class="order-tag-new">新</a-tag>
                 <a-tag v-if="justServedLabel(order.id)" size="small" class="order-tag-served">{{ justServedLabel(order.id) }}</a-tag>
-                <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order.status, order.status_text) }}</a-tag>
+                <a-tag :class="`tag-${order.status}`" size="small">{{ statusLabel(order) }}</a-tag>
                 <a-tag v-if="order.source === 'h5'" size="small" class="order-tag-source-h5">H5</a-tag>
                 <a-tag v-if="order.source === 'staff'" size="small" class="order-tag-source-staff">{{ staffSourceLabel(order) }}</a-tag>
                 <a-tag v-if="order.pickup_no" size="small" class="order-tag-pickup">{{ order.pickup_no }}号桌牌</a-tag>
@@ -413,7 +413,7 @@
               <a-tag v-if="justServedLabel(order.id)" size="small" class="order-tag-served">{{ justServedLabel(order.id) }}</a-tag>
               <a-tag class="order-tag-table">桌{{ order.table }}</a-tag>
               <span v-if="order.participantNo" class="participant-badge" :style="{ background: participantColor(order.participantNo) }">{{ order.participantNo }}</span>
-              <a-tag :class="`tag-${order.status}`">{{ statusLabel(order.status, order.status_text) }}</a-tag>
+              <a-tag :class="`tag-${order.status}`">{{ statusLabel(order) }}</a-tag>
               <a-tag v-if="order.source === 'staff'" size="small" class="order-tag-source-staff">{{ staffSourceLabel(order) }}</a-tag>
               <a-tag v-if="order.pickup_no" size="small" class="order-tag-pickup">{{ order.pickup_no }}号桌牌</a-tag>
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
@@ -1570,8 +1570,14 @@ function staffSourceLabel(order) {
   return '员工代加'
 }
 
-function statusLabel(s, statusText) {
-  return formatOrderStatusText(s, statusText)
+function statusLabel(order) {
+  // done 现在的真实含义是"厨房出餐完成"，端上桌是独立的 served_at 环节。
+  // 没上菜时顶部标签显示"已出餐"，跟下面的"待上菜 / 确认已上菜"对得上；
+  // served_at 有了才是"已上餐"。（settled 等其它状态不受影响。）
+  if (order?.status === 'done') {
+    return order?.served_at ? '已上餐' : '已出餐'
+  }
+  return formatOrderStatusText(order?.status, order?.status_text)
 }
 
 // 拼桌时标出"这一单是第几位点的"，跟顾客小程序端用同一套颜色循环，纯展示编号，
@@ -1833,7 +1839,7 @@ async function confirmSettle() {
     const res = await settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)
     if (res.code !== 200) {
       const statuses = res.data?.blocking_statuses
-      const detail = Array.isArray(statuses) && statuses.length ? `（${statuses.map(statusLabel).join('、')}）` : ''
+      const detail = Array.isArray(statuses) && statuses.length ? `（${statuses.map((s) => formatOrderStatusText(s)).join('、')}）` : ''
       message.error(`${res.msg || '结账失败'}${detail}`)
       // 结账失败常常是因为这张桌台卡片本身已经过期——比如这一桌已经被结过账了
       // （另一台设备操作、或者上一次点击其实已经成功但本地没刷新），也可能是 P0-10：

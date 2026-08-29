@@ -66,7 +66,7 @@
             <span> · {{ order.pickup_no }}号桌牌</span>
             <span class="muted"> · #{{ order.display_order_no }}</span>
           </div>
-          <a-tag>{{ statusText(order.status, order.status_text) }}</a-tag>
+          <a-tag>{{ statusText(order) }}</a-tag>
         </div>
         <div class="items">
           <div v-for="(item, idx) in order.items" :key="idx">{{ item.name }} ×{{ item.qty }}</div>
@@ -166,8 +166,10 @@ async function logout() {
   router.replace('/login?mode=staff')
 }
 
-function statusText(s, statusTextFromApi) {
-  return formatOrderStatusText(s, statusTextFromApi)
+function statusText(order) {
+  // done = 厨房出餐完成；端上桌是独立的 served_at 环节，没上菜前不说"已上餐"
+  if (order?.status === 'done') return order?.served_at ? '已上餐' : '已出餐'
+  return formatOrderStatusText(order?.status, order?.status_text)
 }
 
 async function refreshOccupied() {
