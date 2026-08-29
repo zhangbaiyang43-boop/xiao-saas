@@ -655,26 +655,26 @@
     /* ============ print — 105×148 trim centered on a 111×154 page (3mm bleed) ============ */
     @page { size: 111mm 154mm; margin: 0; }
     @media print {
-      body { background: #fff; }
+      html, body { background: #fff; overflow: hidden; }
       .toolbar, .intro, .face-label, .note { display: none !important; }
       .stage { width: auto; margin: 0; padding: 0; }
       .faces { display: block; gap: 0; overflow: visible; }
+      .face-wrap { overflow: hidden; }
       .bleed {
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        display: block;
         width: 111mm;
         height: 154mm;
         padding: 3mm;
         border: 0;
         border-radius: 0;
+        overflow: hidden;
         background: var(--paper);
-        break-after: page;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      .face-wrap:last-of-type .bleed { break-after: auto; }
       .face-wrap[hidden] { display: none !important; }
+      /* page break only *between* two visible faces (两面同看) */
+      .face-wrap:not([hidden]) ~ .face-wrap:not([hidden]) .bleed { break-before: page; }
       .face {
         width: 105mm;
         height: 148mm;
@@ -892,7 +892,8 @@
         window.print();
       });
 
-      setView('front');
+      var wanted = new URLSearchParams(location.search).get('view');
+      setView(wanted === 'front' || wanted === 'back' || wanted === 'both' ? wanted : 'front');
     })();
   </script>
 </body>
