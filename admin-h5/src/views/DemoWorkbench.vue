@@ -140,6 +140,7 @@ import {
 import {
   clearDemoSession,
   nextDemoAction,
+  parseServerTime,
   readDemoSession,
   saveDemoSession,
 } from '../demo/session'
@@ -190,7 +191,7 @@ function clearTimers() {
 }
 
 function updateCountdown() {
-  const expiresAt = Date.parse(session.value?.expiresAt || '')
+  const expiresAt = parseServerTime(session.value?.expiresAt)
   if (!Number.isFinite(expiresAt)) {
     remainingSeconds.value = 0
     return
@@ -291,7 +292,7 @@ function statusColor(order) {
 }
 
 function formatTime(value) {
-  const date = new Date(value)
+  const date = new Date(parseServerTime(value))
   if (!value || Number.isNaN(date.getTime())) return ''
   return date.toLocaleTimeString('zh-CN', {
     hour: '2-digit',
