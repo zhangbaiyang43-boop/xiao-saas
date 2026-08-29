@@ -228,6 +228,7 @@
             <div class="mini-preview-body">
               <div class="mini-preview-name">{{ form.name || '商品名称' }}</div>
               <div class="mini-preview-tags">
+                <span v-if="selectedTags[0]" class="mini-preview-badge">{{ selectedTags[0] }}</span>
                 <span>{{ form.category || '热销推荐' }}</span>
                 <span>{{ form.available === false ? '下架' : '可售' }}</span>
               </div>
@@ -305,36 +306,17 @@
             </a-button>
           </div>
         </a-form-item>
-        <a-form-item label="菜品标签">
+        <a-form-item label="顾客端角标">
           <div class="tag-preset-row">
             <span
               v-for="preset in tagPresets"
               :key="preset"
               class="tag-preset-chip"
-              :class="{ 'tag-preset-chip--on': selectedTags.includes(preset) }"
+              :class="{ 'tag-preset-chip--on': selectedTags[0] === preset }"
               @click="toggleTag(preset)"
             >{{ preset }}</span>
           </div>
-          <div class="tag-custom-row">
-            <a-input
-              v-model:value="customTagInput"
-              size="small"
-              placeholder="自定义标签，如：月销500份"
-              style="flex:1"
-              @keydown.enter.prevent="addCustomTag"
-            />
-            <a-button size="small" @click="addCustomTag">添加</a-button>
-          </div>
-          <div v-if="selectedTags.length" class="tag-selected-row">
-            <a-tag
-              v-for="tag in selectedTags"
-              :key="tag"
-              closable
-              color="green"
-              @close="removeTag(tag)"
-            >{{ tag }}</a-tag>
-          </div>
-          <div class="drawer-hint">最多选3个，显示在点餐页菜品名称下方</div>
+          <div class="drawer-hint">显示在顾客点餐页菜名旁，最多一个；不选则不显示。销量请用下面「今日已售」，不要写成标签。</div>
         </a-form-item>
 
         <!-- 分享到菜品库：最次要的"顺手勾选"动作，排在所有内容字段之后、更多设置
@@ -638,30 +620,25 @@ const specPresets = [
 
 const form = reactive({ id: null, name: '', desc: '', price: '', member_price: null, original_price: null, category: '热销推荐', emoji: '🍽️', available: true, sort_order: 0, spec_groups: [], image: '', sales_count: null, tags: '', stock: null, stockMode: 'unlimited', shareToLibrary: false, libraryCuisineType: 'sichuan', libraryKind: 'dish' })
 
-const tagPresets = ['本店特色', '招牌必点', '热卖', '新品', '限时特惠', '月销500+', '好评如潮', '老推荐']
+// 顾客端菜品卡上真正会显示的角标——必须跟小程序 useOrderFormatters.js 的
+// strongDishTags 完全一致，否则后台选了顾客端看不到（历史上后台给了 8 个预设 +
+// 自由输入，小程序只认其中 ~2 个）。顾客端只显示 1 个，所以这里也是单选。
+const tagPresets = ['招牌', '新品', '热销', '店长推荐']
 const selectedTags = ref([])
-const customTagInput = ref('')
+
+// 老数据归一：把历史标签/别名折成上面 4 个之一；对不上的（本店特色/限时特惠/
+// 月销500+/好评如潮/自定义…）返回空——本来顾客端也看不到，行为不变，商家可重选。
+function normalizeBadgeTag(raw) {
+  const t = String(raw || '').trim()
+  if (['招牌', '推荐', '必点', '必吃', '招牌必点'].includes(t)) return '招牌'
+  if (['热销', '热卖', '火爆'].includes(t)) return '热销'
+  if (['店长推荐', '老板推荐', '老推荐'].includes(t)) return '店长推荐'
+  if (t === '新品') return '新品'
+  return ''
+}
 
 function toggleTag(tag) {
-  const idx = selectedTags.value.indexOf(tag)
-  if (idx !== -1) { selectedTags.value.splice(idx, 1); return }
-  if (selectedTags.value.length >= 3) { message.warning('最多选3个标签'); return }
-  selectedTags.value.push(tag)
-  formDirty.value = true
-}
-
-function addCustomTag() {
-  const t = customTagInput.value.trim()
-  if (!t) return
-  if (selectedTags.value.includes(t)) { customTagInput.value = ''; return }
-  if (selectedTags.value.length >= 3) { message.warning('最多选3个标签'); return }
-  selectedTags.value.push(t)
-  customTagInput.value = ''
-  formDirty.value = true
-}
-
-function removeTag(tag) {
-  selectedTags.value = selectedTags.value.filter(t => t !== tag)
+  selectedTags.value = selectedTags.value[0] === tag ? [] : [tag]
   formDirty.value = true
 }
 const imageInputRef = ref(null)
@@ -780,7 +757,6 @@ function onDrawerClose(e) {
 function openAdd() {
   Object.assign(form, { id: null, name: '', desc: '', price: '', member_price: null, original_price: null, category: categories.value[0] || '热销推荐', emoji: '🍽️', available: true, sort_order: 0, spec_groups: [], image: '', tags: '', stock: null, stockMode: 'unlimited', shareToLibrary: false, libraryCuisineType: 'sichuan', libraryKind: 'dish' })
   selectedTags.value = []
-  customTagInput.value = ''
   formDirty.value = false
   showEmojiPicker.value = false
   showAddCategory.value = false
@@ -792,12 +768,13 @@ function openEdit(dish) {
   const stockMode = dish.stock === null || dish.stock === undefined ? 'unlimited' : dish.stock <= 0 ? 'soldout' : 'count'
   Object.assign(form, { ...dish, member_price: dish.member_price ?? null, spec_groups: JSON.parse(JSON.stringify(dish.spec_groups || [])), stock: dish.stock ?? null, stockMode, shareToLibrary: false, libraryCuisineType: 'sichuan', libraryKind: 'dish' })
   showMoreSettings.value = dishHasMoreSettings(dish)
-  // 解析已保存的 tags
+  // 解析已保存的 tags → 归一成顾客端会显示的那一个角标（老数据可能是逗号串或别名）
   const rawTags = dish.tags
-  if (Array.isArray(rawTags)) selectedTags.value = [...rawTags].slice(0, 3)
-  else if (typeof rawTags === 'string' && rawTags.trim()) selectedTags.value = rawTags.split(',').map(t => t.trim()).filter(Boolean).slice(0, 3)
-  else selectedTags.value = []
-  customTagInput.value = ''
+  const rawList = Array.isArray(rawTags)
+    ? rawTags
+    : (typeof rawTags === 'string' && rawTags.trim() ? rawTags.split(',') : [])
+  const badge = rawList.map(normalizeBadgeTag).find(Boolean)
+  selectedTags.value = badge ? [badge] : []
   formDirty.value = false
   showEmojiPicker.value = false
   showAddCategory.value = false
@@ -1429,8 +1406,6 @@ onMounted(() => {
 .drawer-field-row { display: flex; gap: 8px; align-items: flex-start; }
 .drawer-field-row-btn { margin-top: 2px; white-space: nowrap; flex-shrink: 0; }
 .tag-preset-row { margin-bottom: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
-.tag-custom-row { display: flex; gap: 6px; align-items: center; }
-.tag-selected-row { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
 .drawer-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 
 .preview-block {
@@ -1531,6 +1506,13 @@ onMounted(() => {
   background: #fffaf0;
   color: #9a6a21;
   font-size: 11px;
+}
+/* 顾客端角标预览：跟小程序 .dish-tag--strong 一个样（绿底绿字），
+   让商家在后台就看到顾客真正会看到的角标 */
+.mini-preview-tags .mini-preview-badge {
+  border-color: #b8ebd0;
+  background: #e9f9f0;
+  color: #078546;
 }
 
 .mini-preview-desc {
