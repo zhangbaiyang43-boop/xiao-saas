@@ -36,8 +36,11 @@
 
 ## B. 多租户隔离 —— 阻塞级
 
-- [ ] **跨租户探针全绿**：`python scripts/probe_tenant_isolation.py <大宝羊肉馆tenant_id> <另一个真实tenant_id>`
-  覆盖：A 令牌读 B 的订单/客户/入口码/券全拒；令牌类型 / 伪造 / 过期 / 无令牌 fail-closed；库内子表 tenant_id 一致性。
+- [x] **跨租户探针全绿**：`python scripts/probe_tenant_isolation.py <tenantA> <tenantB>`
+  2026-08-30 在 大宝羊肉馆 × 老王川菜馆 上跑过，全 PASS（A 令牌读 B 的订单/客户/入口码/券全拒；
+  demo_merchant / 伪造 / 过期 / 无令牌 fail-closed；库内子表 tenant_id 一致）。
+  顺带修了 `GET /api/v1/entrance-codes/{id}` 对所有人 500（`get_by_id` 早改名成 `get_tenant_code`，`19823df`）。
+  重跑门槛：换租户 / 加了新的按 id 查的接口时。
 - [x] **非 demo 令牌打 `/api/v1/demo/*` → 403**（原为 500，`d589a80` 已修）。
 - [ ] **令牌边界**：merchant / member / staff / demo_merchant / channel_partner 五种，各自越界访问应 401/403。
   （`fix/p0-10` `p0-11` `sessionless` 桌台隔离均已合，仍需真机多设备复核同桌多人 / 换桌）
