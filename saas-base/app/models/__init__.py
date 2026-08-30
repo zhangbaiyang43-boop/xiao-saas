@@ -26,6 +26,7 @@ from app.models.staff import Staff
 from app.models.merchant_account import MerchantAccount
 from app.models.merchant_account_wechat_binding import MerchantAccountWechatBinding
 from app.models.merchant_account_trusted_device import MerchantAccountTrustedDevice
+from app.models.merchant_wecom_binding import MerchantWecomBinding, MerchantWecomBindingToken
 from app.models.perf_sample import PerfSample
 from app.models.staff_assisted_payment_handoff import StaffAssistedPaymentHandoff
 from app.models.billing import BillingInvoice, BillingPayment
@@ -79,6 +80,8 @@ __all__ = [
     'MerchantAccount',
     'MerchantAccountWechatBinding',
     'MerchantAccountTrustedDevice',
+    'MerchantWecomBinding',
+    'MerchantWecomBindingToken',
     'PerfSample',
     'StaffAssistedPaymentHandoff',
     'BillingInvoice',

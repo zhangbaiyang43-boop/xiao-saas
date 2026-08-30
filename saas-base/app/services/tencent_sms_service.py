@@ -29,6 +29,7 @@ class SmsPurpose:
     LOGIN = "login"
     REGISTER = "register"
     CHANGE_PHONE = "change_phone"
+    WECOM_BINDING = "wecom_binding"
 
 
 class SmsErrorCode:
