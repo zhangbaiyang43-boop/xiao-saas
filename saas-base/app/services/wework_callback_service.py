@@ -37,6 +37,8 @@ class WeworkCallbackService:
         plaintext = self.decrypt(encrypt)
         event = self.parse_xml(plaintext)
         event_type = event.get("ChangeType") or event.get("Event") or "UNKNOWN"
+        external_userid = self._first_present(event, "ExternalUserID", "ExternalUser", "ExternalUserid")
+        userid = self._first_present(event, "UserID", "User", "Userid")
         tenant_id = await self._resolve_tenant_id()
 
         if self.db is not None:
@@ -44,8 +46,8 @@ class WeworkCallbackService:
                 WeworkEventLog(
                     id=generate_snowflake_id(),
                     tenant_id=tenant_id,
-                    external_userid=event.get("ExternalUser") or event.get("ExternalUserid"),
-                    userid=event.get("User") or event.get("Userid"),
+                    external_userid=external_userid,
+                    userid=userid,
                     event_type=event_type,
                     change_type=event.get("ChangeType"),
                     state=event.get("State"),
@@ -58,8 +60,8 @@ class WeworkCallbackService:
         return {
             "tenant_id": tenant_id,
             "event_type": event_type,
-            "external_userid": event.get("ExternalUser") or event.get("ExternalUserid"),
-            "userid": event.get("User") or event.get("Userid"),
+            "external_userid": external_userid,
+            "userid": userid,
             "state": event.get("State"),
             "raw_payload": event,
         }
@@ -129,6 +131,14 @@ class WeworkCallbackService:
     def parse_xml(xml_text: str) -> dict:
         root = ET.fromstring(xml_text)
         return {child.tag: child.text for child in root}
+
+    @staticmethod
+    def _first_present(event: dict, *field_names: str) -> str | None:
+        for field_name in field_names:
+            value = event.get(field_name)
+            if value:
+                return value
+        return None
 
     @staticmethod
     def signature(token: str, timestamp: str, nonce: str, encrypted_text: str) -> str:
