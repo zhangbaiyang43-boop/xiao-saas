@@ -556,7 +556,7 @@ export default {
     const {
       formatPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
       dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
-      couponAmountText, couponConditionText, couponValidityText, couponPickerAmount, couponPickerCondText,
+      couponAmountText, couponConditionText, couponValidityText, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
       statusLabel, dishTags, normalizeDishTag, isStrongDishTag, dishCardTags, isFeatured,
       pickAvatarChar,
@@ -925,7 +925,7 @@ export default {
     const {
       selectedCouponId, selectedCoupon, couponBarVisible, bestCouponValue,
       couponBarText, couponBarPrefix, couponBarAmount, discountAmount, finalPrice,
-      showCouponPicker, couponPickerList, openCouponPicker, closeCouponPicker, pickCoupon, selectBestEligibleCoupon,
+      showCouponPicker, couponPickerList, couponPickerAmount, openCouponPicker, closeCouponPicker, pickCoupon, selectBestEligibleCoupon,
     } = useCouponPicker({
       availableCoupons,
       getTotalPrice: () => totalPrice.value,

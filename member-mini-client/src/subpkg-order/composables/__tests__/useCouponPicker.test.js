@@ -250,4 +250,34 @@ describe('useCouponPicker', () => {
       expect(picker.showCouponPicker.value).toBe(false)
     })
   })
+
+  // 现场问题：无门槛 ¥4 券 + 购物车 ¥11.90，选券页印"¥4 / 已减¥4"，结算实付却按
+  // 11.90×20%=2.38 减。展示的数字必须跟真正扣的一致。
+  describe('couponPickerAmount：展示金额 = 本单实际能减多少（含 20% 封顶）', () => {
+    it('已达门槛的券：展示 calculateCouponDiscount 而不是券面额', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', name: '手气爆棚', value: 4, min_amount: 0 }],
+        totalPrice: 11.9,
+      })
+      expect(picker.couponPickerAmount({ id: 'c1', value: 4, min_amount: 0 })).toBe('2.38')
+      expect(picker.bestCouponValue.value).toBe(2.38)
+      expect(picker.couponBarText.value).toBe('您有1张优惠券，最高减¥2.38')
+    })
+
+    it('券面额本来就没触发封顶：原样展示面额', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', value: 4, min_amount: 0 }],
+        totalPrice: 100,
+      })
+      expect(picker.couponPickerAmount({ id: 'c1', value: 4, min_amount: 0 })).toBe('4.00')
+    })
+
+    it('未达门槛的券：展示券面额（招徕），配合"还差X元可用"', () => {
+      const { picker } = setup({
+        coupons: [{ id: 'c1', value: 10, min_amount: 50 }],
+        totalPrice: 20,
+      })
+      expect(picker.couponPickerAmount({ id: 'c1', value: 10, min_amount: 50 })).toBe('10.00')
+    })
+  })
 })
