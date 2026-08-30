@@ -299,10 +299,11 @@ async def export_table_stickers(data: TableStickerExportRequest, db=Depends(get_
 
 @router.get("/{code_id}", response_model=RespVo)
 async def get_entrance_code(code_id: int, db=Depends(get_db)):
-    """Get entrance code by ID."""
+    """Get entrance code by ID（限本商家；get_by_id 早已重命名为 get_tenant_code，
+    旧调用名会 AttributeError → 该接口对所有人 500）。"""
     from app.services.entrance_code_service import EntranceCodeService
-    
-    item = await EntranceCodeService(db).get_by_id(code_id)
+
+    item = await EntranceCodeService(db).get_tenant_code(code_id)
     if not item:
         return error_response(code=404, msg="入口码不存在")
     return success_response(data=EntranceCodeResponse.model_validate(item))

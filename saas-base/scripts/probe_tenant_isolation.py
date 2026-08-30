@@ -73,6 +73,23 @@ def blob_has_any(text: str, needles: list) -> list:
     return [str(n) for n in needles if n is not None and str(n) and str(n) in text]
 
 
+def denied(r, needles=()) -> bool:
+    """这套后端很多路由用 error_response(code=4xx) 返回 —— HTTP 200 但 body.code=4xx。
+    "拒了" = HTTP 403/404，或 HTTP 200 且 body.code 属于 4xx 且 body 里没有对方的标识。"""
+    if r.status_code in (401, 403, 404):
+        return True
+    if r.status_code != 200:
+        return False
+    try:
+        body = r.json()
+    except Exception:
+        return False
+    code = body.get("code")
+    if code not in (400, 401, 403, 404):
+        return False
+    return not blob_has_any(r.text, list(needles))
+
+
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) < 2:
@@ -132,13 +149,16 @@ def main() -> None:
 
         for cid in b["customers"][:3]:
             r = c.get(f"/api/v1/customers/{cid}", headers=H(tok_a))
-            check(r.status_code in (403, 404), f"GET /customers/{cid} (B) 被拒", f"http={r.status_code}")
+            check(denied(r, [cid] + b["customer_phones"]), f"GET /customers/{cid} (B) 被拒",
+                  f"http={r.status_code} body={r.text[:200]}")
             r = c.get(f"/api/v1/customers/{cid}/timeline", headers=H(tok_a))
-            check(r.status_code in (403, 404), f"GET /customers/{cid}/timeline (B) 被拒", f"http={r.status_code}")
+            check(denied(r, [cid]), f"GET /customers/{cid}/timeline (B) 被拒",
+                  f"http={r.status_code} body={r.text[:200]}")
 
         for eid in b["entrance_codes"][:3]:
             r = c.get(f"/api/v1/entrance-codes/{eid}", headers=H(tok_a))
-            check(r.status_code in (403, 404), f"GET /entrance-codes/{eid} (B) 被拒", f"http={r.status_code}")
+            check(denied(r, [eid]), f"GET /entrance-codes/{eid} (B) 被拒",
+                  f"http={r.status_code} body={r.text[:200]}")
 
         r = c.get("/api/v1/coupons/issued", headers=H(tok_a))
         leaked = blob_has_any(r.text, b["coupon_codes"]) if r.status_code == 200 else []
