@@ -11,12 +11,16 @@
 
 ## A. 钱 —— 阻塞级，必须全绿才上线
 
+> 真机部分整套步骤见 **`docs/prelaunch/E2E_ACCEPTANCE_RUNBOOK.md`**（场景 1–8，每条带期望屏幕文案 + 期望库状态）。
+> 每个场景后跑 `python scripts/audit_order_money_contract.py <tenant> --days 1` 兜金额契约。
+
 - [ ] **收款模式契约**：`prepay / postpay / table_account` 三种，桌码分区 `zone_type` 能强制覆盖店铺默认。
-  验：每种模式真机各下一单，确认小程序按钮文案（"立即支付" / "提交桌台"）与后端实际走的流程一致。
+  验：runbook 场景 1/2/3，确认按钮文案（"立即支付" / "提交订单"）与后端实际走的流程一致。
 - [ ] **最终金额权威**（`fix/p0-14` 已合）：金额一律服务端按菜单价重算。
   验：构造一个改价的下单请求，应被拒 / 以服务端价为准。
 - [ ] **一单只能用一张券**、券折扣 ≤ 本单原价 20%（`platform_rules.cap_discount_amount`）。
-  验：`diagnose_tenant_coupons.py <tenant>` 看规则；造不同客单价样例订单跑结算，无一单减免超 20%。
+  验（只读，历史数据）：`python scripts/audit_order_money_contract.py <tenant> --days 30` 全 PASS。
+  验（真机）：`docs/prelaunch/E2E_ACCEPTANCE_RUNBOOK.md` 场景 4（不同客单价 × 无门槛/满减各造一单）。
 - [ ] **月优惠预算总闸**：近 30 天优惠 ≤ GMV × (3/5/8)%，超了 `issue_auto_coupon`/`issue_entry_coupon` 直接不发。
   验：admin「智能营销 → 发券效果」预算进度条；或造数据触发闸。
 - [ ] **退款 / 取消契约**（`fix/p0-09` 已合）：已支付订单取消 → 券恢复、状态回滚、退款路径明确。
@@ -57,7 +61,9 @@
 
 ## E. 部署 / 运维 / 恢复 —— 阻塞级
 
-- [ ] **`.env` 与 `saas-base/static/` 异地备份**（都不在 git、只在服务器；机器挂了配置和入口码图全丢）。
+- [ ] **`.env` 与 `saas-base/static/` 异地备份**：`bash scripts/backup-server-config.sh` 在服务器打包 →
+  按它打印的 `scp` 命令拉到你本地/网盘。每次改 `.env` 或有新上传后重跑，本地留最近 3 份。
+  （脚本已就绪；缺的是"真的跑一次并拉到异地"这个动作。）
 - [ ] `deploy-production.sh` 健康检查抢跑问题（`systemctl restart` 后立刻 curl，旧进程关得慢误判失败）——加等待 / 重试窗口，或记录"失败后手动 `curl /health` 复核"的 SOP。
 - [ ] 确认生产 admin-h5 走的链路（`deploy-production.sh` 统一链路 vs 老的手工 `dist`；`docs/production-deployment.md` 说首次切换"尚未执行"）。
 - [ ] **回滚演练**：`rollback-admin-h5.sh` 真跑一次；后端出问题退到上一个 SHA 的步骤。
