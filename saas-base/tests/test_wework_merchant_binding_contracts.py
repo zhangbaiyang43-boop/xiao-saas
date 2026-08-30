@@ -187,6 +187,10 @@ class WeworkMerchantBindingContractsTest(unittest.TestCase):
         self.assertFalse(any("/api/v1/wework/bindings" in prefix for prefix in WHITELIST_PREFIXES))
         self.assertNotIn("/api/v1/wework", WHITELIST)
 
+    def test_binding_endpoints_keep_slowapi_request_signature_contract(self):
+        for endpoint in (wework.create_binding_token, wework.send_binding_code, wework.confirm_binding):
+            self.assertIn("request", inspect.signature(endpoint).parameters)
+
     def test_binding_code_validates_token_before_sending_sms(self):
         send_source = inspect.getsource(WeworkBindingService.send_binding_code)
 

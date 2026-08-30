@@ -104,9 +104,11 @@ async def list_contact_ways(
 @tenant_limit()
 async def create_binding_token(
     payload: BindingTokenRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     actor: str = Depends(_require_wework_super_token),
 ):
+    del request
     del actor
     try:
         issue = await WeworkBindingService(db).create_binding_token(
@@ -126,7 +128,12 @@ async def create_binding_token(
 
 @router.post("/bindings/code", response_model=RespVo)
 @tenant_limit()
-async def send_binding_code(payload: BindingCodeRequest, db: AsyncSession = Depends(get_db)):
+async def send_binding_code(
+    payload: BindingCodeRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    del request
     try:
         ok, msg, data = await WeworkBindingService(db).send_binding_code(
             binding_token=payload.binding_token,
@@ -143,7 +150,12 @@ async def send_binding_code(payload: BindingCodeRequest, db: AsyncSession = Depe
 
 @router.post("/bindings/confirm", response_model=RespVo)
 @tenant_limit()
-async def confirm_binding(payload: BindingConfirmRequest, db: AsyncSession = Depends(get_db)):
+async def confirm_binding(
+    payload: BindingConfirmRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    del request
     try:
         data = await WeworkBindingService(db).confirm_binding(
             binding_token=payload.binding_token,
