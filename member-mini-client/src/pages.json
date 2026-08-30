@@ -159,29 +159,6 @@
           }
         }
       ]
-    },
-    {
-      "root": "subpkg-plugins",
-      "pages": [
-        {
-          "path": "pages/crm-placeholder",
-          "style": {
-            "navigationBarTitleText": "会员活动"
-          }
-        },
-        {
-          "path": "pages/bargain-placeholder",
-          "style": {
-            "navigationBarTitleText": "活动"
-          }
-        },
-        {
-          "path": "pages/points-placeholder",
-          "style": {
-            "navigationBarTitleText": "积分"
-          }
-        }
-      ]
     }
   ],
   "preloadRule": {
