@@ -186,6 +186,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 )
             return await call_next(request)
 
+        # Defense-in-depth: only demo_merchant tokens may reach /api/v1/demo/*.
+        # The demo route handlers read request.state.demo_session_id
+        # unconditionally, so any other valid token (merchant/member/staff)
+        # would 500 with AttributeError instead of a clean reject.
+        # (/api/v1/demo/sessions/start is whitelisted and never gets here.)
+        if request.url.path.startswith("/api/v1/demo/"):
+            return JSONResponse(
+                status_code=403,
+                content=RespVo(code=403, msg="体验凭证无权访问此功能").to_response(),
+            )
+
         if payload.get("type") == "merchant":
             auth_state, err = await resolve_merchant_request_auth(payload)
             if err is not None:
