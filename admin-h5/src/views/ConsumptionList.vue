@@ -147,6 +147,7 @@ import {
 } from 'vant'
 import PageHeader from '../components/PageHeader.vue'
 import { createConsumption, getCustomers, getConsumptions } from '../api'
+import { formatBeijingDateTime } from '../utils/beijingTime'
 
 const route = useRoute()
 
@@ -220,13 +221,7 @@ const formatMoney = (num) => {
   return Number(num || 0).toFixed(2)
 }
 
-const formatDateTime = (date) => {
-  if (!date) return '-'
-  const d = new Date(date)
-  if (Number.isNaN(d.getTime())) return '-'
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
+const formatDateTime = (date) => formatBeijingDateTime(date) || '-'
 
 const loadCustomers = async () => {
   try {

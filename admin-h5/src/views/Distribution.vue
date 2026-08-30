@@ -182,6 +182,7 @@ import {
   showToast
 } from 'vant'
 import PageHeader from '../components/PageHeader.vue'
+import { formatBeijingDateTime } from '../utils/beijingTime'
 import {
   getDistributionPreview,
   getDistributionRecords,
@@ -247,13 +248,7 @@ const switchIntensity = async (key) => {
 const visitedCount = computed(() => records.value.filter((item) => item.has_visited).length)
 const pendingCount = computed(() => records.value.filter((item) => item.reward_status === 'PENDING').length)
 
-const fmtDate = (iso) => {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return String(iso).slice(0, 16).replace('T', ' ')
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
+const fmtDate = (iso) => formatBeijingDateTime(iso) || String(iso || '').slice(0, 16).replace('T', ' ')
 
 const maskPhone = (phone) => {
   if (!phone) return '-'

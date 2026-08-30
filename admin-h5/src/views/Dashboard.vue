@@ -181,6 +181,7 @@ import StatCard from '../components/StatCard.vue'
 import InsightCard from '../components/InsightCard.vue'
 import RankList from '../components/RankList.vue'
 import TrendChart from '../components/TrendChart.vue'
+import { formatBeijingTime } from '../utils/beijingTime'
 
 const router = useRouter()
 const merchant = ref({ name: '', is_open: true, is_new_merchant: false })
@@ -273,9 +274,8 @@ const printerActionable = computed(() =>
 // 系统状态最近一次检测的时间，跟结果类信息的"已更新"角标是同一个套路。
 const systemStatusCheckedLabel = computed(() => {
   if (!systemStatus.value.checked_at) return ''
-  const d = new Date(systemStatus.value.checked_at)
-  if (Number.isNaN(d.getTime())) return ''
-  return `最近检测 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  const t = formatBeijingTime(systemStatus.value.checked_at)
+  return t ? `最近检测 ${t}` : ''
 })
 
 // 待办：需要商家处理的事，合并了原来分散的"紧急提醒"+"系统状态"+"待结账"，

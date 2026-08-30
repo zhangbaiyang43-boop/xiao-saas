@@ -165,6 +165,7 @@ import { message, Modal } from 'ant-design-vue'
 import { UserOutlined, GiftOutlined, ShoppingCartOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
 import CouponStatusTag from '../components/CouponStatusTag.vue'
+import { formatBeijingDateTime } from '../utils/beijingTime'
 import {
   getConsumptions, getCouponTemplates, getCustomer, getCustomerCoupons,
   getCustomerMembership, getCustomerOperationLogs, recallCoupon, restoreCustomer, sendCoupons, updateCustomerStatus,
@@ -205,9 +206,7 @@ function money(v) { const n = Number(v || 0); return Number.isInteger(n) ? n : n
 function formatMemberNo(no) { return String(no).padStart(6, '0') }
 function formatDate(v) {
   if (!v) return '-'
-  const d = new Date(v)
-  if (isNaN(d.getTime())) return String(v).substring(0, 16)
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+  return formatBeijingDateTime(v) || String(v).substring(0, 16)
 }
 function ruleTypeLabel(r) { return { entry_coupon: '进店券', consumption_coupon: '复购券', new_customer_coupon: '新客券', recall_coupon: '召回券' }[r] || r }
 function ruleTypeColor(r) { return { entry_coupon: 'blue', consumption_coupon: 'green', new_customer_coupon: 'orange', recall_coupon: 'purple' }[r] || 'default' }

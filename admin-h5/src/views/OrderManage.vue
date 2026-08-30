@@ -714,6 +714,7 @@ import PickupNoPicker from '../components/PickupNoPicker.vue'
 import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pickupNoUi'
 import { sortMerchantOrders } from '../utils/orderListSort'
 import { formatOrderStatusText } from '../utils/orderStatusText'
+import { formatBeijingTime, formatBeijingDate, formatBeijingLong } from '../utils/beijingTime'
 import { markPageContentReady } from '../utils/adminPerformance'
 
 function decodeJwtPayload(token) {
@@ -1115,7 +1116,7 @@ function mapOwnerOrders(raw) {
       printManualReprintCount: Number(o.print_manual_reprint_count || 0),
       printManualReprintLastStatus: o.print_manual_reprint_last_status || '',
       createdAt: o.created_at || '',
-      time: o.created_at ? new Date(o.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '',
+      time: formatBeijingTime(o.created_at),
       items: Array.isArray(o.items) ? o.items : [],
       paymentMethodText: paymentMethodText(o.payment_method, o.payment_status),
       updating: false,
@@ -1222,11 +1223,7 @@ function orderDishSummary(order) {
   if (items.length === 1) return `${items[0].name}×${items[0].qty}`
   return `${items[0].name}等${items.length}个菜品`
 }
-const lastRefreshed = computed(() => {
-  if (!lastSuccessfulSyncAt.value) return ''
-  const now = new Date(lastSuccessfulSyncAt.value)
-  return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
-})
+const lastRefreshed = computed(() => formatBeijingTime(lastSuccessfulSyncAt.value))
 
 watch(initialLoading, (current, previous) => {
   if (previous !== true || current !== false) return
@@ -1280,11 +1277,7 @@ const statItems = computed(() => [
 const orderCenterMode = ref('live')
 const customDate = ref('')
 const historyQuery = ref('')
-const todayDateInput = computed(() => {
-  const now = new Date()
-  const utc8 = new Date(now.getTime() + 8 * 60 * 60 * 1000)
-  return utc8.toISOString().slice(0, 10)
-})
+const todayDateInput = computed(() => formatBeijingDate(new Date()))
 const isLiveToday = computed(() => orderCenterMode.value === 'live')
 const historyDateKey = ref('yesterday')
 const historicalOrders = ref([])
@@ -1751,7 +1744,7 @@ async function reprintOrderTicket(order) {
 function printDiagnostic(order) {
   const route = [order.printProvider, order.printPrinterIdentifier].filter(Boolean).join(' / ')
   const attempt = order.printLastAttemptAt
-    ? new Date(order.printLastAttemptAt).toLocaleString('zh-CN', { hour12: false })
+    ? (formatBeijingLong(order.printLastAttemptAt) || '暂无时间')
     : '暂无时间'
   const manual = order.printManualReprintCount
     ? ` · 补打${order.printManualReprintCount}次(${order.printManualReprintLastStatus || '处理中'})`

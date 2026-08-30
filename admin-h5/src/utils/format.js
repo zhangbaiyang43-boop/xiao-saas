@@ -1,3 +1,12 @@
+// 时间一律按北京时间口径，且先补 Z 再解析（后端存 naive UTC，无时区后缀）。
+// 见 utils/beijingTime.js 的说明。
+import {
+  formatBeijingDate,
+  formatBeijingDateTime,
+  isBeijingThisMonth,
+  isBeijingToday,
+} from './beijingTime.js'
+
 export const unwrapList = (res) => {
   if (Array.isArray(res?.data)) return res.data
   if (Array.isArray(res?.data?.items)) return res.data.items
@@ -39,30 +48,10 @@ export const formatMoney = (value) => {
   })
 }
 
-export const formatDateTime = (value) => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
+export const formatDateTime = (value) => formatBeijingDateTime(value) || '-'
 
-export const formatDate = (value) => {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return date.toLocaleDateString('zh-CN')
-}
+export const formatDate = (value) => formatBeijingDate(value) || '-'
 
-export const isThisMonth = (value) => {
-  if (!value) return false
-  const date = new Date(value)
-  const now = new Date()
-  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()
-}
+export const isThisMonth = (value) => isBeijingThisMonth(value)
 
-export const isToday = (value) => {
-  if (!value) return false
-  const date = new Date(value)
-  const now = new Date()
-  return date.toDateString() === now.toDateString()
-}
+export const isToday = (value) => isBeijingToday(value)

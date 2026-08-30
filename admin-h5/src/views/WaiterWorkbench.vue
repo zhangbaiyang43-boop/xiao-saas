@@ -92,6 +92,7 @@ import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { waitingToServeIdsFromOrders, useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 import { getSession } from '../utils/session'
+import { formatBeijingTime } from '../utils/beijingTime'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -151,10 +152,7 @@ function itemSummary(order) {
 }
 
 function timeLabel(value) {
-  if (!value) return ''
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  return formatBeijingTime(value)
 }
 
 async function loadRecentServed() {

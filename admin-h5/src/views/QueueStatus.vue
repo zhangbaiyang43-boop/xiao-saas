@@ -65,6 +65,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { getQueueTicketStatusByToken } from '../api'
+import { formatBeijingDateTime } from '../utils/beijingTime'
 
 const route = useRoute()
 const token = computed(() => String(route.query.token || '').trim())
@@ -149,9 +150,7 @@ function handleVisibilityChange() {
 
 function formatTime(value) {
   if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
+  return formatBeijingDateTime(value) || value
 }
 
 onMounted(() => {

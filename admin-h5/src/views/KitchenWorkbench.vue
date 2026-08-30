@@ -111,6 +111,7 @@ import WorkbenchSyncBar from '../components/WorkbenchSyncBar.vue'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { useAuthStore } from '../stores/auth'
 import { formatOrderStatusText } from '../utils/orderStatusText'
+import { formatBeijingLong, minutesSince } from '../utils/beijingTime'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -157,7 +158,7 @@ const visible = computed(() => orders.value.filter((o) => o.status === statusFil
 function printDiagnostic(order) {
   const route = [order.print_provider, order.print_printer_identifier].filter(Boolean).join(' / ')
   const attempt = order.print_last_attempt_at
-    ? new Date(order.print_last_attempt_at).toLocaleString('zh-CN', { hour12: false })
+    ? (formatBeijingLong(order.print_last_attempt_at) || '暂无时间')
     : '暂无时间'
   const manual = Number(order.manual_reprint_count || 0)
     ? ` · 补打${order.manual_reprint_count}次(${order.manual_reprint_last_status || '处理中'})`
@@ -171,8 +172,7 @@ async function logout() {
 }
 
 function waitMinutes(iso) {
-  if (!iso) return 0
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000))
+  return minutesSince(iso) ?? 0
 }
 
 async function setStatus(order, status) {

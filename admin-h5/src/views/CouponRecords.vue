@@ -128,6 +128,7 @@ import {
 import PageHeader from '../components/PageHeader.vue'
 import CouponStatusTag from '../components/CouponStatusTag.vue'
 import { getIssuedCoupons, recallCoupon } from '../api'
+import { formatBeijingDateTime } from '../utils/beijingTime'
 
 const router = useRouter()
 const records = ref([])
@@ -202,13 +203,7 @@ const getSourceText = (source) => {
   return map[source] || source || '手动发券'
 }
 
-const formatTime = (time) => {
-  if (!time) return '-'
-  const date = new Date(time)
-  if (Number.isNaN(date.getTime())) return '-'
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
+const formatTime = (time) => formatBeijingDateTime(time) || '-'
 
 const loadRecords = async () => {
   loading.value = true

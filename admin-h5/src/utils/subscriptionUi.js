@@ -3,6 +3,8 @@
 // 对 .vue 源码做字符串存在性检查。价格/状态文案/套餐选择器状态/在线支付
 // 就绪判定 全部收在这里，SubscriptionSettings.vue / Dashboard.vue 只消费。
 
+import { formatBeijingDate } from './beijingTime.js'
+
 export const PLAN_CODE_FREE = 'FREE'
 export const PLAN_CODE_STANDARD = 'STANDARD'
 export const PLAN_CODE_PRO = 'PRO'
@@ -35,10 +37,7 @@ export function annualDiscountCopy(plan) {
 }
 
 export function formatDate(isoString) {
-  if (!isoString) return ''
-  const d = new Date(isoString)
-  if (Number.isNaN(d.getTime())) return ''
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return formatBeijingDate(isoString)
 }
 
 // 当前套餐状态卡（Phase F1E-B §8）：商家只看得到商家语言，TRIAL/ACTIVE/

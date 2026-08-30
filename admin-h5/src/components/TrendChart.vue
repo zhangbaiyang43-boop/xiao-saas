@@ -22,6 +22,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { formatBeijingDate } from '../utils/beijingTime'
 
 const props = defineProps({
   title: { type: String, default: '' },
@@ -31,7 +32,7 @@ const props = defineProps({
   valuePrefix: { type: String, default: '¥' },
 })
 
-const todayIso = new Date().toISOString().slice(0, 10)
+const todayIso = formatBeijingDate(new Date())
 
 const points = computed(() => props.data.map(d => {
   const dt = new Date(d.date + 'T00:00:00')

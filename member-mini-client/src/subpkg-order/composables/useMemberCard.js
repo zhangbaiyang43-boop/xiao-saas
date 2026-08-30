@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { parseServerTime, formatBeijingDate } from '@/utils/beijingTime'
 
 // 从 menu.vue 拆出来的会员卡片状态和纯派生计算——会员等级、成长值进度、会员
 // 专属券列表这些只读展示逻辑。逻辑跟原来在 menu.vue 里的一字未改，只是搬了个
@@ -25,7 +26,9 @@ export function useMemberCard({ shopCreatedAt, formatPrice, onGoOrder, onUseCoup
   const memberAuthorizing = ref(false)
 
   const memberSinceText = computed(() => {
-    const year = new Date(shopCreatedAt.value).getFullYear()
+    const d = parseServerTime(shopCreatedAt.value)
+    if (!d) return ''
+    const year = Number(formatBeijingDate(d).slice(0, 4))
     return Number.isNaN(year) ? '' : '会员自 ' + year + ' 年'
   })
 

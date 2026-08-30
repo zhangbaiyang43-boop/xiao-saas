@@ -4,6 +4,7 @@
  * - 履约态 FIFO（createdAt ASC）
  * - 终态/查看态最新优先（createdAt DESC）
  */
+import { parseServerTime } from './beijingTime.js'
 
 const STATUS_PRIORITY = {
   pending: 0,
@@ -20,8 +21,8 @@ const ACTIVE_ASC_STATUSES = new Set(['pending', 'preparing', 'done'])
 
 export function parseOrderTime(value) {
   if (value == null || value === '') return 0
-  const t = new Date(value).getTime()
-  return Number.isFinite(t) ? t : 0
+  const d = parseServerTime(value)
+  return d ? d.getTime() : 0
 }
 
 function compareIdAsc(a, b) {

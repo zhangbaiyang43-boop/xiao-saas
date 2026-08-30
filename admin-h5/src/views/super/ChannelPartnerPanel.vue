@@ -60,6 +60,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { createChannelPartner, listChannelPartners } from '../../api/superChannel'
+import { formatBeijingDateTime } from '../../utils/beijingTime'
 
 const props = defineProps({
   superToken: { type: String, required: true },
@@ -120,10 +121,7 @@ function maskPhone(value) {
 
 function formatDateTime(value) {
   if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16).replace('T', ' ')
-  const pad = n => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return formatBeijingDateTime(value) || String(value).slice(0, 16).replace('T', ' ')
 }
 
 function validateForm() {

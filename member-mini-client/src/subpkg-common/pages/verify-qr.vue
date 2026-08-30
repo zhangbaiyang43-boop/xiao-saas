@@ -117,6 +117,7 @@
 import { getCouponDetail, getCustomerCoupons } from '@/api/coupon'
 import { getCouponVerifyCode } from '@/api/verify'
 import { drawQrCode } from '@/utils/qrcode-canvas'
+import { formatBeijingDate } from '@/utils/beijingTime'
 
 const CACHE_PREFIX  = 'vqr_'
 const POLL_INTERVAL = 8000
@@ -253,14 +254,9 @@ export default {
         // 格式化有效期
         let expireText = '长期有效'
         const expireRaw = newCoupon.expire_time || newCoupon.expired_at || newCoupon.end_time || ''
-        if (expireRaw) {
-          const d = new Date(expireRaw)
-          if (!isNaN(d.getTime())) {
-            const y = d.getFullYear()
-            const m = String(d.getMonth() + 1).padStart(2, '0')
-            const day = String(d.getDate()).padStart(2, '0')
-            expireText = `有效期至 ${y}.${m}.${day}`
-          }
+        const bjDate = formatBeijingDate(expireRaw)
+        if (bjDate) {
+          expireText = `有效期至 ${bjDate.replace(/-/g, '.')}`
         }
 
         this.newCouponOverlay = {

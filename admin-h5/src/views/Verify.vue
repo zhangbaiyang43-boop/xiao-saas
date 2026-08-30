@@ -120,6 +120,7 @@ import { ScanOutlined } from '@ant-design/icons-vue'
 import PageHeader from '../components/PageHeader.vue'
 import CameraScanner from '../components/CameraScanner.vue'
 import { getVerifyRecords, verifyCoupon } from '../api'
+import { formatBeijingTime } from '../utils/beijingTime'
 
 const inputRef = ref(null)
 const scannerVisible = ref(false)
@@ -252,7 +253,7 @@ async function loadHistory() {
       name: item.customer_name || item.customer?.name || '会员用券',
       code: item.code || item.coupon_code || '',
       amount: Number(item.coupon_amount || item.template_value || item.value || 0).toFixed(2),
-      time: (() => { const d = new Date(item.use_time || item.verify_time || item.updated_at || item.created_at); return isNaN(d.getTime()) ? '-' : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` })(),
+      time: formatBeijingTime(item.use_time || item.verify_time || item.updated_at || item.created_at) || '-',
     }))
   } catch { historyList.value = [] }
   finally { loadingHistory.value = false }

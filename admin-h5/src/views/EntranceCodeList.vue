@@ -207,6 +207,7 @@ import PageHeader from '../components/PageHeader.vue'
 import TableStickerExportDialog from '../components/TableStickerExportDialog.vue'
 import { classifyTableStickerCode, triggerBlobDownload } from '../utils/tableStickerExport'
 import { batchDownloadEntranceCodes, createEntranceCode, deleteEntranceCode, exportTableStickers, getActivationStatus, getEntranceCodeSummary, getEntranceCodes, regenerateEntranceCode, updateEntranceCodeStatus } from '../api'
+import { parseOrderTime } from '../utils/orderListSort'
 
 const route = useRoute()
 const router = useRouter()
@@ -257,7 +258,7 @@ const displayCodes = computed(() => {
   let list = channelFilter.value === 'ALL' ? codes.value : codes.value.filter(c => c.channel === channelFilter.value)
   list = [...list]
   if (sortBy.value === 'scan') list.sort((a, b) => (b.scan_count || 0) - (a.scan_count || 0))
-  else if (sortBy.value === 'new') list.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+  else if (sortBy.value === 'new') list.sort((a, b) => parseOrderTime(b.created_at) - parseOrderTime(a.created_at))
   else list.sort(byTableNo)
   return list
 })
