@@ -59,7 +59,9 @@
 - [ ] 状态机 `pending → preparing → done → served`：越级 / 重复提交 / 并发操作行为正确（`p0-08` `p0-15` 已合）。
 - [ ] **厨房出票可靠性**（`fix/p0-07` 已合）：飞鹅云打印机离线 / 超时 / 重复打印的恢复；`FEIEYUN_*` 未配的店不报错。
   （注意：生产日志里有订单 `7496403891492360192` 长期卡在 `PRINT_RECOVERY_ATTEMPT` 循环，排查是否僵尸任务。）
-- [ ] **异步 / 事务陷阱**：`MissingGreenlet` 类（已修一次）；**批量循环共享 session 时任一 rollback 会让其余对象过期**——审计批量发券 / 批量改状态代码。
+- [x] **异步 / 事务陷阱审计（2026-08-30）**：`_stale_order_cleanup_once` / `_pending_payment_reconcile_once`（`main.py`）
+  用独立 `AsyncSessionLocal()` 逐单隔离；`_cleanup_stale_pending_payment_orders`（`orders.py`，必须留在建单事务内）
+  从纯 id 列表出发、每单用前重新 `SELECT` 一次；`_marketing_tuning_loop` 每租户独立 session。三处 rollback 传染风险都已封住。
 - [ ] 工作台 2 秒轮询：N 家店同时开工作台的 DB / 连接池压力（见 J 压测）。
 
 ## E. 部署 / 运维 / 恢复 —— 阻塞级
@@ -67,7 +69,7 @@
 - [ ] **`.env` 与 `saas-base/static/` 异地备份**：`bash scripts/backup-server-config.sh` 在服务器打包 →
   按它打印的 `scp` 命令拉到你本地/网盘。每次改 `.env` 或有新上传后重跑，本地留最近 3 份。
   （脚本已就绪；缺的是"真的跑一次并拉到异地"这个动作。）
-- [ ] `deploy-production.sh` 健康检查抢跑问题（`systemctl restart` 后立刻 curl，旧进程关得慢误判失败）——加等待 / 重试窗口，或记录"失败后手动 `curl /health` 复核"的 SOP。
+- [x] `deploy-production.sh` 健康检查抢跑：已改为轮询最多 ~90s（`f0c6a4b`），不再单次立刻 curl 误判。
 - [ ] 确认生产 admin-h5 走的链路（`deploy-production.sh` 统一链路 vs 老的手工 `dist`；`docs/production-deployment.md` 说首次切换"尚未执行"）。
 - [ ] **回滚演练**：`rollback-admin-h5.sh` 真跑一次；后端出问题退到上一个 SHA 的步骤。
 - [ ] Alembic：新迁移人工审过再上；确认线上 revision。
@@ -86,7 +88,9 @@
 - [ ] `member-mini-client` 审核状态 / 版本；`channel=DEMO` 那一版是否已发布（体验卡演示用，不发也能演示但不够干净）。
 - [ ] `getwxacodeunlimit` 日调用配额：一家店几十桌 × 多家店批量建码时留意。
 - [ ] 订阅消息模板 ID（券提醒 / 排队 / 订单 / 取餐）线上还在、字段顺序对。
-- [ ] **`ALLOW_MOCK_WECHAT_SESSION` 线上必须 `False`**；`code2session` 失败必须 fail-closed。
+- [~] **`code2session` fail-closed 已核实（代码层）**：`wechat_service._can_use_mock_session()` = `APP_ENV != "production" AND ALLOW_MOCK_WECHAT_SESSION`。
+  两个都满足才会 mock，否则 `_mock_or_raise` 直接 `raise RuntimeError`（不返回假 openid）。默认 `ALLOW_MOCK_WECHAT_SESSION=False`。
+  **你要确认的**：服务器 `.env` 里 `APP_ENV=production`（别只靠 `ALLOW_MOCK...` 那一道），且 `ALLOW_MOCK_WECHAT_SESSION` 没被打开。
 - [ ] access_token 全局限流：多处获取要复用缓存。
 
 ## H. 营销 / 券经济性 —— 观察项，不阻塞（已决定先上线观察）
@@ -99,7 +103,8 @@
 ## I. 可观测性 / 告警
 
 - [x] 生产事件可追踪性 + 关键事件告警（`bb97262` `2fbe00f` 已合）——**验证告警真的能推达**（造一次后端异常 / 支付失败，确认收到）。
-- [ ] `/health` 覆盖 DB + Redis；Redis 挂时哪些功能降级（限流、Demo 直接 503）、正常下单是否受影响。
+- [x] `/health` 现在真探 DB（`SELECT 1`，不通 → 503 `status:"down"`）+ 报 Redis 状态（降级不致命）（`f0c6a4b`）。
+  之前是无条件 `{"status":"healthy"}` 空壳，DB 挂了也照切流量。部署后 `curl -s localhost:9898/health` 应看到 `checks:{process,db,redis}`。
 - [ ] `request_id` 贯穿日志（`fix/p0-16-b1` 已合）——抽查一条链路。
 
 ## J. 压测（上线前至少一轮）
