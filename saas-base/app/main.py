@@ -579,6 +579,41 @@ def read_root():
 
 
 @app.get("/health")
-def health_check():
-    return success_response(data={"status": "healthy"})
+async def health_check():
+    """真实健康检查：DB 不通 = 503 unhealthy（deploy-production.sh 靠 body 里有没有
+    'healthy' 判断是否切流量，所以 DB 挂了绝不能再回 'healthy'）。Redis 按"降级不致命"
+    处理——只报状态，不影响整体判定（限流/缓存/Demo 会退化，但正常下单不依赖它）。"""
+    import sqlalchemy as _sa
+    from app.core.database import async_engine
+
+    checks = {"process": "ok"}
+
+    db_ok = False
+    try:
+        async def _ping_db():
+            async with async_engine.connect() as conn:
+                await conn.execute(_sa.text("SELECT 1"))
+        await asyncio.wait_for(_ping_db(), timeout=3)
+        db_ok = True
+        checks["db"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        checks["db"] = f"fail: {type(exc).__name__}"
+
+    if getattr(settings, "REDIS_ENABLED", False):
+        try:
+            from app.core.redis_client import redis_client
+            await asyncio.wait_for(redis_client.ping(), timeout=2)
+            checks["redis"] = "ok"
+        except Exception as exc:  # noqa: BLE001
+            checks["redis"] = f"degraded: {type(exc).__name__}"
+    else:
+        checks["redis"] = "disabled"
+
+    # 注意：down 态的字符串不能含子串 "healthy"——deploy-production.sh 用
+    # `grep -q 'healthy'` 判断，"unhealthy" 会被误匹配。
+    status = "healthy" if db_ok else "down"
+    payload = success_response(data={"status": status, "checks": checks})
+    if not db_ok:
+        return JSONResponse(status_code=503, content=payload.to_response())
+    return payload
 

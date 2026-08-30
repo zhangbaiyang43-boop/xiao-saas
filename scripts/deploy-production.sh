@@ -484,16 +484,27 @@ if [ "$BACKEND_CHANGED" -eq 1 ]; then
   log "Restarting $BACKEND_SERVICE"
   systemctl restart "$BACKEND_SERVICE"
 
-  if systemctl is-active --quiet "$BACKEND_SERVICE"; then
-    HEALTH_BODY="$(curl -fsS "$BACKEND_HEALTH_URL" || true)"
-    if grep -q 'healthy' <<<"$HEALTH_BODY"; then
-      BACKEND_STATUS="OK"
+  # The old process can take 10s-5min to actually exit (production has seen it
+  # stuck in a PRINT_RECOVERY_ATTEMPT loop during shutdown), and the new one
+  # needs a beat to bind :9898. A single immediate curl races both and gives a
+  # false HEALTH_CHECK_FAILED. Poll /health for up to ~90s instead; only a real
+  # sustained failure aborts the deploy.
+  BACKEND_STATUS="HEALTH_CHECK_FAILED"
+  HEALTH_ATTEMPTS=30
+  HEALTH_INTERVAL=3
+  for _hc in $(seq 1 "$HEALTH_ATTEMPTS"); do
+    if systemctl is-active --quiet "$BACKEND_SERVICE"; then
+      HEALTH_BODY="$(curl -fsS --max-time 5 "$BACKEND_HEALTH_URL" || true)"
+      if grep -q 'healthy' <<<"$HEALTH_BODY"; then
+        BACKEND_STATUS="OK"
+        log "backend healthy after $((_hc * HEALTH_INTERVAL))s"
+        break
+      fi
     else
-      BACKEND_STATUS="HEALTH_CHECK_FAILED"
+      BACKEND_STATUS="RESTART_FAILED"
     fi
-  else
-    BACKEND_STATUS="RESTART_FAILED"
-  fi
+    sleep "$HEALTH_INTERVAL"
+  done
 
   if [ "$BACKEND_STATUS" != "OK" ]; then
     echo "STATUS=BACKEND_DEPLOY_FAILED" >&2

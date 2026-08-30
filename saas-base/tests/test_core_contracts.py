@@ -65,11 +65,19 @@ class CoreContractsTest(unittest.TestCase):
             "msg": "ok",
             "data": {"message": "Multi-tenant Member Management SaaS API"},
         })
-        self.assertEqual(health_check().model_dump(), {
-            "code": 200,
-            "msg": "ok",
-            "data": {"status": "healthy"},
-        })
+        # /health is now async and probes DB (+ Redis, degrade-tolerant). It
+        # returns a RespVo on success or a 503 JSONResponse when the DB is down.
+        # Here (no live DB) it should still be RespVo-shaped with a status +
+        # per-dependency checks; the exact db/redis outcome depends on the env.
+        result = asyncio.run(health_check())
+        if hasattr(result, "model_dump"):
+            body = result.model_dump()
+        else:  # JSONResponse (DB unreachable → 503)
+            body = json.loads(result.body)
+        self.assertEqual(set(body.keys()), {"code", "msg", "data"})
+        self.assertIn(body["data"]["status"], {"healthy", "down"})
+        self.assertIn("process", body["data"]["checks"])
+        self.assertIn("db", body["data"]["checks"])
 
     def test_auth_middleware_returns_readable_respvo_for_missing_token(self):
         middleware = AuthMiddleware(app=None)
