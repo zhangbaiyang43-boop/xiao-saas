@@ -7,6 +7,9 @@
       <view v-if="summaryText" class="cp-summary-wrap">
         <text class="cp-summary">{{ summaryText }}</text>
       </view>
+      <view class="cp-summary-wrap">
+        <text class="cp-note">券每次最多抵订单金额的 20%，上方金额已按本单计算</text>
+      </view>
       <scroll-view class="cp-list" scroll-y>
         <view
           v-if="bestCoupon"
@@ -120,6 +123,13 @@ export default {
   display: block;
   font-size: 24rpx;
   color: var(--text-3);
+  line-height: 1.4;
+}
+
+.cp-note {
+  display: block;
+  font-size: 22rpx;
+  color: var(--text-4, var(--text-3));
   line-height: 1.4;
 }
 

@@ -5,6 +5,7 @@
     <view class="page-header">
       <text class="ph-title">我的优惠券</text>
       <text class="ph-desc">去点餐，结算时自动为您用上最划算的一张。</text>
+      <text class="ph-note">单张券每次最多抵订单金额的 20%，实际优惠以结算页为准。</text>
     </view>
 
     <!-- Tabs -->
@@ -224,6 +225,14 @@ export default {
   margin-top: 12rpx;
   color: rgba(255, 255, 255, 0.85);
   font-size: 26rpx;
+}
+
+.ph-note {
+  display: block;
+  margin-top: 8rpx;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 22rpx;
+  line-height: 1.4;
 }
 
 /* ── Tabs ────────────────────────────────── */

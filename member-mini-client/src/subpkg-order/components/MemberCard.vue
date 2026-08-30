@@ -55,6 +55,7 @@
 
       <view v-if="usableMemberCoupons.length" class="member-section">
         <text class="member-section-title">可用优惠券</text>
+        <text class="member-coupon-hint">单张券每次最多抵订单金额的 20%，实际优惠以结算页为准</text>
         <view class="member-coupon-list">
           <view v-for="coupon in usableMemberCoupons" :key="coupon.id || coupon.coupon_id || coupon.name" class="member-coupon-card" @click="$emit('use-coupon', coupon)">
             <view class="member-coupon-value">
@@ -283,6 +284,7 @@ export default {
 
 
 .member-section-title { color: var(--text-1); font-size: 32rpx; line-height: 44rpx; font-weight: 900; }
+.member-coupon-hint { margin-top: -4rpx; color: var(--text-3); font-size: 22rpx; line-height: 1.4; }
 
 
 .member-coupon-list { display: flex; flex-direction: column; gap: 16rpx; }

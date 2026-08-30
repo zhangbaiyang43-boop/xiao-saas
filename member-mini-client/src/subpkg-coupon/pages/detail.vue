@@ -59,6 +59,11 @@
           <text class="info-label">领取时间</text>
           <text class="info-value">{{ formatDateTime(coupon.created_at) }}</text>
         </view>
+        <view class="info-divider"></view>
+        <view class="info-row">
+          <text class="info-label">使用限制</text>
+          <text class="info-value">单笔最多抵订单金额的 20%</text>
+        </view>
       </view>
 
       <!-- 底部操作栏 -->
