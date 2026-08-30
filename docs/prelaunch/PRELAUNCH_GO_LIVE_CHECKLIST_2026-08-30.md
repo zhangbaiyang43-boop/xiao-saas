@@ -21,8 +21,10 @@
   验：admin「智能营销 → 发券效果」预算进度条；或造数据触发闸。
 - [ ] **退款 / 取消契约**（`fix/p0-09` 已合）：已支付订单取消 → 券恢复、状态回滚、退款路径明确。
   验：真机下单支付 → 取消，检查券、订单状态、退款记录。
-- [ ] **⚠️ `fix/p1-wxpay-recovery-gate` 尚未合并**（内存记：已实现已测 16/16）。支付回调丢失 / 超时的恢复闸缺一块。
-  决策：上线前合并部署，还是接受"回调异常需人工兜"的风险并记录。
+- [x] **WXPay 恢复闸已在 main**：`saas-base/app/services/wxpay_recovery_gate.py`（374 行，commit `e8b399b`，2026-08-20）——
+  单一共享节流闸，per-order 冷却/退避、monotonic 计时、同一 order_id 同时只有一个真实 provider 查询在飞、有界内存。
+  测试 `tests/test_p1_wxpay_recovery_gate.py`（22 个）。
+  注：分支 `fix/p1-wxpay-recovery-gate` 名字有误导——本地那两个 commit 是别的（商户开通）且已被 PR #11 取代，勿合，建议删。
 - [ ] **平台订阅收款**：线上确认 `SAAS_REAL_PAYMENT_ENABLED=False`、走 `SAAS_MANUAL_PAYMENT_ENABLED`（官方码 + 超管确认）。
   验：`PROVIDER_IMPLEMENTATION_READY` 代码常量没被误开；试跑一次手动核销流程。
 - [ ] **幂等**（`fix/p0-04` 已合）：同 `request_id` 重试返回同一张订单。
@@ -102,7 +104,7 @@
 
 | 分支 | 内容 | 处置 |
 |---|---|---|
-| `fix/p1-wxpay-recovery-gate` | 微信支付回调恢复闸（P1，已实现已测） | 建议合并部署 |
+| ~~`fix/p1-wxpay-recovery-gate`~~ | 名字误导——恢复闸本体已在 main（`e8b399b`）；本地这条 = 别的旧活（商户开通），已被 PR #11 取代 | **删本地分支**，勿合 |
 | `perf/phase1-p0-certified` / `release/perf-phase1-backport` | 性能优化回填 | 压测结果决定是否上 |
 | `p0-02-pricing-authority` | 定价权威（大概率被已合的 `p0-14` 覆盖） | 确认后删分支 |
 | `fix/ops-p0-guest-order-status-tenant`（`-v2` 已合） | 旧版，已被 v2 取代 | 删分支 |
@@ -113,3 +115,4 @@
 - 非 demo 令牌打 `/api/v1/demo/*` 由 500 改 403（`d589a80`）
 - 只读诊断脚本：`check_demo_tenant` / `diagnose_tenant_coupons` / `probe_tenant_isolation`
 - 生产告警（`2fbe00f`，需验证推达）
+- 核实 **WXPay 恢复闸已在 main**（`e8b399b` / `wxpay_recovery_gate.py` / 22 测试）——之前以为未合，是笔记过期
