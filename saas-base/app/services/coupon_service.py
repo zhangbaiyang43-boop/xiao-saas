@@ -128,19 +128,46 @@ class CouponService(BaseService):
         return float(row[0] or 0), float(row[1] or 0), int(row[2] or 0)
 
     async def within_discount_budget(self) -> bool:
-        """月优惠预算总闸：近30天优惠总额 ≤ GMV × X%（X 随强度）。
-        数据太少（冷启动）不设限，先把量做起来。这是「不亏钱」的总账防线，
-        单张券的面额不再靠拍毛利率去卡。"""
+        """优惠预算总闸（「不亏钱」的总账防线）：
+        - 数据够了：近30天优惠总额 ≤ GMV × X%（X 随强度 3/5/8%）。
+        - 冷启动（订单/GMV 未达比例闸门槛）：比例闸豁免，但仍受一个**绝对额度上限**
+          （补丁 ①，COLD_START_DISCOUNT_CEILING）——否则新店头几天发券没有任何上限。
+        """
         from app.core.platform_rules import (
+            COLD_START_DISCOUNT_CEILING,
             DISCOUNT_BUDGET_MIN_GMV,
             DISCOUNT_BUDGET_MIN_ORDERS,
             discount_budget_ratio,
         )
         discount, gmv, count = await self._recent_discount_and_gmv()
         if count < DISCOUNT_BUDGET_MIN_ORDERS or gmv < DISCOUNT_BUDGET_MIN_GMV:
-            return True
+            return discount <= COLD_START_DISCOUNT_CEILING
         intensity = await self.get_marketing_intensity()
         return discount <= gmv * discount_budget_ratio(intensity)
+
+    async def _free_entry_coupons_in_window(self, customer_id: int) -> int:
+        """该顾客近 FREE_ENTRY_COUPON_WINDOW_DAYS 天内领到的「无门槛」进店券张数。
+        用 CouponTemplate.description == 'entry_coupon' + min_amount==0 认定
+        （description 存 rule_type，见 _get_or_create_auto_coupon_template）。"""
+        from app.core.platform_rules import FREE_ENTRY_COUPON_WINDOW_DAYS
+        from app.models.coupon import Coupon
+        from app.models.coupon_template import CouponTemplate
+
+        tenant_id = self.require_tenant_id()
+        cutoff = datetime.utcnow() - timedelta(days=FREE_ENTRY_COUPON_WINDOW_DAYS)
+        result = await self.db.execute(
+            select(func.count(Coupon.id))
+            .select_from(Coupon)
+            .join(CouponTemplate, CouponTemplate.id == Coupon.template_id)
+            .where(
+                Coupon.tenant_id == tenant_id,
+                Coupon.customer_id == customer_id,
+                Coupon.created_at >= cutoff,
+                CouponTemplate.description == "entry_coupon",
+                func.coalesce(CouponTemplate.min_amount, 0) == 0,
+            )
+        )
+        return int(result.scalar_one() or 0)
 
     async def get_marketing_intensity(self) -> str:
         """商家选择的营销强度档位（保守/标准/激进），未设置时回落标准档。"""
@@ -487,6 +514,24 @@ class CouponService(BaseService):
                 return await self._existing_entry_coupon_payload(customer_id)
 
             selected = self.select_weighted_coupon(rule_config)
+
+            # 补丁 ②：同一顾客近 FREE_ENTRY_COUPON_WINDOW_DAYS 天内领的「无门槛」进店券
+            # 达到上限后，本次强制换成带门槛的那档进店券（还是有券，但要凑够金额才能用）。
+            # 月优惠预算总闸是全店口径的，管不住「天天来的熟客靠无门槛券持续薅毛利」这种
+            # 单点损耗，这里按人再补一层。
+            from app.core.platform_rules import FREE_ENTRY_COUPON_MAX_PER_WINDOW
+            if float(selected.get("threshold", 0) or 0) <= 0:
+                if await self._free_entry_coupons_in_window(customer_id) >= FREE_ENTRY_COUPON_MAX_PER_WINDOW:
+                    options = self.normalize_weighted_coupon_options(rule_config)
+                    paid = [o for o in options if float(o.get("threshold", 0) or 0) > 0]
+                    if paid:
+                        selected = max(paid, key=lambda o: o.get("weight", 0))
+                    elif float(rule_config.get("threshold", 0) or 0) > 0:
+                        selected = dict(rule_config)
+                    else:
+                        # 这档进店券全是无门槛，且已达顾客频次上限——本次不发。
+                        return None
+
             amount = float(selected.get("amount", 3))
             threshold = float(selected.get("threshold", 50))
             valid_days = int(selected.get("valid_days", 1))

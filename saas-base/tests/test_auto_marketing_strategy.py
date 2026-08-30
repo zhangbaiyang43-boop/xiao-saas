@@ -10,7 +10,8 @@
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from app.core.platform_rules import (
     build_dynamic_rules,
@@ -18,6 +19,7 @@ from app.core.platform_rules import (
     INDUSTRY_PRESETS,
     MICRO_BAND_MAX,
     discount_budget_ratio,
+    COLD_START_DISCOUNT_CEILING,
 )
 from app.services.coupon_service import CouponService
 
@@ -138,9 +140,20 @@ class AutoMarketingStrategyP0Test(unittest.TestCase):
     # ── P0-6 月优惠预算总闸 ─────────────────────────────────────────
     def test_within_discount_budget_true_during_cold_start(self):
         svc = CouponService(db=None)
-        # 单量不足 → 不设限
-        svc._recent_discount_and_gmv = AsyncMock(return_value=(999.0, 100.0, 3))
+        # 冷启动（单量不足）：比例闸豁免，但优惠总额仍受绝对上限约束（补丁 ①）。
+        # 未超上限 → 放行。
+        svc._recent_discount_and_gmv = AsyncMock(
+            return_value=(COLD_START_DISCOUNT_CEILING - 1, 100.0, 3)
+        )
         self.assertTrue(asyncio.run(svc.within_discount_budget()))
+
+    def test_within_discount_budget_false_during_cold_start_over_ceiling(self):
+        svc = CouponService(db=None)
+        # 冷启动期优惠总额超过绝对上限 → 拦截（补丁 ①：之前这里无条件放行，是唯一有缝的地方）。
+        svc._recent_discount_and_gmv = AsyncMock(
+            return_value=(COLD_START_DISCOUNT_CEILING + 1, 100.0, 3)
+        )
+        self.assertFalse(asyncio.run(svc.within_discount_budget()))
 
     def test_within_discount_budget_false_when_over_ratio(self):
         svc = CouponService(db=None)
@@ -170,6 +183,78 @@ class AutoMarketingStrategyP0Test(unittest.TestCase):
         svc.within_discount_budget = AsyncMock(return_value=False)
         result = asyncio.run(svc.issue_entry_coupon(customer_id=1))
         self.assertIsNone(result)
+
+    # ── 补丁 ②：同一顾客的「无门槛」进店券频次上限 ──────────────────────
+    def _entry_coupon_svc(self, weighted_coupons, free_in_window):
+        from contextlib import asynccontextmanager
+
+        svc = CouponService(db=None)
+        svc.get_coupon_rules = AsyncMock(return_value={
+            "entry_coupon": {
+                "enabled": True,
+                "weighted_enabled": True,
+                "weighted_coupons": weighted_coupons,
+            }
+        })
+        svc.within_discount_budget = AsyncMock(return_value=True)
+        svc._free_entry_coupons_in_window = AsyncMock(return_value=free_in_window)
+
+        @asynccontextmanager
+        async def _fake_lock(customer_id, rule_type):
+            yield True
+
+        svc._dedup_issue_lock = _fake_lock
+        captured = {}
+
+        async def _fake_tpl(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(id=1)
+
+        svc._get_or_create_auto_coupon_template = _fake_tpl
+        svc.send_coupons_with_result = AsyncMock(return_value={
+            "success_count": 1, "sent": [{"id": "c1", "expire_time": None}],
+        })
+        return svc, captured
+
+    def test_free_entry_coupon_rerouted_to_threshold_option_when_cap_hit(self):
+        # 顾客近 7 天已领 2 张无门槛进店券；本次随机命中的又是无门槛那档 →
+        # 强制换成带门槛的最高权重档，而不是再发一张无门槛。
+        weighted = [
+            {"name": "无门槛立减", "amount": 4, "threshold": 0, "weight": 60},
+            {"name": "加菜小券", "amount": 6, "threshold": 30, "weight": 28},
+        ]
+        svc, captured = self._entry_coupon_svc(weighted, free_in_window=2)
+        with patch("app.services.coupon_service.random.choices",
+                   return_value=[weighted[0]]):
+            result = asyncio.run(svc.issue_entry_coupon(customer_id=1))
+        self.assertIsNotNone(result)
+        self.assertEqual(captured["threshold"], 30)
+        self.assertEqual(captured["amount"], 6)
+
+    def test_free_entry_coupon_returns_none_when_cap_hit_and_no_threshold_option(self):
+        # 这档进店券全是无门槛，且顾客已达频次上限 → 本次不发。
+        weighted = [
+            {"name": "无门槛立减", "amount": 4, "threshold": 0, "weight": 60},
+            {"name": "手气爆棚", "amount": 5, "threshold": 0, "weight": 12},
+        ]
+        svc, _ = self._entry_coupon_svc(weighted, free_in_window=2)
+        with patch("app.services.coupon_service.random.choices",
+                   return_value=[weighted[0]]):
+            result = asyncio.run(svc.issue_entry_coupon(customer_id=1))
+        self.assertIsNone(result)
+
+    def test_free_entry_coupon_allowed_when_under_cap(self):
+        weighted = [
+            {"name": "无门槛立减", "amount": 4, "threshold": 0, "weight": 60},
+            {"name": "加菜小券", "amount": 6, "threshold": 30, "weight": 28},
+        ]
+        svc, captured = self._entry_coupon_svc(weighted, free_in_window=1)
+        with patch("app.services.coupon_service.random.choices",
+                   return_value=[weighted[0]]):
+            result = asyncio.run(svc.issue_entry_coupon(customer_id=1))
+        self.assertIsNotNone(result)
+        self.assertEqual(captured["threshold"], 0)
+        self.assertEqual(captured["amount"], 4)
 
 
 if __name__ == "__main__":

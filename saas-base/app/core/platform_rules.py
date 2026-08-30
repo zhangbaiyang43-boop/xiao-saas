@@ -31,9 +31,19 @@ DISCOUNT_BUDGET_RATIO_BY_INTENSITY = {
     "standard": 0.05,
     "aggressive": 0.08,
 }
-# 冷启动：数据太少不设总闸，先把量做起来
+# 冷启动：数据太少比例总闸还不成立（近30天订单 < 此数 或 GMV < 此值时豁免比例闸）
 DISCOUNT_BUDGET_MIN_ORDERS = 10
 DISCOUNT_BUDGET_MIN_GMV = 300.0
+
+# 冷启动补丁 ①：即使比例总闸豁免，近 30 天优惠总额也不得超过这个绝对值。
+# 防止新店头几天在没有比例闸的情况下把钱撒没——这是"不亏钱"里唯一之前有缝的地方。
+COLD_START_DISCOUNT_CEILING = 100.0
+
+# 补丁 ②：同一顾客在此窗口内最多领这么多张"无门槛"进店券。
+# 月优惠预算总闸是全店的，管不住"天天来的熟客靠无门槛券持续薅毛利"这种单点损耗，
+# 这里按人再补一层。命中上限后强制换成带门槛的那档进店券（还是有券，只是要花够）。
+FREE_ENTRY_COUPON_WINDOW_DAYS = 7
+FREE_ENTRY_COUPON_MAX_PER_WINDOW = 2
 
 # 业态预设：仅用于「连菜单都没有」的兜底兜底客单价。
 # 冷启动客单价优先用「菜单菜品价格中位数 × 1.2」算（见 coupon_service），
