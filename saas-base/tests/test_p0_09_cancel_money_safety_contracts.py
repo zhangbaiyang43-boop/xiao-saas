@@ -136,6 +136,8 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
         fake_wxpay.verify_notify = lambda _headers, _body: resource
+        fake_wxpay.refund.return_value = {"status": "SUCCESS"}
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), patch.object(
             OrderPaymentService, "_on_payment_success", new=AsyncMock()
@@ -150,7 +152,7 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.wx_transaction_id, resource["transaction_id"])
         self.assertEqual(order.refund_status, "success")
-        self.assertTrue(serialize_order(order, [])["refund_required"])
+        self.assertFalse(serialize_order(order, [])["refund_required"])
 
     async def test_r04_terminal_query_success_uses_same_reconciliation(self):
         order = await self.make_order(status="rejected")
@@ -163,6 +165,8 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
         fake_wxpay.query_order_by_out_trade_no.return_value = resource
+        fake_wxpay.refund.return_value = {"status": "SUCCESS"}
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), patch.object(
             OrderPaymentService, "_run_post_commit_payment_effects", new=AsyncMock()
@@ -195,6 +199,8 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         current_resource = {}
         fake_wxpay.verify_notify = lambda _headers, _body: current_resource
         fake_wxpay.query_order_by_out_trade_no.side_effect = lambda _order_id: current_resource
+        fake_wxpay.refund.return_value = {"status": "SUCCESS"}
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         def request():
             value = AsyncMock()
@@ -253,7 +259,7 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
             await self.db.refresh(order)
             self.assertEqual(order.payment_status, "paid")
             self.assertIn(order.status, ("cancelled", "rejected"))
-            self.assertTrue(serialize_order(order, [])["refund_required"])
+            self.assertFalse(serialize_order(order, [])["refund_required"])
 
     async def test_twenty_order_option_a_matrix_has_no_illegal_paid_cancel(self):
         rows = []

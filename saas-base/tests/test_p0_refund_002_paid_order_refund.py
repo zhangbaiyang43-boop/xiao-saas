@@ -1,10 +1,10 @@
-"""P0-REFUND-002: paid fulfillable orders can refund in-system; paid cancel stays 409."""
+"""P0-REFUND-002: paid terminal orders reconcile provider refund truth."""
 from __future__ import annotations
 
 import asyncio
 import unittest
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +16,7 @@ from app.models.order import Order
 from app.models.tenant import Tenant
 from app.services.order_lifecycle_service import OrderLifecycleService
 from app.services.order_payment_service import OrderPaymentService
+from app.services.wxpay_service import WxPayService, map_provider_refund_status
 
 if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -88,10 +89,21 @@ class P0Refund002PaidOrderRefundTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         return order
 
-    async def test_paid_pending_refund_success_cancels_and_refunds_once(self):
-        order = await self._make_order()
+    def _wxpay(self, *, submit_status="SUCCESS", query_status=None, submit_error=None):
         fake = AsyncMock()
         fake.enabled = True
+        if submit_error is not None:
+            fake.refund.side_effect = submit_error
+        else:
+            fake.refund.return_value = {"status": submit_status}
+        fake.query_refund_by_out_refund_no.return_value = (
+            None if query_status is None else {"status": query_status}
+        )
+        return fake
+
+    async def test_paid_cancelled_refund_success_records_local_success(self):
+        order = await self._make_order(status="cancelled")
+        fake = self._wxpay(submit_status="SUCCESS")
         with patch("app.services.wxpay_service.WxPayService", return_value=fake):
             result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
 
@@ -102,26 +114,66 @@ class P0Refund002PaidOrderRefundTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.refund_status, "success")
         self.assertEqual(float(order.refund_amount), 58.0)
         self.assertIsNotNone(order.refunded_at)
+        fake.query_refund_by_out_refund_no.assert_awaited_once_with(f"RF{order.id}")
         fake.refund.assert_awaited_once()
         _, kwargs = fake.refund.call_args
         self.assertEqual(kwargs["out_refund_no"], f"RF{order.id}")
 
-    async def test_paid_preparing_refund_success_cancels(self):
-        order = await self._make_order(status="preparing")
-        fake = AsyncMock()
-        fake.enabled = True
+    async def test_paid_rejected_refund_success_records_local_success(self):
+        order = await self._make_order(status="rejected")
+        fake = self._wxpay(submit_status="SUCCESS")
         with patch("app.services.wxpay_service.WxPayService", return_value=fake):
             result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
 
         self.assertEqual(result.code, 200, result.msg)
         await self.db.refresh(order)
-        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.status, "rejected")
+        self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.refund_status, "success")
 
+    async def test_active_paid_order_cannot_refund_in_phase_02a(self):
+        order = await self._make_order(status="preparing")
+        fake = self._wxpay(submit_status="SUCCESS")
+        with patch("app.services.wxpay_service.WxPayService", return_value=fake):
+            result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
+
+        self.assertEqual(result.code, 409)
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "preparing")
+        self.assertIsNone(order.refund_status)
+        fake.refund.assert_not_called()
+
+    async def test_processing_submit_records_processing_without_final_side_effects(self):
+        order = await self._make_order(status="cancelled")
+        fake = self._wxpay(submit_status="PROCESSING", query_status="PROCESSING")
+        with patch("app.services.wxpay_service.WxPayService", return_value=fake):
+            result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
+
+        self.assertEqual(result.code, 200)
+        self.assertEqual((result.data or {}).get("refund_status"), "processing")
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "cancelled")
+        self.assertEqual(order.refund_status, "processing")
+        self.assertIsNone(order.refunded_at)
+        self.assertIsNone(order.refund_amount)
+
+    async def test_closed_or_abnormal_submit_records_failed_not_success(self):
+        for provider_status in ("CLOSED", "ABNORMAL"):
+            with self.subTest(provider_status=provider_status):
+                order = await self._make_order(status="cancelled")
+                fake = self._wxpay(submit_status=provider_status)
+                with patch("app.services.wxpay_service.WxPayService", return_value=fake):
+                    result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
+
+                self.assertEqual(result.code, 502)
+                await self.db.refresh(order)
+                self.assertEqual(order.status, "cancelled")
+                self.assertEqual(order.refund_status, "failed")
+                self.assertIsNone(order.refunded_at)
+
     async def test_refund_success_is_idempotent(self):
-        order = await self._make_order()
-        fake = AsyncMock()
-        fake.enabled = True
+        order = await self._make_order(status="cancelled")
+        fake = self._wxpay(submit_status="SUCCESS")
         with patch("app.services.wxpay_service.WxPayService", return_value=fake):
             first = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
             second = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
@@ -134,17 +186,41 @@ class P0Refund002PaidOrderRefundTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order.refund_status, "success")
         fake.refund.assert_awaited_once()
 
+    async def test_processing_retry_queries_existing_refund_without_new_submit(self):
+        order = await self._make_order(status="cancelled", refund_status="processing")
+        fake = self._wxpay(query_status="PROCESSING")
+        with patch("app.services.wxpay_service.WxPayService", return_value=fake):
+            result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
+
+        self.assertEqual(result.code, 200)
+        self.assertEqual((result.data or {}).get("refund_status"), "processing")
+        await self.db.refresh(order)
+        self.assertEqual(order.refund_status, "processing")
+        fake.query_refund_by_out_refund_no.assert_awaited_once_with(f"RF{order.id}")
+        fake.refund.assert_not_called()
+
+    async def test_provider_success_local_missing_reconciles_before_submit(self):
+        order = await self._make_order(status="cancelled")
+        fake = self._wxpay(query_status="SUCCESS")
+        with patch("app.services.wxpay_service.WxPayService", return_value=fake):
+            result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
+
+        self.assertEqual(result.code, 200)
+        await self.db.refresh(order)
+        self.assertEqual(order.refund_status, "success")
+        self.assertIsNotNone(order.refunded_at)
+        fake.query_refund_by_out_refund_no.assert_awaited_once_with(f"RF{order.id}")
+        fake.refund.assert_not_called()
+
     async def test_refund_failure_keeps_order_status(self):
-        order = await self._make_order()
-        fake = AsyncMock()
-        fake.enabled = True
-        fake.refund.side_effect = RuntimeError("wxpay gateway timeout")
+        order = await self._make_order(status="cancelled")
+        fake = self._wxpay(submit_error=RuntimeError("wxpay gateway timeout"))
         with patch("app.services.wxpay_service.WxPayService", return_value=fake):
             result = await refund_paid_order(str(order.id), make_merchant_request(), self.db)
 
         self.assertEqual(result.code, 502)
         await self.db.refresh(order)
-        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.status, "cancelled")
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.refund_status, "failed")
         self.assertIn("timeout", order.refund_error or "")
@@ -191,13 +267,12 @@ class P0Refund002PaidOrderRefundTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(order.refund_status)
 
     async def test_tenant_a_refund_does_not_mutate_tenant_b(self):
-        order_a = await self._make_order(tenant_id=TENANT_A)
+        order_a = await self._make_order(tenant_id=TENANT_A, status="cancelled")
         order_b = await self._make_order(tenant_id=TENANT_B, table_no="B1")
         note_b = order_b.merchant_note
         status_b = order_b.status
         refund_b = order_b.refund_status
-        fake = AsyncMock()
-        fake.enabled = True
+        fake = self._wxpay(submit_status="SUCCESS")
         with patch("app.services.wxpay_service.WxPayService", return_value=fake):
             result = await refund_paid_order(
                 str(order_a.id), make_merchant_request(TENANT_A), self.db
@@ -209,3 +284,37 @@ class P0Refund002PaidOrderRefundTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order_b.refund_status, refund_b)
         self.assertEqual(order_b.merchant_note, note_b)
         self.assertEqual(order_b.payment_status, "paid")
+
+    async def test_refund_required_false_after_success_or_processing(self):
+        from app.api.v1.orders import build_order_financial_capabilities, serialize_order
+
+        success = await self._make_order(status="cancelled", refund_status="success", refund_amount=58.0)
+        processing = await self._make_order(status="rejected", refund_status="processing")
+        failed = await self._make_order(status="cancelled", refund_status="failed")
+
+        self.assertFalse(build_order_financial_capabilities(success)["refund_required"])
+        self.assertFalse(build_order_financial_capabilities(processing)["refund_required"])
+        self.assertTrue(build_order_financial_capabilities(failed)["refund_required"])
+
+        payload = serialize_order(success, [])
+        self.assertEqual(payload["refund_status"], "success")
+        self.assertEqual(payload["refund_amount"], 58.0)
+        self.assertIn("refunded_at", payload)
+
+    def test_wxpay_provider_refund_status_mapper(self):
+        self.assertEqual(map_provider_refund_status("SUCCESS"), "success")
+        self.assertEqual(map_provider_refund_status("PROCESSING"), "processing")
+        self.assertEqual(map_provider_refund_status("CLOSED"), "failed")
+        self.assertEqual(map_provider_refund_status("ABNORMAL"), "failed")
+        self.assertEqual(map_provider_refund_status(""), "processing")
+
+    async def test_wxpay_refund_query_uses_sdk_query_refund(self):
+        svc = object.__new__(WxPayService)
+        svc._client = MagicMock()
+        svc._client.query_refund.return_value = (200, '{"status":"SUCCESS","out_refund_no":"RF1"}')
+
+        result = await svc.query_refund_by_out_refund_no("RF1")
+
+        self.assertEqual(result["refund_status"], "success")
+        self.assertEqual(result["status"], "SUCCESS")
+        svc._client.query_refund.assert_called_once_with("RF1")

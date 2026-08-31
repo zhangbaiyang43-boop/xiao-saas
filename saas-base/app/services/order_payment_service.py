@@ -55,6 +55,7 @@ class RefundResult(TypedDict):
     success: bool
     amount: float
     error: str | None
+    refund_status: str
 
 
 class PostPaymentCouponData(TypedDict, total=False):
@@ -582,19 +583,24 @@ class OrderPaymentService(BaseService):
 
 
     async def _refund_order_payment(self, order: Order, reason: str) -> RefundResult:
-        """Refund a paid order's money before flipping it to a terminal cancelled/rejected state.
+        """Refund a paid order's money after terminal cancellation/rejection.
 
         Must be called with `order` already locked (with_for_update) in the current transaction.
         Restores the balance-paid portion directly; submits a WeChat refund request for the
         WeChat-charged portion. Uses a deterministic out_refund_no so retrying this call is safe
         (WeChat treats a repeated out_refund_no as the same refund request, not a new one).
 
-        Returns {"success": bool, "amount": float, "error": str | None}.
+        Returns {"success": bool, "amount": float, "error": str | None, "refund_status": str}.
         """
         if getattr(order, "payment_status", None) != "paid":
-            return RefundResult(success=True, amount=0.0, error=None)
+            return RefundResult(success=True, amount=0.0, error=None, refund_status="success")
         if getattr(order, "refund_status", None) == "success":
-            return RefundResult(success=True, amount=float(order.refund_amount or 0), error=None)
+            return RefundResult(
+                success=True,
+                amount=float(order.refund_amount or 0),
+                error=None,
+                refund_status="success",
+            )
 
         total = float(order.total or 0)
         balance_portion = float(order.balance_deduct_requested or 0)
@@ -603,6 +609,87 @@ class OrderPaymentService(BaseService):
             balance_portion = total
         wechat_portion = max(total - balance_portion, 0.0)
         refunded_amount = 0.0
+
+        provider_status = "success"
+        if wechat_portion > 0 and order.payment_method == "wxpay":
+            try:
+                from app.models.tenant import Tenant
+                from app.services.wxpay_service import map_provider_refund_status
+                from app.services.wxpay_service import WxPayService
+
+                tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
+                tenant = tenant_result.scalar_one_or_none()
+                svc = WxPayService(tenant) if tenant else None
+                if not svc or not svc.enabled:
+                    raise RuntimeError("merchant wxpay not configured, cannot auto-refund")
+                wechat_fen = max(1, round(wechat_portion * 100))
+                out_refund_no = f"RF{order.id}"
+                existing = await svc.query_refund_by_out_refund_no(out_refund_no)
+                if not isinstance(existing, dict):
+                    existing = None
+                provider_status = (
+                    (existing or {}).get("refund_status")
+                    or map_provider_refund_status((existing or {}).get("status"))
+                    if existing
+                    else ""
+                )
+                if not provider_status:
+                    submitted = await svc.refund(
+                        out_trade_no=str(order.id),
+                        out_refund_no=out_refund_no,
+                        refund_fen=wechat_fen,
+                        total_fen=wechat_fen,
+                        reason=reason,
+                    )
+                    if not isinstance(submitted, dict):
+                        submitted = {}
+                    provider_status = (
+                        (submitted or {}).get("refund_status")
+                        or map_provider_refund_status((submitted or {}).get("status"))
+                    )
+                    if provider_status == "processing":
+                        queried = await svc.query_refund_by_out_refund_no(out_refund_no)
+                        if not isinstance(queried, dict):
+                            queried = None
+                        if queried:
+                            provider_status = (
+                                queried.get("refund_status")
+                                or map_provider_refund_status(queried.get("status"))
+                            )
+                if provider_status == "processing":
+                    order.refund_status = "processing"
+                    order.refund_error = None
+                    logger.info(
+                        "[REFUND_PROCESSING] order_id=%s amount=%s out_refund_no=%s reason=%s",
+                        order.id, wechat_portion, out_refund_no, reason,
+                    )
+                    return RefundResult(
+                        success=False,
+                        amount=0.0,
+                        error=None,
+                        refund_status="processing",
+                    )
+                if provider_status != "success":
+                    order.refund_status = "failed"
+                    order.refund_error = f"wechat refund status={provider_status or 'unknown'}"[:500]
+                    return RefundResult(
+                        success=False,
+                        amount=0.0,
+                        error=order.refund_error,
+                        refund_status="failed",
+                    )
+                # Provider SUCCESS is the only point where local refund success is allowed.
+                refunded_amount += wechat_portion
+            except Exception as exc:
+                order.refund_status = "failed"
+                order.refund_error = str(exc)[:500]
+                logger.error("[REFUND_FAILED] order_id=%s error=%s", order.id, exc)
+                return RefundResult(
+                    success=False,
+                    amount=refunded_amount,
+                    error=str(exc),
+                    refund_status="failed",
+                )
 
         if balance_portion > 0 and order.customer_id:
             from app.models.member_account import MemberAccount
@@ -617,31 +704,6 @@ class OrderPaymentService(BaseService):
             if acc:
                 acc.balance = cast(Any, _numeric_decimal(acc.balance) + _numeric_decimal(balance_portion))
                 refunded_amount += balance_portion
-
-        if wechat_portion > 0 and order.payment_method == "wxpay":
-            try:
-                from app.models.tenant import Tenant
-                from app.services.wxpay_service import WxPayService
-
-                tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
-                tenant = tenant_result.scalar_one_or_none()
-                svc = WxPayService(tenant) if tenant else None
-                if not svc or not svc.enabled:
-                    raise RuntimeError("merchant wxpay not configured, cannot auto-refund")
-                wechat_fen = max(1, round(wechat_portion * 100))
-                await svc.refund(
-                    out_trade_no=str(order.id),
-                    out_refund_no=f"RF{order.id}",
-                    refund_fen=wechat_fen,
-                    total_fen=wechat_fen,
-                    reason=reason,
-                )
-                refunded_amount += wechat_portion
-            except Exception as exc:
-                order.refund_status = "failed"
-                order.refund_error = str(exc)[:500]
-                logger.error("[REFUND_FAILED] order_id=%s error=%s", order.id, exc)
-                return RefundResult(success=False, amount=refunded_amount, error=str(exc))
 
         # 退款后回滚这一单在支付成功时记的账：优惠券和积分/消费额，否则顾客能靠
         # "付款->拿到积分/等级/优惠券->自己或商家取消退款"反复刷积分和等级。
@@ -691,57 +753,42 @@ class OrderPaymentService(BaseService):
             "[REFUND_SUCCESS] order_id=%s amount=%s balance_portion=%s wechat_portion=%s reason=%s",
             order.id, refunded_amount, balance_portion, wechat_portion, reason,
         )
-        return RefundResult(success=True, amount=refunded_amount, error=None)
+        return RefundResult(
+            success=True,
+            amount=refunded_amount,
+            error=None,
+            refund_status="success",
+        )
 
 
     async def _refund_orphaned_wxpay_payment(self, order: Order) -> RefundResult:
         """WeChat confirms a payment succeeded for an order that's already cancelled/rejected
         locally (see wxpay_notify) -- the callback arrived after cancel_order/update_order_status
-        had already committed the terminal state, so _on_payment_success never ran for this order:
-        no points, no consumption tracking, no coupon issuance, no kitchen ticket. There is nothing
-        on our side to reverse, only the money that actually landed in the merchant's WeChat
-        account to send back. Deliberately does not touch order.status or print anything -- the
-        kitchen was already told this order is off.
+        had already committed the terminal state. It deliberately does not touch order.status
+        or print anything -- the kitchen was already told this order is off. Provider SUCCESS
+        is still required before shared local refund-success side effects are applied.
 
         Must be called with `order` already locked (with_for_update) in the current transaction.
         """
-        if getattr(order, "refund_status", None) == "success":
-            return RefundResult(success=True, amount=float(order.refund_amount or 0), error=None)
-        total_fen = max(1, round(float(order.total or 0) * 100))
-        try:
-            from app.models.tenant import Tenant
-            from app.services.wxpay_service import WxPayService
-
-            tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
-            tenant = tenant_result.scalar_one_or_none()
-            svc = WxPayService(tenant) if tenant else None
-            if not svc or not svc.enabled:
-                raise RuntimeError("merchant wxpay not configured, cannot auto-refund")
-            await svc.refund(
-                out_trade_no=str(order.id),
-                out_refund_no=f"RF{order.id}",
-                refund_fen=total_fen,
-                total_fen=total_fen,
-                reason="race_with_cancel_auto_refund",
+        order.payment_status = "paid"
+        order.payment_method = "wxpay"
+        result = await self._refund_order_payment(order, reason="race_with_cancel_auto_refund")
+        if result.get("refund_status") == "success":
+            logger.error(
+                "[WXPAY_NOTIFY_RACE_AUTO_REFUNDED] order_id=%s amount=%s order_status=%s",
+                order.id, order.refund_amount, order.status,
             )
-        except Exception as exc:
-            order.refund_status = "failed"
-            order.refund_error = str(exc)[:500]
+        elif result.get("refund_status") == "processing":
+            logger.warning(
+                "[WXPAY_NOTIFY_RACE_AUTO_REFUND_PROCESSING] order_id=%s order_status=%s",
+                order.id, order.status,
+            )
+        else:
             logger.error(
                 "[WXPAY_NOTIFY_RACE_AUTO_REFUND_FAILED] order_id=%s error=%s -- needs manual refund",
-                order.id, exc,
+                order.id, result.get("error"),
             )
-            return RefundResult(success=False, amount=0.0, error=str(exc))
-
-        order.refund_status = "success"
-        order.refund_amount = cast(Any, _numeric_decimal(order.total))
-        order.refunded_at = datetime.now(timezone.utc)
-        order.refund_error = None
-        logger.error(
-            "[WXPAY_NOTIFY_RACE_AUTO_REFUNDED] order_id=%s amount=%s order_status=%s",
-            order.id, order.refund_amount, order.status,
-        )
-        return RefundResult(success=True, amount=float(order.refund_amount or 0), error=None)
+        return result
 
     async def _refund_after_terminal_wx_capture(self, *, order_id: int, tenant_id: str) -> None:
         """After a terminal paid fact is committed, send the orphaned WeChat capture back.

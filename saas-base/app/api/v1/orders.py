@@ -92,12 +92,9 @@ ORDER_ALLOWED_TRANSITIONS = {
     "preparing": {"done"},
     "done": {"settled"},
 }
-# Paid refund (POST /orders/{id}/refund) may terminalize these states after
-# money is returned. PATCH /status still uses ORDER_ALLOWED_TRANSITIONS and
-# still 409s paid cancel.
-ORDER_REFUND_TERMINAL_FROM = frozenset({
-    "pending_payment", "pending", "preparing", "done", "settled",
-})
+# Phase 02A: merchant refund is only safe after fulfilment termination has
+# already happened. Active/post-fulfilment refunds need a separate contract.
+ORDER_REFUND_ALLOWED_STATES = frozenset({"cancelled", "rejected"})
 ORDER_NEXT_ACTIONS = {
     "prepay": "pay",
     "postpay": "order_success",
@@ -108,18 +105,22 @@ ORDER_NEXT_ACTIONS = {
 def build_order_financial_capabilities(order) -> dict[str, bool]:
     """Return server-authoritative cancel/reject and manual-refund attention flags.
 
-    Phase P0-09 deliberately treats every paid terminal order as requiring attention.
-    The legacy ``refund_status=success`` value only meant that a provider request was
-    accepted; it is not provider-confirmed refund truth and therefore cannot clear the
-    warning.
+    Phase 02A only exposes merchant refund action for paid terminal orders. A provider-
+    confirmed ``success`` or in-flight ``processing`` refund clears the action; missing
+    or failed refund state remains actionable.
     """
     status = str(getattr(order, "status", "") or "")
     is_paid = str(getattr(order, "payment_status", "") or "") == "paid"
+    refund_status = str(getattr(order, "refund_status", "") or "").lower()
     is_unpaid_actionable = not is_paid and status in {"pending_payment", "pending"}
     return {
         "can_cancel": is_unpaid_actionable,
         "can_reject": not is_paid and status == "pending",
-        "refund_required": is_paid and status in {"cancelled", "rejected"},
+        "refund_required": (
+            is_paid
+            and status in ORDER_REFUND_ALLOWED_STATES
+            and refund_status not in {"success", "processing"}
+        ),
     }
 
 
@@ -213,6 +214,9 @@ def serialize_order(
         "payment_status": getattr(order, "payment_status", "paid"),
         "payment_mode": getattr(order, "payment_mode", "prepay"),
         "payment_method": getattr(order, "payment_method", None),
+        "refund_status": getattr(order, "refund_status", None),
+        "refund_amount": float(order.refund_amount) if getattr(order, "refund_amount", None) is not None else None,
+        "refunded_at": order.refunded_at.isoformat() if getattr(order, "refunded_at", None) else None,
         **build_order_financial_capabilities(order),
         "checkout_requested_at": checkout_requested_at,
         "dining_session_id": str(order.dining_session_id) if getattr(order, "dining_session_id", None) else None,

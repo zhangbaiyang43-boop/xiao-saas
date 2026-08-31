@@ -100,6 +100,7 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
             fake.refund.side_effect = refund_error
         else:
             fake.refund.return_value = {"status": "SUCCESS"}
+        fake.query_refund_by_out_refund_no.return_value = None
         return fake
 
     async def _notify(self, order: Order, fake_wxpay):
