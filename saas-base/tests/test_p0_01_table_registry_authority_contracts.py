@@ -282,9 +282,12 @@ class TableRegistryAuthorityTest(unittest.IsolatedAsyncioTestCase):
             ),
             make_request(), db=self.db,
         )
-        self.assertEqual(result.code, 400)
-        # Only the one legitimate tenant-B order/session exists; no cross-tenant
-        # order should have been created against tenant A.
+        # A forged/stale table session is a recoverable session-identity conflict:
+        # the canonical create-order response is 409, while the security invariant
+        # is that the forged cross-tenant session is rejected and no Order persists.
+        self.assertEqual(result.code, 409)
+        # Only the legitimate tenant-B session exists; no cross-tenant order
+        # should have been created against tenant A.
         orders = (await self.db.execute(select(Order))).scalars().all()
         self.assertEqual(len(orders), 0)
 
