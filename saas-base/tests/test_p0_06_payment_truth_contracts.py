@@ -227,15 +227,31 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
     async def test_same_callback_three_times_has_one_transition_and_one_post_commit_print(self):
         order = await self.make_order()
         fact = self.resource(order)
+        expected_order_id = order.id
         printer = AsyncMock()
         with (
             patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True),
             patch.object(WxPayService, "verify_notify", return_value=fact),
             patch("app.services.order_payment_service._print_paid_order_ticket", printer),
+            patch("app.services.order_payment_service.logger.warning") as warning,
+            patch("app.services.order_payment_service.logger.exception") as exception,
         ):
             responses = [await wxpay_notify(make_notify_request(), db=self.db) for _ in range(3)]
 
         self.assertEqual([item.get("code") for item in responses], ["SUCCESS"] * 3)
+        duplicate_warnings = [
+            call for call in warning.call_args_list
+            if call.args and call.args[0] == "WXPAY_CALLBACK_DUPLICATE"
+        ]
+        self.assertEqual(len(duplicate_warnings), 2)
+        for call in duplicate_warnings:
+            self.assertEqual(call.kwargs["extra"]["tenant_id"], TENANT_ID)
+            self.assertEqual(call.kwargs["extra"]["order_id"], expected_order_id)
+            self.assertEqual(call.kwargs["extra"]["transaction_id"], fact["transaction_id"])
+            self.assertEqual(call.kwargs["extra"]["payment_status"], "paid")
+        self.assertFalse(
+            any(call.args and call.args[0] == "WXPAY_CALLBACK_FAILED" for call in exception.call_args_list)
+        )
         await self.db.refresh(order)
         self.assertEqual(order.wx_transaction_id, fact["transaction_id"])
         self.assertEqual(printer.await_count, 1)
