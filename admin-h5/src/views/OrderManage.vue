@@ -707,11 +707,11 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons-vue'
-import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, reconcileRefundStatus, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
@@ -1761,6 +1761,7 @@ function refundPaidOrderClick(order) {
         if (res && res.code === 200) {
           if (res.data && res.data.refund_status === 'processing') {
             message.info('退款申请已提交，正在处理中')
+            startRefundReconcile(order.id)
           } else {
             message.success('退款成功')
           }
@@ -1783,6 +1784,77 @@ function refundPaidOrderClick(order) {
     },
   })
 }
+
+// 退款进入 processing 后的最终真值收敛：微信不推退款回调、GET /orders 是纯 DB 读，
+// 所以一笔 processing 退款不会自己收敛。这里对 processing 的订单做「有上限」的轮询，
+// 调用 QUERY-ONLY 的 reconcile 端点（只查已存在的退款 RF{id}，绝不发起新退款）。
+// 触发点有两个：刚点完退款返回 processing、以及页面刷新/重开后从 GET /orders 读到的
+// 既有 processing 订单（当前 ¥0.02 canary 就是这种）。
+const REFUND_RECONCILE_DELAYS = [2000, 5000, 10000] // 最多 3 次，间隔递增；不是无限 timer
+const refundReconcileTimers = new Map()   // orderId -> timeoutId（每单最多一个 pending timer）
+const refundReconcileInflight = new Set() // orderId（每单最多一个在途请求）
+const refundReconcileSettled = new Set()  // orderId：本次挂载内已收敛/已用尽，别再重排
+
+function startRefundReconcile(orderId) {
+  const id = String(orderId)
+  if (!id) return
+  if (refundReconcileSettled.has(id)) return
+  if (refundReconcileTimers.has(id) || refundReconcileInflight.has(id)) return
+  scheduleRefundReconcileAttempt(id, 0)
+}
+
+function scheduleRefundReconcileAttempt(id, attempt) {
+  if (attempt >= REFUND_RECONCILE_DELAYS.length) {
+    // 用尽 3 次仍 processing：停止轮询，界面继续显示"退款处理中，请稍后刷新查看结果"。
+    refundReconcileSettled.add(id)
+    return
+  }
+  const timer = setTimeout(() => runRefundReconcile(id, attempt), REFUND_RECONCILE_DELAYS[attempt])
+  timer.unref?.()
+  refundReconcileTimers.set(id, timer)
+}
+
+async function runRefundReconcile(id, attempt) {
+  refundReconcileTimers.delete(id)
+  if (refundReconcileSettled.has(id) || refundReconcileInflight.has(id)) return
+  const order = orders.value.find((o) => String(o.id) === id)
+  if (!order || order.refundStatus !== 'processing') {
+    refundReconcileSettled.add(id)
+    return
+  }
+  refundReconcileInflight.add(id)
+  let rs = null
+  try {
+    const res = await reconcileRefundStatus(id)
+    rs = res && res.code === 200 ? (res.data && res.data.refund_status) : null
+  } catch {
+    rs = null // provider query 不确定：当作仍 processing，有上限地重试，绝不当失败/重复退款
+  } finally {
+    refundReconcileInflight.delete(id)
+  }
+  if (rs === 'success' || rs === 'failed') {
+    refundReconcileSettled.add(id)
+    await reconcileAfterOrderAction() // 用后端最新真值刷新这一行（已退款 / 退款失败）
+    return
+  }
+  scheduleRefundReconcileAttempt(id, attempt + 1) // processing / 不确定 -> 下一次（仍受 3 次上限约束）
+}
+
+function stopAllRefundReconcile() {
+  for (const timer of refundReconcileTimers.values()) clearTimeout(timer)
+  refundReconcileTimers.clear()
+}
+
+// 页面刷新 / 重开 / 服务重启后重新登录：GET /orders 里已存在的 processing 退款也要能收敛。
+watch(
+  () => orders.value.filter((o) => o.refundStatus === 'processing').map((o) => o.id).join(','),
+  (joined) => {
+    for (const id of joined.split(',').filter(Boolean)) startRefundReconcile(id)
+  },
+  { immediate: true },
+)
+
+onUnmounted(stopAllRefundReconcile)
 
 async function reprintOrderTicket(order) {
   order.reprinting = true

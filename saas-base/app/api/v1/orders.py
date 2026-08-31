@@ -1702,6 +1702,38 @@ async def refund_paid_order(
     )
 
 
+@router.post("/orders/{order_id}/refund/reconcile")
+async def reconcile_order_refund(
+    order_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """QUERY-ONLY: converge a refund stuck at ``processing`` against the provider's
+    existing refund record. Never creates a refund -- POST /orders/{id}/refund is the
+    only refund command. Same tenant + finance.refund permission as the refund command.
+    """
+    from app.core.merchant_auth import get_request_principal
+    from app.core.permissions import PERM_FINANCE_REFUND
+    from fastapi.responses import JSONResponse
+    from app.core.response import RespVo
+
+    principal = get_request_principal(request)
+    if not principal:
+        return error_response(code=401, msg="请先登录")
+    if not principal.can(PERM_FINANCE_REFUND):
+        return JSONResponse(
+            status_code=403,
+            content=RespVo(code=403, msg="当前账号无此权限").to_response(),
+        )
+    service = OrderLifecycleService(db)
+    service.set_tenant_id(principal.tenant_id)
+    return await service.reconcile_refund_status(
+        int(order_id),
+        account_id=principal.account_id,
+        role=principal.role,
+    )
+
+
 @router.post("/orders/{order_id}/cancel")
 async def cancel_order(
     order_id: str,
