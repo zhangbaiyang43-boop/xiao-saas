@@ -157,7 +157,9 @@ def install_stubs():
         "app.config": types.ModuleType("app.config"),
         "app.core": types.ModuleType("app.core"),
         "app.core.database": types.ModuleType("app.core.database"),
+        "app.core.entitlement_guard": types.ModuleType("app.core.entitlement_guard"),
         "app.core.logger": types.ModuleType("app.core.logger"),
+        "app.core.plan_capabilities": types.ModuleType("app.core.plan_capabilities"),
         "app.core.response": types.ModuleType("app.core.response"),
         "app.core.tenant_context": types.ModuleType("app.core.tenant_context"),
         "app.core.platform_rules": types.ModuleType("app.core.platform_rules"),
@@ -170,6 +172,7 @@ def install_stubs():
         "app.services.order_lifecycle_service": types.ModuleType("app.services.order_lifecycle_service"),
         "app.services.order_payment_service": types.ModuleType("app.services.order_payment_service"),
         "app.services.order_print_service": types.ModuleType("app.services.order_print_service"),
+        "app.services.optional_entitlement": types.ModuleType("app.services.optional_entitlement"),
         "app.services.order_stock_service": types.ModuleType("app.services.order_stock_service"),
         "app.services.base_service": types.ModuleType("app.services.base_service"),
         "app.services.wxpay_service": types.ModuleType("app.services.wxpay_service"),
@@ -182,6 +185,13 @@ def install_stubs():
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
     modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
+    modules["app.core.logger"].log_coupon_transition = lambda **k: None
+    modules["app.core.logger"].log_order_status_changed = lambda **k: None
+    modules["app.core.entitlement_guard"].require_capability_response = _noop_async
+    modules["app.core.plan_capabilities"].CAP_COUPONS = "COUPONS"
+    modules["app.core.plan_capabilities"].CAP_DISTRIBUTION_REFERRAL = "DISTRIBUTION_REFERRAL"
+    modules["app.core.plan_capabilities"].CAP_KITCHEN_PRINT = "KITCHEN_PRINT"
+    modules["app.core.plan_capabilities"].CAP_MEMBERSHIP = "MEMBERSHIP"
     import importlib.util
 
     response_spec = importlib.util.spec_from_file_location(
@@ -208,6 +218,7 @@ def install_stubs():
     modules["app.services.coupon_service"]._set_order_coupon_status_if_locked = _noop_async
     modules["app.services.coupon_service"]._unlock_order_coupon_if_locked = _noop_async
     modules["app.services.consumption_service"]._record_order_consumption = _noop_async
+    modules["app.services.optional_entitlement"].optional_capability_enabled = _noop_async
     modules["app.services.order_lifecycle_service"].OrderLifecycleService = type("OrderLifecycleService", (), {})
     modules["app.services.order_payment_service"].OrderPaymentService = type(
         "OrderPaymentService",

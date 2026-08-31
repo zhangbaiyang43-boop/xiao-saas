@@ -241,6 +241,7 @@ def install_stubs():
         "app.config": types.ModuleType("app.config"),
         "app.core": types.ModuleType("app.core"),
         "app.core.database": types.ModuleType("app.core.database"),
+        "app.core.entitlement_guard": types.ModuleType("app.core.entitlement_guard"),
         "app.core.logger": types.ModuleType("app.core.logger"),
         "app.core.plan_capabilities": types.ModuleType("app.core.plan_capabilities"),
         "app.core.platform_rules": types.ModuleType("app.core.platform_rules"),
@@ -269,6 +270,9 @@ def install_stubs():
     modules["app.core.database"].get_db = lambda: None
     modules["app.core.logger"].logger = types.SimpleNamespace(warning=lambda *a, **k: None, info=lambda *a, **k: None, error=lambda *a, **k: None)
     modules["app.core.logger"].safe_log = lambda log_fn, *a, **k: log_fn(*a, **k)
+    modules["app.core.logger"].log_coupon_transition = lambda **k: None
+    modules["app.core.logger"].log_order_status_changed = lambda **k: None
+    modules["app.core.entitlement_guard"].require_capability_response = _noop_async
     # F1F-D1B: order_print_service._print_paid_order_ticket now checks
     # KITCHEN_PRINT via optional_capability_enabled() for the auto (non-manual)
     # path. This harness predates plan-tier awareness and has no concept of a
