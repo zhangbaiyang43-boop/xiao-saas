@@ -1312,19 +1312,20 @@ class OrderPaymentService(BaseService):
             claim = await self._claim_wx_transaction(order, transaction_id)
 
             if order.payment_status == "paid":
+                duplicate_log_extra = {
+                    "event": "WXPAY_CALLBACK_DUPLICATE",
+                    "tenant_id": str(order.tenant_id),
+                    "order_id": order.id,
+                    "transaction_id": transaction_id,
+                    "payment_status": order.payment_status,
+                }
                 if claim == "bound":
                     await self.db.commit()
                 else:
                     await self.db.rollback()
                 logger.warning(
                     "WXPAY_CALLBACK_DUPLICATE",
-                    extra={
-                        "event": "WXPAY_CALLBACK_DUPLICATE",
-                        "tenant_id": str(order.tenant_id),
-                        "order_id": order.id,
-                        "transaction_id": transaction_id,
-                        "payment_status": order.payment_status,
-                    },
+                    extra=duplicate_log_extra,
                 )
                 return {"code": "SUCCESS", "message": "ok"}
 
