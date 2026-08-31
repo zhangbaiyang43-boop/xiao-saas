@@ -196,6 +196,9 @@ export const updateOrderPickupNo = (id, pickup_no) => request.patch(`/v1/orders/
 export const getPickupNoStatus = (config = {}) => request.get('/v1/pickup-nos/status', config)
 export const reprintOrder = (id, print_type = 'kitchen') => request.post(`/v1/orders/${id}/reprint`, { print_type })
 export const refundPaidOrder = (id) => request.post(`/v1/orders/${id}/refund`)
+// QUERY-ONLY: converge a refund stuck at "processing" against the provider's existing
+// refund. Never creates a refund -- refundPaidOrder is the only refund command.
+export const reconcileRefundStatus = (id) => request.post(`/v1/orders/${id}/refund/reconcile`)
 export const settleTable = (table_no, dining_session_id) => request.post('/v1/orders/settle-table', { table_no, dining_session_id: dining_session_id || undefined })
 export const getReviews = () => request.get('/v1/orders/reviews')
 

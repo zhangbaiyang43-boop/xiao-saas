@@ -446,6 +446,87 @@ class OrderLifecycleService(BaseService):
             msg="退款成功",
         )
 
+    async def reconcile_refund_status(
+        self,
+        order_id: int,
+        *,
+        account_id: int | None = None,
+        role: str | None = None,
+    ) -> ApiResponse:
+        """QUERY-ONLY convergence for a refund stuck at ``processing``.
+
+        WeChat may confirm a refund SUCCESS without pushing anything back (no refund
+        callback), and GET /orders is a pure DB read for payment, so a refund that the
+        provider returned as PROCESSING can sit at ``processing`` locally forever. This
+        queries the EXISTING refund (out_refund_no = RF{order.id}) and converges local
+        state. It NEVER creates a refund -- POST /orders/{id}/refund stays the only
+        command entrypoint.
+
+        Only acts when refund_status == "processing"; every other state is a no-op.
+        """
+        from app.api.v1.orders import ORDER_REFUND_ALLOWED_STATES
+        from app.services.order_payment_service import OrderPaymentService
+
+        tenant_id = self.require_tenant_id()
+        locked_result = await self.db.execute(
+            select(Order)
+            .where(Order.id == order_id, Order.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        order = locked_result.scalar_one_or_none()
+        if not order:
+            return error_response(code=404, msg="order not found")
+        if getattr(order, "payment_status", None) != "paid":
+            return error_response(code=400, msg="订单未支付，无需对账")
+
+        current_status = order.status or "pending"
+        if current_status not in ORDER_REFUND_ALLOWED_STATES:
+            return error_response(code=409, msg=f"当前状态不能退款: {current_status}")
+
+        refund_status = getattr(order, "refund_status", None)
+        if refund_status == "success":
+            return success_response(
+                data={
+                    "id": str(order.id),
+                    "status": order.status,
+                    "refund_status": "success",
+                    "refund_amount": float(order.refund_amount or 0),
+                    "idempotent": True,
+                },
+                msg="退款已完成",
+            )
+        if refund_status != "processing":
+            # None / failed: nothing to reconcile; never restart a refund here.
+            return success_response(
+                data={
+                    "id": str(order.id),
+                    "status": order.status,
+                    "refund_status": refund_status,
+                    "reconciled": False,
+                },
+                msg="当前退款状态无需对账",
+            )
+
+        payment_svc = OrderPaymentService(self.db)
+        result = await payment_svc._reconcile_existing_refund(order)
+        await self.db.commit()
+
+        rs = result.get("refund_status")
+        data = {
+            "id": str(order.id),
+            "status": order.status,
+            "refund_status": rs,
+        }
+        if rs == "success":
+            data["refund_amount"] = float(order.refund_amount or 0)
+            return success_response(data=data, msg="退款成功")
+        if rs == "failed":
+            data["refund_error"] = getattr(order, "refund_error", None)
+            return success_response(data=data, msg="退款失败")
+        # still processing / inconclusive -- the provider query itself succeeded, so this
+        # is a 200 with the current truth, not an error.
+        return success_response(data=data, msg="退款处理中")
+
     async def _prove_order_read_owner(
         self,
         order: Order,

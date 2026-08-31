@@ -691,6 +691,39 @@ class OrderPaymentService(BaseService):
                     refund_status="failed",
                 )
 
+        # Provider SUCCESS confirmed above (or no WeChat portion at all): apply the
+        # single, shared local success finalizer -- identical side effects whether we
+        # got here by submitting the refund or by reconciling a pre-existing one.
+        # `refunded_amount` here is exactly what the original inline code carried:
+        # wechat_portion iff a WeChat SUCCESS was confirmed, else 0.0.
+        return await self._apply_refund_success(
+            order,
+            base_refunded=refunded_amount,
+            balance_portion=balance_portion,
+            wechat_portion=wechat_portion,
+            reason=reason,
+        )
+
+    async def _apply_refund_success(
+        self, order: Order, *, base_refunded: float, balance_portion: float,
+        wechat_portion: float, reason: str,
+    ) -> RefundResult:
+        """Shared local side effects for a confirmed refund (provider SUCCESS).
+
+        Called by both the refund COMMAND (_refund_order_payment) and the refund
+        RECONCILIATION (_reconcile_existing_refund) so the money-linked reversals are
+        written by exactly one code path. Never talks to the provider. Must run inside
+        the caller's locked transaction; the caller owns commit/rollback.
+
+        Idempotency: the caller only enters here when refund_status != "success", and
+        every reversal below has its own guard -- balance credit is atomic with the
+        refund_status="success" write in the caller's single commit; coupon reversal is
+        gated on status in {LOCKED, USED}; point/consumption reversal is idempotent by
+        PointLedger ref_id=consumption_id (see MembershipService.reverse_consumption).
+        """
+        total = float(order.total or 0)
+        refunded_amount = float(base_refunded or 0)
+
         if balance_portion > 0 and order.customer_id:
             from app.models.member_account import MemberAccount
 
@@ -760,6 +793,106 @@ class OrderPaymentService(BaseService):
             refund_status="success",
         )
 
+    async def _reconcile_existing_refund(self, order: Order) -> RefundResult:
+        """QUERY-ONLY final-truth convergence for a refund stuck at ``processing``.
+
+        The refund was already submitted by _refund_order_payment; the provider returned
+        PROCESSING and nothing has re-checked it since (no refund callback, GET /orders is
+        a pure DB read, no scheduler). This queries the EXISTING refund by its deterministic
+        out_refund_no and converges local state -- it MUST NEVER call WxPayService.refund().
+
+        Must be called with `order` already locked in the current transaction; the caller
+        owns commit. Eligibility (paid + terminal + refund_status == "processing") is the
+        caller's responsibility; this method also fails safe if those do not hold.
+
+        Provider status -> result:
+          SUCCESS               -> local success (shared _apply_refund_success)
+          PROCESSING / empty    -> stays processing (RefundResult.refund_status="processing")
+          CLOSED / ABNORMAL     -> local failed
+          query None / exception / unknown status -> INCONCLUSIVE: stays processing, never
+            failed, never a new refund (None cannot prove the refund does not exist).
+        """
+        if getattr(order, "payment_status", None) != "paid":
+            return RefundResult(success=True, amount=0.0, error=None, refund_status="success")
+        if getattr(order, "refund_status", None) == "success":
+            return RefundResult(
+                success=True,
+                amount=float(order.refund_amount or 0),
+                error=None,
+                refund_status="success",
+            )
+
+        total = float(order.total or 0)
+        balance_portion = float(order.balance_deduct_requested or 0)
+        if balance_portion <= 0 and order.payment_method == "balance":
+            balance_portion = total
+        wechat_portion = max(total - balance_portion, 0.0)
+
+        def _still_processing() -> RefundResult:
+            order.refund_status = "processing"
+            order.refund_error = None
+            return RefundResult(success=False, amount=0.0, error=None, refund_status="processing")
+
+        if wechat_portion > 0 and order.payment_method == "wxpay":
+            from app.models.tenant import Tenant
+            from app.services.wxpay_service import WxPayService
+
+            out_refund_no = f"RF{order.id}"
+            tenant_result = await self.db.execute(select(Tenant).where(Tenant.tenant_id == str(order.tenant_id)))
+            tenant = tenant_result.scalar_one_or_none()
+            svc = WxPayService(tenant) if tenant else None
+            if not svc or not svc.enabled:
+                logger.info("[REFUND_RECONCILE_NO_WXPAY] order_id=%s -- staying processing", order.id)
+                return _still_processing()
+
+            try:
+                existing = await svc.query_refund_by_out_refund_no(out_refund_no)
+            except Exception as exc:  # query already swallows errors, but be defensive
+                logger.warning("[REFUND_RECONCILE_QUERY_ERROR] order_id=%s error=%s", order.id, exc)
+                existing = None
+
+            if not isinstance(existing, dict):
+                logger.info(
+                    "[REFUND_RECONCILE_INCONCLUSIVE] order_id=%s out_refund_no=%s -- provider query "
+                    "returned no result, staying processing (not resubmitting)", order.id, out_refund_no,
+                )
+                return _still_processing()
+
+            raw_status = str(existing.get("status") or "").strip().upper()
+            if raw_status == "SUCCESS":
+                logger.info("[REFUND_RECONCILE_SUCCESS] order_id=%s out_refund_no=%s", order.id, out_refund_no)
+                return await self._apply_refund_success(
+                    order,
+                    base_refunded=wechat_portion,
+                    balance_portion=balance_portion,
+                    wechat_portion=wechat_portion,
+                    reason="reconcile",
+                )
+            if raw_status in ("", "PROCESSING"):
+                logger.info("[REFUND_RECONCILE_STILL_PROCESSING] order_id=%s", order.id)
+                return _still_processing()
+            if raw_status in ("CLOSED", "ABNORMAL"):
+                order.refund_status = "failed"
+                order.refund_error = f"wechat refund status={raw_status}"[:500]
+                logger.error("[REFUND_RECONCILE_FAILED] order_id=%s status=%s", order.id, raw_status)
+                return RefundResult(
+                    success=False, amount=0.0, error=order.refund_error, refund_status="failed",
+                )
+            # Unknown / future provider status: do NOT fake failed or success.
+            logger.warning(
+                "[REFUND_RECONCILE_UNKNOWN_STATUS] order_id=%s status=%s -- staying processing",
+                order.id, raw_status,
+            )
+            return _still_processing()
+
+        # No WeChat portion (pure balance / free order): nothing to query, converge directly.
+        return await self._apply_refund_success(
+            order,
+            base_refunded=0.0,
+            balance_portion=balance_portion,
+            wechat_portion=0.0,
+            reason="reconcile",
+        )
 
     async def _refund_orphaned_wxpay_payment(self, order: Order) -> RefundResult:
         """WeChat confirms a payment succeeded for an order that's already cancelled/rejected
