@@ -155,7 +155,10 @@ class WeworkMerchantBindingContractsTest(unittest.TestCase):
 
     def test_token_create_requires_route_level_super_admin(self):
         source = inspect.getsource(wework.create_binding_token)
-        route = next(item for item in wework.router.routes if item.path == "/bindings/tokens")
+        # wework.router is APIRouter(prefix="/api/v1/wework"), so each route.path
+        # is already prefix-composed at registration -- match the canonical final
+        # path, the same one asserted against WHITELIST below.
+        route = next(item for item in wework.router.routes if item.path == "/api/v1/wework/bindings/tokens")
 
         self.assertIn("/api/v1/wework/bindings/tokens", WHITELIST)
         self.assertIn("_verify_super_token", API_SOURCE)
