@@ -38,6 +38,20 @@ CONSUMER_POLL_SOURCE = (
 ORDER_MANAGE_SOURCE = (
     ROOT.parent / "admin-h5" / "src" / "views" / "OrderManage.vue"
 ).read_text(encoding="utf-8-sig")
+ADMIN_STATUS_TEXT_SOURCE = (
+    ROOT.parent / "admin-h5" / "src" / "utils" / "orderStatusText.js"
+).read_text(encoding="utf-8-sig")
+
+# Canonical backend order states -- keep in sync with orders.py ORDER_KNOWN_STATUSES.
+BACKEND_ORDER_STATES = (
+    "pending_payment",
+    "pending",
+    "preparing",
+    "done",
+    "settled",
+    "rejected",
+    "cancelled",
+)
 
 
 def py_function_source(source: str, name: str) -> str:
@@ -120,9 +134,16 @@ class OrderStateMachineContractsTest(unittest.TestCase):
         self.assertIn("preparing:", CONSUMER_LABEL_SOURCE)
         self.assertIn("done:", CONSUMER_LABEL_SOURCE)
         self.assertIn("settled:", CONSUMER_LABEL_SOURCE)
-        self.assertIn("function statusLabel(s, statusText)", ORDER_MANAGE_SOURCE)
-        self.assertIn("formatOrderStatusText", ORDER_MANAGE_SOURCE)
-        self.assertIn("statusLabel(order.status", ORDER_MANAGE_SOURCE)
+        # Merchant (Admin) side: OrderManage renders every order status through the
+        # shared formatter, not an ad-hoc inline map. The contract is the wiring
+        # plus canonical-state coverage -- NOT the statusLabel helper's parameter
+        # shape, which is an internal detail (already refactored once from
+        # statusLabel(s, statusText) to statusLabel(order)).
+        self.assertIn("import { formatOrderStatusText }", ORDER_MANAGE_SOURCE)
+        self.assertIn("formatOrderStatusText(", ORDER_MANAGE_SOURCE)
+        for state in BACKEND_ORDER_STATES:
+            self.assertIn(f"{state}:", ADMIN_STATUS_TEXT_SOURCE)
+        self.assertIn("UNKNOWN_ORDER_STATUS_TEXT", ADMIN_STATUS_TEXT_SOURCE)
 
     def test_consumer_status_rendering_uses_backend_status_without_fake_progression(self):
         self.assertIn("if (['paid', 'pending'].includes(status)) return 'pending'", CONSUMER_STATUS_SOURCE)
