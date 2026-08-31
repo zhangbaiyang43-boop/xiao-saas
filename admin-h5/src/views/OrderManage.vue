@@ -1678,9 +1678,15 @@ function applyPickupNoToOrders(pickupNo, orderIds) {
 // 业务请求本身（updateOrderStatus/reconcileAfterOrderAction）原样不动，只是挪进
 // onOk 里，取消分支不触发任何请求。
 function rejectOrder(order) {
+  // 已付款订单的拒单只终止履约、不退款：拒单成功后订单变成 rejected+paid，
+  // refund_required 变 true，商户再点已有的「退款」按钮走原退款流程。二次确认
+  // 必须把这层说清楚，避免商户以为拒单已经把钱退了。
+  const isPaid = order.paymentStatus === 'paid'
   Modal.confirm({
-    title: '确认拒绝该订单？',
-    content: `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
+    title: isPaid ? '确认拒绝已付款订单？' : '确认拒绝该订单？',
+    content: isPaid
+      ? `该订单已微信付款 ¥${Number(order.total).toFixed(2)}。拒单后订单将停止处理，但不会自动退款；拒单成功后，请继续点击“退款”将款项原路退回顾客。`
+      : `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
     okText: '拒绝订单',
     okType: 'danger',
     cancelText: '再想想',
@@ -1689,7 +1695,7 @@ function rejectOrder(order) {
       try {
         const res = await updateOrderStatus(order.id, 'rejected')
         if (res.code === 200) {
-          message.warning('已拒单，请联系顾客说明原因')
+          message.warning(isPaid ? '已拒单，请继续点击“退款”完成退款' : '已拒单，请联系顾客说明原因')
           await reconcileAfterOrderAction()
         } else if (res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND') {
           showPaidCancelSop()

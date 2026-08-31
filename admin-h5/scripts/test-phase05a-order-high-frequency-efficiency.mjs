@@ -111,7 +111,10 @@ test('7. Confirming reject still uses the exact original business path -- same A
   const rejectOrderFn = slice('function rejectOrder(order) {', '\nasync function finishOrder')
   const onOkBlock = rejectOrderFn.split('onOk: async () => {', 2)[1]
   assert.ok(onOkBlock.includes("const res = await updateOrderStatus(order.id, 'rejected')"), 'must call the same status-update endpoint with the same status value')
-  assert.ok(onOkBlock.includes("message.warning('已拒单，请联系顾客说明原因')"), 'success feedback text must be unchanged')
+  // P0-PAID-PENDING: the unpaid success feedback is unchanged; a paid order now
+  // also gets a success toast that points to the follow-up refund step.
+  assert.ok(onOkBlock.includes("'已拒单，请联系顾客说明原因'"), 'the original unpaid success feedback text must be preserved')
+  assert.ok(onOkBlock.includes("'已拒单，请继续点击“退款”完成退款'"), 'a paid reject must guide the merchant to the refund step')
   assert.ok(onOkBlock.includes("res?.data?.code === 'PAID_ORDER_CANCEL_REQUIRES_REFUND'"), 'the paid-order-requires-refund business rule must be preserved unchanged')
   assert.ok(onOkBlock.includes('await reconcileAfterOrderAction()'), 'must still reconcile through the existing sync path (Phase-03A truthfulness contract), not apply a local optimistic mutation')
   assert.ok(!onOkBlock.includes('order.status ='), 'must not directly assign order.status -- truth still comes from reconcileAfterOrderAction/syncNow, not a local write')

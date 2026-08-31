@@ -114,8 +114,14 @@ def build_order_financial_capabilities(order) -> dict[str, bool]:
     refund_status = str(getattr(order, "refund_status", "") or "").lower()
     is_unpaid_actionable = not is_paid and status in {"pending_payment", "pending"}
     return {
+        # Cancel stays unpaid-only: a paid order is terminated by reject, never cancel.
         "can_cancel": is_unpaid_actionable,
-        "can_reject": not is_paid and status == "pending",
+        # Reject is allowed while the kitchen has not accepted the order yet
+        # (status == "pending"), paid or not. A paid reject terminates fulfilment
+        # only; the merchant then completes the refund through the existing
+        # POST /orders/{id}/refund flow. Reject is never offered once the order
+        # left "pending" (preparing / done / settled).
+        "can_reject": status == "pending",
         "refund_required": (
             is_paid
             and status in ORDER_REFUND_ALLOWED_STATES
