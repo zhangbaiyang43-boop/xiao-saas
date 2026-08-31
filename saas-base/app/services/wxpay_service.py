@@ -12,6 +12,31 @@ from app.config import settings
 from app.core.crypto import decrypt_secret
 from app.core.logger import logger
 
+PROVIDER_REFUND_SUCCESS = "SUCCESS"
+PROVIDER_REFUND_PROCESSING = "PROCESSING"
+PROVIDER_REFUND_FAILED = {"CLOSED", "ABNORMAL"}
+INTERNAL_REFUND_SUCCESS = "success"
+INTERNAL_REFUND_PROCESSING = "processing"
+INTERNAL_REFUND_FAILED = "failed"
+
+
+def map_provider_refund_status(status: Optional[str]) -> str:
+    value = str(status or "").strip().upper()
+    if value == PROVIDER_REFUND_SUCCESS:
+        return INTERNAL_REFUND_SUCCESS
+    if value == PROVIDER_REFUND_PROCESSING or not value:
+        return INTERNAL_REFUND_PROCESSING
+    if value in PROVIDER_REFUND_FAILED:
+        return INTERNAL_REFUND_FAILED
+    return INTERNAL_REFUND_FAILED
+
+
+def _parse_response_body(message_body):
+    try:
+        return json.loads(message_body) if isinstance(message_body, str) else message_body
+    except Exception:
+        return None
+
 
 def _get_wechat_app_id() -> str:
     return (getattr(settings, 'WECHAT_APP_ID', '') or getattr(settings, 'WECHAT_APP_', '') or '').strip()
@@ -196,7 +221,7 @@ class WxPayService:
         不会重复扣款/重复退款。
 
         Returns:
-            {"success": True, "status": "...", "raw": {...}}
+            {"success": True, "status": "...", "refund_status": "success|processing|failed", "raw": {...}}
         Raises:
             RuntimeError: 退款请求失败（网络错误、微信返回非 200/204）
         """
@@ -210,10 +235,7 @@ class WxPayService:
             reason=reason,
         )
 
-        try:
-            body = json.loads(message_body) if isinstance(message_body, str) else message_body
-        except Exception:
-            body = None
+        body = _parse_response_body(message_body)
 
         if code not in (200, 204):
             wechat_message = (body or {}).get("message") if isinstance(body, dict) else str(message_body)[:300]
@@ -224,11 +246,42 @@ class WxPayService:
             raise RuntimeError(f"微信退款申请失败: code={code} message={wechat_message}")
 
         status = (body or {}).get("status", "") if isinstance(body, dict) else ""
+        refund_status = map_provider_refund_status(status)
         logger.info(
-            "[WXPAY_REFUND_SUBMITTED] out_trade_no=%s out_refund_no=%s status=%s",
-            out_trade_no, out_refund_no, status,
+            "[WXPAY_REFUND_SUBMITTED] out_trade_no=%s out_refund_no=%s status=%s refund_status=%s",
+            out_trade_no, out_refund_no, status, refund_status,
         )
-        return {"success": True, "status": status, "raw": body}
+        return {"success": True, "status": status, "refund_status": refund_status, "raw": body}
+
+    async def query_refund_by_out_refund_no(self, out_refund_no: str) -> Optional[dict]:
+        """Query a WeChat Pay refund by merchant out_refund_no using the SDK signer."""
+        if not self.enabled:
+            return None
+
+        fn = getattr(self._client, "query_refund", None)
+        if not callable(fn):
+            logger.warning("[WXPAY_QUERY_REFUND_UNSUPPORTED] out_refund_no=%s", out_refund_no)
+            return None
+        try:
+            result = await asyncio.to_thread(fn, out_refund_no)
+            if isinstance(result, tuple) and len(result) >= 2:
+                code, body = result[0], result[1]
+                if code not in (200, 204):
+                    logger.warning("[WXPAY_QUERY_REFUND_FAIL] out_refund_no=%s code=%s", out_refund_no, code)
+                    return None
+                body_obj = _parse_response_body(body)
+            else:
+                body_obj = _parse_response_body(result)
+            if not isinstance(body_obj, dict):
+                return None
+            status = body_obj.get("status", "")
+            return {
+                **body_obj,
+                "refund_status": map_provider_refund_status(status),
+            }
+        except Exception as exc:
+            logger.warning("[WXPAY_QUERY_REFUND_FAIL] out_refund_no=%s error=%s", out_refund_no, exc)
+            return None
 
     async def query_order_by_out_trade_no(self, out_trade_no: str) -> Optional[dict]:
         """Query a WeChat Pay order by merchant out_trade_no for callback-loss recovery."""

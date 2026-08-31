@@ -89,6 +89,8 @@ class RefundOrphanedWxpayPaymentTest(RaceReconciliationTestBase):
         order = await self._make_order(status="cancelled")
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
+        fake_wxpay.refund.return_value = {"status": "SUCCESS"}
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay):
             result = await OrderPaymentService(self.db)._refund_orphaned_wxpay_payment(order)
@@ -106,6 +108,7 @@ class RefundOrphanedWxpayPaymentTest(RaceReconciliationTestBase):
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
         fake_wxpay.refund.side_effect = RuntimeError("wxpay gateway timeout")
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay):
             result = await OrderPaymentService(self.db)._refund_orphaned_wxpay_payment(order)
@@ -179,6 +182,8 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
         fake_wxpay.verify_notify = lambda headers, raw_body: self._resource
+        fake_wxpay.refund.return_value = {"status": "SUCCESS"}
+        fake_wxpay.query_refund_by_out_refund_no.return_value = None
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
              patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock()) as on_success:

@@ -291,13 +291,22 @@ class ClientCannotSpoofActorTest(unittest.TestCase):
                 rhs = actor_id_match.group(1)
                 self.assertNotIn("body.", rhs)
                 self.assertNotIn("request.", rhs)
-        # 7 textual call sites: cancel_order's customer/participant branches
-        # (2, only one executes per invocation), update_order_status (1),
-        # refund_paid_order's idempotent-already-refunded terminal write (1) and
-        # refund-success terminal transition (1) -- both source=merchant_refund,
-        # actor_id=account_id from the merchant principal -- orders.py's
-        # synchronous sweep (1), main.py's background loop (1).
-        self.assertEqual(call_sites, 7, f"expected exactly 7 termination call sites, found {call_sites}")
+        # 5 textual call sites: cancel_order's customer/participant branches
+        # (2, only one executes per invocation), update_order_status's
+        # merchant_reject/merchant_cancel write (1), orders.py's synchronous
+        # sweep (1), main.py's background loop (1).
+        #
+        # refund_paid_order no longer terminalizes: since the P0-REFUND provider-
+        # final-state rework it only accepts orders already in
+        # ORDER_REFUND_ALLOWED_STATES = {cancelled, rejected}, i.e. orders whose
+        # terminated_at / terminated_actor_* / termination_source were already
+        # written by the cancel/reject path that made them terminal. It performs
+        # money movement only and never mutates order.status, so its former two
+        # source="merchant_refund" set_termination_audit_if_unset(...) calls were
+        # dead-as-writes (the _if_unset guard always failed) and were removed.
+        # The runtime B2 audit tests above still fully cover that every terminal
+        # transition writes the durable WHO/WHEN/HOW fact.
+        self.assertEqual(call_sites, 5, f"expected exactly 5 termination call sites, found {call_sites}")
 
 
 if __name__ == "__main__":
