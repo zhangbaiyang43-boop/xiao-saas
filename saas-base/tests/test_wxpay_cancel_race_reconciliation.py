@@ -147,10 +147,17 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
         await self.db.refresh(order)
         self.assertEqual(order.status, "cancelled")
 
-    async def test_update_order_status_refuses_reject_when_wechat_already_paid(self):
-        order = await self._make_order()
+    async def test_update_order_status_allows_merchant_reject_of_paid_pending_order(self):
+        # Post P0-PAID-PENDING fix: once an order is known paid and still sitting in
+        # the kitchen queue ("pending"), the merchant CAN reject it. This only
+        # terminates fulfilment -- no refund is submitted here; refund_required
+        # becomes true and the merchant refunds through POST /orders/{id}/refund.
+        order = await self._make_order(status="pending", payment_status="paid")
 
-        with patch.object(OrderPaymentService, "_recover_wxpay_order_if_paid", new=AsyncMock(return_value=True)):
+        with patch.object(
+            OrderPaymentService, "_refund_order_payment",
+            new=AsyncMock(return_value={"success": True, "amount": 58.0, "error": None}),
+        ) as refund:
             result = await update_order_status(
                 str(order.id),
                 OrderStatusUpdate(status="rejected"),
@@ -158,9 +165,30 @@ class CancelAndRejectRaceCheckTest(RaceReconciliationTestBase):
                 db=self.db,
             )
 
-        self.assertEqual(result.code, 409)
+        self.assertEqual(result.code, 200)
+        refund.assert_not_called()
         await self.db.refresh(order)
-        self.assertEqual(order.status, "pending_payment")
+        self.assertEqual(order.status, "rejected")
+        self.assertEqual(order.payment_status, "paid")
+        self.assertNotEqual(getattr(order, "refund_status", None), "success")
+        self.assertIsNone(getattr(order, "refunded_at", None))
+        self.assertEqual(order.termination_source, "merchant_reject")
+
+    async def test_update_order_status_still_refuses_merchant_cancel_of_paid_order(self):
+        # Cancel of a paid order stays fail-closed; only reject terminates a paid order.
+        order = await self._make_order(status="pending", payment_status="paid")
+
+        result = await update_order_status(
+            str(order.id),
+            OrderStatusUpdate(status="cancelled"),
+            make_request(tenant_id=TENANT_A, token_type="merchant"),
+            db=self.db,
+        )
+
+        self.assertEqual(result.code, 409)
+        self.assertEqual(result.data["code"], "PAID_ORDER_CANCEL_REQUIRES_REFUND")
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "pending")
 
 
 class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):

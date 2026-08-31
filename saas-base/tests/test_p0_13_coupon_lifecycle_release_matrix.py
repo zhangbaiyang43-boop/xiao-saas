@@ -6,7 +6,8 @@ Matrix:
   unpaid cancel   -> coupon released (UNUSED)
   unpaid reject   -> coupon released (UNUSED)
   paid cancel     -> DENIED (409), coupon stays USED, no premature return
-  paid reject     -> DENIED (409), coupon stays USED
+  paid pending reject -> ALLOWED (200), order -> rejected, coupon still stays USED
+                         at reject time (released only on later refund SUCCESS)
   wechat-sheet-cancel (order stays pending_payment, no explicit cancel call) -> coupon stays LOCKED
   normal prepay lifecycle -> exactly one LOCKED->USED transition
   duplicate callback x3 -> exactly one transition, no repeated side effects
@@ -152,7 +153,11 @@ class CouponLifecycleReleaseMatrixTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         self.assertEqual(order.status, "pending")  # untouched
 
-    async def test_paid_reject_denied_coupon_not_returned(self):
+    async def test_paid_pending_reject_allowed_coupon_not_released_at_reject(self):
+        # Merchant reject of a paid, kitchen-unaccepted order is now allowed and
+        # terminates fulfilment only. The coupon must NOT be released at reject:
+        # it is a paid order's coupon (USED), and any reversal happens later,
+        # only after the merchant's refund reaches provider SUCCESS.
         order, coupon = await self._make_locked_order_with_coupon()
         order.status = "pending"
         order.payment_status = "paid"
@@ -164,7 +169,10 @@ class CouponLifecycleReleaseMatrixTest(unittest.IsolatedAsyncioTestCase):
         result = await OrderLifecycleService(self.db).update_order_status(
             order.id, OrderStatusUpdate(status="rejected"),
         )
-        self.assertEqual(result.code, 409)
+        self.assertEqual(result.code, 200)
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "rejected")
+        self.assertEqual(order.payment_status, "paid")
         await self.db.refresh(coupon)
         self.assertEqual(coupon.status, "USED")
 

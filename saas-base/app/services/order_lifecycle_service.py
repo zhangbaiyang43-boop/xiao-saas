@@ -931,7 +931,23 @@ class OrderLifecycleService(BaseService):
             return error_response(code=409, msg=f"illegal status transition: {current_status}->{body.status}")
         entered_done = body.status == "done"
 
-        if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) == "paid":
+        # A merchant may reject a paid order that the kitchen has not accepted yet
+        # (status == "pending"): the dish is out of stock, the shop is closing, etc.
+        # This terminates fulfilment only -- it does NOT refund. Once rejected + paid,
+        # refund_required becomes true and the merchant completes the refund through
+        # the existing POST /orders/{id}/refund flow (Phase 02A/02B). Every other paid
+        # terminal action still fails closed: paid + pending -> cancelled, customer
+        # cancel of a paid order, and any reject after the order left "pending".
+        paid_pending_merchant_reject = (
+            getattr(order, "payment_status", None) == "paid"
+            and current_status == "pending"
+            and body.status == "rejected"
+        )
+        if (
+            body.status in ("rejected", "cancelled")
+            and getattr(order, "payment_status", None) == "paid"
+            and not paid_pending_merchant_reject
+        ):
             return _paid_order_cancel_response()
         if body.status in ("rejected", "cancelled") and getattr(order, "payment_status", None) != "paid":
             await _unlock_order_coupon_if_locked(order, self.db)

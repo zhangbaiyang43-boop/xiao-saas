@@ -210,6 +210,28 @@ class MerchantRejectAuditTest(TerminationAuditBase):
         self.assertEqual(order.terminated_actor_role, "owner")
         self.assertEqual(order.termination_source, "merchant_reject")
 
+    async def test_paid_pending_merchant_reject_writes_durable_who_when_how(self):
+        # The P0-PAID-PENDING fix routes a paid, kitchen-unaccepted order's
+        # rejection through the SAME termination path -- the durable WHO/WHEN/HOW
+        # audit must be written identically, and payment stays untouched.
+        order = await self._make_order(status="pending", payment_status="paid", payment_mode="prepay")
+
+        result = await update_order_status(
+            str(order.id), OrderStatusUpdate(status="rejected"),
+            make_request(tenant_id=TENANT_A, token_type="merchant", role="owner", account_id=None),
+            db=self.db,
+        )
+
+        self.assertEqual(result.code, 200, result.msg)
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "rejected")
+        self.assertEqual(order.payment_status, "paid")
+        self.assertIsNotNone(order.terminated_at)
+        self.assertEqual(order.terminated_actor_type, "account")
+        self.assertIsNone(order.terminated_actor_id)
+        self.assertEqual(order.terminated_actor_role, "owner")
+        self.assertEqual(order.termination_source, "merchant_reject")
+
 
 class RepeatedTerminalActionPreservesAuditTest(TerminationAuditBase):
     async def test_second_cancel_attempt_after_already_cancelled_does_not_overwrite_audit(self):

@@ -68,23 +68,50 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         return order
 
-    async def test_r01_paid_merchant_cancel_and_reject_fail_closed_without_refund(self):
-        for target in ("cancelled", "rejected"):
-            order = await self.make_order(status="pending", payment_status="paid")
-            service = OrderLifecycleService(self.db)
-            service.set_tenant_id(TENANT_ID)
-            refund = AsyncMock(return_value={"success": True, "amount": 28.0, "error": None})
-            with patch.object(OrderPaymentService, "_refund_order_payment", new=refund):
-                result = await service.update_order_status(
-                    int(order.id), OrderStatusUpdate(status=target)
-                )
+    async def test_r01a_paid_merchant_cancel_fails_closed_without_refund(self):
+        # Cancel of a paid order stays fail-closed: a paid order is only ever
+        # terminated by reject (while still "pending"), never by cancel.
+        order = await self.make_order(status="pending", payment_status="paid")
+        service = OrderLifecycleService(self.db)
+        service.set_tenant_id(TENANT_ID)
+        refund = AsyncMock(return_value={"success": True, "amount": 28.0, "error": None})
+        with patch.object(OrderPaymentService, "_refund_order_payment", new=refund):
+            result = await service.update_order_status(
+                int(order.id), OrderStatusUpdate(status="cancelled")
+            )
 
-            self.assertEqual(result.code, 409)
-            self.assertEqual((result.data or {}).get("code"), "PAID_ORDER_CANCEL_REQUIRES_REFUND")
-            refund.assert_not_called()
-            await self.db.refresh(order)
-            self.assertEqual(order.status, "pending")
-            self.assertEqual(order.payment_status, "paid")
+        self.assertEqual(result.code, 409)
+        self.assertEqual((result.data or {}).get("code"), "PAID_ORDER_CANCEL_REQUIRES_REFUND")
+        refund.assert_not_called()
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "pending")
+        self.assertEqual(order.payment_status, "paid")
+
+    async def test_r01b_paid_pending_merchant_reject_allowed_but_never_refunds(self):
+        # P0-PAID-PENDING gap fix: a merchant may reject a paid order the kitchen
+        # has not accepted yet. This terminates fulfilment only -- it must NOT
+        # submit a refund, mark refund success, or set refunded_at. The merchant
+        # completes the refund separately through POST /orders/{id}/refund.
+        order = await self.make_order(status="pending", payment_status="paid")
+        service = OrderLifecycleService(self.db)
+        service.set_tenant_id(TENANT_ID)
+        refund = AsyncMock(return_value={"success": True, "amount": 28.0, "error": None})
+        with patch.object(OrderPaymentService, "_refund_order_payment", new=refund):
+            result = await service.update_order_status(
+                int(order.id), OrderStatusUpdate(status="rejected")
+            )
+
+        self.assertEqual(result.code, 200)
+        refund.assert_not_called()
+        await self.db.refresh(order)
+        self.assertEqual(order.status, "rejected")
+        self.assertEqual(order.payment_status, "paid")
+        self.assertNotEqual(getattr(order, "refund_status", None), "success")
+        self.assertIsNone(getattr(order, "refunded_at", None))
+        self.assertEqual(order.terminated_actor_type, "account")
+        self.assertEqual(order.termination_source, "merchant_reject")
+        self.assertIsNotNone(order.terminated_at)
+        self.assertTrue(serialize_order(order, [])["refund_required"])
 
     async def test_r02_paid_customer_cancel_fails_closed_without_refund(self):
         order = await self.make_order(
@@ -265,11 +292,19 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         rows = []
         for _ in range(5):
             rows.append((await self.make_order(payment_mode="prepay"), "cancelled", True))
-        for index in range(5):
+        # paid + pending: reject terminates fulfilment (allowed, no refund side effect);
+        # cancel is still fail-closed.
+        for _ in range(3):
             rows.append((
                 await self.make_order(status="pending", payment_status="paid", payment_mode="prepay"),
-                "cancelled" if index % 2 == 0 else "rejected",
+                "cancelled",
                 False,
+            ))
+        for _ in range(2):
+            rows.append((
+                await self.make_order(status="pending", payment_status="paid", payment_mode="prepay"),
+                "rejected",
+                True,
             ))
         for _ in range(5):
             rows.append((await self.make_order(status="pending", payment_mode="postpay"), "rejected", True))
@@ -321,8 +356,10 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         unpaid = serialize_order(unpaid_pending, [])
         self.assertTrue(terminal["refund_required"])
         self.assertFalse(terminal["can_cancel"])
+        self.assertFalse(terminal["can_reject"])
+        # paid + pending: reject is offered (fulfilment termination), cancel is not.
         self.assertFalse(paid["can_cancel"])
-        self.assertFalse(paid["can_reject"])
+        self.assertTrue(paid["can_reject"])
         self.assertTrue(unpaid["can_cancel"])
         self.assertTrue(unpaid["can_reject"])
 
