@@ -237,6 +237,8 @@
                 <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
                 <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
                 <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
+                <a-tag v-else-if="order.refundStatus === 'processing'" color="warning">退款处理中</a-tag>
+                <a-tag v-else-if="order.refundStatus === 'success'" color="success">已退款</a-tag>
                 <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
               </div>
               <div style="text-align:right">
@@ -245,7 +247,7 @@
               </div>
             </div>
             <div v-if="order.paymentMethodText" style="font-size:11px;color:var(--text-3);margin-bottom:6px">{{ order.paymentMethodText }}</div>
-            <div v-if="order.refundRequired" class="refund-attention">已付款但已终止，需要处理退款</div>
+            <div v-if="refundLine(order)" class="refund-line" :class="'refund-line--' + refundLine(order).tone">{{ refundLine(order).text }}</div>
             <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
               {{ printDiagnostic(order) }}
             </div>
@@ -271,7 +273,7 @@
               <a-tag v-if="orderNeedsServe(order)" size="small" style="background:#ecfdf5;color:#047857;border-color:#a7f3d0;font-size:10px">待上菜</a-tag>
               <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
               <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
-              <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">退款</a-button>
+              <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">{{ order.refundStatus === 'failed' ? '重新退款' : '退款' }}</a-button>
             </div>
             <div v-if="reviewsMap[order.id]" class="review-row">
               <span class="review-stars-display">{{ '★'.repeat(reviewsMap[order.id].rating) }}{{ '☆'.repeat(5 - reviewsMap[order.id].rating) }}</span>
@@ -420,6 +422,8 @@
               <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
               <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
               <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
+              <a-tag v-else-if="order.refundStatus === 'processing'" color="warning">退款处理中</a-tag>
+              <a-tag v-else-if="order.refundStatus === 'success'" color="success">已退款</a-tag>
               <span style="font-size:12px;color:var(--text-3)">{{ order.time }}</span>
             </div>
             <div style="text-align:right">
@@ -428,7 +432,7 @@
             </div>
           </div>
           <div style="font-size:11px;color:var(--text-3);margin-bottom:6px">单号尾号 {{ orderTail(order) }}<template v-if="order.paymentMethodText"> · {{ order.paymentMethodText }}</template></div>
-          <div v-if="order.refundRequired" class="refund-attention">已付款但已终止，需要处理退款</div>
+          <div v-if="refundLine(order)" class="refund-line" :class="'refund-line--' + refundLine(order).tone">{{ refundLine(order).text }}</div>
           <div v-if="['failed','unknown'].includes(order.printStatus)" class="print-diagnostic">
             {{ printDiagnostic(order) }}
           </div>
@@ -459,7 +463,7 @@
             <a-button v-if="orderNeedsServe(order)" type="primary" :loading="order.updating" @click="confirmServed(order)" class="order-action-btn">确认已上菜</a-button>
             <a-button v-if="order.canCancel" danger :loading="order.updating" @click="cancelPendingPaymentOrder(order)" class="order-action-btn order-action-btn--reject">取消订单</a-button>
             <a-button v-if="['failed','unknown'].includes(order.printStatus)" danger :loading="order.reprinting" @click="reprintOrderTicket(order)" class="order-action-btn order-action-btn--reject">补打小票</a-button>
-            <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">退款</a-button>
+            <a-button v-if="order.refundRequired" danger :loading="order.refunding" @click="refundPaidOrderClick(order)" class="order-action-btn order-action-btn--reject">{{ order.refundStatus === 'failed' ? '重新退款' : '退款' }}</a-button>
             <a-button
               v-if="orphanCanSettle(order)"
               type="primary"
@@ -1108,6 +1112,11 @@ function mapOwnerOrders(raw) {
       canCancel: o.can_cancel === true,
       canReject: o.can_reject === true,
       refundRequired: o.refund_required === true,
+      // 退款事实全部来自后端 serialize_order（refund_status / refund_amount /
+      // refunded_at），前端不自建退款状态机——按钮是否出现只看后端 refund_required。
+      refundStatus: o.refund_status || null,
+      refundAmount: o.refund_amount != null ? Number(o.refund_amount) : null,
+      refundedAt: o.refunded_at || null,
       printStatus: o.print_status || null,
       printErrorCode: o.print_error_code || '',
       printLastAttemptAt: o.print_last_attempt_at || '',
@@ -1367,6 +1376,33 @@ function paymentMethodText(method, paymentStatus) {
   if (paymentStatus && paymentStatus !== 'paid') return '未支付'
   const labels = { wxpay: '微信支付', offline: '线下/记账已收', free: '优惠券抵扣至0元', balance: '余额支付', mock: '测试支付' }
   return labels[method] || ''
+}
+
+// 退款状态展示：只翻译后端 refund_status，不做任何业务判断。金额优先用后端
+// 已确认的 refund_amount（渠道真实退款额），没有才回退到订单实付额 order.total。
+// tone 决定用哪种既有配色：attention=需要处理/失败(红)，info=处理中(琥珀)，done=已退款(绿)。
+function refundLine(order) {
+  const status = order.refundStatus
+  if (status === 'success') {
+    const amount = order.refundAmount != null ? order.refundAmount : Number(order.total || 0)
+    return { text: `已退款 ¥${amount.toFixed(2)}`, tone: 'done' }
+  }
+  if (status === 'processing') {
+    return { text: '退款处理中，请稍后刷新查看结果', tone: 'info' }
+  }
+  if (order.refundRequired) {
+    return status === 'failed'
+      ? { text: '退款失败，可点击“重新退款”再次发起', tone: 'attention' }
+      : { text: '已付款但已终止，需要处理退款', tone: 'attention' }
+  }
+  return null
+}
+
+// 退款金额只读展示：优先订单实付额（后端在收款时已校验 == 微信实付，见
+// orders.py expected_fen），成功后以后端 refund_amount 为准。
+function refundDisplayAmount(order) {
+  if (order.refundStatus === 'success' && order.refundAmount != null) return order.refundAmount
+  return Number(order.total || 0)
 }
 
 const sortedOrders = computed(() => {
@@ -1700,25 +1736,42 @@ async function confirmServed(order) {
 }
 
 function refundPaidOrderClick(order) {
+  // 防重复：已有一次退款请求在途时，直接忽略再次点击。前端 disable 只是体验层，
+  // 真正的幂等在后端（确定性 out_refund_no + provider query，02A 已认证）。
+  if (order.refunding) return
+  const paid = Number(order.total || 0)
+  const refundAmount = refundDisplayAmount(order)
   Modal.confirm({
     title: '确认退款？',
-    content: `桌${order.table} · 订单尾号${orderTail(order)} · 已付款 ¥${Number(order.total).toFixed(2)}，将由系统向支付渠道发起退款。已付款订单不能直接取消。`,
+    // 退款金额只读展示，当前 P0 只支持全额退款，不提供金额输入框。
+    content: `订单尾号${orderTail(order)}（桌${order.table}） · 实付金额 ¥${paid.toFixed(2)} · 退款金额 ¥${refundAmount.toFixed(2)}。退款成功后，资金将原路退回顾客。已付款订单不能直接取消。`,
     okText: '确认退款',
     okType: 'danger',
-    cancelText: '再想想',
+    cancelText: '取消',
     onOk: async () => {
       order.refunding = true
       try {
         const res = await refundPaidOrder(order.id)
-        if (res.code === 200) message.success(res.msg || '已提交退款')
-        else message.error(res.msg || '退款失败，请稍后重试')
-        await reconcileAfterOrderAction()
-      } catch (err) {
-        if (err?.response?.status !== 403) {
-          message.error(err?.response?.data?.msg || '退款失败')
+        if (res && res.code === 200) {
+          if (res.data && res.data.refund_status === 'processing') {
+            message.info('退款申请已提交，正在处理中')
+          } else {
+            message.success('退款成功')
+          }
+        } else {
+          // 400 未支付 / 409 状态不可退 / 502 渠道失败 都以 HTTP 200 包体返回，
+          // 优先展示后端的安全业务 message，没有再用统一兜底。
+          message.error((res && res.msg) || '当前订单无法退款，请刷新后重试')
         }
-        await reconcileAfterOrderAction()
+      } catch (err) {
+        // 403（无 finance.refund 权限）由 request 拦截器统一提示，这里不重复。
+        if (err?.response?.status !== 403) {
+          message.error(err?.response?.data?.msg || '当前订单无法退款，请刷新后重试')
+        }
       } finally {
+        // 无论 success / processing / failed，都用后端最新 refund_status /
+        // refund_required 重新覆盖本地，不靠前端猜测。
+        await reconcileAfterOrderAction()
         order.refunding = false
       }
     },
@@ -2379,15 +2432,31 @@ onMounted(async () => {
   font-size: 18px;
   padding: 4px;
 }
-.refund-attention {
+/* 退款状态行：一套排版，三种既有语义配色。attention 沿用原 .refund-attention 的红，
+   info 用与"打印结果未知"一致的琥珀，done 用与"待上菜"一致的绿。 */
+.refund-line {
   margin-bottom: 8px;
   padding: 9px 10px;
-  border: 1px solid #fecaca;
+  border: 1px solid transparent;
   border-radius: 8px;
-  background: #fef2f2;
-  color: #b91c1c;
   font-size: 12px;
   line-height: 1.5;
+  white-space: pre-line;
+}
+.refund-line--attention {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.refund-line--info {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+.refund-line--done {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
 }
 .tag-rejected {
   color: #fff !important;
