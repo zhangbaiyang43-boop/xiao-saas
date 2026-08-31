@@ -490,7 +490,17 @@ class MerchantSubscriptionApiTest(unittest.IsolatedAsyncioTestCase):
     async def test_trial_to_paid_e2e_across_f1a_f1b_f1c_f1d(self):
         await self.service.create_trial_for_tenant(TENANT_A)
         trial = await self.service.get_current_subscription(TENANT_A)
-        fixed_trial_ends_at = datetime(2026, 8, 31, 0, 0, 0)
+        # A single, deterministic source of time truth for this test: a fixed
+        # trial end clearly in the future (30-day margin -- far beyond any CI
+        # latency), so apply_paid_purchase always takes the "unused trial
+        # remainder preserved" branch (current.trial_ends_at > paid_at).
+        # Midnight-aligned so the exact ends_at equality below is immune to any
+        # DB datetime round-trip sub-second precision. The old hard-coded
+        # datetime(2026, 8, 31) silently expired once wall-clock time passed it,
+        # flipping the runtime onto the lapsed-trial (base_time = paid_at) path.
+        fixed_trial_ends_at = (datetime.utcnow() + timedelta(days=30)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         trial.trial_ends_at = fixed_trial_ends_at
         await self.db.commit()
         trial_id = trial.id
@@ -549,9 +559,11 @@ class MerchantSubscriptionApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reloaded_trial.status, STATUS_TRIAL)
         self.assertEqual(reloaded_trial.trial_ends_at, fixed_trial_ends_at)
 
-        # paid_ends_at = trial_ends_at + 12 calendar months (trial time preserved)
+        # paid_ends_at = trial_ends_at + 12 calendar months (unused trial time preserved).
+        # expected is derived from the SAME fixed_trial_ends_at stored above -- never a
+        # second datetime.utcnow() -- so exact equality holds with no tolerance.
         expected_min = _add_calendar_months_clamped(fixed_trial_ends_at, 12)
-        expected_max = expected_min  # trial_ends_at is fixed/deterministic, no bracket needed
+        expected_max = expected_min  # fixed_trial_ends_at is deterministic, no bracket needed
         result = await self.db.execute(
             select(Subscription)
             .where(Subscription.tenant_id == TENANT_A, Subscription.status == STATUS_ACTIVE)
