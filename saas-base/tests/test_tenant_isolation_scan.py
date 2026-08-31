@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import re
+import textwrap
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,9 +63,9 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     "recovery commit; ownership was already verified above.",
     (
         "app/services/order_lifecycle_service.py",
-        800,
+        892,
         "create_review",
-    ): "Order loaded by primary key then customer_id must match caller before review is created.",
+    ): "Order loaded by primary key, customer_id must match caller before mutation, and the review uses order.tenant_id.",
     (
         "app/services/order_payment_service.py",
         72,
@@ -114,7 +115,7 @@ ALLOWLIST: dict[tuple[str, int, str], str] = {
     "order.tenant_id != tenant_id check in _load_order_for_staff_handoff()).",
     (
         "app/services/order_print_service.py",
-        1020,
+        1064,
         "recover_pending_print_orders_once",
     ): "Intentionally cross-tenant: a startup/interval background recovery job (see _print_recovery_loop in "
     "main.py), same trust model as _pending_payment_reconcile_once and _marketing_recall_loop. Each recovered "
@@ -245,6 +246,34 @@ def scan_tenant_isolation_violations() -> list[tuple[SelectHit, str]]:
 
 
 class TenantIsolationScanTest(unittest.TestCase):
+    def test_scanner_still_flags_unallowlisted_unscoped_sensitive_select(self):
+        probe = ROOT / "app" / "services" / "_tenant_isolation_scan_negative_probe.py"
+        probe.write_text(
+            textwrap.dedent(
+                """
+                from sqlalchemy import select
+                from app.models.order import Order
+
+                async def unsafe_probe(db):
+                    return await db.execute(select(Order).where(Order.id == 1))
+                """
+            ),
+            encoding="utf-8",
+        )
+        try:
+            violations = _scan_file(probe)
+        finally:
+            probe.unlink(missing_ok=True)
+
+        self.assertTrue(
+            any(
+                hit.rel_path == "app/services/_tenant_isolation_scan_negative_probe.py"
+                and hit.func_name == "unsafe_probe"
+                and hit.model == "Order"
+                for hit, _ in violations
+            )
+        )
+
     def test_sensitive_selects_filter_by_tenant_id(self):
         violations = scan_tenant_isolation_violations()
         if not violations:
