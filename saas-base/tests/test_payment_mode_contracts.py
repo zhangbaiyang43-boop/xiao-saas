@@ -146,9 +146,15 @@ class PaymentModeContractsTest(unittest.TestCase):
 
 
     def test_admin_order_manage_can_see_pay_later_orders(self):
+        # Pay-later (postpay / table_account) orders land in 'pending', and
+        # abandoned-prepay orders in 'pending_payment' -- both must stay visible
+        # in OrderManage. Lock the visibility surfaces (render branch,
+        # pending_payment aggregation, status filter option, shared status
+        # formatter), not the internal statusLabel call shape.
         self.assertIn("o.status === 'pending'", ADMIN_ORDER_MANAGE_SOURCE)
-        self.assertIn("statusLabel(order.status", ADMIN_ORDER_MANAGE_SOURCE)
         self.assertIn("pendingPaymentOrders", ADMIN_ORDER_MANAGE_SOURCE)
+        self.assertIn("val: 'pending_payment'", ADMIN_ORDER_MANAGE_SOURCE)
+        self.assertIn("formatOrderStatusText", ADMIN_ORDER_MANAGE_SOURCE)
 
     def test_pay_later_add_on_uses_any_active_session_order_as_parent(self):
         source = function_source(ORDERS_SOURCE, "_resolve_create_order_dining_context")
