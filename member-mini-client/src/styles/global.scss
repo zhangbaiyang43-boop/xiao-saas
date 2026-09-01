@@ -30,6 +30,32 @@ page {
   --btn-primary-radius:      50rpx;  /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
   --btn-primary-font-size:   32rpx;  /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
   --btn-primary-font-weight: 600;    /* provenance: exact pre-refactor value in commit 74614aa (SpecSheet.vue .spec-confirm-btn) */
+  --font-caption:    22rpx;
+  --font-meta:       24rpx;
+  --font-body:       26rpx;
+  --font-title:      32rpx;
+  --font-context-title: 34rpx;
+  --font-sheet-title: 36rpx;
+  --font-price-md:   40rpx;
+  --font-price-lg:   48rpx;
+  --space-8:         8rpx;
+  --space-12:        12rpx;
+  --space-16:        16rpx;
+  --space-20:        20rpx;
+  --space-24:        24rpx;
+  --space-32:        32rpx;
+  --space-40:        40rpx;
+  --radius-sm:       8rpx;
+  --radius-md:       16rpx;
+  --radius-lg:       var(--radius-card);
+  --radius-sheet:    32rpx;
+  --radius-pill:     999rpx;
+  --control-sm:      72rpx;
+  --control-md:      88rpx;
+  --control-lg:      var(--btn-primary-height);
+  --motion-fast:     120ms;
+  --motion-normal:   180ms;
+  --motion-sheet:    240ms;
   --z-chrome:        300;
   --z-floating:      850;
   --z-blocking:      3100;

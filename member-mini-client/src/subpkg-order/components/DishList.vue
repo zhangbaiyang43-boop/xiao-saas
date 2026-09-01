@@ -59,73 +59,17 @@
       </view>
       <view v-for="cat in categories" :key="cat" :id="categoryAnchorId(cat)">
         <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
-        <view
+        <dish-card
           v-for="dish in dishesByCategory(cat)"
           :key="dish.id"
-          class="dish-item"
-          :class="{ 'dish-item--featured': isFeatured(dish), 'dish-item--soldout': isSoldOut(dish) }"
-          @click="$emit('open-product-detail', dish)"
-        >
-          <view class="dish-thumb">
-            <image
-              v-if="dishImage(dish) && !imageLoadFailed[dish.id]"
-              class="dish-img"
-              :src="dishImage(dish)"
-              mode="aspectFill"
-              lazy-load
-              @error="$emit('image-error', dish.id)"
-            />
-            <view v-else class="dish-placeholder">
-              <image class="dish-placeholder-img" src="/static/order/dish-placeholder.png" mode="aspectFit" />
-            </view>
-            <view v-if="isSoldOut(dish)" class="dish-soldout-mask"><text>已售罄</text></view>
-          </view>
-          <view class="dish-info">
-            <view class="dish-title-row">
-              <text class="dish-name">{{ dish.name }}</text>
-              <view v-if="dishCardTags(dish).length" class="dish-tags">
-                <text
-                  v-for="tag in dishCardTags(dish)"
-                  :key="tag"
-                  class="dish-tag"
-                  :class="isStrongDishTag(tag) ? 'dish-tag--strong' : 'dish-tag--plain'"
-                >{{ tag }}</text>
-              </view>
-            </view>
-            <view class="dish-meta">
-              <text v-if="dishCardDesc(dish)" class="dish-desc">{{ dishCardDesc(dish) }}</text>
-              <text v-if="showDishSales(dish)" class="dish-sales">月售{{ dish.sales_count }}</text>
-            </view>
-            <view class="dish-bottom-row">
-              <price-text
-                class="dish-price-wrap"
-                size="md"
-                block
-                :amount="dishPriceText(dish)"
-                :suffix="dishPriceSuffix(dish)"
-              />
-              <view class="dish-counter" @click.stop>
-                <view v-if="isSoldOut(dish)" class="soldout-action" @click.stop><text>已售罄</text></view>
-                <template v-else-if="hasSpecs(dish)">
-                  <view v-if="dishOptionKindCount(dish.id) > 0" class="option-count-pill" @click.stop="$emit('open-cart')">
-                    <text>{{ optionCountText(dish.id) }}</text>
-                  </view>
-                  <view class="choose-option-btn" @click.stop="$emit('open-spec-sheet', dish)">
-                    <text>选规格</text>
-                  </view>
-                </template>
-                <template v-else>
-                  <view v-if="cartCount(dish.id) > 0" class="dish-qty-control">
-                    <view class="counter-touch" @click.stop="$emit('remove-from-cart', dish)"><view class="counter-btn minus"><text class="iconfont icon-move"></text></view></view>
-                    <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === dish.id }">{{ cartCount(dish.id) }}</text>
-                    <view class="counter-touch" @click.stop="$emit('add-to-cart', dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
-                  </view>
-                  <view v-else class="counter-touch" @click.stop="$emit('add-to-cart', dish)"><view class="counter-btn plus" :class="{ 'counter-btn--pressing': addPressKey === dish.id }"><text class="iconfont icon-add"></text></view></view>
-                </template>
-              </view>
-            </view>
-          </view>
-        </view>
+          :model="buildDishCardModel(dish)"
+          @open-detail="$emit('open-product-detail', $event)"
+          @image-error="$emit('image-error', $event)"
+          @open-cart="$emit('open-cart')"
+          @open-spec="$emit('open-spec-sheet', $event)"
+          @remove="$emit('remove-from-cart', $event)"
+          @add="$emit('add-to-cart', $event)"
+        />
       </view>
       <view class="list-pad" />
     </scroll-view>
@@ -136,7 +80,7 @@
 <script>
 import { categoryAnchorId } from '../composables/useDishCategories.js'
 import StateEmpty from '@/components/state-empty/state-empty.vue'
-import PriceText from './PriceText.vue'
+import DishCard from './DishCard.vue'
 
 // 从 menu.vue 拆出来的菜品列表 + 分类导航区块（原来是 activeTab==='order' 那部
 // 分模板：category-nav + dish-scroll，含"再来一单"、空菜单态、菜品卡片）。基本
@@ -160,7 +104,7 @@ import PriceText from './PriceText.vue'
 // 迷你条显隐」；门店大头部不在本列表里，这里不做高度/透明度动画。
 export default {
   name: 'DishList',
-  components: { StateEmpty, PriceText },
+  components: { StateEmpty, DishCard },
   props: {
     categories: { type: Array, default: () => [] },
     activeCategory: { type: String, default: '' },
@@ -218,6 +162,37 @@ export default {
   },
   methods: {
     categoryAnchorId,
+    buildDishCardModel(dish) {
+      const id = dish?.id
+      const tags = this.dishCardTags(dish).map((tag) => {
+        const strong = this.isStrongDishTag(tag)
+        return {
+          text: tag,
+          tone: strong ? 'brand' : 'neutral',
+          emphasis: strong ? 'strong' : 'plain',
+        }
+      })
+      return {
+        id,
+        dish,
+        name: dish?.name || '',
+        imageSrc: this.dishImage(dish),
+        imageFailed: !!this.imageLoadFailed[id],
+        description: this.dishCardDesc(dish),
+        salesText: this.showDishSales(dish) ? '月售' + dish.sales_count : '',
+        tags,
+        priceAmount: this.dishPriceText(dish),
+        priceSuffix: this.dishPriceSuffix(dish),
+        featured: this.isFeatured(dish),
+        soldOut: this.isSoldOut(dish),
+        hasSpecs: this.hasSpecs(dish),
+        quantity: this.cartCount(id),
+        optionKindCount: this.dishOptionKindCount(id),
+        optionCountText: this.optionCountText(id),
+        addPressing: this.addPressKey === id,
+        qtyPulsing: this.qtyPulseKey === id,
+      }
+    },
     // 方案1：门店大头部在 menu.vue 全宽区，不在本列表里。这里只把 scrollTop
     // 抛给父组件决定何时收起头部/露出迷你条；分类高亮仍走下面的节流逻辑。
     onDishScroll(e) {
@@ -261,8 +236,6 @@ export default {
 </script>
 
 <style lang="scss">
-@import '../styles/_shared.scss';
-
 .menu-body {
   display: flex;
   flex: 1;
@@ -445,67 +418,6 @@ export default {
 
 
 
-.dish-item {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  height: 236rpx;
-  min-height: 236rpx;
-  max-height: 236rpx;
-  margin: 0 20rpx 16rpx;
-  padding: 20rpx 20rpx 20rpx 24rpx;
-  box-sizing: border-box;
-  background: #fff;
-  border-radius: var(--radius-card);
-  box-shadow: var(--card-shadow);
-  position: relative;
-  overflow: hidden;
-  transition: background 120ms ease, opacity 120ms ease;
-}
-
-
-
-.dish-item:active { background: #f8faf9; }
-
-
-.dish-item--featured { border-left-color: transparent; }
-
-
-.dish-item--soldout { opacity: .76; }
-
-
-
-.dish-thumb {
-  position: relative;
-  width: 192rpx;
-  height: 192rpx;
-  border-radius: 20rpx;
-  overflow: hidden;
-  background: #F5F3EE;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  box-shadow: 0 2rpx 8rpx rgba(17,24,39,0.08);
-}
-
-
-
-.dish-img { width: 100%; height: 100%; display: block; }
-
-
-.dish-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #F5F3EE; }
-
-
-.dish-placeholder-img { width: 60%; height: 60%; }
-
-
-.dish-soldout-mask { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(31,41,55,.42); }
-
-
-.dish-soldout-mask text { min-width: 104rpx; height: 48rpx; padding: 0 18rpx; border-radius: 999rpx; display: flex; align-items: center; justify-content: center; background: rgba(17,24,39,.76); color: #fff; font-size: 24rpx; font-weight: 700; }
-
-
-
-
 .reorder-bar {
   display: flex;
   align-items: center;
@@ -585,76 +497,6 @@ export default {
 
 
 
-.dish-info { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-left: 18rpx; box-sizing: border-box; overflow: hidden; }
-
-
-.dish-title-row { display: flex; align-items: flex-start; gap: 8rpx; min-width: 0; }
-
-
-.dish-name { flex: 1; min-width: 0; font-size: 32rpx; font-weight: 600; line-height: 44rpx; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-
-.dish-tags { display: flex; flex-shrink: 0; flex-wrap: nowrap; max-width: 88rpx; overflow: hidden; }
-
-
-.dish-tag { max-width: 88rpx; height: 34rpx; padding: 0 8rpx; border-radius: 8rpx; box-sizing: border-box; font-size: 20rpx; font-weight: 500; line-height: 34rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dish-tag--strong { color: #078546; background: #e9f9f0; }
-.dish-tag--plain { display: none; }
-
-
-.dish-meta { flex: 1; min-width: 0; min-height: 0; padding-top: 6rpx; }
-
-
-.dish-desc { display: block; min-width: 0; font-size: 26rpx; color: var(--text-3); line-height: 36rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-
-.dish-sales { display: block; min-width: 0; margin-top: 2rpx; margin-left: 0; font-size: 24rpx; line-height: 34rpx; color: #A8ADB4; font-weight: 400; }
-
-
-.dish-bottom-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 0; margin-top: auto; min-width: 0; }
-
-
-.dish-price-wrap { flex: 1; min-width: 104rpx; overflow: hidden; }
-
-
-.dish-counter { flex: none; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; margin-left: 6rpx; min-width: 60rpx; max-width: 176rpx; padding-right: 0; box-sizing: border-box; }
-
-
-.dish-qty-control { width: 164rpx; max-width: 164rpx; height: 58rpx; padding: 4rpx; display: flex; align-items: center; justify-content: space-between; gap: 0; overflow: hidden; flex-shrink: 0; box-sizing: border-box; border-radius: 29rpx; background: #F3F4F6; }
-
-
-.counter-touch { width: 72rpx; height: 72rpx; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; }
-
-
-.dish-qty-control .counter-touch { width: 50rpx; height: 50rpx; }
-
-
-.dish-counter > .counter-touch { width: 76rpx; height: 76rpx; }
-
-
-.dish-qty-control .counter-btn--pressing { animation: none; transform: none; }
-
-.dish-counter .counter-btn { width: 60rpx; height: 60rpx; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; flex-shrink: 0; }
-.dish-qty-control .counter-btn { width: 50rpx; height: 50rpx; }
-.dish-counter .counter-btn text { font-size: 30rpx; font-weight: 800; line-height: 1; }
-.dish-counter .counter-btn .iconfont { font-size: 27rpx; font-weight: 400; line-height: 1; }
-.dish-counter .counter-btn.plus { background: var(--brand); }
-.dish-counter .counter-btn.plus text { color: #fff; }
-.dish-counter .counter-btn.minus { border: none; background: #E5E7EB; }
-.dish-qty-control .counter-btn.minus { background: #EAEDF1; }
-.dish-counter .counter-btn.minus text { color: #4B5563; }
-.dish-counter .counter-num { width: 36rpx; min-width: 36rpx; text-align: center; font-size: 30rpx; line-height: 32rpx; font-weight: 600; color: var(--text-1); }
-.dish-qty-control .counter-num { width: 32rpx; min-width: 32rpx; font-size: 30rpx; line-height: 32rpx; }
-
-
-.soldout-action { height: 60rpx; min-width: 104rpx; padding: 0 20rpx; border-radius: 30rpx; display: flex; align-items: center; justify-content: center; background: #eef1f4; box-sizing: border-box; flex-shrink: 0; }
-
-
-.soldout-action text { font-size: 24rpx; font-weight: 600; color: #9aa1aa; white-space: nowrap; }
-
-
-
-
 .list-pad { height: calc(348rpx + env(safe-area-inset-bottom)); }
 
 
@@ -676,24 +518,4 @@ export default {
 
 
 
-.choose-option-btn { height: 60rpx; padding: 0 20rpx; border-radius: 30rpx; background: var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; transition: transform 180ms var(--bounce-ease); text { color: #fff; font-size: 24rpx; font-weight: 600; white-space: nowrap; } }
-
-
-.choose-option-btn:active { transform: scale(.97); }
-
-
-.option-count-pill { position: static; min-width: 34rpx; height: 34rpx; padding: 0 10rpx; border-radius: 999rpx; background: #fff; border: 2rpx solid var(--brand); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-sizing: border-box; text { color: var(--brand); font-size: 20rpx; font-weight: 800; white-space: nowrap; } }
-
-
-
-.counter-btn--pressing {
-  animation: addButtonPress 220ms var(--bounce-ease);
-}
-
-@keyframes addButtonPress {
-  0% { transform: scale(1); }
-  40% { transform: scale(.9); }
-  75% { transform: scale(1.08); }
-  100% { transform: scale(1); }
-}
 </style>
