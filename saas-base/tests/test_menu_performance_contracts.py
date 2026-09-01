@@ -41,6 +41,44 @@ EXPECTED_ITEM_FIELDS = {
     "has_options",
 }
 
+# The slow-menu warning's `extra=` must stay a lightweight correlation record.
+# Heavy per-request diagnostics belong only in the structured JSON message; these
+# keys must never be copied into `extra`.
+SLOW_LOG_DETAIL_KEYS_NOT_ALLOWED_IN_EXTRA = frozenset({
+    "tenant_query_ms",
+    "handler_total_ms",
+    "menu_query_ms",
+    "config_query_ms",
+    "mapping_ms",
+    "serialization_prepare_ms",
+    "payload_bytes",
+    "menu_item_count",
+    "category_count",
+    "spec_group_count",
+    "spec_option_count",
+    "cache_state",
+})
+# PII / credential / payment identifiers must never appear in `extra` (nor in the
+# message, but `extra` is what an unstructured log sink surfaces verbatim).
+SLOW_LOG_SENSITIVE_KEYS_NOT_ALLOWED_IN_EXTRA = frozenset({
+    "openid",
+    "unionid",
+    "authorization",
+    "access_token",
+    "refresh_token",
+    "phone",
+    "mobile",
+    "password",
+    "cookie",
+    "request_body",
+    "raw_body",
+    "session_token",
+    "participant_token",
+    "dining_session_token",
+    "out_trade_no",
+    "transaction_id",
+})
+
 
 def make_request() -> Request:
     request = Request(
@@ -260,7 +298,17 @@ class MenuPerformanceContractTest(unittest.IsolatedAsyncioTestCase):
             logged = json.loads(message)
             self.assertEqual(logged, {"event": "SLOW_MENU_API", **base})
             fields = warning.call_args.kwargs["extra"]
-            self.assertEqual(fields, {"request_id": "request-123"})
+            # Contract: `extra` carries the request correlation id and the event
+            # classification with their exact values -- but is NOT pinned to an
+            # exact key set, so a future safe correlation field (trace_id,
+            # span_id, ...) can be added without breaking this. What it must
+            # NOT contain is heavy diagnostics or any PII/credential key.
+            self.assertEqual(fields.get("request_id"), "request-123")
+            self.assertEqual(fields.get("event"), "SLOW_MENU_API")
+            for detail_key in SLOW_LOG_DETAIL_KEYS_NOT_ALLOWED_IN_EXTRA:
+                self.assertNotIn(detail_key, fields)
+            for sensitive_key in SLOW_LOG_SENSITIVE_KEYS_NOT_ALLOWED_IN_EXTRA:
+                self.assertNotIn(sensitive_key, fields)
             for forbidden in ("authorization", "openid", "phone", "password", "items"):
                 self.assertNotIn(forbidden, logged)
 
