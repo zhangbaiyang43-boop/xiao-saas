@@ -19,13 +19,21 @@ jobs:
         working-directory: member-mini-client
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full history so the certified candidate commit is present and
+          # can be diffed against HEAD. A shallow (depth 1) clone makes HEAD^ /
+          # the candidate SHA unresolvable and the source-integrity guard aborts.
+          fetch-depth: 0
 
       - name: Verify certified product source
         working-directory: .
         run: |
           set -euo pipefail
+          CANDIDATE=6be2bce7f90ba8c5d4d6e0997372c94abba3de71
           echo "VERIFY_HEAD=$(git rev-parse HEAD)"
-          echo "VERIFY_PARENT=$(git rev-parse HEAD^)"
+          echo "CANDIDATE_SHA=$CANDIDATE"
+          git merge-base --is-ancestor "$CANDIDATE" HEAD
+          echo "CANDIDATE_IS_ANCESTOR=YES"
           test "$(git rev-parse HEAD:member-mini-client/src/styles/global.scss)" = "3d61e44695be6dca0db9fa53fd10f1cc572b509e"
           test "$(git rev-parse HEAD:member-mini-client/src/components/app-button/app-button.vue)" = "adecd95e4306ebde3ada5b9278d350cc33e0db69"
           test "$(git rev-parse HEAD:member-mini-client/src/components/app-button/README.md)" = "f9fa6950a67b8253be7fc27fcb572b0477ae159a"
@@ -35,7 +43,11 @@ jobs:
           test "$(git rev-parse HEAD:member-mini-client/src/components/app-tag/README.md)" = "9d065b5c8067707c0f9f992251635dbba697be4a"
           test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishList.vue)" = "fdbdfa59afd096447f7fbbcb683bf30ae92937cf"
           test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishCard.vue)" = "4b8d767ca2b3af4f65d74028f1363c7e6496e06c"
-          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/mini-ux-runtime-artifact.yml"
+          CHANGED="$(git diff --name-only "$CANDIDATE" HEAD)"
+          echo "CHANGED_VS_CANDIDATE<<CHANGED_EOF"
+          echo "$CHANGED"
+          echo "CHANGED_EOF"
+          test "$CHANGED" = ".github/workflows/mini-ux-runtime-artifact.yml"
           echo "REMOTE_PRODUCT_CONTENT_MATCH=YES"
 
       - uses: actions/setup-node@v4
