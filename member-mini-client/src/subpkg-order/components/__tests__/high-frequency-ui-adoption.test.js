@@ -9,6 +9,7 @@ const read = (rel) => readFileSync(path.join(srcRoot, rel), 'utf8')
 
 describe('P1-HIGH-FREQUENCY-UI-ADOPTION-PHASE-02', () => {
   const dishList = read('subpkg-order/components/DishList.vue')
+  const dishCard = read('subpkg-order/components/DishCard.vue')
   const loadingStates = read('subpkg-order/components/LoadingStates.vue')
   const bottomNav = read('subpkg-order/components/BottomNav.vue')
   const bubble = read('components/order-bubble/order-bubble.vue')
@@ -27,13 +28,25 @@ describe('P1-HIGH-FREQUENCY-UI-ADOPTION-PHASE-02', () => {
     expect(dishList).not.toContain('empty-title')
   })
 
-  it('migrates dish-card price onto PriceText md', () => {
-    expect(dishList).toMatch(/import\s+PriceText\s+from\s+['"]\.\/PriceText\.vue['"]/)
-    expect(dishList).toMatch(/components\s*:\s*\{[^}]*PriceText/)
-    expect(dishList).toMatch(/<price-text[\s\S]*size="md"/)
+  it('routes dish-card price through the DishCard + PriceText md contract', () => {
+    // DishList delegates each dish row to the extracted DishCard component and
+    // no longer re-implements price formatting itself.
+    expect(dishList).toMatch(/import\s+DishCard\s+from\s+['"]\.\/DishCard\.vue['"]/)
+    expect(dishList).toMatch(/components\s*:\s*\{[^}]*DishCard/)
+    expect(dishList).toContain('<dish-card')
+    expect(dishList).not.toMatch(/import\s+PriceText/)
+    expect(dishList).not.toContain('<price-text')
     expect(dishList).not.toContain('class="dish-price-currency"')
     expect(dishList).not.toContain('class="dish-price-amount"')
     expect(dishList).not.toContain('class="dish-price-suffix"')
+
+    // DishCard owns price presentation through PriceText at md size, not raw spans.
+    expect(dishCard).toMatch(/import\s+PriceText\s+from\s+['"]\.\/PriceText\.vue['"]/)
+    expect(dishCard).toMatch(/components\s*:\s*\{[^}]*PriceText/)
+    expect(dishCard).toMatch(/<price-text[\s\S]*size="md"/)
+    expect(dishCard).not.toContain('class="dish-price-currency"')
+    expect(dishCard).not.toContain('class="dish-price-amount"')
+    expect(dishCard).not.toContain('class="dish-price-suffix"')
   })
 
   it('migrates menu error onto StateError and drops the loading copy', () => {
