@@ -255,9 +255,9 @@ export default {
 
 
 .category-nav {
-  width: 168rpx;
-  flex: 0 0 168rpx;
-  background: #F6F7F8;
+  width: 160rpx;
+  flex: 0 0 160rpx;
+  background: var(--bg-page);
   overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;
@@ -277,7 +277,7 @@ export default {
   justify-content: center;
   gap: 6rpx;
   text-align: center;
-  color: #6F7680;
+  color: var(--text-3);
   background: transparent;
 }
 
@@ -309,18 +309,14 @@ export default {
   font-size: 24rpx;
   line-height: 30rpx;
   font-weight: 600;
-  color: #6F7680;
+  color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cat-item.active {
-  background: #fff;
-}
-
-.cat-item.active .cat-icon-wrap {
-  background: var(--brand-light);
+  background: var(--bg-card);
 }
 
 .cat-item.active .cat-icon,
@@ -342,14 +338,6 @@ export default {
   height: 52rpx;
   border-radius: 0 4rpx 4rpx 0;
   background: var(--brand);
-}
-
-.cat-title {
-  display: block;
-  padding: 24rpx 0 16rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-  color: var(--text-3);
 }
 
 
