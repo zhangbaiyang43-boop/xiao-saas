@@ -1,0 +1,74 @@
+name: Mini UX Runtime Artifact
+
+on:
+  push:
+    branches:
+      - verify/mini-ux-05b-mp-weixin-artifact
+    paths:
+      - '.github/workflows/mini-ux-runtime-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mp-weixin-artifact:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: member-mini-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify certified product source
+        working-directory: .
+        run: |
+          set -euo pipefail
+          echo "VERIFY_HEAD=$(git rev-parse HEAD)"
+          echo "VERIFY_PARENT=$(git rev-parse HEAD^)"
+          test "$(git rev-parse HEAD:member-mini-client/src/styles/global.scss)" = "3d61e44695be6dca0db9fa53fd10f1cc572b509e"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-button/app-button.vue)" = "adecd95e4306ebde3ada5b9278d350cc33e0db69"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-button/README.md)" = "f9fa6950a67b8253be7fc27fcb572b0477ae159a"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-card/app-card.vue)" = "bab8e7a8b27e4da8e37b4eda4db985387499b55f"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-card/README.md)" = "104484f29c62fc482d5c9a73c37d46ebd36efcbf"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-tag/app-tag.vue)" = "f4eaf8e5b9c1abef01ee1a46933ae1554fa5ad73"
+          test "$(git rev-parse HEAD:member-mini-client/src/components/app-tag/README.md)" = "9d065b5c8067707c0f9f992251635dbba697be4a"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishList.vue)" = "fdbdfa59afd096447f7fbbcb683bf30ae92937cf"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishCard.vue)" = "4b8d767ca2b3af4f65d74028f1363c7e6496e06c"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/mini-ux-runtime-artifact.yml"
+          echo "REMOTE_PRODUCT_CONTENT_MATCH=YES"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: member-mini-client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build mp-weixin
+        run: npm run build:mp-weixin
+
+      - name: Verify mp-weixin artifact structure
+        run: |
+          set -euo pipefail
+          test -f dist/build/mp-weixin/app.js
+          test -f dist/build/mp-weixin/app.json
+          test -f dist/build/mp-weixin/app.wxss
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.js
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.wxml
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.wxss
+          test -f dist/build/mp-weixin/subpkg-order/components/DishList.js
+          test -f dist/build/mp-weixin/subpkg-order/components/DishList.wxml
+          test -f dist/build/mp-weixin/subpkg-order/components/DishList.wxss
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.js
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.wxml
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.wxss
+          echo "DISHCARD_RUNTIME_FILES_PRESENT=YES"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mini-ux-05b-mp-weixin
+          path: member-mini-client/dist/build/mp-weixin
+          retention-days: 5
