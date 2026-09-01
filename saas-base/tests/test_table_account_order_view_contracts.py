@@ -29,9 +29,17 @@ class TableAccountOrderViewContractsTest(unittest.TestCase):
         self.assertIn('paymentMode.value === "table_account"', TABLE_BILL_VIEW_SOURCE)
         self.assertIn('paymentMode.value === "postpay"', TABLE_BILL_VIEW_SOURCE)
         self.assertIn("isSharedBillMode = computed(() => isTableAccountMode.value || isPostpayMode.value)", TABLE_BILL_VIEW_SOURCE)
-        self.assertIn("table-account-sheet", TABLE_BILL_SHEET_SOURCE)
-        self.assertIn("已点菜品", TABLE_BILL_SHEET_SOURCE)
-        self.assertIn("本桌已点菜品", TABLE_BILL_SHEET_SOURCE)
+        # table_account keeps its own self-checkout capability inside the shared
+        # bill view: a clickable "去结账" gated on the table-account-only
+        # canCheckout, wired to the checkout emit. Lock that capability and the
+        # mode gate -- NOT the sheet's internal CSS class or its item-header
+        # microcopy, which are free to change with UI refactors.
+        self.assertIn('v-if="canCheckout"', TABLE_BILL_SHEET_SOURCE)
+        self.assertIn("$emit('checkout')", TABLE_BILL_SHEET_SOURCE)
+        self.assertIn(
+            'isTableAccountMode.value && tableItemCount.value > 0 && !isTableSettled.value && !tableCheckouting.value && allOrdersDone.value',
+            TABLE_BILL_VIEW_SOURCE,
+        )
 
     def test_table_account_aggregates_by_session_not_table_number_only(self):
         self.assertIn("tableOrderGroups", MENU_SOURCE)
@@ -49,9 +57,24 @@ class TableAccountOrderViewContractsTest(unittest.TestCase):
             TABLE_BILL_VIEW_SOURCE,
         )
         self.assertIn("postpayReadyToSettle", TABLE_BILL_VIEW_SOURCE)
-        self.assertIn("用餐结束请到收银台或联系服务员结账", TABLE_BILL_SHEET_SOURCE)
-        self.assertIn('v-else-if="postpayReadyToSettle"', TABLE_BILL_SHEET_SOURCE)
         self.assertIn('v-if="canCheckout"', TABLE_BILL_SHEET_SOURCE)
+        self.assertIn('v-else-if="postpayReadyToSettle"', TABLE_BILL_SHEET_SOURCE)
+        # The clickable checkout is emitted from exactly one place, and that
+        # place is the canCheckout branch -- the postpay branch carries no
+        # @click. Lock the behavior (postpay only shows guidance), not the
+        # exact wording of that guidance.
+        self.assertEqual(TABLE_BILL_SHEET_SOURCE.count("$emit('checkout')"), 1)
+        checkout_idx = TABLE_BILL_SHEET_SOURCE.index("$emit('checkout')")
+        checkout_view_tag = TABLE_BILL_SHEET_SOURCE[
+            TABLE_BILL_SHEET_SOURCE.rfind("<view", 0, checkout_idx):checkout_idx
+        ]
+        self.assertIn('v-if="canCheckout"', checkout_view_tag)
+        postpay_idx = TABLE_BILL_SHEET_SOURCE.index('v-else-if="postpayReadyToSettle"')
+        postpay_block = TABLE_BILL_SHEET_SOURCE[postpay_idx:TABLE_BILL_SHEET_SOURCE.index("</view>", postpay_idx)]
+        self.assertNotIn("@click", postpay_block)
+        # Guidance semantics: postpay must still tell the diner where to settle.
+        self.assertIn("收银台", TABLE_BILL_SHEET_SOURCE)
+        self.assertIn("结账", TABLE_BILL_SHEET_SOURCE)
 
     def test_table_account_actions_do_not_use_normal_wxpay_flow(self):
         self.assertIn("import { useTableCheckout } from '../composables/useTableCheckout.js'", MENU_SOURCE)
