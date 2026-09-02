@@ -63,12 +63,30 @@ describe('当前进行中的那道菜：进度点竖排里「当前点」呼吸'
     expect(rule).toMatch(/animation:\s*toStagePulse\b/)
   })
 
-  it('@keyframes toStagePulse 存在，且只动 opacity + transform（不触发重排）', () => {
+  it('@keyframes toStagePulse 存在，且只动 opacity / transform / box-shadow（不触发重排）', () => {
     const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
     expect(kf).toContain('opacity')
     expect(kf).toContain('transform')
     for (const layoutProp of ['width', 'height', 'margin', 'padding', 'top:', 'left:', 'right:', 'bottom:']) {
       expect(kf, `keyframe 不应动 ${layoutProp}`).not.toContain(layoutProp)
+    }
+  })
+
+  it('光环必须真的露得出来：至少一帧 spread 大于自带的 3rpx 白色遮罩且 alpha 大于 0', () => {
+    // 10rpx 的点上，只有「spread > 3rpx 且 alpha > 0」的帧才看得见绿色光环；
+    // 两者缺一（被白色遮罩盖住 / 已经全透明）就等于没有呼吸效果。
+    const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
+    const rings = [...kf.matchAll(/0 0 0 (\d+)rpx rgba\(7, 193, 96, ([\d.]+)\)/g)]
+    const visible = rings.filter(([, spread, alpha]) => Number(spread) > 3 && Number(alpha) > 0)
+    expect(visible.length, `可见光环帧: ${JSON.stringify(rings.map(r => r.slice(1)))}`).toBeGreaterThanOrEqual(1)
+  })
+
+  it('每一帧都保留点自带的白色遮罩环，竖线不会从点后面穿出来', () => {
+    const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
+    const frames = kf.match(/box-shadow:[^;]+;/g) || []
+    expect(frames.length).toBeGreaterThanOrEqual(2)
+    for (const frame of frames) {
+      expect(frame, `${frame} 缺少白色遮罩环`).toContain('3rpx var(--bg-card)')
     }
   })
 })

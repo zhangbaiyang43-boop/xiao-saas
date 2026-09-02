@@ -330,28 +330,37 @@ export default {
   padding: 24rpx 0;
 }
 
-/* 当前进行中的那道菜：进度点竖排里「当前那个点」（= 最后一个亮点）做一次
-   极慢的呼吸，类似任务状态指示灯。只动 opacity + transform（合成/绘制层，
-   不触发重排、周围文字/布局不动）。
+/* 当前进行中的那道菜：进度点竖排里「当前那个点」（= 最后一个亮点）做呼吸。
+   点本体只有 10rpx（真机约 5px），只靠透明度/小幅缩放在手机上根本看不出来，
+   所以三管齐下：静止态就比其它点大一圈（scale 1.35，reduced-motion 下也保留，
+   一眼能认出「现在在这一步」）、呼吸时再胀到 1.8，同时外扩一圈品牌绿光环。
+   光环必须扩到比 .to-stage-dot 自带的 3rpx 白色遮罩更远才露得出来，所以
+   50% 那帧同时满足 spread 8rpx > 3rpx 且 alpha 0.32 > 0；白色遮罩每帧都保留，
+   否则点后面那条竖线会穿出来。
+   只动 opacity / transform / box-shadow —— 合成与绘制层，不触发重排，
+   周围文字和行高都不动。
    已上齐(row.stage >= stageCount)的菜不带 --cur —— 那走的是四点汇聚成对号的
    收尾动效，两者互斥。 */
 .to-stage-dot--cur {
-  animation: toStagePulse 2.4s ease-in-out infinite;
+  transform: scale(1.35);
+  animation: toStagePulse 2s ease-in-out infinite;
 }
 
 @keyframes toStagePulse {
   0%,
   100% {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1.35);
+    box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 3rpx rgba(7, 193, 96, 0);
   }
   50% {
-    opacity: 0.3;
-    transform: scale(1.25);
+    opacity: 0.45;
+    transform: scale(1.8);
+    box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 8rpx rgba(7, 193, 96, 0.32);
   }
 }
 
-/* 尊重系统"减弱动效"：停在稳定态，当前点仍是实心品牌色，只是不动。 */
+/* 尊重系统"减弱动效"：停掉呼吸，但保留放大的静止态——当前点仍然一眼可辨。 */
 @media (prefers-reduced-motion: reduce) {
   .to-stage-dot--cur {
     animation: none;
