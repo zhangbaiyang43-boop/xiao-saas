@@ -10,7 +10,6 @@
         :class="{ active: activeCategory === cat }"
         @click="$emit('switch-category', cat)"
       >
-        <view class="cat-icon-wrap"><text :class="['cat-icon', 'iconfont', categoryIconClass(cat)]"></text></view>
         <text class="cat-name">{{ categoryDisplayName(cat) }}</text>
       </view>
     </scroll-view>
@@ -275,7 +274,6 @@ export default {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6rpx;
   text-align: center;
   color: var(--text-3);
   background: transparent;
@@ -283,31 +281,10 @@ export default {
 
 
 
-.cat-icon-wrap {
-  width: 42rpx;
-  height: 42rpx;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  flex-shrink: 0;
-}
-
-
-
-.cat-icon {
-  color: #9CA3AF;
-  font-size: 32rpx;
-  line-height: 36rpx;
-}
-
-
-
 .cat-name {
   max-width: 124rpx;
-  font-size: 24rpx;
-  line-height: 30rpx;
+  font-size: 28rpx;
+  line-height: 36rpx;
   font-weight: 600;
   color: var(--text-3);
   overflow: hidden;
@@ -319,7 +296,6 @@ export default {
   background: var(--bg-card);
 }
 
-.cat-item.active .cat-icon,
 .cat-item.active .cat-name {
   color: var(--brand);
 }
