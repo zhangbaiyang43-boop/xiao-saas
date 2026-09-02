@@ -1,0 +1,179 @@
+name: 05C Category Text Only Runtime Artifact
+
+# VERIFICATION ONLY — DO NOT MERGE.
+# Builds the WeChat mini-program (mp-weixin) output from the EXACT certified
+# 05C-R5 candidate commit and uploads it as an artifact for later WeChat
+# DevTools / real-device runtime certification (05C-R7). This workflow never
+# modifies product source: the checkout below pins the candidate SHA, so the
+# workflow file itself is not even present in the built tree.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - verify/05c-r6-category-text-only-artifact
+    paths:
+      - '.github/workflows/verify-05c-category-text-only-artifact.yml'
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: 8feff9597eea38916bfe9f3cb007c127578fc1c6
+  CERTIFIED_DISH_LIST_BLOB: b42125d74d3a954327ac2a2176dfa2f44960b63e
+
+jobs:
+  mp-weixin-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin the exact certified candidate commit. Full history so the SHA
+      # resolves (shallow clone breaks pinned refs — 05B lesson).
+      - uses: actions/checkout@v4
+        with:
+          ref: 8feff9597eea38916bfe9f3cb007c127578fc1c6
+          fetch-depth: 0
+
+      - name: Verify pinned source identity
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          echo "SOURCE_SHA=$SOURCE_SHA"
+          test "$SOURCE_SHA" = "$CANDIDATE_SHA"
+          echo "SOURCE_SHA_MATCH=YES"
+          SOURCE_DISH_LIST_BLOB="$(git hash-object member-mini-client/src/subpkg-order/components/DishList.vue)"
+          echo "SOURCE_DISH_LIST_BLOB=$SOURCE_DISH_LIST_BLOB"
+          test "$SOURCE_DISH_LIST_BLOB" = "$CERTIFIED_DISH_LIST_BLOB"
+          echo "SOURCE_BLOB_MATCH=YES"
+          # Frozen / host files must be byte-identical to main.
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishCard.vue)"   = "4b8d767ca2b3af4f65d74028f1363c7e6496e06c"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/PriceText.vue)"  = "59744dd902b9d0b6c4c07462df1f5cb9a798dbaf"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/ShopHeader.vue)" = "dbb4033aaffdd13262c535322cb56e877f3ded77"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/CouponBar.vue)"  = "98e87ec84ceaa5bb1251ad0a883c512d0c6c3968"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/CartBar.vue)"    = "1a62c63cf9f870e3659ad6d2953f2b086206aac9"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/BottomNav.vue)"  = "31e190bcfebca1db1621cac0da7ff9d0e0e28750"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/pages/menu.vue)"            = "7ddd540156f690a86c30beed951634c5752a2c6f"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/composables/useCategoryScroll.js)"  = "e84c0ec1aefacd4d0ab044c7b861d760bfc06110"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/composables/useDishCategories.js)"   = "251460b0d66459a01526340d78ef607780d51795"
+          echo "REMOTE_FROZEN_BLOBS_MATCH=YES"
+
+      - name: Verify source Category Rail contract
+        run: |
+          set -euo pipefail
+          # The DishList blob was already asserted byte-identical to the certified
+          # 05C-R5 blob above, so content is exactly what 05C-R4 certified. These
+          # are unambiguous belt-and-suspenders checks only.
+          F=member-mini-client/src/subpkg-order/components/DishList.vue
+          ! grep -qF 'cat-icon-wrap' "$F"
+          grep -qF 'cat-divider-icon' "$F"
+          grep -qF "categoryIconClass: { type: Function, required: true }" "$F"
+          echo "SOURCE_CATEGORY_CONTRACT=PASS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: member-mini-client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: member-mini-client
+        run: npm ci
+
+      - name: Build mp-weixin
+        working-directory: member-mini-client
+        run: npm run build:mp-weixin
+
+      - name: Verify mp-weixin artifact structure
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          D=dist/build/mp-weixin
+          test -f "$D/app.js"
+          test -f "$D/app.json"
+          test -f "$D/app.wxss"
+          test -f "$D/subpkg-order/pages/menu.js"
+          test -f "$D/subpkg-order/pages/menu.wxml"
+          test -f "$D/subpkg-order/pages/menu.wxss"
+          test -s "$D/subpkg-order/components/DishList.js"
+          test -s "$D/subpkg-order/components/DishList.wxml"
+          test -s "$D/subpkg-order/components/DishList.wxss"
+          test -f "$D/subpkg-order/components/DishList.json"
+          test -s "$D/subpkg-order/components/DishCard.wxss"
+          test -s "$D/subpkg-order/components/PriceText.wxss"
+          echo "BUILD_OUTPUT_PRESENT=YES"
+
+      - name: Verify compiled Category Rail contract
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          WXSS=dist/build/mp-weixin/subpkg-order/components/DishList.wxss
+          WXML=dist/build/mp-weixin/subpkg-order/components/DishList.wxml
+
+          # Left rail icon fully gone ("cat-icon" is not a substring of "cat-divider-icon")
+          ! grep -qF 'cat-icon-wrap' "$WXML"
+          ! grep -qF 'cat-icon-wrap' "$WXSS"
+          ! grep -qF 'cat-icon' "$WXML"
+          ! grep -qF 'cat-icon' "$WXSS"
+          echo "LEFT_ICON_COMPILED_PRESENT=NO"
+
+          # Right divider icon retained
+          grep -qF 'cat-divider-icon' "$WXSS"
+          echo "COMPILED_RIGHT_DIVIDER_PRESENT=YES"
+
+          # Scoped .cat-name rule
+          CATNAME="$(grep -oE '\.cat-name\{[^}]*\}' "$WXSS" | head -1)"
+          echo "COMPILED_CAT_NAME_RULE=$CATNAME"
+          echo "$CATNAME" | grep -qF 'font-size:28rpx'
+          echo "$CATNAME" | grep -qF 'line-height:36rpx'
+          echo "$CATNAME" | grep -qF 'max-width:124rpx'
+          echo "$CATNAME" | grep -qF 'font-weight:600'
+          echo "$CATNAME" | grep -qF 'color:var(--text-3)'
+          echo "COMPILED_TEXT_28=YES"
+          echo "COMPILED_LINE_HEIGHT_36=YES"
+          echo "COMPILED_MAX_WIDTH_124=YES"
+
+          # Scoped .category-nav / .cat-item geometry
+          CATNAV="$(grep -oE '\.category-nav\{[^}]*\}' "$WXSS" | head -1)"
+          echo "$CATNAV" | grep -qF 'width:160rpx'
+          echo "COMPILED_SIDEBAR_160=YES"
+          CATITEM="$(grep -oE '\.cat-item\{[^}]*\}' "$WXSS" | head -1)"
+          echo "COMPILED_CAT_ITEM_RULE=$CATITEM"
+          echo "$CATITEM" | grep -qF 'height:108rpx'
+          echo "$CATITEM" | grep -qF 'min-height:108rpx'
+          ! echo "$CATITEM" | grep -qF 'gap:'
+          echo "COMPILED_ITEM_108=YES"
+          echo "COMPILED_GAP_REMOVED=YES"
+
+          # Active contract
+          grep -qE '\.cat-item\.active\{[^}]*background:var\(--bg-card\)' "$WXSS"
+          grep -qE '\.cat-item\.active .cat-name\{[^}]*color:var\(--brand\)' "$WXSS"
+          grep -qE '\.cat-item\.active .cat-name\{[^}]*font-weight:800' "$WXSS"
+          grep -qF 'width:6rpx' "$WXSS"
+          grep -qF 'height:52rpx' "$WXSS"
+          echo "COMPILED_ACTIVE_CONTRACT=PASS"
+
+          echo "COMPILED_CATEGORY_CONTRACT=PASS"
+
+      - name: Write verification manifest
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          M=dist/build/mp-weixin/05c-r6-manifest.txt
+          {
+            echo "PHASE=05C-R6"
+            echo "SOURCE_SHA=$CANDIDATE_SHA"
+            echo "SOURCE_DISH_LIST_BLOB=$CERTIFIED_DISH_LIST_BLOB"
+            echo "BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "MP_WEIXIN_OUTPUT_DIR=member-mini-client/dist/build/mp-weixin"
+            echo "SOURCE_CATEGORY_CONTRACT=PASS"
+            echo "COMPILED_CATEGORY_CONTRACT=PASS"
+          } > "$M"
+          cat "$M"
+          RUNTIME_ARTIFACT_SHA256="$( (cd dist/build/mp-weixin && find . -type f -not -name 05c-r6-manifest.txt | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1) )"
+          echo "RUNTIME_ARTIFACT_SHA256=$RUNTIME_ARTIFACT_SHA256"
+          echo "RUNTIME_ARTIFACT_SHA256=$RUNTIME_ARTIFACT_SHA256" >> "$M"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 05c-r6-category-text-only-mp-weixin-8feff959
+          path: member-mini-client/dist/build/mp-weixin
+          retention-days: 7
