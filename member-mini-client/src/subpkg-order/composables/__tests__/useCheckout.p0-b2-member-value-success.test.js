@@ -408,9 +408,13 @@ describe('PaymentSuccessSheet 会员价值渲染合同（source contract，不�
     expect(source).not.toMatch(/uni\.(get|set|remove)StorageSync/)
   })
 
-  it('reward 卡片结构未变（P0-B2a 只换 authority，不做视觉重构）', () => {
+  it('earned coupon 继续由权威 earnedCoupon 字段驱动条件渲染（不锁具体视觉结构）', () => {
     const source = readComponentSource()
-    expect(source).toContain('earned-coupon-card')
+    // 券只在服务端权威 earnedCoupon 存在时才渲染——组件不无条件展示、不伪造券。
     expect(source).toContain('v-if="earnedCoupon"')
+    // 券金额复用 formatPrice(earnedCoupon.amount)，组件不在本地另算券金额。
+    expect(source).toContain('formatPrice(earnedCoupon.amount)')
+    // 具体券卡的视觉结构（class 名 / S5·S6 分支 / reminder chip / 无假「查看」动作）
+    // 由 payment-success-low-entropy.test.js 独立保护，这里不重复锁定。
   })
 })
