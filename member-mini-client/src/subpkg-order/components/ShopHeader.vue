@@ -17,17 +17,6 @@
             <text class="shop-chip-text">{{ tableDisplayText }}</text>
             <text class="shop-chip-arrow iconfont icon-roundright"></text>
           </view>
-          <view class="shop-chip shop-chip--mode">
-            <text class="shop-chip-text">{{ orderModeDisplayText }}</text>
-          </view>
-        </view>
-        <view v-if="dishCount > 0 || couponCount > 0" class="shop-sub-row">
-          <text v-if="dishCount > 0" class="shop-sub-item">
-            今日可点 <text class="shop-sub-em">{{ dishCount }}</text> 道
-          </text>
-          <text v-if="couponCount > 0" class="shop-sub-item">
-            优惠券 <text class="shop-sub-em">{{ couponCount }}</text> 张可用
-          </text>
         </view>
       </view>
     </view>
@@ -43,10 +32,7 @@ export default {
     shopLogo: { type: String, default: '' },
     shopName: { type: String, default: '' },
     tableDisplayText: { type: String, default: '' },
-    orderModeDisplayText: { type: String, default: '' },
     storeClosed: { type: Boolean, default: false },
-    dishCount: { type: Number, default: 0 },
-    couponCount: { type: Number, default: 0 },
   },
   emits: ['show-table-hint'],
   computed: {
@@ -63,7 +49,7 @@ export default {
   position: relative;
   flex-shrink: 0;
   background: var(--bg-card);
-  padding: 24rpx 32rpx 20rpx;
+  padding: 16rpx 32rpx;
   box-sizing: border-box;
 }
 
@@ -131,12 +117,12 @@ export default {
   font-size: 22rpx;
   font-weight: 600;
   line-height: 32rpx;
-  color: #06ad56;
+  color: var(--brand);
   background: rgba(7, 193, 96, 0.12);
 }
 
 .shop-status--closed {
-  color: #999;
+  color: var(--text-3);
   background: #f0f2f5;
 }
 
@@ -145,7 +131,7 @@ export default {
   flex-wrap: wrap;
   align-items: center;
   gap: 12rpx;
-  margin-top: 12rpx;
+  margin-top: 8rpx;
 }
 
 .shop-chip {
@@ -159,21 +145,12 @@ export default {
 }
 
 .shop-chip--table {
-  background: #1a1a1a;
+  background: var(--ink);
 }
 
 .shop-chip--table .shop-chip-text,
 .shop-chip--table .shop-chip-arrow {
   color: #fff;
-}
-
-.shop-chip--mode {
-  background: #f0f2f5;
-}
-
-.shop-chip--mode .shop-chip-text {
-  color: var(--text-2, #666);
-  font-weight: 500;
 }
 
 .shop-chip-text {
@@ -186,23 +163,5 @@ export default {
   font-size: 22rpx;
   line-height: 1;
   opacity: 0.75;
-}
-
-.shop-sub-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20rpx;
-  margin-top: 12rpx;
-}
-
-.shop-sub-item {
-  font-size: 22rpx;
-  color: var(--text-3, #999);
-  line-height: 32rpx;
-}
-
-.shop-sub-em {
-  color: var(--text-2, #666);
-  font-weight: 600;
 }
 </style>

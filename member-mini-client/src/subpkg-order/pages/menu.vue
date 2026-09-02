@@ -14,10 +14,7 @@
       :shop-logo="shopLogo"
       :shop-name="shopName"
       :table-display-text="tableDisplayText"
-      :order-mode-display-text="orderModeDisplayText"
       :store-closed="storeClosed"
-      :dish-count="allDishes.length"
-      :coupon-count="availableCoupons.length"
       @show-table-hint="showTableHint"
     />
 
