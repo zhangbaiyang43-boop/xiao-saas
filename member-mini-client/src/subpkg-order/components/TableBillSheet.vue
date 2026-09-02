@@ -330,40 +330,53 @@ export default {
   padding: 24rpx 0;
 }
 
-/* 当前进行中的那道菜：进度点竖排里「当前那个点」（= 最后一个亮点）做呼吸。
-   点本体只有 10rpx（真机约 5px），只靠透明度/小幅缩放在手机上根本看不出来，
-   所以三管齐下：静止态就比其它点大一圈（scale 1.35，reduced-motion 下也保留，
-   一眼能认出「现在在这一步」）、呼吸时再胀到 1.8，同时外扩一圈品牌绿光环。
-   光环必须扩到比 .to-stage-dot 自带的 3rpx 白色遮罩更远才露得出来，所以
-   50% 那帧同时满足 spread 8rpx > 3rpx 且 alpha 0.32 > 0；白色遮罩每帧都保留，
-   否则点后面那条竖线会穿出来。
-   只动 opacity / transform / box-shadow —— 合成与绘制层，不触发重排，
-   周围文字和行高都不动。
-   已上齐(row.stage >= stageCount)的菜不带 --cur —— 那走的是四点汇聚成对号的
-   收尾动效，两者互斥。 */
+/* 当前进行中的那道菜：进度点竖排里「当前那个点」（= 最后一个亮点）。
+   点本体只有 10rpx（真机约 5px），单靠它自己不够醒目，两层处理：
+
+   1) 静止态就明显做大 + 一圈实心品牌绿描边（scale 1.5 + box-shadow 白遮罩里再套一圈绿）。
+      这是「不依赖动画」的可辨识度——手机开了「减弱动效」也一眼看得出现在在哪一步。
+   2) 用伪元素 ::after 画一圈会 ripple 的绿环，靠它自己的 transform+opacity 外扩淡出。
+      为什么是伪元素而不是 keyframe 里动 box-shadow：mp-weixin 的动画只可靠插值
+      transform / opacity，box-shadow 在真机上经常被忽略；仓库里所有会动的 keyframe
+      也都只动 transform/opacity。keyframe 里也不放 var()（自定义属性在 @keyframes 内
+      解析不稳）。
+
+   只动 transform / opacity —— 合成层，不触发重排，周围文字和行高都不动。
+   已上齐(row.stage >= stageCount)的菜不带 --cur —— 那走四点汇聚成对号的收尾动效。 */
 .to-stage-dot--cur {
-  transform: scale(1.35);
-  animation: toStagePulse 2s ease-in-out infinite;
+  transform: scale(1.5);
+  box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 5rpx var(--brand);
 }
 
-@keyframes toStagePulse {
-  0%,
+.to-stage-dot--cur::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10rpx;
+  height: 10rpx;
+  margin: -5rpx 0 0 -5rpx;
+  border-radius: 50%;
+  border: 2rpx solid var(--brand);
+  animation: toStagePing 1.8s ease-out infinite;
+}
+
+@keyframes toStagePing {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
   100% {
-    opacity: 1;
-    transform: scale(1.35);
-    box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 3rpx rgba(7, 193, 96, 0);
-  }
-  50% {
-    opacity: 0.45;
-    transform: scale(1.8);
-    box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 8rpx rgba(7, 193, 96, 0.32);
+    transform: scale(3.4);
+    opacity: 0;
   }
 }
 
-/* 尊重系统"减弱动效"：停掉呼吸，但保留放大的静止态——当前点仍然一眼可辨。 */
+/* 尊重系统"减弱动效"：停掉 ripple，静止态的放大点 + 绿描边仍然一眼可辨。 */
 @media (prefers-reduced-motion: reduce) {
-  .to-stage-dot--cur {
+  .to-stage-dot--cur::after {
     animation: none;
+    opacity: 0;
   }
 }
 

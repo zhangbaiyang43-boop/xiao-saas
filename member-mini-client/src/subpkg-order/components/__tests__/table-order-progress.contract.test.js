@@ -3,22 +3,23 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// 「本桌订单」每道菜进度点竖排里「当前那个点」的呼吸指示合同。
+// 「本桌订单」每道菜进度点竖排里「当前那个点」的进行中指示合同。
 //
-// 早期版本试过一条横排「待接单 / 制作中 / 已上齐」三阶段文字条（.to-progress /
-// tableProgress / progressStepClass / @keyframes toBreathe），真机上看不出效果、
-// 也不是产品想要的。已整条移除，改为：每道菜自己那一竖排 .to-stage-dot 里，
-// 「当前那一步」（= 最后一个亮点，row.stage === n 且这道菜还没上齐）做一次
-// 极慢的 opacity + scale 呼吸，类似任务状态指示灯。
+// 早期试过一条横排「待接单 / 制作中 / 已上齐」三阶段文字条（.to-progress /
+// tableProgress / progressStepClass / @keyframes toBreathe），真机看不出、也不是
+// 产品想要的，已整条移除。改为：每道菜自己那一竖排 .to-stage-dot 里，「当前那一步」
+// （= 最后一个亮点，row.stage === n 且这道菜还没上齐）——
+//   静止态就明显做大 + 一圈品牌绿描边（不依赖动画，减弱动效下也可辨），
+//   再叠一个伪元素 ::after 的 ripple 绿环，只靠 transform + opacity 外扩淡出。
 //
-// 测试环境是 node（无 jsdom / @vue/test-utils），SFC 不挂载 —— SOURCE CONTRACT：
-// 锁结构（哪个点带 --cur、有 keyframe、尊重减弱动效、不动布局、无 JS 计时器），
-// 逐帧视觉参数（时长 / 具体 opacity / scale / 颜色）不锁，留安全微调空间。
+// mp-weixin 合规点：会动的东西只动 transform / opacity（仓库既有 keyframe 全是如此），
+// 不在 @keyframes 里动 box-shadow、也不在 @keyframes 里用 var()。
+//
+// SOURCE CONTRACT（node 环境不挂载 SFC）：锁结构，不锁逐帧数值 / 时长 / 颜色。
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SRC = fs.readFileSync(path.resolve(here, '../TableBillSheet.vue'), 'utf8')
 
-// 稳定分区：不用会被内嵌 <template v-if> 截断的贪婪正则。
 const TEMPLATE = SRC.slice(SRC.indexOf('<template'), SRC.indexOf('<script'))
 const SCRIPT = SRC.slice(SRC.indexOf('<script'), SRC.indexOf('<style'))
 const STYLE = SRC.slice(SRC.indexOf('<style'))
@@ -41,64 +42,67 @@ describe('废弃的横排三阶段文字条已彻底移除', () => {
     expect(SCRIPT).not.toContain('tableProgressSteps')
     expect(SCRIPT).not.toContain('progressStepClass')
     expect(SCRIPT).not.toContain('tableProgress')
-    expect(TEMPLATE).not.toContain('待接单')
-    expect(TEMPLATE).not.toContain('制作中')
   })
 })
 
-describe('当前进行中的那道菜：进度点竖排里「当前点」呼吸', () => {
+describe('当前进行中的那道菜：进度点竖排里「当前点」的指示', () => {
   it('只有 row.stage === n 且这道菜还没上齐(< stageCount) 的那个点带 --cur', () => {
-    // 提取 .to-stage-dot 的 v-for class 绑定那一段。
     const dot = sliceBetween(TEMPLATE, 'class="to-stage-dot"', '></view>')
-    // 亮点仍是 row.stage >= n。
     expect(dot).toMatch(/on:\s*row\.stage >= n/)
-    // 当前点用「恰好等于」，不是「>=」—— 同一竖排至多一个点在呼吸。
+    // 当前点用「恰好等于」，不是「>=」—— 同一竖排至多一个点。
     expect(dot).toMatch(/to-stage-dot--cur['"]?\s*:\s*row\.stage === n/)
     // 且排除已上齐的菜（那走汇聚成对号的收尾动效）。
     expect(dot).toMatch(/to-stage-dot--cur[\s\S]{0,60}row\.stage < stageCount/)
   })
 
-  it('.to-stage-dot--cur 有一条 animation 规则，引用 toStagePulse', () => {
+  it('静止态就明显可辨：当前点放大 + 一圈品牌绿描边，不依赖动画', () => {
     const rule = sliceBetween(STYLE, '.to-stage-dot--cur {', '}')
-    expect(rule).toMatch(/animation:\s*toStagePulse\b/)
+    // 放大（transform: scale(...) 大于 1）
+    const scale = rule.match(/transform:\s*scale\(([\d.]+)\)/)
+    expect(scale, `.to-stage-dot--cur 静止态应放大: ${rule}`).not.toBeNull()
+    expect(Number(scale[1])).toBeGreaterThan(1)
+    // 品牌绿描边（box-shadow 里带 var(--brand)）
+    expect(rule).toMatch(/box-shadow:[^;]*var\(--brand\)/)
+    // 静止规则本身不挂 animation（呼吸交给 ::after）
+    expect(rule).not.toMatch(/\banimation:/)
   })
 
-  it('@keyframes toStagePulse 存在，且只动 opacity / transform / box-shadow（不触发重排）', () => {
-    const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
-    expect(kf).toContain('opacity')
+  it('ripple 由伪元素 ::after 承担，只动 transform + opacity（mp-weixin 可靠插值的属性）', () => {
+    const after = sliceBetween(STYLE, '.to-stage-dot--cur::after {', '}')
+    expect(after).toContain("content: ''")
+    expect(after).toMatch(/position:\s*absolute/)
+    expect(after).toMatch(/animation:\s*toStagePing\b/)
+
+    const kf = sliceBetween(STYLE, '@keyframes toStagePing', '\n}')
     expect(kf).toContain('transform')
+    expect(kf).toContain('opacity')
+    // 关键合规：@keyframes 里不动 box-shadow、不出现 var()。
+    expect(kf, 'ripple keyframe 不应动 box-shadow（mp-weixin 动画不可靠插值）').not.toContain('box-shadow')
+    expect(kf, '@keyframes 里不应用 var()（自定义属性在 keyframe 内解析不稳）').not.toContain('var(')
+    // 也不动会触发重排的属性。
     for (const layoutProp of ['width', 'height', 'margin', 'padding', 'top:', 'left:', 'right:', 'bottom:']) {
       expect(kf, `keyframe 不应动 ${layoutProp}`).not.toContain(layoutProp)
     }
   })
 
-  it('光环必须真的露得出来：至少一帧 spread 大于自带的 3rpx 白色遮罩且 alpha 大于 0', () => {
-    // 10rpx 的点上，只有「spread > 3rpx 且 alpha > 0」的帧才看得见绿色光环；
-    // 两者缺一（被白色遮罩盖住 / 已经全透明）就等于没有呼吸效果。
-    const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
-    const rings = [...kf.matchAll(/0 0 0 (\d+)rpx rgba\(7, 193, 96, ([\d.]+)\)/g)]
-    const visible = rings.filter(([, spread, alpha]) => Number(spread) > 3 && Number(alpha) > 0)
-    expect(visible.length, `可见光环帧: ${JSON.stringify(rings.map(r => r.slice(1)))}`).toBeGreaterThanOrEqual(1)
-  })
-
-  it('每一帧都保留点自带的白色遮罩环，竖线不会从点后面穿出来', () => {
-    const kf = sliceBetween(STYLE, '@keyframes toStagePulse', '\n}')
-    const frames = kf.match(/box-shadow:[^;]+;/g) || []
-    expect(frames.length).toBeGreaterThanOrEqual(2)
-    for (const frame of frames) {
-      expect(frame, `${frame} 缺少白色遮罩环`).toContain('3rpx var(--bg-card)')
-    }
+  it('ripple 确实向外扩散并淡出（首帧不透明、末帧透明且更大）', () => {
+    const kf = sliceBetween(STYLE, '@keyframes toStagePing', '\n}')
+    const scales = [...kf.matchAll(/transform:\s*scale\(([\d.]+)\)/g)].map(m => Number(m[1]))
+    const opacities = [...kf.matchAll(/opacity:\s*([\d.]+)/g)].map(m => Number(m[1]))
+    expect(Math.max(...scales)).toBeGreaterThan(Math.min(...scales)) // 有外扩
+    expect(Math.min(...opacities)).toBe(0) // 末态完全淡出
+    expect(Math.max(...opacities)).toBeGreaterThan(0) // 起始可见
   })
 })
 
 describe('无障碍 + CSS-only', () => {
-  it('尊重 prefers-reduced-motion: reduce —— 停掉 --cur 的动画', () => {
+  it('尊重 prefers-reduced-motion: reduce —— 停掉 ripple（静止的放大点+描边仍在）', () => {
     expect(STYLE).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
     const mq = sliceBetween(STYLE, '@media (prefers-reduced-motion: reduce)', '\n}')
-    expect(mq).toMatch(/\.to-stage-dot--cur[\s\S]{0,40}animation:\s*none/)
+    expect(mq).toMatch(/\.to-stage-dot--cur::after[\s\S]{0,60}animation:\s*none/)
   })
 
-  it('呼吸不靠任何 JS 定时器 / rAF 驱动', () => {
+  it('不靠任何 JS 定时器 / rAF 驱动', () => {
     expect(SCRIPT).not.toContain('setInterval')
     expect(SCRIPT).not.toContain('setTimeout')
     expect(SCRIPT).not.toContain('requestAnimationFrame')
