@@ -1,0 +1,203 @@
+name: Checkout 08 Runtime Artifact
+
+# VERIFICATION INFRASTRUCTURE ONLY - DO NOT MERGE.
+# Builds the WeChat mini-program (mp-weixin) output from the EXACT certified
+# CHECKOUT-07 candidate commit (a870408ecb60a705b5059dbcfb79ecabdda54868) via a
+# pinned checkout ref, asserts source identity + frozen host blobs, verifies the
+# compiled CheckoutSheet B-contract (low-entropy information architecture), writes
+# a manifest, and uploads the artifact for CHECKOUT-09 WeChat runtime
+# certification. The workflow file is not present in the built tree.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - verify/checkout-08-runtime-artifact
+    paths:
+      - '.github/workflows/verify-checkout-08-runtime-artifact.yml'
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: a870408ecb60a705b5059dbcfb79ecabdda54868
+  CERTIFIED_PRODUCT_BLOB: 9634493ca8492d1e0c7c7c0715715181bbb75f4f
+  CERTIFIED_TEST_BLOB: b60cc6d5c746ec5a4b23a7b13dd4ae740f13075d
+
+jobs:
+  mp-weixin-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a870408ecb60a705b5059dbcfb79ecabdda54868
+          fetch-depth: 0
+
+      - name: Verify pinned source identity
+        run: |
+          set -euo pipefail
+          BUILD_SOURCE_SHA="$(git rev-parse HEAD)"
+          echo "BUILD_SOURCE_SHA=$BUILD_SOURCE_SHA"
+          test "$BUILD_SOURCE_SHA" = "$CANDIDATE_SHA"
+          echo "BUILD_SOURCE_SHA_MATCH=YES"
+          BUILD_PRODUCT_BLOB="$(git hash-object member-mini-client/src/subpkg-order/components/CheckoutSheet.vue)"
+          BUILD_TEST_BLOB="$(git hash-object member-mini-client/src/subpkg-order/components/__tests__/checkout-sheet-low-entropy.test.js)"
+          echo "BUILD_PRODUCT_BLOB=$BUILD_PRODUCT_BLOB"
+          echo "BUILD_TEST_BLOB=$BUILD_TEST_BLOB"
+          test "$BUILD_PRODUCT_BLOB" = "$CERTIFIED_PRODUCT_BLOB"
+          test "$BUILD_TEST_BLOB" = "$CERTIFIED_TEST_BLOB"
+          echo "BUILD_SOURCE_BLOB_MATCH=YES"
+          # CHECKOUT frozen host / composable / shared / other-component files must be
+          # byte-identical to origin/main @ 372c7b3 (hardcoded, no remote-tracking ref needed).
+          B=member-mini-client/src/subpkg-order
+          test "$(git rev-parse HEAD:$B/pages/menu.vue)"                     = "7ddd540156f690a86c30beed951634c5752a2c6f"
+          test "$(git rev-parse HEAD:$B/composables/useCheckout.js)"         = "e39b7ba9fdbc67e5687ea58e86991a11b82addc8"
+          test "$(git rev-parse HEAD:$B/composables/useCouponPicker.js)"     = "b7c84f3aa37d85329dd56ffe6aa4a38c4ca8b342"
+          test "$(git rev-parse HEAD:$B/components/PaymentSuccessSheet.vue)" = "5fb08a468f089160b3fcde5aa8475b715993a596"
+          test "$(git rev-parse HEAD:$B/components/table-order-card.scss)"   = "124316aee643b4090b1060dc8d029f8af7036330"
+          test "$(git rev-parse HEAD:$B/components/DishList.vue)"            = "b42125d74d3a954327ac2a2176dfa2f44960b63e"
+          test "$(git rev-parse HEAD:$B/components/DishCard.vue)"            = "4b8d767ca2b3af4f65d74028f1363c7e6496e06c"
+          test "$(git rev-parse HEAD:$B/components/PriceText.vue)"           = "59744dd902b9d0b6c4c07462df1f5cb9a798dbaf"
+          test "$(git rev-parse HEAD:$B/components/ShopHeader.vue)"          = "dbb4033aaffdd13262c535322cb56e877f3ded77"
+          test "$(git rev-parse HEAD:$B/components/CouponBar.vue)"           = "98e87ec84ceaa5bb1251ad0a883c512d0c6c3968"
+          test "$(git rev-parse HEAD:$B/components/CartBar.vue)"             = "1a62c63cf9f870e3659ad6d2953f2b086206aac9"
+          test "$(git rev-parse HEAD:$B/components/BottomNav.vue)"           = "31e190bcfebca1db1621cac0da7ff9d0e0e28750"
+          echo "REMOTE_HOST_FROZEN_BLOBS_MATCH=YES"
+          # Only the two certified files may differ from the parent commit (372c7b3).
+          CHANGED="$(git diff --name-only HEAD^ HEAD -- member-mini-client/)"
+          echo "CHANGED_VS_PARENT<<EOF"
+          echo "$CHANGED"
+          echo "EOF"
+          EXPECTED=$'member-mini-client/src/subpkg-order/components/CheckoutSheet.vue\nmember-mini-client/src/subpkg-order/components/__tests__/checkout-sheet-low-entropy.test.js'
+          test "$CHANGED" = "$EXPECTED"
+          echo "CHANGED_FILESET_MATCH=YES"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: member-mini-client/package-lock.json
+
+      - name: Install dependencies
+        working-directory: member-mini-client
+        run: npm ci
+
+      - name: Build mp-weixin
+        working-directory: member-mini-client
+        run: npm run build:mp-weixin
+
+      - name: Verify mp-weixin build tree
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          D=dist/build/mp-weixin
+          test -f "$D/app.js"
+          test -f "$D/app.json"
+          test -f "$D/app.wxss"
+          test -f "$D/project.config.json"
+          test -d "$D/subpkg-order"
+          test -d "$D/miniprogram_npm"
+          test -s "$D/subpkg-order/components/CheckoutSheet.wxml"
+          test -s "$D/subpkg-order/components/CheckoutSheet.wxss"
+          test -s "$D/subpkg-order/components/CheckoutSheet.js"
+          test -f "$D/subpkg-order/components/CheckoutSheet.json"
+          echo "COMPILED_FILE_COUNT=$(find "$D" -type f | wc -l)"
+          echo "BUILD_TREE_COMPLETE=YES"
+
+      - name: Verify compiled CheckoutSheet B-contract
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          W=dist/build/mp-weixin/subpkg-order/components/CheckoutSheet.wxml
+          S=dist/build/mp-weixin/subpkg-order/components/CheckoutSheet.wxss
+          J=dist/build/mp-weixin/subpkg-order/components/CheckoutSheet.js
+          echo "COMPILED_CHECKOUT_WXML=$W"
+          echo "COMPILED_CHECKOUT_WXSS=$S"
+
+          # 15 / 16 / 24 - removed meta + duplicate UI (wxml + wxss)
+          for cls in checkout-plate-meta checkout-mode-text checkout-meta-sep checkout-member-text \
+                     checkout-items-amount checkout-item-selected checkout-item-subtotal; do
+            ! grep -qF "$cls" "$W"
+            ! grep -qF "$cls" "$S"
+          done
+          echo "COMPILED_META_ABSENT=PASS"
+          echo "COMPILED_DUPLICATE_UI_ABSENT=PASS"
+          echo "COMPILED_DEAD_SELECTOR_ABSENCE=PASS"
+
+          # 17 - goods header copy (已点商品 · N份); no 共 anywhere
+          grep -qF '已点商品' "$W"
+          ! grep -qF '共' "$W"
+          echo "COMPILED_GOODS_HEADER=PASS"
+
+          # 18 - goods-amount row is conditional (wx:if on the .to-line.to-line--sub block)
+          grep -qE '<view[^>]*wx:if="\{\{[^}]+\}\}"[^>]*class="[^"]*to-line to-line--sub' "$W"
+          echo "COMPILED_GOODS_AMOUNT_CONDITION=PASS"
+
+          # 19 - coupon row is conditional (wx:if on the checkout-coupon-line block)
+          grep -qE '<view[^>]*wx:if="\{\{[^}]+\}\}"[^>]*class="[^"]*checkout-coupon-line' "$W"
+          echo "COMPILED_COUPON_CONDITION=PASS"
+
+          # 20 - no "暂无可用" branch in compiled CheckoutSheet
+          ! grep -qF '暂无可用' "$W"
+          echo "COMPILED_COUPON_NONE_BRANCH=ABSENT"
+
+          # 21 - payable label present, no count prefix (共 already asserted absent above)
+          grep -qF '应付金额' "$W"
+          echo "COMPILED_PAYABLE_CONTRACT=PASS"
+
+          # 22 - core controls still present
+          for tok in to-plate-table to-drow-name to-drow-spec checkout-item-counter \
+                     checkout-clear-line to-detail checkout-btn-full; do
+            grep -qF "$tok" "$W"
+          done
+          grep -qE 'to-drow-img' "$W"
+          echo "COMPILED_CORE_CHECKOUT=PASS"
+
+          # 23 - interaction handlers preserved (emit names live in the compiled component js)
+          for ev in show-table-hint toggle-items-expanded remove-from-cart increase-cart-item \
+                    clear-cart open-coupon-picker toggle-order-remark-expanded checkout; do
+            grep -qF "$ev" "$J"
+          done
+          echo "COMPILED_INTERACTION_CONTRACT=PASS"
+
+          # 25 - shared .to-* skeleton still compiled into wxss
+          for rule in '.to-card' '.to-plate' '.to-drow' '.to-line' '.to-foot' '.to-foot-v' '.to-detail'; do
+            grep -qF "$rule" "$S"
+          done
+          echo "COMPILED_SHARED_VISUAL_CONTRACT=PASS"
+
+          # 26 - CTA geometry unchanged
+          CTA="$(grep -oE '\.checkout-btn-full\{[^}]*\}' "$S" | head -1)"
+          echo "COMPILED_CHECKOUT_BTN_FULL_RULE=$CTA"
+          echo "$CTA" | grep -qF 'height:92rpx'
+          echo "$CTA" | grep -qF 'border-radius:46rpx'
+          ! echo "$CTA" | grep -qF 'box-shadow'
+          echo "COMPILED_CTA_CONTRACT=PASS"
+
+          echo "COMPILED_CHECKOUT_B_CONTRACT=PASS"
+
+      - name: Write runtime manifest
+        working-directory: member-mini-client
+        run: |
+          set -euo pipefail
+          M=dist/build/mp-weixin/checkout-08-manifest.txt
+          {
+            echo "PHASE=CHECKOUT-08"
+            echo "SOURCE_SHA=$CANDIDATE_SHA"
+            echo "PRODUCT_BLOB=$CERTIFIED_PRODUCT_BLOB"
+            echo "TEST_BLOB=$CERTIFIED_TEST_BLOB"
+            echo "REMOTE_NPM_CI=PASS"
+            echo "REMOTE_MP_WEIXIN_BUILD=PASS"
+            echo "COMPILED_CHECKOUT_B_CONTRACT=PASS"
+            echo "BUILD_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$M"
+          cat "$M"
+          RUNTIME_TREE_SHA256="$( (cd dist/build/mp-weixin && find . -type f -not -name checkout-08-manifest.txt | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1) )"
+          echo "RUNTIME_TREE_SHA256=$RUNTIME_TREE_SHA256"
+          echo "RUNTIME_TREE_SHA256=$RUNTIME_TREE_SHA256" >> "$M"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkout-08-mp-weixin-a870408
+          path: member-mini-client/dist/build/mp-weixin
+          retention-days: 14
