@@ -141,8 +141,21 @@ jobs:
           ! grep -qF '暂无可用' "$W"
           echo "COMPILED_COUPON_NONE_BRANCH=ABSENT"
 
-          # 21 - payable label present, no count prefix (共 already asserted absent above)
-          grep -qF '应付金额' "$W"
+          # 21 - payable label present, no count prefix.
+          # confirmationText is a PROP (props.confirmationText, orderText.js:
+          # payable: '应付金额'), so the compiled component WXML carries the
+          # binding {{confirmationText.payable}}, never the Chinese literal —
+          # that literal ships in the compiled page/util module. Hard gates:
+          # the .to-foot-l label element survived here, and the literal survived
+          # somewhere in the shipped bundle. Count-prefix absence is the '共'
+          # assertion already made under COMPILED_GOODS_HEADER above.
+          grep -qF 'to-foot-l' "$W"
+          grep -rqF '应付金额' dist/build/mp-weixin
+          if grep -qF 'confirmationText.payable' "$W"; then
+            echo "COMPILED_PAYABLE_BINDING=confirmationText.payable"
+          else
+            echo "COMPILED_PAYABLE_BINDING=hoisted-expression"
+          fi
           echo "COMPILED_PAYABLE_CONTRACT=PASS"
 
           # 22 - core controls still present
@@ -153,10 +166,12 @@ jobs:
           grep -qE 'to-drow-img' "$W"
           echo "COMPILED_CORE_CHECKOUT=PASS"
 
-          # 23 - interaction handlers preserved (emit names live in the compiled component js)
+          # 23 - interaction handlers preserved. Inline @click="$emit('x')" can
+          # compile into either the component JS or the WXML event bindings
+          # depending on uni-app codegen, so accept the name in either file.
           for ev in show-table-hint toggle-items-expanded remove-from-cart increase-cart-item \
                     clear-cart open-coupon-picker toggle-order-remark-expanded checkout; do
-            grep -qF "$ev" "$J"
+            grep -qF "$ev" "$J" || grep -qF "$ev" "$W"
           done
           echo "COMPILED_INTERACTION_CONTRACT=PASS"
 
