@@ -29,7 +29,8 @@
               class="to-drow"
               :class="{ 'to-drow--muted': row.isInvalid }"
             >
-              <!-- 这道菜走到哪一步，四个点自己说，不配文字。 -->
+              <!-- 这道菜走到哪一步，几个点自己说，不配文字。
+                   当前那一步（最后一个亮点）做一次极慢的呼吸，提示「这道菜还在进行中」。 -->
               <view
                 class="to-stage"
                 :class="{ 'to-stage--void': row.stage < 0, 'to-stage--done': row.stage >= stageCount }"
@@ -38,7 +39,7 @@
                   v-for="n in stageCount"
                   :key="n"
                   class="to-stage-dot"
-                  :class="{ on: row.stage >= n }"
+                  :class="{ on: row.stage >= n, 'to-stage-dot--cur': row.stage === n && row.stage < stageCount }"
                 ></view>
                 <!-- 这道菜上完了：几个点汇聚成一个点，中间一个对号，表示这道菜完结 -->
                 <view v-if="row.stage >= stageCount" class="to-stage-check"></view>
@@ -327,6 +328,56 @@ export default {
 
 .to-empty {
   padding: 24rpx 0;
+}
+
+/* 当前进行中的那道菜：进度点竖排里「当前那个点」（= 最后一个亮点）。
+   点本体只有 10rpx（真机约 5px），单靠它自己不够醒目，两层处理：
+
+   1) 静止态就明显做大 + 一圈实心品牌绿描边（scale 1.5 + box-shadow 白遮罩里再套一圈绿）。
+      这是「不依赖动画」的可辨识度——手机开了「减弱动效」也一眼看得出现在在哪一步。
+   2) 用伪元素 ::after 画一圈会 ripple 的绿环，靠它自己的 transform+opacity 外扩淡出。
+      为什么是伪元素而不是 keyframe 里动 box-shadow：mp-weixin 的动画只可靠插值
+      transform / opacity，box-shadow 在真机上经常被忽略；仓库里所有会动的 keyframe
+      也都只动 transform/opacity。keyframe 里也不放 var()（自定义属性在 @keyframes 内
+      解析不稳）。
+
+   只动 transform / opacity —— 合成层，不触发重排，周围文字和行高都不动。
+   已上齐(row.stage >= stageCount)的菜不带 --cur —— 那走四点汇聚成对号的收尾动效。 */
+.to-stage-dot--cur {
+  transform: scale(1.5);
+  box-shadow: 0 0 0 3rpx var(--bg-card), 0 0 0 5rpx var(--brand);
+}
+
+.to-stage-dot--cur::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10rpx;
+  height: 10rpx;
+  margin: -5rpx 0 0 -5rpx;
+  border-radius: 50%;
+  border: 2rpx solid var(--brand);
+  animation: toStagePing 1.8s ease-out infinite;
+}
+
+@keyframes toStagePing {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(3.4);
+    opacity: 0;
+  }
+}
+
+/* 尊重系统"减弱动效"：停掉 ripple，静止态的放大点 + 绿描边仍然一眼可辨。 */
+@media (prefers-reduced-motion: reduce) {
+  .to-stage-dot--cur::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 /* 底部动作区：BaseSheet 的 #footer 插槽里的正常 flex 子元素，跟

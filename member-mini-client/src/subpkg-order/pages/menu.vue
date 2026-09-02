@@ -420,6 +420,7 @@
       :selected-spec-summary="selectedSpecFullSummary"
       :dish-image="dishImage"
       :format-price="formatPrice"
+      :format-product-price="formatProductPrice"
       :is-spec-selected="isSpecSelected"
       @cancel="cancelSpec"
       @confirm="handleSpecPrimary"
@@ -551,7 +552,7 @@ export default {
   components: { OrderBubble, MemberCard, SpecSheet, CouponPicker, HomeTab, TableBillSheet, OrderHistorySheet, PaymentSuccessSheet, CheckoutSheet, CheckoutAuthSheet, MemberCheckoutChoice, DishList, CartBar, CouponBar, WelcomeCouponSheet, EntryCouponReveal, ShopHeader, BottomNav, LoadingStates },
   setup() {
     const {
-      formatPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
+      formatPrice, formatProductPrice, dishImage, hasSpecs, isSoldOut, dishCardDesc,
       dishPriceBase, dishPriceText, dishPriceSuffix, dishOriginalPrice, showDishSales,
       couponAmountText, couponConditionText, couponValidityText, couponPickerCondText,
       orderItemName, orderItemQty, orderItemAmount, orderItemSpecText, orderItemImage, orderItemCount,
@@ -1465,7 +1466,7 @@ export default {
       openCart, refreshAvailableCoupons,
       activeCategory, scrollTarget, categoryScrollTop, allDishes, cart, addPressKey, qtyPulseKey, cartIconPulse, cartBadgePulse, amountPulse,
       successItems, successTotal, successMemberValue,
-      categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice,
+      categories, categoryDisplayName, categoryIconClass, dishesByCategory, dishImage, dishTags, dishCardTags, isStrongDishTag, dishCardDesc, showDishSales, isSoldOut, dishPriceText, dishPriceSuffix, dishOriginalPrice, hasSpecs, formatPrice, formatProductPrice,
       imageLoadFailed, detailImageFailed, markDishImageFailed, openProductDetail,
       cartCount, addToCart, removeFromCart, increaseCartItem, clearCart, specButtonText, dishOptionKindCount, optionCountText, openSpecSheet,
       cartItems, totalCount, totalPrice, cartBadgeText,

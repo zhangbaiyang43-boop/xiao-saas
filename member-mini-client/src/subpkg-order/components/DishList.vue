@@ -57,7 +57,10 @@
         </state-empty>
       </view>
       <view v-for="cat in categories" :key="cat" :id="categoryAnchorId(cat)">
-        <view class="cat-divider"><view class="cat-divider-line"></view><view class="cat-divider-main"><text :class="['cat-divider-icon', 'iconfont', categoryIconClass(cat)]"></text><text class="cat-divider-text">{{ categoryDisplayName(cat) }}</text></view><view class="cat-divider-line"></view></view>
+        <!-- 右侧分类区块只留一条分隔线保持分组节奏；图标 + 名称的重复信息移除
+             （左侧 rail 已是纯文字且能跳到这里）。anchor id 仍在外层 v-for wrapper 上，
+             左侧点击 scroll-into-view、右侧 scroll-spy 高亮都不受影响。 -->
+        <view class="cat-divider"></view>
         <dish-card
           v-for="dish in dishesByCategory(cat)"
           :key="dish.id"
@@ -330,54 +333,12 @@ export default {
 
 
 
+/* 分类区块分隔：只保留一条居中细线，用来提示「新分类开始」的分组节奏。
+   区块 anchor id 仍在外层 v-for wrapper 上，跳转 / scroll-spy 不依赖这里。 */
 .cat-divider {
-  height: 64rpx;
-  padding: 0 24rpx;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-}
-
-
-.cat-divider-line {
-  flex: 1;
-  max-width: 160rpx;
   height: 1rpx;
+  margin: 28rpx 24rpx 20rpx;
   background: #E7E9EC;
-}
-
-
-.cat-divider-main {
-  margin: 0 18rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8rpx;
-  min-width: 0;
-}
-
-
-
-.cat-divider-icon {
-  flex-shrink: 0;
-  font-size: 28rpx;
-  line-height: 32rpx;
-  color: var(--brand);
-}
-
-
-
-.cat-divider-text {
-  max-width: 168rpx;
-  font-size: 26rpx;
-  color: var(--text-3);
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0;
 }
 
 

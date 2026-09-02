@@ -95,6 +95,13 @@ export function useTableBillView({
       .sort(byCreatedTs)
   )
   const isOrderInvalid = (order) => ['cancelled', 'rejected'].includes(normalizeOrderStatus(order?.status))
+  // 「这一单还没跨过支付边界」——pending_payment / unpaid / need_payment。
+  // 必须读后端 raw status：normalizeOrderStatus 会把这些都归一化成 'pending'
+  // （结算状态机的承重墙需要），所以判断未支付不能走 normalizeOrderStatus。
+  // 统一在这里定义一次，isAwaitingPayment（当前单）和 buildOrderGroups（每个分单）
+  // 共用同一份判断，界面不再各自 hardcode 状态名。
+  const AWAITING_PAYMENT_STATUSES = ['pending_payment', 'unpaid', 'need_payment']
+  const isOrderAwaitingPayment = (order) => AWAITING_PAYMENT_STATUSES.includes(String(order?.status || ''))
   const isItemInvalid = (item) => ['refunded', 'refund', 'cancelled', 'canceled'].includes(String(item?.status || item?.refund_status || '').toLowerCase())
   const validTableOrders = computed(() => tableSessionOrders.value.filter(order => !isOrderInvalid(order)))
   const validDisplayOrders = computed(() => sessionDisplayOrders.value.filter(order => !isOrderInvalid(order)))
@@ -161,6 +168,9 @@ export function useTableBillView({
       statusText: tableGroupStatusText(order.status, order.status_text),
       tone: tableGroupStatusTone(order.status),
       stage: orderStageIndex(order.status),
+      // 这一单还没跨过支付边界（pending_payment 等）——不属于餐厅正常经营进度，
+      // 「本桌进度」呼吸灯要把它排除在 frontier 之外（它仍照常出现在订单列表里）。
+      isAwaitingPayment: isOrderAwaitingPayment(order),
       isPrepaid: isPrepaidOrder(order),
       discountAmount: Number(order.discountAmount || 0),
       participantNo: order.participantNo || null,
@@ -256,15 +266,11 @@ export function useTableBillView({
 
   const currentTableOrderStatus = computed(() => normalizeOrderStatus(currentTableOrder.value?.status || orderStatus.value))
 
-  // 「这一单的钱到底收没收到」——纯展示派生，读后端 raw status，不进
-  // normalizeOrderStatus。normalizeOrderStatus 是结算状态机的承重墙
-  // （allOrdersDone / isTableSettled / canCheckout 都依赖它，pending_payment
-  // 在那里落到 'pending'），动它会波及桌台结算判断；这里只解决"界面上不能把
-  // 一笔没收到的钱说成已经在正常走流程"。
-  const AWAITING_PAYMENT_STATUSES = ['pending_payment', 'unpaid', 'need_payment']
-  const isAwaitingPayment = computed(() =>
-    AWAITING_PAYMENT_STATUSES.includes(String(currentTableOrder.value?.status || ''))
-  )
+  // 「这一单的钱到底收没收到」——纯展示派生，复用上面的 isOrderAwaitingPayment
+  // （读后端 raw status，不进 normalizeOrderStatus——那是结算状态机的承重墙，
+  // pending_payment 在那里落到 'pending'）。这里只解决"界面上不能把一笔没收到的钱
+  // 说成已经在正常走流程"。
+  const isAwaitingPayment = computed(() => isOrderAwaitingPayment(currentTableOrder.value))
 
   const tableOrderStatusTone = computed(() => {
     if (!currentTableOrder.value) return 'empty'

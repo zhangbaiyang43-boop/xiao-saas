@@ -62,6 +62,42 @@ describe('isAwaitingPayment', () => {
   })
 })
 
+describe('group.isAwaitingPayment —— 每个分单的「未跨过支付边界」信号', () => {
+  // 「本桌进度」呼吸灯的 frontier 必须排除未支付单。这个 per-group 信号来自
+  // 后端 raw status，绝不能因为 normalizeOrderStatus('pending_payment') → 'pending'
+  // → orderStageIndex → stage 1 而在归一化里丢掉。
+  for (const status of ['pending_payment', 'unpaid', 'need_payment']) {
+    it(`raw status ${status} → group.isAwaitingPayment = true`, () => {
+      const groups = setup({ status }).tableOrderGroups.value
+      expect(groups[0].isAwaitingPayment).toBe(true)
+    })
+  }
+
+  for (const status of ['pending', 'preparing', 'done', 'settled']) {
+    it(`raw status ${status} → group.isAwaitingPayment = false`, () => {
+      const groups = setup({ status }).tableOrderGroups.value
+      expect(groups[0].isAwaitingPayment).toBe(false)
+    })
+  }
+
+  it('pending_payment 的分单：stage 仍是 1，但 isAwaitingPayment 是 true（信号没被 normalize 吃掉）', () => {
+    const groups = setup({ status: 'pending_payment' }).tableOrderGroups.value
+    expect(groups[0].stage).toBe(1)
+    expect(groups[0].isAwaitingPayment).toBe(true)
+  })
+
+  it('未支付单仍留在 tableOrderGroups 里（只是不驱动呼吸，不从列表里删）', () => {
+    const mixed = [
+      { id: 'a', orderNo: 'a', status: 'pending_payment', diningSessionId: 'sess_1', paymentMode: 'prepay', items: [{ name: '未付的菜', qty: 1, price: 10 }], total: 10, createdAt: '10:00', createdTs: 1000 },
+      { id: 'b', orderNo: 'b', status: 'preparing', diningSessionId: 'sess_1', paymentMode: 'table_account', items: [{ name: '在做的菜', qty: 1, price: 20 }], total: 20, createdAt: '10:05', createdTs: 2000 },
+    ]
+    const groups = setup({ orders: mixed }).tableOrderGroups.value
+    expect(groups).toHaveLength(mixed.length)
+    expect(groups.some(g => g.isAwaitingPayment === true)).toBe(true)
+    expect(groups.some(g => g.isAwaitingPayment === false)).toBe(true)
+  })
+})
+
 describe('未支付时的下一步文案', () => {
   it('给出真实的下一步（去付款），不是"无需操作，请稍候"', () => {
     const view = setup({ status: 'pending_payment' })
@@ -99,9 +135,12 @@ describe('静态合同：面板不再展示孤立的等待时长', () => {
     }
   })
 
-  it('两个弹层都没有横贯整卡的进度条组件', () => {
-    // 顾客是来吃饭的，不是来看订单状态机的。进度改成每道菜左侧四个点，
-    // 不再有一条独立的、需要配文字解释的进度条。
+  it('废弃的四步整卡进度条（tableBillTimeline / tableOrderTimeline）没有回归', () => {
+    // 早期两个弹层各带一条「已下单 → 接单 → 上齐 → 结账」四步 timeline
+    // （含 .to-track 元素和 *Timeline 计算），已按产品决定删除
+    // （见 useTableBillView.js 里两处「已删除」注释）。
+    // 用户后来要求的三阶段「呼吸」轻量状态指示是另一回事，由
+    // table-order-progress.contract.test.js 负责——这里只守「旧四步 timeline 不回来」。
     for (const rel of ['../../components/TableBillSheet.vue', '../../components/OrderHistorySheet.vue']) {
       const source = read(rel)
       expect(source).not.toContain('to-track')

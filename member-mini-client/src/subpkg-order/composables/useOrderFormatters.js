@@ -22,6 +22,19 @@ export function useOrderFormatters() {
     return n % 1 === 0 ? String(n) : n.toFixed(2)
   }
 
+  // 商品浏览价格展示（FORMATTER_1 / PRODUCT_PRICE_DISPLAY）：最多两位小数，
+  // 去掉无意义的末尾 0 和小数点，让整桌菜价格式一致（不会 ¥128 和 ¥34.80 并排）。
+  // 只用于菜单浏览场景的商品售价；支付 / 退款 / 应付 / 实付 / 结算等财务金额
+  // 一律固定两位小数（见各自的 toFixed(2)），不走这个 formatter。
+  //   128 → 128        128.00 → 128        128.5 → 128.5
+  //   34.80 → 34.8     49.888 → 49.89      0.01 → 0.01
+  // 先 toFixed(2) 再裁零：既限死两位精度，也不会把 34.7999999 这类浮点误差暴露出来。
+  const formatProductPrice = (val) => {
+    const n = Number(val)
+    if (isNaN(n)) return val
+    return n.toFixed(2).replace(/\.?0+$/, '')
+  }
+
   // 存量菜品图片是商家直接传的原图（可能几MB），在服务端加处理管线之前上传的图都是这样，
   // 重新上传前没法改变已经存在 COS 上的文件本身。用 COS 万象缩略图参数在“读”的时候按需
   // 裁一份小图，不用等商家重新上传就能立刻覆盖全部存量图片；只对 http(s) 的 COS 图片链接
@@ -55,7 +68,7 @@ export function useOrderFormatters() {
   }
 
   const dishPriceBase = (dish) => Number(dish.min_price ?? dish.price_min ?? dish.price ?? 0)
-  const dishPriceText = (dish) => formatPrice(dishPriceBase(dish))
+  const dishPriceText = (dish) => formatProductPrice(dishPriceBase(dish))
   const dishPriceSuffix = (dish) => hasSpecs(dish) || Number(dish.max_price || dish.price_max || 0) > dishPriceBase(dish) ? '起' : ''
   const dishOriginalPrice = (dish) => dish.original_price || dish.market_price || ''
   const showDishSales = (dish) => Number(dish.sales_count || 0) >= 10
@@ -136,6 +149,7 @@ export function useOrderFormatters() {
 
   return {
     formatPrice,
+    formatProductPrice,
     dishImage,
     dishPlaceholderStyle,
     hasSpecs,
