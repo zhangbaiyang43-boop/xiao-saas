@@ -17,7 +17,7 @@
         <text class="spec-sheet-title">{{ specDish.name }}</text>
         <text v-if="specDishDesc" class="spec-sheet-desc">{{ specDishDesc }}</text>
         <view class="spec-sheet-price">
-          <price-text size="lg" :amount="formatPrice(specBasePrice)" />
+          <price-text size="lg" :amount="formatProductPrice(specBasePrice)" />
         </view>
         <view class="spec-sheet-close" @click="$emit('cancel')"><text class="iconfont icon-close"></text></view>
       </view>
@@ -31,7 +31,7 @@
           <view class="spec-option-list spec-option-list--single">
             <view v-for="opt in group.options" :key="opt.name" class="spec-option" :class="{ 'spec-option--on': isSpecSelected(group, opt) }" @click="$emit('toggle-spec', group, opt)">
               <text>{{ opt.name }}</text>
-              <text v-if="opt.price_delta > 0" class="spec-price">+{{ currency }}{{ formatPrice(opt.price_delta) }}</text>
+              <text v-if="opt.price_delta > 0" class="spec-price">+{{ currency }}{{ formatProductPrice(opt.price_delta) }}</text>
             </view>
           </view>
         </view>
@@ -40,7 +40,7 @@
           <view class="spec-option-list">
             <view v-for="extra in specExtraOptions" :key="extra.name" class="spec-option" :class="{ 'spec-option--on': selectedExtras.includes(extra.name) }" @click="$emit('toggle-extra', extra.name)">
               <text>{{ extra.name }}</text>
-              <text v-if="extra.price_delta > 0" class="spec-price">+{{ currency }}{{ formatPrice(extra.price_delta) }}</text>
+              <text v-if="extra.price_delta > 0" class="spec-price">+{{ currency }}{{ formatProductPrice(extra.price_delta) }}</text>
             </view>
           </view>
         </view>
@@ -109,6 +109,8 @@ export default {
     // 保证跟父组件其它地方用到的结果 100% 一致。
     dishImage: { type: Function, required: true },
     formatPrice: { type: Function, required: true },
+    // 商品浏览价格用 compact 口径（¥49.8 起，不是 ¥49.80），跟菜单卡片一致。
+    formatProductPrice: { type: Function, required: true },
     isSpecSelected: { type: Function, required: true },
   },
   emits: [

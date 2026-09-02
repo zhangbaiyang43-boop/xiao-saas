@@ -20,6 +20,22 @@
 
           <view class="to-divider"></view>
 
+          <!-- 本桌整体走到哪一步：三个正常阶段（待接单 → 制作中 → 已上齐）用三点表达，
+               当前那一点做一次极慢的「呼吸」提示「还在进行中」。同一时刻至多一个点在呼吸；
+               整桌结账后三点全实心、都不呼吸。取消 / 拒单等异常不在这条线上——异常本身
+               由下面每道菜行内的「已取消 / 已退菜」单独表达。纯 CSS keyframes，无计时器、无轮询。 -->
+          <view v-if="tableProgress.stage >= 1" class="to-progress">
+            <view
+              v-for="step in tableProgressSteps"
+              :key="step.index"
+              class="to-progress-step"
+              :class="progressStepClass(step.index)"
+            >
+              <view class="to-progress-dot"></view>
+              <text class="to-progress-label">{{ step.label }}</text>
+            </view>
+          </view>
+
           <!-- 默认视图只回答顾客真正在问的两件事：点了多少菜、要付多少钱。
                同一道菜跨批次合并成一行，不按"第几单"拆开——分单是系统的组织方式。 -->
           <view class="to-list">
@@ -247,6 +263,34 @@ export default {
     return { showDetail: false }
   },
   computed: {
+    // 三个正常阶段的静态定义。跟 useTableBillView.orderStageIndex 的档位对齐：
+    // 待接单=1 / 制作中=2 / 已上齐(done 或 settled)=3。
+    tableProgressSteps() {
+      return [
+        { index: 1, label: '待接单' },
+        { index: 2, label: '制作中' },
+        { index: 3, label: '已上齐' },
+      ]
+    },
+    // 本桌整体进度：只表达三个正常阶段。不参与 frontier 的分单：
+    //   - 异常单（取消/拒单）：stage=-1，被 stage>=1 过滤掉；
+    //   - 未支付单（pending_payment 等）：group.isAwaitingPayment=true，先排除掉——
+    //     它还没跨过支付边界，不算餐厅正常经营进度（订单列表里照常显示，只是不驱动呼吸）。
+    //   stage 取自 tableOrderGroups[].stage（父层 useTableBillView 已按后端真实档位算好）。
+    //   整桌已结账 → 三点全实心、不呼吸（stage 3、breathing false）。
+    //   还有正常单在途 → 取最靠前的未完成档位作为「当前」，让那一点呼吸。
+    //   没有任何有效阶段（全是取消/拒单/未支付或本桌空）→ stage 0，模板整条不渲染。
+    tableProgress() {
+      if (this.isTableSettled) return { stage: 3, breathing: false }
+      const stages = (this.tableOrderGroups || [])
+        .filter(group => !group.isAwaitingPayment)
+        .map(group => Number(group.stage))
+        .filter(stage => stage >= 1)
+      if (!stages.length) return { stage: 0, breathing: false }
+      if (stages.some(stage => stage === 1)) return { stage: 1, breathing: true }
+      if (stages.some(stage => stage === 2)) return { stage: 2, breathing: true }
+      return { stage: 3, breathing: true }
+    },
     // 同一道菜合并成一行——顾客问的是"点了什么"，不是"这道菜分几次点的"。
     // 合并键的每一个维度都是顾客会区分的东西：
     //   规格不同 = 不同的菜；谁点的不同 = 不能混；进度不同 = 点点要能分别表达；
@@ -302,6 +346,16 @@ export default {
       if (this.isTableSettled) this.$emit('finish')
       else this.$emit('close')
     },
+    // 每个阶段点相对当前进度的三态：已过 / 当前 / 未到。
+    // 只有「当前且整桌未结账」这一个点带 is-breathing——同一时刻至多一个。
+    progressStepClass(index) {
+      const { stage, breathing } = this.tableProgress
+      return {
+        'is-done': stage > index,
+        'is-cur': stage === index,
+        'is-breathing': stage === index && breathing,
+      }
+    },
   },
 }
 </script>
@@ -327,6 +381,98 @@ export default {
 
 .to-empty {
   padding: 24rpx 0;
+}
+
+/* 本桌整体进度：三个正常阶段的三点提示，夹在桌牌分割线和菜品清单之间。
+   刻意压到比菜品缩略图和每道菜的四点进度更轻——只做"现在到哪一步"的背景信息。 */
+.to-progress {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 4rpx 8rpx 14rpx;
+  box-sizing: border-box;
+}
+
+.to-progress-step {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+/* 阶段之间的连接线：画在点的水平中线上，右接下一个点。
+   固定三段式，只有前两个 step 右侧需要连接线（避开 wxss 对 :not() 的支持差异）。 */
+.to-progress-step:first-child::after,
+.to-progress-step:nth-child(2)::after {
+  content: '';
+  position: absolute;
+  top: 8rpx;
+  left: calc(50% + 16rpx);
+  right: calc(-50% + 16rpx);
+  height: 2rpx;
+  background: #E7E9EC;
+}
+
+.to-progress-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  background: #D8DBDF;
+  box-sizing: border-box;
+}
+
+.to-progress-label {
+  font-size: 22rpx;
+  line-height: 1;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 已经走过的阶段：实心品牌色，不呼吸。 */
+.to-progress-step.is-done .to-progress-dot {
+  background: var(--brand);
+}
+
+.to-progress-step.is-done .to-progress-label {
+  color: var(--text-2);
+}
+
+/* 当前阶段：品牌色 + 文案加重。 */
+.to-progress-step.is-cur .to-progress-dot {
+  background: var(--brand);
+}
+
+.to-progress-step.is-cur .to-progress-label {
+  color: var(--brand);
+  font-weight: 600;
+}
+
+/* 当前阶段且整桌未结账：极慢的一次呼吸，提示"还在进行中"。
+   纯 CSS keyframes，无 JS 计时器、无轮询。halo 用品牌绿 #07C160。 */
+.to-progress-step.is-breathing .to-progress-dot {
+  animation: toBreathe 1.8s ease-in-out infinite;
+}
+
+@keyframes toBreathe {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(7, 193, 96, 0.35);
+  }
+  50% {
+    transform: scale(1.18);
+    box-shadow: 0 0 0 10rpx rgba(7, 193, 96, 0);
+  }
+}
+
+/* 尊重系统"减弱动效"：停在稳定态，仍用颜色区分当前阶段。 */
+@media (prefers-reduced-motion: reduce) {
+  .to-progress-step.is-breathing .to-progress-dot {
+    animation: none;
+  }
 }
 
 /* 底部动作区：BaseSheet 的 #footer 插槽里的正常 flex 子元素，跟
