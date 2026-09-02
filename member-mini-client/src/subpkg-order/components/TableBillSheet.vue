@@ -451,20 +451,30 @@ export default {
 }
 
 /* 当前阶段且整桌未结账：极慢的一次呼吸，提示"还在进行中"。
-   纯 CSS keyframes，无 JS 计时器、无轮询。halo 用品牌绿 #07C160。 */
+   纯 CSS keyframes，无 JS 计时器、无轮询。halo 用品牌绿 #07C160。
+   关键：周期中段必须同时满足 spread>0 且 alpha>0（30% / 60% 两帧），
+   否则光环要么被圆点遮住、要么已经透明，真机上看不出在呼吸。
+   只动 transform(scale) + box-shadow —— 合成/绘制层，不触发重排、文字不动。 */
 .to-progress-step.is-breathing .to-progress-dot {
   animation: toBreathe 1.8s ease-in-out infinite;
 }
 
 @keyframes toBreathe {
-  0%,
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(7, 193, 96, 0);
+  }
+  30% {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 4rpx rgba(7, 193, 96, 0.24);
+  }
+  60% {
+    transform: scale(1.18);
+    box-shadow: 0 0 0 9rpx rgba(7, 193, 96, 0.1);
+  }
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(7, 193, 96, 0.35);
-  }
-  50% {
-    transform: scale(1.18);
-    box-shadow: 0 0 0 10rpx rgba(7, 193, 96, 0);
+    box-shadow: 0 0 0 12rpx rgba(7, 193, 96, 0);
   }
 }
 
