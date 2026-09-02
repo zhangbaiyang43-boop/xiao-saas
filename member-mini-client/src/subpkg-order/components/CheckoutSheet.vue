@@ -7,16 +7,11 @@
   >
       <scroll-view class="order-confirm-content" scroll-y>
         <!-- 确认订单和看订单共用同一张 `.to-*` 点单卡，让顾客两头看到的是同一个东西。
-             这里额外的只有"可编辑"（步进器 + 选中圈）和桌牌下面那行堂食/会员信息。 -->
+             这里额外的只有"可编辑"（步进器）。 -->
         <view class="to-card" :class="{ 'checkout-card--missing': !tableNo }">
           <view class="to-plate" @click="$emit('show-table-hint')">
             <text class="to-plate-table">{{ tableNo || orderModeText.unknownTable }}</text>
             <text class="to-plate-unit">桌</text>
-          </view>
-          <view class="checkout-plate-meta">
-            <text class="checkout-mode-text">{{ orderModeText.dineIn }}</text>
-            <text v-if="memberSummaryText" class="checkout-meta-sep">·</text>
-            <text v-if="memberSummaryText" class="checkout-member-text">{{ memberSummaryText }}</text>
           </view>
           <text v-if="!tableNo" class="checkout-plate-tip">{{ confirmationText.tableMissing }}</text>
 
@@ -25,17 +20,15 @@
           <view class="checkout-items-head" @click="$emit('toggle-items-expanded')">
             <view class="checkout-items-title-wrap">
               <text class="checkout-items-icon iconfont icon-list"></text>
-              <text class="checkout-items-title">{{ confirmationText.selectedItems }} · 共{{ totalCount }}份</text>
+              <text class="checkout-items-title">已点商品 · {{ totalCount }}份</text>
             </view>
             <view class="checkout-items-head-action">
-              <text class="checkout-items-amount">{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text>
               <text :class="['checkout-items-toggle', 'iconfont', itemsExpanded ? 'icon-pullup' : 'icon-unfold']"></text>
             </view>
           </view>
 
           <view v-if="itemsExpanded" class="to-list">
             <view v-for="item in cartItems" :key="item.specKey || item.id" class="to-drow">
-              <view class="checkout-item-selected"><text>✓</text></view>
               <image
                 v-if="item.image_url || item.image || item.cover_image"
                 class="to-drow-img"
@@ -56,7 +49,6 @@
                   <text class="counter-num" :class="{ 'counter-num--pulse': qtyPulseKey === (item.specKey || item.id) }">{{ item.qty }}</text>
                   <view class="counter-btn plus sm" @click="$emit('increase-cart-item', item)"><text class="iconfont icon-add"></text></view>
                 </view>
-                <text class="checkout-item-subtotal">小计 {{ confirmationText.currency }}{{ (item.price * item.qty).toFixed(2) }}</text>
               </view>
             </view>
             <view class="checkout-clear-line" @click="$emit('clear-cart')">
@@ -65,24 +57,25 @@
             </view>
           </view>
 
-          <view class="to-line to-line--sub">
+          <view v-if="discountAmount > 0" class="to-line to-line--sub">
             <text class="to-line-l">{{ confirmationText.goodsAmount }}</text>
             <text class="to-line-v">{{ confirmationText.currency }}{{ totalPrice.toFixed(2) }}</text>
           </view>
           <!-- 优惠券只在这里出现一次：既是明细里的减项（在应付金额旁边一眼可见），
-               也是换券入口（点开选券）。不在下面「订单详情」里再放一条。 -->
+               也是换券入口（点开选券）。不在下面「订单详情」里再放一条。
+               没有优惠、也没有可用券时整行不渲染——没有用户动作价值。 -->
           <view
+            v-if="discountAmount > 0 || availableCoupons.length > 0"
             class="to-line checkout-coupon-line"
             :class="{ 'to-line--sub': discountAmount <= 0 }"
             @click="$emit('open-coupon-picker')"
           >
             <text class="to-line-l">{{ confirmationText.coupon }}</text>
             <text v-if="discountAmount > 0" class="to-line-v">-{{ confirmationText.currency }}{{ discountAmount.toFixed(2) }} {{ confirmationText.arrow }}</text>
-            <text v-else-if="availableCoupons.length > 0" class="to-line-v">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
-            <text v-else class="to-line-v">{{ confirmationText.couponNone }} {{ confirmationText.arrow }}</text>
+            <text v-else class="to-line-v">{{ availableCoupons.length }}{{ confirmationText.couponAvailable }} {{ confirmationText.arrow }}</text>
           </view>
           <view class="to-foot">
-            <text class="to-foot-l">共 {{ totalCount }} 份 · {{ confirmationText.payable }}</text>
+            <text class="to-foot-l">{{ confirmationText.payable }}</text>
             <text class="to-foot-v"><text class="to-cur">{{ confirmationText.currency }}</text>{{ wechatPayAmount.toFixed(2) }}</text>
           </view>
         </view>
@@ -229,28 +222,6 @@ export default {
   background: #fffdf9;
 }
 
-/* 桌牌下方那行：堂食 · 会员权益。确认页专属信息，居中、品牌色。 */
-.checkout-plate-meta {
-  max-width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10rpx;
-  margin-top: 8rpx;
-  color: var(--brand);
-  font-size: 23rpx;
-  font-weight: 700;
-}
-
-.checkout-mode-text { flex-shrink: 0; }
-.checkout-meta-sep { color: #b7c2bc; }
-
-.checkout-member-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .checkout-plate-tip {
   display: block;
   margin-top: 6rpx;
@@ -280,39 +251,17 @@ export default {
 .checkout-items-head-action { flex-shrink: 0; gap: 12rpx; }
 .checkout-items-icon { color: var(--brand); font-size: 26rpx; }
 .checkout-items-title { color: var(--text-1); font-size: 26rpx; font-weight: 700; }
-.checkout-items-amount { color: var(--brand); font-size: 26rpx; font-weight: 800; }
 .checkout-items-toggle { color: var(--text-3); font-size: 23rpx; }
 
-/* 菜品行左侧的选中圈——确认页专属，占看订单页四点进度的那个位置 */
-.checkout-item-selected {
-  width: 32rpx;
-  height: 32rpx;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--brand);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  text { color: var(--text-inverse); font-size: 20rpx; font-weight: 900; }
-}
-
-/* 行右侧：步进器 + 小计（确认页专属，看订单时是只读的 ×N ¥X） */
+/* 行右侧：步进器（确认页专属可编辑控件） */
 .checkout-item-side {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6rpx;
 }
 
 .checkout-item-counter { display: flex; align-items: center; gap: 10rpx; }
-
-.checkout-item-subtotal {
-  color: var(--text-3);
-  font-size: 19rpx;
-  font-variant-numeric: tabular-nums;
-}
 
 .checkout-clear-line {
   min-height: 64rpx;

@@ -60,16 +60,30 @@ describe('CheckoutSheet 复用「本桌订单」的 .to-* 点单卡', () => {
     }
   })
 
-  it('只保留确认页专属的可编辑控件 / 信息', () => {
-    for (const cls of [
-      'class="checkout-item-selected"',   // 选中圈（本桌订单那里是四点进度）
-      'class="checkout-item-counter"',    // 加减步进器
-      'class="checkout-item-subtotal"',   // 小计
-      'class="checkout-plate-meta"',      // 桌牌下方 堂食 · 会员
-      'class="checkout-btn-full"',        // 单个提交 CTA
+  it('确认订单收敛为交易主线（B 版低熵信息架构）', () => {
+    // 顾客进确认页只回答三件事：点了什么 / 有没有点错 / 付多少钱。
+    // CHECKOUT-02 冻结的 B 版把没有交易信息增量的展示删掉——以下旧高熵结构不得回归：
+    for (const gone of [
+      'class="checkout-plate-meta"',     // 桌牌下 堂食 · 会员 · 预计积分 · N张可用
+      'class="checkout-item-selected"',  // 装饰性绿 ✓ 圈（无 selection 语义，cart item 恒提交）
+      'class="checkout-item-subtotal"',  // 逐行小计（= 单价 × 数量 的重复）
+      'class="checkout-items-amount"',   // 已选商品头右侧重复的商品原价
     ]) {
-      expect(checkout).toContain(cls)
+      expect(checkout).not.toContain(gone)
     }
+    // 总份数只在商品头出现一次；应付行不再带「共 N 份 ·」前缀
+    expect(checkout).toMatch(/已点商品\s*·\s*\{\{\s*totalCount\s*\}\}\s*份/)
+    expect(checkout).not.toMatch(/共\s*\{\{\s*totalCount\s*\}\}\s*份\s*·/)
+    // 无优惠且无可用券时优惠券行整行不渲染——「暂无可用」常驻分支已删
+    expect(checkout).not.toContain('confirmationText.couponNone')
+
+    // B 版条件展示合同：原价行 / 优惠券行 只在有信息价值时出现
+    expect(checkout).toMatch(/v-if="discountAmount > 0"[\s\S]{0,40}class="to-line to-line--sub"/)
+    expect(checkout).toMatch(/v-if="discountAmount > 0 \|\| availableCoupons\.length > 0"[\s\S]{0,160}class="to-line checkout-coupon-line"/)
+
+    // 交易主线控件继续受保护（数量步进器 + 单一提交 CTA）
+    expect(checkout).toContain('class="checkout-item-counter"')
+    expect(checkout).toContain('class="checkout-btn-full"')
   })
 
   it('提交按钮尺寸对齐本桌订单的主按钮（92rpx / 46rpx 胶囊 / 无阴影）', () => {
