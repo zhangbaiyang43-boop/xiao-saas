@@ -1,0 +1,114 @@
+name: Mini UX Shop Context Runtime Artifact
+
+on:
+  push:
+    branches:
+      - verify/mini-ux-05d-shop-context-artifact
+    paths:
+      - '.github/workflows/mini-ux-05d-shop-context-artifact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mp-weixin-artifact:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: member-mini-client
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the certified candidate commit is present and can be
+          # diffed against HEAD. A shallow (depth 1) clone makes the candidate SHA
+          # unresolvable and the source-integrity guard aborts (05B lesson).
+          fetch-depth: 0
+
+      - name: Verify certified shop-context candidate source
+        working-directory: .
+        run: |
+          set -euo pipefail
+          CANDIDATE=a9e02356f7147dfe26bec78923036a46377a5bde
+          echo "VERIFY_HEAD=$(git rev-parse HEAD)"
+          echo "CANDIDATE_SHA=$CANDIDATE"
+          git merge-base --is-ancestor "$CANDIDATE" HEAD
+          echo "PRODUCT_CANDIDATE_IS_ANCESTOR=YES"
+          # 05D changed files: ShopHeader.vue (compact header) + menu.vue (3 prop
+          # bindings removed). Everything else must be byte-identical to main.
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/ShopHeader.vue)" = "dbb4033aaffdd13262c535322cb56e877f3ded77"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/pages/menu.vue)" = "7ddd540156f690a86c30beed951634c5752a2c6f"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishList.vue)" = "849f60a3ce41d882f7a832c4dce83c7a8e67d114"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/DishCard.vue)" = "4b8d767ca2b3af4f65d74028f1363c7e6496e06c"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/PriceText.vue)" = "59744dd902b9d0b6c4c07462df1f5cb9a798dbaf"
+          test "$(git rev-parse HEAD:member-mini-client/src/subpkg-order/components/CouponBar.vue)" = "98e87ec84ceaa5bb1251ad0a883c512d0c6c3968"
+          echo "REMOTE_SHOPHEADER_BLOB_MATCH=YES"
+          echo "REMOTE_MENU_BLOB_MATCH=YES"
+          echo "REMOTE_FROZEN_BLOBS_MATCH=YES"
+          CHANGED="$(git diff --name-only "$CANDIDATE" HEAD)"
+          echo "CHANGED_VS_PRODUCT_CANDIDATE<<CHANGED_EOF"
+          echo "$CHANGED"
+          echo "CHANGED_EOF"
+          test "$CHANGED" = ".github/workflows/mini-ux-05d-shop-context-artifact.yml"
+          echo "REMOTE_PRODUCT_CONTENT_MATCH=YES"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: member-mini-client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build mp-weixin
+        run: npm run build:mp-weixin
+
+      - name: Verify mp-weixin artifact structure
+        run: |
+          set -euo pipefail
+          test -f dist/build/mp-weixin/app.js
+          test -f dist/build/mp-weixin/app.json
+          test -f dist/build/mp-weixin/app.wxss
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.js
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.wxml
+          test -f dist/build/mp-weixin/subpkg-order/pages/menu.wxss
+          test -s dist/build/mp-weixin/subpkg-order/components/ShopHeader.js
+          test -s dist/build/mp-weixin/subpkg-order/components/ShopHeader.wxml
+          test -s dist/build/mp-weixin/subpkg-order/components/ShopHeader.wxss
+          test -f dist/build/mp-weixin/subpkg-order/components/ShopHeader.json
+          test -f dist/build/mp-weixin/subpkg-order/components/DishList.js
+          test -f dist/build/mp-weixin/subpkg-order/components/DishList.wxml
+          test -s dist/build/mp-weixin/subpkg-order/components/DishList.wxss
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.js
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.wxml
+          test -f dist/build/mp-weixin/subpkg-order/components/DishCard.wxss
+          test -f dist/build/mp-weixin/subpkg-order/components/CouponBar.js
+          test -f dist/build/mp-weixin/subpkg-order/components/CouponBar.wxml
+          test -f dist/build/mp-weixin/subpkg-order/components/CouponBar.wxss
+          echo "GENERAL_RUNTIME_FILES_PRESENT=YES"
+
+      - name: Verify compiled ShopHeader contract
+        run: |
+          set -euo pipefail
+          WXSS=dist/build/mp-weixin/subpkg-order/components/ShopHeader.wxss
+          WXML=dist/build/mp-weixin/subpkg-order/components/ShopHeader.wxml
+          grep -qF -- 'padding:16rpx 32rpx' "$WXSS"
+          grep -qF -- 'background:var(--ink)' "$WXSS"
+          grep -qF -- 'color:var(--brand)' "$WXSS"
+          grep -qF -- 'color:var(--text-3)' "$WXSS"
+          grep -qF -- 'margin-top:8rpx' "$WXSS"
+          ! grep -qF -- 'shop-chip--mode' "$WXSS"
+          ! grep -qF -- 'shop-sub-row' "$WXSS"
+          ! grep -qF -- 'shop-sub-item' "$WXSS"
+          ! grep -qF -- 'shop-sub-em' "$WXSS"
+          ! grep -qF -- '今日可点' "$WXML"
+          ! grep -qF -- '优惠券' "$WXML"
+          echo "COMPILED_SHOPHEADER_STYLE_CONTRACT=PASS"
+          echo "COMPILED_SHOPHEADER_TEMPLATE_CONTRACT=PASS"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mini-ux-05d-shop-context-mp-weixin
+          path: member-mini-client/dist/build/mp-weixin
+          retention-days: 5
