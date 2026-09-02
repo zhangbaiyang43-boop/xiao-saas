@@ -15,41 +15,44 @@
 
         <view class="order-status-bar" :class="successStatusTone">
           <text class="order-status-text">{{ successStatusText }}</text>
+          <text class="order-status-hint">状态自动更新 · 请勿重复提交或支付</text>
         </view>
 
-        <!-- P0-B2a: 唯一 authority 是 memberValue.status === 'available'——
-             not_applicable/pending/unavailable 一律不展示任何会员数字，
-             也不把合法的 0 值（真的没省钱/没积分）误判成异常。 -->
+        <view v-if="pickupNoEnabled && !pickupNo" class="pickup-pending">
+          <text class="pickup-pending-title">桌牌待领取</text>
+          <text class="pickup-pending-tip">请向工作人员领取桌牌</text>
+        </view>
+
+        <view v-if="earnedCoupon" class="reward-coupon">
+          <template v-if="pickupNoEnabled && !pickupNo">
+            <text class="reward-coupon-text">已获券 ¥{{ formatPrice(earnedCoupon.amount) }}</text>
+            <text
+              v-if="couponReminderTemplateId && earnedCoupon.couponId"
+              class="reward-coupon-remind"
+              :class="{ 'reward-coupon-remind--done': reminderRequested }"
+              @click="$emit('request-coupon-reminder')"
+            >{{ reminderRequested ? '已提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我') }}</text>
+          </template>
+          <template v-else>
+            <text class="reward-coupon-text">已获优惠券 ¥{{ formatPrice(earnedCoupon.amount) }}{{ earnedCoupon.threshold > 0 ? ' · 满' + formatPrice(earnedCoupon.threshold) + '元可用' : ' · 无门槛' }}</text>
+            <text
+              v-if="couponReminderTemplateId && earnedCoupon.couponId"
+              class="reward-coupon-remind"
+              :class="{ 'reward-coupon-remind--done': reminderRequested }"
+              @click="$emit('request-coupon-reminder')"
+            >{{ reminderRequested ? '已设置提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我别忘了用') }}</text>
+          </template>
+        </view>
+
+        <!-- P0-B2a: 会员数字唯一 authority 是 memberValue.status === 'available'；
+             合法的 0 值（真的没省钱/没积分）不展示、不误判为异常。 -->
         <view
           v-if="memberValue && memberValue.status === 'available' && (memberValue.member_savings > 0 || memberValue.points_earned > 0)"
-          class="member-value-summary"
+          class="success-reward-line"
         >
-          <text v-if="memberValue.member_savings > 0" class="mv-row">会员本单已省 ¥{{ formatPrice(memberValue.member_savings) }}</text>
-          <text v-if="memberValue.points_earned > 0" class="mv-row">本单 +{{ memberValue.points_earned }} 积分 · 现有 {{ memberValue.points_balance }} 积分</text>
-        </view>
-
-        <view v-if="earnedCoupon" class="earned-coupon-card">
-          <text class="ec-ribbon">{{ earnedCoupon.isSecondOrder ? '欢迎回来 · 专属奖励' : '支付成功 · 专属奖励' }}</text>
-          <view class="ec-amount-row">
-            <text class="ec-currency">¥</text>
-            <text class="ec-amount">{{ formatPrice(earnedCoupon.amount) }}</text>
-          </view>
-          <text class="ec-cond">{{ earnedCoupon.threshold > 0 ? '满' + formatPrice(earnedCoupon.threshold) + '元可用' : '无门槛立减' }}</text>
-          <view class="ec-divider"></view>
-          <text class="ec-title">{{ (earnedCoupon.isSecondOrder ? '欢迎回来，这是你的第二次光临！再送你一张券：' : '又送你一张券：') + (earnedCoupon.name || '') }}</text>
-          <text v-if="earnedCoupon.expire_time" class="ec-deadline">{{ couponValidityText(earnedCoupon) }}</text>
-          <text
-            v-if="couponReminderTemplateId && earnedCoupon.couponId"
-            class="ec-remind-btn"
-            :class="{ 'ec-remind-btn--done': reminderRequested }"
-            @click="$emit('request-coupon-reminder')"
-          >{{ reminderRequested ? '已设置提醒 ✓' : (requestingReminder ? '设置中...' : '提醒我别忘了用') }}</text>
-        </view>
-
-        <view v-if="pickupNoEnabled" class="pickup-hero">
-          <text class="pickup-hero-label">{{ pickupNo ? '您的桌牌号' : '桌牌待领取' }}</text>
-          <text v-if="pickupNo" class="pickup-hero-no">{{ pickupNo }}</text>
-          <text class="pickup-hero-tip">{{ pickupNo ? '请将桌牌放在桌面，方便服务员送餐' : '请向工作人员领取桌牌' }}</text>
+          <text v-if="memberValue.member_savings > 0">会员本单省 ¥{{ formatPrice(memberValue.member_savings) }}</text>
+          <text v-if="memberValue.member_savings > 0 && memberValue.points_earned > 0"> · +{{ memberValue.points_earned }}积分</text>
+          <text v-if="!(memberValue.member_savings > 0) && memberValue.points_earned > 0">本单 +{{ memberValue.points_earned }}积分</text>
         </view>
 
         <view class="success-summary">
@@ -58,32 +61,22 @@
             <text class="success-summary-value">{{ tableNo || orderModeText.unknownTable }}</text>
           </view>
           <view v-if="pickupNoEnabled && pickupNo" class="success-summary-row">
-            <text class="success-summary-label">桌牌号</text>
-            <text class="success-summary-value">{{ pickupNo }}</text>
-          </view>
-          <view class="success-summary-row">
-            <text class="success-summary-label">{{ successText.orderNo }}</text>
-            <text class="success-summary-value">#{{ successOrderNo }}</text>
-          </view>
-          <view class="success-summary-row">
-            <text class="success-summary-label">{{ successText.items }}</text>
-            <text class="success-summary-value">{{ successOrderItemCount }}{{ successText.itemUnit }}</text>
+            <text class="success-summary-label">桌牌</text>
+            <text class="success-summary-value">{{ pickupNo }} 号</text>
           </view>
         </view>
 
         <view class="success-actions">
-          <view class="success-btn-primary" @click="$emit('close-and-wait')">
-            <text>{{ successText.closeAndWait }}</text>
+          <view class="success-btn-primary" @click="$emit('view-order-detail')">
+            <text>{{ successText.viewDetail }}</text>
           </view>
           <view class="success-btn-secondary" @click="$emit('continue-ordering')">
             <text>{{ successText.continueOrdering }}</text>
           </view>
-          <view class="success-btn-ghost" @click="$emit('view-order-detail')">
-            <text>{{ successText.viewDetail }}</text>
+          <view class="success-btn-ghost" @click="$emit('close-and-wait')">
+            <text>关闭</text>
           </view>
         </view>
-
-        <text class="success-safe-tip">{{ successText.safeTip }}</text>
       </view>
     </view>
   </view>
@@ -154,33 +147,25 @@ export default {
 
 
 
-.pickup-hero {
-  margin: 8rpx 40rpx 24rpx;
-  padding: 28rpx 24rpx;
-  border-radius: 28rpx;
-  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+.pickup-pending {
+  margin: 16rpx 0 0;
+  padding: 20rpx 24rpx;
+  border-radius: 20rpx;
+  background: #fff7ed;
+  border: 1rpx solid #fde7cf;
   text-align: center;
 }
-.pickup-hero-label {
+.pickup-pending-title {
   display: block;
-  font-size: 26rpx;
-  font-weight: 700;
+  font-size: 27rpx;
+  font-weight: 800;
   color: #9a3412;
 }
-.pickup-hero-no {
+.pickup-pending-tip {
   display: block;
-  margin-top: 8rpx;
-  font-size: 88rpx;
-  line-height: 1;
-  font-weight: 900;
-  color: #c2410c;
-  letter-spacing: 4rpx;
-}
-.pickup-hero-tip {
-  display: block;
-  margin-top: 12rpx;
+  margin-top: 6rpx;
   font-size: 22rpx;
-  color: #9a3412;
+  color: #9a6a21;
   line-height: 1.4;
 }
 
@@ -371,10 +356,9 @@ export default {
 
 
 .success-sheet .success-check {
-  width: 112rpx;
-  height: 112rpx;
-  margin: 0 auto 22rpx;
-  box-shadow: 0 12rpx 28rpx rgba(16,196,105,.22);
+  width: 96rpx;
+  height: 96rpx;
+  margin: 0 auto 16rpx;
   animation: successCheckIn 280ms ease-out;
 }
 
@@ -392,7 +376,7 @@ export default {
 
 .success-sheet .success-title {
   margin: 0;
-  font-size: 46rpx;
+  font-size: 40rpx;
   line-height: 1.2;
   font-weight: 900;
   color: var(--text-1);
@@ -401,20 +385,20 @@ export default {
 
 
 .success-sheet .success-paid-amount-row {
-  margin: 12rpx 0 0;
+  margin: 8rpx 0 0;
 }
 
 
 
 .success-sheet .success-paid-currency {
-  font-size: 34rpx;
-  margin-bottom: 10rpx;
+  font-size: 30rpx;
+  margin-bottom: 8rpx;
 }
 
 
 
 .success-sheet .success-paid-amount {
-  font-size: 68rpx;
+  font-size: 52rpx;
   letter-spacing: 0;
 }
 
@@ -464,148 +448,69 @@ export default {
   color: #9a6a21;
 }
 
-
-
-.member-value-summary {
-  margin-top: 18rpx;
-  padding: 20rpx 24rpx;
-  border-radius: 20rpx;
-  background: #fff7ed;
-  text-align: center;
-}
-
-.mv-row {
+.success-sheet .order-status-text {
   display: block;
-  font-size: 25rpx;
-  font-weight: 700;
-  color: #9a3412;
-  line-height: 1.6;
 }
 
-
-
-.earned-coupon-card {
-  position: relative;
-  margin-top: 20rpx;
-  padding: 34rpx 28rpx 28rpx;
-  border-radius: 24rpx;
-  text-align: center;
-  background: linear-gradient(160deg, #ff5a3c 0%, #ff2f1f 55%, #d81717 100%);
-  border: 2rpx solid rgba(255, 222, 150, 0.9);
-  box-shadow: 0 16rpx 40rpx -14rpx rgba(180, 20, 10, 0.45);
-  overflow: hidden;
-  animation: ec-card-in 0.5s cubic-bezier(0.22, 1.3, 0.4, 1) both;
-}
-
-
-
-.earned-coupon-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(115deg, transparent 42%, rgba(255, 255, 255, 0.5) 50%, transparent 58%);
-  transform: translateX(-140%);
-  animation: ec-shine 1s ease 0.45s 1;
-  pointer-events: none;
-}
-
-
-
-.ec-ribbon {
-  display: inline-block;
-  padding: 4rpx 20rpx;
-  border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffe9c2;
-  font-size: 21rpx;
-  font-weight: 700;
-  margin-bottom: 14rpx;
-}
-
-
-
-.ec-amount-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-}
-
-
-
-.ec-currency {
-  font-size: 30rpx;
-  font-weight: 800;
-  color: var(--text-inverse);
-  margin-right: 2rpx;
-}
-
-
-
-.ec-amount {
-  font-size: 68rpx;
-  font-weight: 900;
-  color: var(--text-inverse);
-  line-height: 1;
-  text-shadow: 0 3rpx 0 rgba(120, 10, 0, 0.4);
-}
-
-
-
-.ec-cond {
+.order-status-hint {
   display: block;
   margin-top: 6rpx;
-  font-size: 22rpx;
-  color: #ffe4d2;
+  font-size: 21rpx;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.success-sheet .order-status-bar.warning .order-status-hint {
+  color: #b08636;
 }
 
 
 
-.ec-divider {
-  width: 100%;
-  height: 1rpx;
-  background: rgba(255, 255, 255, 0.25);
-  margin: 20rpx 0 18rpx;
-}
-
-
-
-.ec-title {
+.success-reward-line {
   display: block;
-  font-size: 25rpx;
-  font-weight: 700;
-  color: var(--text-inverse);
+  margin-top: 16rpx;
+  font-size: 23rpx;
+  color: var(--text-3);
   line-height: 1.5;
 }
 
 
 
-.ec-deadline {
-  display: block;
-  margin-top: 8rpx;
-  font-size: 21rpx;
-  font-weight: 700;
-  color: #ffe9c2;
+.reward-coupon {
+  margin-top: 14rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: #f6f7f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
 }
 
+.reward-coupon-text {
+  flex: 1;
+  text-align: left;
+  font-size: 23rpx;
+  font-weight: 700;
+  color: var(--text-2);
+  line-height: 1.4;
+}
 
-
-.ec-remind-btn {
-  display: inline-block;
-  margin-top: 18rpx;
-  padding: 8rpx 22rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+.reward-coupon-remind {
+  flex: none;
+  padding: 8rpx 20rpx;
   border-radius: 999rpx;
+  border: 1rpx solid #d7dce2;
   font-size: 21rpx;
   font-weight: 700;
-  color: var(--text-inverse);
-  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-2);
+  background: var(--bg-card);
 }
 
-
-
-.ec-remind-btn--done {
-  border-color: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.55);
+.reward-coupon-remind--done {
+  border-color: #e2e6ea;
+  color: var(--text-3);
   background: transparent;
 }
 
@@ -667,7 +572,6 @@ export default {
   height: 98rpx;
   border-radius: var(--radius-card);
   background: var(--brand);
-  box-shadow: 0 12rpx 24rpx rgba(16,196,105,.18);
 }
 
 
@@ -710,14 +614,6 @@ export default {
 }
 
 
-
-.success-safe-tip {
-  display: block;
-  margin: 16rpx 10rpx 0;
-  color: var(--text-3);
-  font-size: 22rpx;
-  line-height: 1.55;
-}
 
 @keyframes successSheetIn {
   from { transform: translateY(28rpx); opacity: .92; }
