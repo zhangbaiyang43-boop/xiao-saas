@@ -1381,11 +1381,13 @@ class OrderLifecycleService(BaseService):
         # 变成清不掉的"幽灵桌台"——结账按钮点了以后（因为 session 已经关闭）下次点就直接 404。
         # 只要是 done 就该跟着这次结账一起推进到 settled，是否需要补标线下已付款交给下面
         # payment_mode 的判断去管，不应该影响"要不要把它算作已结账"这件事。
-        settlement_orders = [
-            o for o in table_orders
-            if o.status == "done"
-            or (print_first and print_first_pending_is_settleable(o, collection_confirmed=collection_confirmed))
-        ]
+        settlement_orders = [o for o in table_orders if o.status == "done"]
+        if print_first:
+            # PRINT_FIRST: pending orders that passed the blocker above are settled with the table.
+            settlement_orders += [
+                o for o in table_orders
+                if print_first_pending_is_settleable(o, collection_confirmed=collection_confirmed)
+            ]
         previous_status_by_order = {o.id: (o.status or "") for o in settlement_orders}
         payment_svc = OrderPaymentService(self.db)
         for o in settlement_orders:

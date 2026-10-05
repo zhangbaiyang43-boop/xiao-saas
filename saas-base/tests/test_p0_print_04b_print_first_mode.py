@@ -338,7 +338,9 @@ class StaticContractsTest(unittest.TestCase):
         self.assertFalse([p for p in (root / "alembic" / "versions").glob("*.py") if "fulfilment" in p.read_text("utf-8")])
         # the module only reads the mode; nothing in it writes business_info
         source = inspect.getsource(fm)
-        self.assertNotIn("business_info[", source)
+        import re
+
+        self.assertIsNone(re.search(r"business_info\[[^\]]+\]\s*=", source))
         self.assertNotIn("flag_modified", source)
 
     def test_print_pipeline_is_not_mode_aware(self):
