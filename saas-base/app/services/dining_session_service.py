@@ -597,6 +597,11 @@ class DiningSessionService:
         participant_no: int | None = None,
     ) -> dict:
         from app.api.v1.orders import _compose_backward_compatible_item_name
+        from app.services.order_lifecycle_service import (
+            customer_status_text,
+            customer_visible_merchant_note,
+            derive_kitchen_notice,
+        )
 
         dish_images = dish_images or {}
         return {
@@ -606,7 +611,9 @@ class DiningSessionService:
             "total": float(order.total or 0),
             "discount_amount": float(order.discount_amount) if order.discount_amount else 0,
             "status": order.status,
-            "merchant_note": order.merchant_note,
+            "status_text": customer_status_text(order),
+            "kitchen_notice": derive_kitchen_notice(order),
+            "merchant_note": customer_visible_merchant_note(order.merchant_note),
             "payment_status": order.payment_status,
             "payment_mode": order.payment_mode,
             "payment_method": order.payment_method,

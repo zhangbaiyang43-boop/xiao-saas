@@ -60,9 +60,9 @@ export const orderStatusNextAction = (tone) => NEXT_ACTION_BY_TONE[tone] || '无
 
 export const ORDER_STATUS_TEXT = {
   pending_payment: '待支付',
-  pending: '待接单',
+  pending: '订单已提交',
   preparing: '制作中',
-  done: '已上餐',
+  done: '厨房已出餐',
   settled: '已结账',
   cancelled: '已取消',
   rejected: '已拒单',

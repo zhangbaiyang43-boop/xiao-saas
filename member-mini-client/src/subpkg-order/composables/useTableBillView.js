@@ -126,8 +126,8 @@ export function useTableBillView({
   const tableGroupStatusText = (status, statusText) => formatOrderStatusText(status, statusText)
   // 每道菜的进度，用点表达，不用文字。返回"已经走完几步"。
   //
-  // 档数 = 3，因为后端就只有三个真实档位：pending(待接单) → preparing(制作中)
-  // → done(已上餐)。`accepted` 只是客户端容错的别名，后端从来不产出。
+  // 档数 = 3，因为后端就只有三个真实档位：pending(订单已提交) → preparing(制作中)
+  // → done(厨房已出餐)。`accepted` 只是客户端容错的别名，后端从来不产出。
   //
   // 之前是 4 档、第 4 档给 settled(已结账)——那是**整桌**事件，不是这道菜的事件，
   // 于是菜早就上齐了、进度却永远差一格，非要等整桌结账才填满。现在 done 就是
@@ -241,7 +241,7 @@ export function useTableBillView({
     // 展示口径：顶部这句话描述的是"这一桌的菜现在什么情况"，必须涵盖会话里全部订单，
     // 否则同会话的 prepay 单还在制作中，顶部却会说"菜品已上齐"。
     const statuses = validDisplayOrders.value.map(order => normalizeOrderStatus(order.status))
-    if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '商家正在确认订单，请稍候', tone: 'active' }
+    if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '订单已记录，如长时间未上菜可联系店员', tone: 'active' }
     if (statuses.includes('preparing')) return { icon: 'icon-beican', title: '菜品正在制作', desc: '厨房正在制作，可以继续加菜', tone: 'active' }
     if (statuses.includes('done')) {
       if (isPostpayMode.value) {
@@ -319,13 +319,13 @@ export function useTableBillView({
   })[tableOrderStatusTone.value] || '我知道了')
 
   const tableOrderStatusTitle = computed(() => ({
-    pending: '商家正在确认订单',
+    pending: '订单已提交',
     preparing: '商家已接单，正在制作',
-    done: '餐品已上餐，请留意',
+    done: '厨房已出餐，请留意',
     settled: '本桌订单已完成',
     rejected: '订单异常，请联系商家',
     cancelled: '订单已取消',
-  })[currentTableOrderStatus.value] || '商家正在确认订单')
+  })[currentTableOrderStatus.value] || '订单已提交')
 
   const tableOrderStatusHint = computed(() => {
     if (!currentTableOrder.value) return '暂无本桌订单'

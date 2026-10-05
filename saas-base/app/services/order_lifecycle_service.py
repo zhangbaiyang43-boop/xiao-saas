@@ -95,6 +95,58 @@ def _decode_reward_snapshot(raw_snapshot: object) -> tuple[str, dict[str, Any] |
     return "unknown", None, False
 
 
+# --- customer-facing truth -----------------------------------------------------------------
+# What a customer is allowed to learn about the kitchen side of their order, and nothing
+# more. Order.merchant_note carries the merchant's human note *and*, after a marker, the
+# print bookkeeping (printer serial, provider task id, error text, retry counts, operator
+# ids). Customers get only the human part; "did the kitchen get it" is reduced to two
+# words derived from facts the system really has.
+KITCHEN_NOTICE_SENT = "sent"
+KITCHEN_NOTICE_SUBMITTED = "submitted"
+
+
+def customer_visible_merchant_note(raw_note: object) -> str | None:
+    """The merchant's own note with every print-internal byte removed (None if none)."""
+    from app.services.order_print_service import _split_merchant_note_and_print_meta
+
+    note, _ = _split_merchant_note_and_print_meta(raw_note if isinstance(raw_note, str) else None)
+    return note
+
+
+def derive_kitchen_notice(order: object) -> str:
+    """``sent`` only when the print provider accepted the kitchen ticket (print_status
+    SUCCESS). That is all it says: not that anyone saw it, that it printed on paper, or
+    that cooking started. Every other state, including no printer at all, is
+    ``submitted``: the order is recorded."""
+    status = str(getattr(order, "print_status", "") or "").upper()
+    return KITCHEN_NOTICE_SENT if status == "SUCCESS" else KITCHEN_NOTICE_SUBMITTED
+
+
+def customer_status_text(order: object) -> str:
+    """Customer wording for an order's status. ``pending`` is never "waiting to be
+    accepted" (nobody has to accept it) and ``done`` only proves the kitchen marked it
+    finished, not that it was served. Merchant-facing wording is untouched."""
+    from app.api.v1.orders import order_status_text
+
+    status = str(getattr(order, "status", "") or "")
+    if status == "pending":
+        return "订单已发送至厨房" if derive_kitchen_notice(order) == KITCHEN_NOTICE_SENT else "订单已提交"
+    if status == "done":
+        return "厨房已出餐"
+    return order_status_text(status)
+
+
+def customer_order_view(data: dict, order: object) -> dict:
+    """Customer copy of a serialize_order() payload: drops every print_* field (printer
+    identifier, provider task id, error text, retry counters, reprint operator) and adds
+    the two-word kitchen notice plus customer wording for the status."""
+    view = {key: value for key, value in data.items() if not str(key).startswith("print_")}
+    view["merchant_note"] = customer_visible_merchant_note(view.get("merchant_note"))
+    view["kitchen_notice"] = derive_kitchen_notice(order)
+    view["status_text"] = customer_status_text(order)
+    return view
+
+
 async def build_member_value_for_order(db: AsyncSession, order: Order) -> dict[str, Any]:
     """Build transaction facts for the existing customer-owned order read.
 
@@ -683,7 +735,9 @@ class OrderLifecycleService(BaseService):
             "id": str(order.id),
             "status": order.status,
             "payment_status": order.payment_status,
-            "merchant_note": order.merchant_note,
+            "merchant_note": customer_visible_merchant_note(order.merchant_note),
+            "kitchen_notice": derive_kitchen_notice(order),
+            "status_text": customer_status_text(order),
             "reward_coupon": reward_coupon,
             "member_value": member_value,
             "pickup_no": getattr(order, "pickup_no", None),

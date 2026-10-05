@@ -29,7 +29,7 @@ from app.services.coupon_service import (
     _set_order_coupon_status_if_locked,
     _unlock_order_coupon_if_locked,
 )
-from app.services.order_lifecycle_service import OrderLifecycleService
+from app.services.order_lifecycle_service import OrderLifecycleService, customer_order_view
 from app.services.order_payment_service import OrderPaymentService
 from app.services.order_print_service import (
     _compose_merchant_note_with_print_meta,
@@ -442,6 +442,9 @@ async def _replay_order_response(
     replay_items_result = await db.execute(select(OrderItem).where(OrderItem.order_id == replay_order.id))
     replay_items = list(replay_items_result.scalars().all())
     replay_data = serialize_order(replay_order, replay_items)
+    if not str(getattr(replay_order, "source", "") or "").startswith("staff"):
+        # A customer replaying their own submission never sees print internals.
+        replay_data = customer_order_view(replay_data, replay_order)
     replay_payment_mode = getattr(replay_order, "payment_mode", "prepay")
     safe_log(
         logger.info,
@@ -1263,6 +1266,10 @@ async def _persist_create_order_and_build_response(
         pickup_settings=pickup_settings,
         dining_session=session_for_pickup,
     )
+    if not str(getattr(order, "source", "") or "").startswith("staff"):
+        # Customer-submitted orders: no print internals (printer id, task id, error text)
+        # in the response; staff-assisted orders keep the staff view the admin expects.
+        order_data = customer_order_view(order_data, order)
     return success_response(
         data={
             **order_data,
