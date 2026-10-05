@@ -287,92 +287,23 @@
           <button class="primary-action tap-shrink" @click="router.push('/super/merchants/new')">开通商户</button>
         </div>
 
-        <div class="section animate-in">
-        <div class="section-title title-row">
-          <span>商户列表（{{ filteredMerchants.length }}/{{ merchants.length }}）</span>
-          <button class="refresh-btn tap-shrink" :disabled="loadingList" @click="loadMerchants(true)">{{ loadingList ? '刷新中...' : '刷新' }}</button>
-        </div>
-        <input v-model="searchQuery" class="form-input search-input" placeholder="搜索商户名称、手机号或 Tenant ID" />
-        <div class="filter-label">账号</div>
-        <div class="filter-row">
-          <button
-            v-for="f in accountFilters"
-            :key="f.value"
-            class="filter-chip tap-shrink"
-            :class="{ active: accountFilter === f.value }"
-            @click="accountFilter = f.value"
-          >{{ f.label }}</button>
-        </div>
-        <div class="filter-label">收款</div>
-        <div class="filter-row">
-          <button
-            v-for="f in statusFilters"
-            :key="'pay-' + f.value"
-            class="filter-chip tap-shrink"
-            :class="{ active: statusFilter === f.value }"
-            @click="statusFilter = f.value"
-          >{{ f.label }}</button>
-        </div>
-        <div class="filter-label">套餐</div>
-        <div class="filter-row">
-          <button
-            v-for="f in planFilters"
-            :key="'plan-' + f.value"
-            class="filter-chip tap-shrink"
-            :class="{ active: planFilter === f.value }"
-            @click="planFilter = f.value"
-          >{{ f.label }}</button>
-        </div>
-        <div v-if="loadingList && !merchants.length" class="loading">加载中...</div>
-        <div v-else-if="merchantListError" class="empty error-state">
-          <div>{{ merchantListError }}</div>
-          <button class="refresh-btn tap-shrink" @click="loadMerchants(true)">重新加载</button>
-        </div>
-        <div v-else-if="merchants.length === 0" class="empty">暂无商户</div>
-        <div v-else-if="filteredMerchants.length === 0" class="empty">没有匹配的商户</div>
-        <div v-else class="merchant-list">
-          <div v-for="m in filteredMerchants" :key="m.tenant_id" class="merchant-card">
-            <div class="mc-left">
-              <button class="mc-name-btn tap-shrink" @click="openMerchant(m)">{{ m.name }}</button>
-              <div class="mc-meta">
-                <span class="phone-reveal tap-shrink" @click="togglePhone(m.tenant_id)">{{ revealedPhones.has(m.tenant_id) ? m.phone : (m.phone_masked || maskPhone(m.phone)) }}</span>
-                · <span class="tenant-id">{{ m.tenant_id }}</span>
-              </div>
-              <div class="mc-facts">
-                <span class="mc-fact">账号 <b>{{ m.status ? '启用' : '已停用' }}</b></span>
-                <span class="mc-fact">收款 <b :class="statusClass(m.payment_status)">{{ statusText(m.payment_status) }}</b></span>
-                <span class="mc-fact">套餐 <b>{{ subscriptionLabel(m.subscription) }}</b></span>
-                <span class="mc-fact">到期 <b>{{ expiryLabel(m.subscription) }}</b></span>
-                <span class="mc-fact">渠道 <b>{{ channelLabel(m.channel) }}</b></span>
-                <span class="mc-fact">今日订单 <b>{{ m.today_orders }}</b></span>
-              </div>
-              <div class="mc-pay-row">
-                <button class="pay-cfg-btn tap-shrink" @click="openMerchant(m)">查看</button>
-                <button class="pay-cfg-btn tap-shrink" @click="openPayConfig(m)">收款配置</button>
-                <button class="more-btn tap-shrink" @click="toggleDanger(m.tenant_id)">{{ dangerOpenId === m.tenant_id ? '收起' : '更多' }}</button>
-              </div>
-              <div v-if="dangerOpenId === m.tenant_id" class="danger-zone card-danger">
-                <div class="danger-zone-label">危险操作</div>
-                <div class="danger-ops-actions">
-                  <button
-                    class="toggle-btn tap-shrink"
-                    :class="m.status ? 'stop' : 'resume'"
-                    :disabled="rowBusy(m.tenant_id)"
-                    @click="confirmToggleStatus(m)"
-                  >{{ statusButtonText(m) }}</button>
-                  <button class="seed-btn tap-shrink" :disabled="rowBusy(m.tenant_id)" @click="seedTestData(m)">{{ seedingId === m.tenant_id ? '填充中...' : '填充测试数据' }}</button>
-                </div>
-                <div class="seed-hint">测试 / 开发辅助。没有订单的商户会先被清掉菜单、会员、入口码和优惠券模板，再写入演示数据。</div>
-              </div>
-              <div v-if="statusResult && statusResult.tenant_id === m.tenant_id" class="create-result" :class="statusResult.ok ? 'ok' : 'err'">{{ statusResult.msg }}</div>
-              <div v-if="seedResult && seedResult.tenant_id === m.tenant_id" class="create-result" :class="seedResult.ok ? 'ok' : 'err'">{{ seedResult.msg }}</div>
-            </div>
-            <div class="mc-right">
-              <span class="mc-badge" :class="m.status ? 'on' : 'off'">账号：{{ m.status ? '启用' : '已停用' }}</span>
-            </div>
-          </div>
-        </div>
-        </div>
+        <MerchantList
+          :merchants="merchants"
+          :loading="loadingList"
+          :error="merchantListError"
+          :danger-open-id="dangerOpenId"
+          :status-busy-id="statusBusyId"
+          :seeding-id="seedingId"
+          :status-result="statusResult"
+          :seed-result="seedResult"
+          @refresh="loadMerchants(true)"
+          @create="router.push('/super/merchants/new')"
+          @open="openMerchant"
+          @pay-config="openPayConfig"
+          @toggle-danger="toggleDanger"
+          @toggle-status="confirmToggleStatus"
+          @seed="seedTestData"
+        />
       </template>
 
       <template v-else-if="currentPage === 'billing'">
@@ -484,7 +415,16 @@ import { formatBeijingDate, formatBeijingDateTime } from '../utils/beijingTime'
 import { formatYuan, planDisplayName } from '../utils/subscriptionUi'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
+import MerchantList from './super/MerchantList.vue'
 import SuperAdminShell from './super/SuperAdminShell.vue'
+import {
+  channelLabel,
+  expiryLabel,
+  maskPhone,
+  statusClass,
+  statusText,
+  subscriptionLabel,
+} from './super/merchantListModel'
 
 const BASE = '/super'
 
@@ -529,42 +469,6 @@ const merchants = ref([])
 const loadingList = ref(false)
 const merchantsLoaded = ref(false)
 const merchantListError = ref('')
-const searchQuery = ref('')
-const accountFilter = ref('')
-const accountFilters = [
-  { value: '', label: '全部' },
-  { value: 'enabled', label: '启用' },
-  { value: 'disabled', label: '已停用' },
-]
-const statusFilter = ref('')
-const statusFilters = [
-  { value: '', label: '全部' },
-  { value: 'unconfigured', label: '未配置' },
-  { value: 'pending', label: '待验证' },
-  { value: 'verified', label: '已验证' },
-  { value: 'paused', label: '暂停' },
-]
-const planFilter = ref('')
-const planFilters = [
-  { value: '', label: '全部' },
-  { value: 'trial', label: '试用中' },
-  { value: 'active', label: '付费中' },
-  { value: 'free', label: '免费版' },
-  { value: 'ended', label: '已到期' },
-]
-const filteredMerchants = computed(() => {
-  const q = searchQuery.value.trim()
-  const qLower = q.toLowerCase()
-  return merchants.value.filter(m => {
-    if (accountFilter.value === 'enabled' && !m.status) return false
-    if (accountFilter.value === 'disabled' && m.status) return false
-    if (statusFilter.value && (m.payment_status || 'unconfigured') !== statusFilter.value) return false
-    if (planFilter.value && !matchesPlanFilter(m.subscription, planFilter.value)) return false
-    if (!q) return true
-    const tenantId = String(m.tenant_id || '').toLowerCase()
-    return m.name.includes(q) || (m.phone || '').includes(q) || tenantId.includes(qLower)
-  })
-})
 const newMerchant = reactive({ name: '', phone: '', initial_code: '123456' })
 const creating = ref(false)
 const createResult = ref(null)
@@ -620,35 +524,6 @@ function applyRoute() {
   else if (route.name === 'SuperOverview' && route.query.tab === 'channel') router.replace({ path: '/super/channels', query: route.query.partner ? { partner: route.query.partner } : {} })
   else if (route.name === 'SuperOverview' && route.query.tab === 'merchants') router.replace('/super/merchants')
 }
-function matchesPlanFilter(sub, filter) {
-  if (!sub || sub.load_error) return false
-  if (filter === 'trial') return !!sub.is_trial || sub.status === 'TRIAL'
-  if (filter === 'active') return sub.status === 'ACTIVE'
-  if (filter === 'free') return sub.status === 'FREE'
-  if (filter === 'ended') return sub.status === 'EXPIRED' || sub.status === 'CANCELLED'
-  return true
-}
-function subscriptionLabel(sub) {
-  if (!sub || sub.load_error) return '套餐加载失败'
-  const name = sub.plan_name || '免费版'
-  if (sub.is_trial || sub.status === 'TRIAL') return `${name}试用`
-  if (sub.status === 'ACTIVE' || sub.status === 'FREE') return name
-  if (sub.status === 'EXPIRED') return '已到期'
-  if (sub.status === 'CANCELLED') return '已取消'
-  return name
-}
-function expiryLabel(sub) {
-  if (!sub || sub.load_error || !sub.expires_at) return '—'
-  const date = formatBeijingDate(sub.expires_at)
-  if (!date) return '—'
-  if (typeof sub.days_remaining === 'number') return `${date} · 剩余 ${sub.days_remaining} 天`
-  return date
-}
-function channelLabel(channel) {
-  if (!channel || channel.load_error) return '加载失败'
-  if (!channel.bound) return '未绑定'
-  return channel.partner_name || '渠道伙伴资料缺失'
-}
 function paymentStatusOf(payload) {
   return payload?.payment?.status || payload?.payment?.payment_status || 'unconfigured'
 }
@@ -688,19 +563,12 @@ function invoiceTitle(invoice) {
   if (plan) return period ? `${plan} · ${period}` : plan
   return invoice?.description || '套餐账单'
 }
-function statusText(status) { return { unconfigured: '未配置', pending: '待验证', verified: '已验证', paused: '暂停' }[status] || '未配置' }
-function statusClass(status) { return { unconfigured: 'pay-off', pending: 'pay-pending', verified: 'pay-on', paused: 'pay-paused' }[status] || 'pay-off' }
 function receiverTypeText(type) { return type === 'individual' ? '个体' : '企业' }
 function maskMchid(value) {
   const v = (value || '').trim()
   if (!v) return '-'
   if (v.length <= 6) return v
   return `${v.slice(0, 3)}****${v.slice(-3)}`
-}
-function maskPhone(value) {
-  const v = (value || '').trim()
-  if (v.length !== 11) return v || '-'
-  return `${v.slice(0, 3)}****${v.slice(-4)}`
 }
 function togglePhone(tenantId) {
   if (revealedPhones.has(tenantId)) revealedPhones.delete(tenantId)
@@ -1131,8 +999,6 @@ function openChannelPartner(partnerId) {
 }
 
 function openMerchantFilter(paymentStatus = '', accountStatus = '') {
-  statusFilter.value = paymentStatus
-  accountFilter.value = accountStatus
   router.push({
     path: '/super/merchants',
     query: {
@@ -1140,14 +1006,6 @@ function openMerchantFilter(paymentStatus = '', accountStatus = '') {
       account: accountStatus || undefined,
     },
   })
-}
-
-function applyMerchantFiltersFromRoute() {
-  if (currentPage.value !== 'merchant-list') return
-  const payment = String(route.query.payment || '')
-  const account = String(route.query.account || '')
-  if (statusFilters.some(item => item.value === payment)) statusFilter.value = payment
-  if (accountFilters.some(item => item.value === account)) accountFilter.value = account
 }
 
 function payMerchantFromDetail() {
@@ -1278,14 +1136,12 @@ watch(() => route.query.section, () => {
 
 watch(() => route.fullPath, () => {
   applyRoute()
-  applyMerchantFiltersFromRoute()
   if (isDetail.value) return
   loadCurrentPage(false)
 })
 
 onMounted(() => {
   applyRoute()
-  applyMerchantFiltersFromRoute()
   if (!superToken) return
   authed.value = true
   if (isDetail.value) {
@@ -1369,7 +1225,6 @@ onMounted(() => {
 .create-form { display: grid; gap: 8px; }
 .create-result { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
 .create-result.ok { background: var(--brand-light); color: var(--success); } .create-result.err { background: #fef2f2; color: var(--danger); }
-.search-input { margin-bottom: 10px; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .filter-chip { height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-card); color: var(--text-2); font-size: 12px; font-weight: 700; cursor: pointer; }
 .filter-chip.active { border-color: var(--brand); background: var(--brand-light); color: var(--success); }
@@ -1379,21 +1234,13 @@ onMounted(() => {
 .perf-table th, .perf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
 .perf-table th.num, .perf-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .perf-table th { color: var(--text-3); font-weight: 700; font-size: 12px; }
-.merchant-list { display: grid; gap: 10px; }
-.merchant-card { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; background: var(--bg-page); border-radius: 10px; }
-.mc-left { min-width: 0; }
-.mc-name { font-size: 15px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
-.mc-meta { font-size: 12px; color: var(--text-2); margin-top: 3px; }
 .phone-reveal { border-bottom: 1px dashed var(--text-3); cursor: pointer; }
-.mc-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .mc-badge, .mc-pay-badge, .status-pill { font-size: 11px; font-weight: 800; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
 .mc-badge.on, .pay-on { background: var(--brand-light); color: var(--success); }
 .mc-badge.off { background: #f3f4f6; color: var(--text-2); }
 .pay-off { background: #fef9c3; color: #92400e; } .pay-pending { background: #eff6ff; color: #2563eb; } .pay-paused { background: #f3f4f6; color: var(--text-2); }
 .toggle-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 0; cursor: pointer; font-weight: 700; }
 .toggle-btn.stop { background: #fef2f2; color: var(--danger); } .toggle-btn.resume { background: var(--brand-light); color: var(--success); }
-.mc-pay-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
-.pay-cfg-btn { font-size: 11px; padding: 3px 10px; }
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 999; padding: 18px; }
 .modal-box { width: min(520px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; background: var(--bg-card); border-radius: 16px; padding: 18px; }
 .modal-title { font-size: 17px; font-weight: 900; margin-bottom: 12px; color: var(--text-1); }
@@ -1432,11 +1279,6 @@ onMounted(() => {
 .seed-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #fcd34d; background: #fffbeb; color: #92400e; cursor: pointer; font-weight: 700; }
 .seed-btn:disabled, .more-btn:disabled { opacity: .55; cursor: not-allowed; }
 .seed-hint { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #92400e; }
-.filter-label { font-size: 11px; font-weight: 800; color: var(--text-3); margin: 2px 0 6px; }
-.mc-name-btn { display: block; max-width: 100%; border: 0; background: transparent; padding: 0; text-align: left; font-size: 15px; font-weight: 800; color: var(--text-1); cursor: pointer; }
-.mc-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
-.mc-fact { font-size: 12px; color: var(--text-3); }
-.mc-fact b { color: var(--text-1); font-weight: 800; }
 .tenant-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--text-3); }
 .merchant-context { padding-top: 12px; }
 .back-link { margin: 0 16px 8px; border: 0; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; }
@@ -1472,7 +1314,6 @@ onMounted(() => {
   .overview-alert { align-items: flex-start; flex-direction: column; }
   .section { margin-right: 0; margin-left: 0; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
-  .merchant-card { align-items: flex-start; }
   .receiver-grid { grid-template-columns: 1fr; }
 }
 </style>
