@@ -1005,9 +1005,10 @@ class OrderPaymentService(BaseService):
             order_items = list(items_result.scalars().all())
 
             from app.api.v1.orders import serialize_order
+            from app.services.order_lifecycle_service import customer_order_view
 
             return success_response(
-                data={**serialize_order(order, order_items), "coupon": coupon_data},
+                data={**customer_order_view(serialize_order(order, order_items), order), "coupon": coupon_data},
                 msg="支付成功",
             )
         except Exception as e:
@@ -1096,10 +1097,11 @@ class OrderPaymentService(BaseService):
                 free_items_result = await self.db.execute(select(OrderItem).where(OrderItem.order_id == order.id))
                 free_order_items = list(free_items_result.scalars().all())
                 from app.api.v1.orders import serialize_order
+                from app.services.order_lifecycle_service import customer_order_view
 
                 return success_response(
                     data={
-                        **serialize_order(order, free_order_items),
+                        **customer_order_view(serialize_order(order, free_order_items), order),
                         "free": True,
                         "coupon": free_coupon_data,
                     },

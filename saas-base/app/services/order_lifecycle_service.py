@@ -95,6 +95,58 @@ def _decode_reward_snapshot(raw_snapshot: object) -> tuple[str, dict[str, Any] |
     return "unknown", None, False
 
 
+# --- customer-facing truth -----------------------------------------------------------------
+# What a customer is allowed to learn about the kitchen side of their order, and nothing
+# more. Order.merchant_note carries the merchant's human note *and*, after a marker, the
+# print bookkeeping (printer serial, provider task id, error text, retry counts, operator
+# ids). Customers get only the human part; "did the kitchen get it" is reduced to two
+# words derived from facts the system really has.
+KITCHEN_NOTICE_SENT = "sent"
+KITCHEN_NOTICE_SUBMITTED = "submitted"
+
+
+def customer_visible_merchant_note(raw_note: object) -> str | None:
+    """The merchant's own note with every print-internal byte removed (None if none)."""
+    from app.services.order_print_service import _split_merchant_note_and_print_meta
+
+    note, _ = _split_merchant_note_and_print_meta(raw_note if isinstance(raw_note, str) else None)
+    return note
+
+
+def derive_kitchen_notice(order: object) -> str:
+    """``sent`` only when the print provider accepted the kitchen ticket (print_status
+    SUCCESS). That is all it says: not that anyone saw it, that it printed on paper, or
+    that cooking started. Every other state, including no printer at all, is
+    ``submitted``: the order is recorded."""
+    status = str(getattr(order, "print_status", "") or "").upper()
+    return KITCHEN_NOTICE_SENT if status == "SUCCESS" else KITCHEN_NOTICE_SUBMITTED
+
+
+def customer_status_text(order: object) -> str:
+    """Customer wording for an order's status. ``pending`` is never "waiting to be
+    accepted" (nobody has to accept it) and ``done`` only proves the kitchen marked it
+    finished, not that it was served. Merchant-facing wording is untouched."""
+    from app.api.v1.orders import order_status_text
+
+    status = str(getattr(order, "status", "") or "")
+    if status == "pending":
+        return "订单已发送至厨房" if derive_kitchen_notice(order) == KITCHEN_NOTICE_SENT else "订单已提交"
+    if status == "done":
+        return "厨房已出餐"
+    return order_status_text(status)
+
+
+def customer_order_view(data: dict, order: object) -> dict:
+    """Customer copy of a serialize_order() payload: drops every print_* field (printer
+    identifier, provider task id, error text, retry counters, reprint operator) and adds
+    the two-word kitchen notice plus customer wording for the status."""
+    view = {key: value for key, value in data.items() if not str(key).startswith("print_")}
+    view["merchant_note"] = customer_visible_merchant_note(view.get("merchant_note"))
+    view["kitchen_notice"] = derive_kitchen_notice(order)
+    view["status_text"] = customer_status_text(order)
+    return view
+
+
 async def build_member_value_for_order(db: AsyncSession, order: Order) -> dict[str, Any]:
     """Build transaction facts for the existing customer-owned order read.
 
@@ -683,7 +735,9 @@ class OrderLifecycleService(BaseService):
             "id": str(order.id),
             "status": order.status,
             "payment_status": order.payment_status,
-            "merchant_note": order.merchant_note,
+            "merchant_note": customer_visible_merchant_note(order.merchant_note),
+            "kitchen_notice": derive_kitchen_notice(order),
+            "status_text": customer_status_text(order),
             "reward_coupon": reward_coupon,
             "member_value": member_value,
             "pickup_no": getattr(order, "pickup_no", None),
@@ -1002,6 +1056,22 @@ class OrderLifecycleService(BaseService):
                 data={"id": str(order.id), "status": order.status, "idempotent": True},
                 msg="状态未变化",
             )
+        if body.status == "preparing" and current_status == "pending":
+            # PRINT_FIRST: the printer already told the kitchen; nobody has to "accept". A stale
+            # admin page or an old client must not push an order into preparing, because that
+            # would also take away the pending-only reject. Refuse with a clear business code.
+            from app.services.fulfilment_mode import (
+                MANUAL_ACCEPT_DISABLED_CODE,
+                get_fulfilment_mode,
+                is_print_first_mode,
+            )
+
+            if is_print_first_mode(await get_fulfilment_mode(self.db, tenant_id)):
+                return error_response(
+                    code=409,
+                    msg="当前门店为打印优先模式，无需手动接单",
+                    data={"code": MANUAL_ACCEPT_DISABLED_CODE},
+                )
         payment_mode = getattr(order, "payment_mode", "prepay") or "prepay"
         requires_table_settlement = payment_mode == "table_account" or (
             payment_mode == "postpay" and getattr(order, "dining_session_id", None) is not None
@@ -1162,6 +1232,14 @@ class OrderLifecycleService(BaseService):
             TABLE_CLOSE_BLOCKING_STATUSES,
             TABLE_CLOSE_DONE_STATUSES,
         )
+        from app.services.fulfilment_mode import (
+            POSTPAY_COLLECTION_NOT_CONFIRMED_CODE,
+            collects_at_settlement,
+            get_fulfilment_mode,
+            is_print_first_mode,
+            print_first_pending_is_settleable,
+            settle_blocking_orders,
+        )
         from app.services.order_payment_service import OrderPaymentService
         from app.models.dining import DiningSession
         from app.services.consumption_service import _record_order_consumption
@@ -1256,21 +1334,31 @@ class OrderLifecycleService(BaseService):
             if not table_orders:
                 return error_response(code=404, msg="本桌没有进行中的会话")
 
-        blocking_orders = [
-            o for o in table_orders
-            if (o.status or "") in TABLE_CLOSE_BLOCKING_STATUSES or (o.status or "") not in TABLE_CLOSE_DONE_STATUSES
-        ]
+        # WORKBENCH (every shop unless explicitly switched): the legacy rule, untouched.
+        # PRINT_FIRST: a paid ``pending`` order is a normal resting state, not "waiting for the
+        # kitchen"; an unpaid postpay / table-account one still needs the cashier to confirm
+        # collection in this request.
+        print_first = is_print_first_mode(await get_fulfilment_mode(self.db, tenant_id))
+        collection_confirmed = body.get("collection_confirmed") is True
+        blocking_orders = settle_blocking_orders(
+            table_orders,
+            blocking_statuses=TABLE_CLOSE_BLOCKING_STATUSES,
+            done_statuses=TABLE_CLOSE_DONE_STATUSES,
+            print_first=print_first,
+            collection_confirmed=collection_confirmed,
+        )
         if blocking_orders:
-            return error_response(
-                code=409,
-                msg="本桌还有未完成的订单，无法结账",
-                data={
-                    "table_no": table_no,
-                    "dining_session_id": str(active_session.id) if active_session else None,
-                    "blocking_order_ids": [str(o.id) for o in blocking_orders],
-                    "blocking_statuses": sorted({o.status for o in blocking_orders}),
-                },
-            )
+            blocked_data = {
+                "table_no": table_no,
+                "dining_session_id": str(active_session.id) if active_session else None,
+                "blocking_order_ids": [str(o.id) for o in blocking_orders],
+                "blocking_statuses": sorted({o.status for o in blocking_orders}),
+            }
+            if print_first and not collection_confirmed and any(
+                (o.status or "") == "pending" and collects_at_settlement(o) for o in blocking_orders
+            ):
+                blocked_data["code"] = POSTPAY_COLLECTION_NOT_CONFIRMED_CODE
+            return error_response(code=409, msg="本桌还有未完成的订单，无法结账", data=blocked_data)
 
         if active_session:
             active_session.status = "CLOSED"
@@ -1294,6 +1382,13 @@ class OrderLifecycleService(BaseService):
         # 只要是 done 就该跟着这次结账一起推进到 settled，是否需要补标线下已付款交给下面
         # payment_mode 的判断去管，不应该影响"要不要把它算作已结账"这件事。
         settlement_orders = [o for o in table_orders if o.status == "done"]
+        if print_first:
+            # PRINT_FIRST: pending orders that passed the blocker above are settled with the table.
+            settlement_orders += [
+                o for o in table_orders
+                if print_first_pending_is_settleable(o, collection_confirmed=collection_confirmed)
+            ]
+        previous_status_by_order = {o.id: (o.status or "") for o in settlement_orders}
         payment_svc = OrderPaymentService(self.db)
         for o in settlement_orders:
             o.status = "settled"
@@ -1317,7 +1412,7 @@ class OrderLifecycleService(BaseService):
             log_order_status_changed(
                 order_id=o.id,
                 tenant_id=str(o.tenant_id),
-                old_status="done",
+                old_status=previous_status_by_order.get(o.id, "done"),
                 new_status="settled",
                 actor="account",
                 source="table_settle",

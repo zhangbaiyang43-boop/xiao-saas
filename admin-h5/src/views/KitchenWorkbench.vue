@@ -2,8 +2,8 @@
   <div class="wb-page">
     <div class="wb-header">
       <div>
-        <div class="wb-title">待制作 {{ pendingCount }}</div>
-        <div class="wb-sub">{{ displayName || '厨房' }} · 接单、制作完成</div>
+        <div class="wb-title">{{ auth.isPrintFirst ? '当前订单' : '待制作' }} {{ pendingCount }}</div>
+        <div class="wb-sub">{{ displayName || '厨房' }} · {{ auth.isPrintFirst ? '看厨房单做菜' : '接单、制作完成' }}</div>
       </div>
       <div class="wb-actions">
         <a-button size="small" @click="syncNow">刷新</a-button>
@@ -78,7 +78,7 @@
       <div v-if="order.remark" class="remark">{{ order.remark }}</div>
       <div class="actions">
         <a-button
-          v-if="order.status === 'pending' && can('order.accept')"
+          v-if="order.status === 'pending' && can('order.accept') && !auth.isPrintFirst"
           type="primary"
           size="small"
           :loading="busyId === order.id"
@@ -136,11 +136,12 @@ const {
 const busyId = ref('')
 const reprintId = ref('')
 const statusFilter = ref('pending')
-const filters = [
-  { label: formatOrderStatusText('pending'), val: 'pending' },
+const filters = computed(() => [
+  // PRINT_FIRST: a pending order is simply a current order, not a task waiting to be accepted.
+  { label: auth.isPrintFirst ? '当前订单' : formatOrderStatusText('pending'), val: 'pending' },
   { label: formatOrderStatusText('preparing'), val: 'preparing' },
   { label: formatOrderStatusText('done'), val: 'done' },
-]
+])
 
 const counts = computed(() => ({
   pending: orders.value.filter((o) => o.status === 'pending').length,

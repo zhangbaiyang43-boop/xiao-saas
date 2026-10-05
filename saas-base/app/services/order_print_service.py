@@ -27,6 +27,18 @@ PRINT_ERROR_CODE_MAX_CHARS = 128
 PRINT_ERROR_MAX_CHARS = 512
 PRINT_IDENTIFIER_MAX_CHARS = 128
 PRINT_OPERATOR_MAX_CHARS = 64
+# Automatic recovery only chases orders that can still be in service. Reuses the
+# existing fulfilment-staleness bound of a table session (SESSION_EXPIRE_HOURS = 12
+# in dining_session_service.py; kept equal by a contract test, not imported, so this
+# module stays import-light). Older PENDING/FAILED rows are left to manual reprint.
+# Stale SENDING rows are exempt: quarantining them to UNKNOWN never calls the provider.
+PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS = 12 * 60 * 60
+# Cost bound for one recovery cycle (rows examined <= batches * PRINT_RECONCILE_BATCH_LIMIT).
+PRINT_RECOVERY_MAX_SCAN_BATCHES = 20
+# How often a tenant whose KITCHEN_PRINT check came back disabled is looked at again.
+# optional_capability_enabled() also returns False on a transient entitlement error, so
+# this must stay a re-check, never a permanent exclusion.
+PRINT_RECOVERY_CAPABILITY_RECHECK_SECONDS = PRINT_RETRY_COOLDOWN_SECONDS
 
 _KUAIMAI_UNKNOWN_CODES = frozenset({
     "KUAIMAI_TIMEOUT",
@@ -524,6 +536,37 @@ def _eligible_at_for_reconcile(order: Order) -> datetime | None:
     return _parse_dt(getattr(order, "created_at", None))
 
 
+def _auto_recovery_disposition(order: Order, now: datetime) -> str:
+    """RETRY / QUARANTINE / SKIP: the recoverability rules both recovery paths share.
+
+    Used by recover_pending_print_orders_once (the background loop) and by
+    reconcile_print_orders (workbench / order-list triggered). Per-path timing gates
+    (PENDING grace, FAILED cooldown) stay with each path; everything else lives here.
+
+    - printed or UNKNOWN rows are never recovered (UNKNOWN: a resend could duplicate)
+    - SENDING goes to quarantine regardless of age: that never calls the provider
+    - FAILED with the retry budget spent can never progress on its own
+    - PENDING/FAILED older than PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS are left to manual reprint
+    ``now`` must be timezone-aware UTC.
+    """
+    db_status = str(getattr(order, "print_status", "") or "").upper()
+    meta = _get_print_meta(order)
+    meta_status = meta.get("status")
+    if db_status == "SUCCESS" or meta_status == "printed":
+        return "SKIP"
+    if db_status == "UNKNOWN" or meta_status == "unknown":
+        return "SKIP"
+    if db_status == "SENDING" or meta_status == "printing":
+        return "QUARANTINE"
+    is_failed = db_status == "FAILED" or meta_status == "failed"
+    if is_failed and int(meta.get("attempts") or 0) >= MAX_PRINT_RETRY_ATTEMPTS:
+        return "SKIP"
+    created_at = _parse_dt(getattr(order, "created_at", None))
+    if created_at is not None and (now - created_at).total_seconds() > PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS:
+        return "SKIP"
+    return "RETRY"
+
+
 def _is_unknown_print_exception(exc: BaseException) -> bool:
     if isinstance(exc, PrintResultUnknownError):
         return True
@@ -945,19 +988,40 @@ async def reconcile_print_orders(
     trigger: str = "reconcile",
     pickup_settings: dict | None = None,
 ) -> int:
-    """Best-effort print recovery for a bounded batch of orders. Returns print call count."""
+    """Best-effort print recovery for orders a request just loaded.
+
+    Returns the number of print attempts plus stale-SENDING quarantines performed.
+    The cap applies to those actions, not to the input: orders that need nothing
+    (already printed, exhausted, too old, UNKNOWN) are skipped without using up the
+    PRINT_RECONCILE_BATCH_LIMIT budget, so they can no longer hide a recoverable order.
+    """
     from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
 
     if not orders:
         return 0
 
-    batch = list(orders)[:PRINT_RECONCILE_BATCH_LIMIT]
     now = datetime.now(timezone.utc)
     settings_by_tenant: dict[str, dict] = {}
     attempted = 0
 
-    for order in batch:
+    for order in list(orders):
+        if attempted >= PRINT_RECONCILE_BATCH_LIMIT:
+            break
         if getattr(order, "status", None) not in _AUTO_RECONCILE_STATUSES:
+            continue
+
+        disposition = _auto_recovery_disposition(order, now)
+        if disposition == "SKIP":
+            continue
+        if disposition == "QUARANTINE":
+            # SENDING becomes UNKNOWN when stale; the provider is deliberately not called.
+            if await _quarantine_stale_sending(
+                db,
+                order_id=int(order.id),
+                tenant_id=str(order.tenant_id),
+                allow_provider_call=False,
+            ):
+                attempted += 1
             continue
 
         tenant_id = str(getattr(order, "tenant_id", "") or "")
@@ -981,17 +1045,10 @@ async def reconcile_print_orders(
         meta = _get_print_meta(order)
         db_print_status = str(getattr(order, "print_status", "") or "").upper()
         meta_status = meta.get("status")
-
-        # Result-unknown must never auto-retry (risk of duplicate tickets).
-        if db_print_status == "UNKNOWN" or meta_status == "unknown":
-            continue
-
         attempts = int(meta.get("attempts") or 0)
         is_failed = db_print_status == "FAILED" or meta_status == "failed"
 
         if is_failed:
-            if attempts >= MAX_PRINT_RETRY_ATTEMPTS:
-                continue
             last_at = _parse_dt(meta.get("last_attempt_at")) or _parse_dt(meta.get("failed_at"))
             if last_at and (now - last_at).total_seconds() < PRINT_RETRY_COOLDOWN_SECONDS:
                 continue
@@ -1048,75 +1105,166 @@ async def _quarantine_stale_sending(
     return True
 
 
-async def recover_pending_print_orders_once(db: AsyncSession | None = None) -> int:
-    """Startup/interval recovery with eligibility filtering before the batch limit."""
+# Skip outcomes of _print_paid_order_ticket after which a row can never make progress
+# on its own: retry budget spent (attempts live in the meta JSON, not in SQL), already
+# printed per meta while the DB column lagged, or the order left the printable set.
+_NO_PROGRESS_ORDER_CODES = frozenset({"PRINT_RETRY_LIMIT", "ORDER_TERMINAL", "NOT_PRINTABLE"})
+# Tenant-level skip: KITCHEN_PRINT is not granted right now (or the entitlement check
+# failed, which optional_capability_enabled() reports identically).
+_NO_PROGRESS_TENANT_CODES = frozenset({"PLAN_CAPABILITY_DISABLED"})
+
+
+class _RecoveryScanMemo:
+    """Loop-owned, process-local memory of rows the recovery scan has proven stuck.
+
+    Pure scan optimisation: it never writes to the order, never changes print_status or
+    updated_at, and is empty after a restart. Rows it hides are re-selected on their own
+    once the memo entry expires or the process restarts.
+    """
+
+    def __init__(self) -> None:
+        self._order_until: dict[int, datetime] = {}
+        self._tenant_until: dict[str, datetime] = {}
+
+    def order_ids(self, now: datetime) -> set[int]:
+        self._order_until = {k: v for k, v in self._order_until.items() if v > now}
+        return set(self._order_until)
+
+    def tenant_ids(self, now: datetime) -> set[str]:
+        self._tenant_until = {k: v for k, v in self._tenant_until.items() if v > now}
+        return set(self._tenant_until)
+
+    def remember_order(self, order_id: int, now: datetime) -> None:
+        # Once the row is older than the auto-recovery window SQL excludes it anyway.
+        self._order_until[int(order_id)] = now + timedelta(seconds=PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS)
+
+    def remember_tenant(self, tenant_id: str, now: datetime) -> None:
+        self._tenant_until[str(tenant_id)] = now + timedelta(seconds=PRINT_RECOVERY_CAPABILITY_RECHECK_SECONDS)
+
+
+def _remember_no_progress(memo: _RecoveryScanMemo, order: Order, result_data: dict, now: datetime) -> None:
+    code = result_data.get("code")
+    if code in _NO_PROGRESS_ORDER_CODES or result_data.get("status") == "printed":
+        memo.remember_order(int(order.id), now)
+    elif code in _NO_PROGRESS_TENANT_CODES:
+        memo.remember_tenant(str(order.tenant_id), now)
+
+
+async def recover_pending_print_orders_once(
+    db: AsyncSession | None = None,
+    *,
+    memo: _RecoveryScanMemo | None = None,
+) -> int:
+    """Startup/interval recovery with eligibility filtering before the batch limit.
+
+    Rows that cannot make progress (retry budget spent, KITCHEN_PRINT not granted, ...)
+    are skipped by _print_paid_order_ticket without touching updated_at, so they would
+    sit at the head of the oldest-first query forever and starve newer rows behind the
+    global LIMIT. Each row is therefore examined at most once per cycle, the scan walks
+    on to the next batch, and proven-stuck rows/tenants go into ``memo`` (owned by
+    print_recovery_loop) so later cycles do not pay for them again. Provider attempts
+    stay capped at PRINT_RECONCILE_BATCH_LIMIT per cycle.
+    """
+    if memo is None:
+        memo = _RecoveryScanMemo()
     if db is None:
         from app.core.database import AsyncSessionLocal
 
         async with AsyncSessionLocal() as recovery_db:
-            return await recover_pending_print_orders_once(recovery_db)
+            return await recover_pending_print_orders_once(recovery_db, memo=memo)
 
     now = datetime.utcnow()
     pending_cutoff = now - timedelta(seconds=PRINT_RECONCILE_GRACE_SECONDS)
     failed_cutoff = now - timedelta(seconds=PRINT_RETRY_COOLDOWN_SECONDS)
     sending_cutoff = now - timedelta(seconds=PRINT_SENDING_STALE_SECONDS)
-    query = (
-        select(Order)
-        .where(
-            Order.print_status.in_(["PENDING", "FAILED", "SENDING"]),
-            Order.status.in_(["pending", "preparing", "done", "settled"]),
-            or_(
-                Order.payment_mode.in_(["postpay", "table_account"]),
-                and_(Order.payment_mode == "prepay", Order.payment_status == "paid"),
-            ),
-            or_(
-                and_(Order.print_status == "PENDING", Order.updated_at <= pending_cutoff),
-                and_(Order.print_status == "FAILED", Order.updated_at <= failed_cutoff),
-                and_(Order.print_status == "SENDING", Order.updated_at <= sending_cutoff),
-            ),
-        )
-        .order_by(Order.updated_at.asc(), Order.id.asc())
-        .limit(PRINT_RECONCILE_BATCH_LIMIT)
-    )
-    result = await db.execute(query)
-    candidates = list(result.scalars().all())
+    fresh_cutoff = now - timedelta(seconds=PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS)
     handled = 0
-    for order in candidates:
-        status = str(getattr(order, "print_status", "") or "").upper()
-        logger.info(
-            "PRINT_RECOVERY_ATTEMPT order_id=%s printer_id=%s attempt=%s reason=startup_recovery prior_status=%s",
-            order.id, None, None, status,
-        )
-        if status == "SENDING":
-            # STALE_SENDING: SENDING becomes UNKNOWN; provider is deliberately not called.
-            if await _quarantine_stale_sending(
-                db,
-                order_id=int(order.id),
-                tenant_id=str(order.tenant_id),
-                allow_provider_call=False,
-            ):
-                handled += 1
-            continue
-        result_data = await _print_paid_order_ticket(order, db, reason="startup_recovery")
-        if (
-            result_data.get("skipped")
-            and result_data.get("code") == "WAITING_PICKUP_NO"
-            and status == "PENDING"
-        ):
-            await _park_waiting_pickup_print_intent(
-                db,
-                order_id=int(order.id),
-                tenant_id=str(order.tenant_id),
+    examined_ids: set[int] = set()
+    for _ in range(PRINT_RECOVERY_MAX_SCAN_BATCHES):
+        if handled >= PRINT_RECONCILE_BATCH_LIMIT:
+            break
+        skip_order_ids = examined_ids | memo.order_ids(now)
+        skip_tenant_ids = memo.tenant_ids(now)
+        tenant_guard = [Order.tenant_id.notin_(list(skip_tenant_ids))] if skip_tenant_ids else []
+        query = (
+            select(Order)
+            .where(
+                Order.print_status.in_(["PENDING", "FAILED", "SENDING"]),
+                Order.status.in_(["pending", "preparing", "done", "settled"]),
+                or_(
+                    Order.payment_mode.in_(["postpay", "table_account"]),
+                    and_(Order.payment_mode == "prepay", Order.payment_status == "paid"),
+                ),
+                or_(
+                    and_(
+                        Order.print_status == "PENDING",
+                        Order.updated_at <= pending_cutoff,
+                        Order.created_at >= fresh_cutoff,
+                        *tenant_guard,
+                    ),
+                    and_(
+                        Order.print_status == "FAILED",
+                        Order.updated_at <= failed_cutoff,
+                        Order.created_at >= fresh_cutoff,
+                        *tenant_guard,
+                    ),
+                    and_(Order.print_status == "SENDING", Order.updated_at <= sending_cutoff),
+                ),
             )
-        if not result_data.get("skipped"):
-            handled += 1
+            .order_by(Order.updated_at.asc(), Order.id.asc())
+            .limit(PRINT_RECONCILE_BATCH_LIMIT)
+        )
+        if skip_order_ids:
+            query = query.where(Order.id.notin_(list(skip_order_ids)))
+        result = await db.execute(query)
+        candidates = list(result.scalars().all())
+        if not candidates:
+            break
+        for order in candidates:
+            if handled >= PRINT_RECONCILE_BATCH_LIMIT:
+                break
+            examined_ids.add(int(order.id))
+            status = str(getattr(order, "print_status", "") or "").upper()
+            logger.info(
+                "PRINT_RECOVERY_ATTEMPT order_id=%s printer_id=%s attempt=%s reason=startup_recovery prior_status=%s",
+                order.id, None, None, status,
+            )
+            if status == "SENDING":
+                # STALE_SENDING: SENDING becomes UNKNOWN; provider is deliberately not called.
+                if await _quarantine_stale_sending(
+                    db,
+                    order_id=int(order.id),
+                    tenant_id=str(order.tenant_id),
+                    allow_provider_call=False,
+                ):
+                    handled += 1
+                continue
+            if _auto_recovery_disposition(order, datetime.now(timezone.utc)) == "SKIP":
+                memo.remember_order(int(order.id), now)
+                continue
+            result_data = await _print_paid_order_ticket(order, db, reason="startup_recovery")
+            if (
+                result_data.get("skipped")
+                and result_data.get("code") == "WAITING_PICKUP_NO"
+                and status == "PENDING"
+            ):
+                await _park_waiting_pickup_print_intent(
+                    db,
+                    order_id=int(order.id),
+                    tenant_id=str(order.tenant_id),
+                )
+            if result_data.get("skipped"):
+                _remember_no_progress(memo, order, result_data, now)
+            else:
+                handled += 1
     return handled
 
 
 async def print_recovery_loop() -> None:
+    memo = _RecoveryScanMemo()
     while True:
         try:
-            await recover_pending_print_orders_once()
+            await recover_pending_print_orders_once(memo=memo)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

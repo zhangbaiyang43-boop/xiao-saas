@@ -333,6 +333,59 @@ class TencentSmsService:
             provider_message=first_status.get("Message") or "验证码发送失败，请稍后再试",
         )
 
+    def is_template_configured(self, template_id: str) -> bool:
+        """Credentials, app id and signature are the same as the login code flow; only
+        the approved template differs."""
+        return bool(template_id) and all([
+            settings.TENCENTCLOUD_SECRET_ID,
+            settings.TENCENTCLOUD_SECRET_KEY,
+            settings.TENCENT_SMS_APP_ID,
+            settings.TENCENT_SMS_SIGN_NAME,
+        ])
+
+    async def send_template_notice(self, phone: str, template_id: str, params: list[str]) -> SmsSendStatus:
+        """Send an approved notification template (not a verification code).
+
+        Deliberately separate from _send_login_code_with_status so the login/register
+        flow is untouched, and deliberately free of the login flow's cooldown/daily
+        counters: callers own their own frequency control. Never raises.
+        """
+        payload = {
+            "PhoneNumberSet": [f"+86{phone}"],
+            "SmsSdkAppId": settings.TENCENT_SMS_APP_ID,
+            "SignName": settings.TENCENT_SMS_SIGN_NAME,
+            "TemplateId": template_id,
+            "TemplateParamSet": [str(item) for item in params],
+        }
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        headers = self._build_headers(body, int(time.time()))
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                response = await client.post(f"https://{_HOST}", content=body.encode("utf-8"), headers=headers)
+                response.raise_for_status()
+                result = response.json()
+        except Exception as exc:
+            logger.error(f"Tencent SMS notice send failed: {exc}")
+            return SmsSendStatus(ok=False, provider_code=None, provider_message="notice send failed")
+
+        response_payload = result.get("Response") or {}
+        status_set = response_payload.get("SendStatusSet") or []
+        first_status = status_set[0] if status_set else {}
+        code_value = first_status.get("Code")
+        if code_value == "Ok":
+            return SmsSendStatus(ok=True, provider_code=code_value, provider_message="ok")
+        logger.error(
+            "Tencent SMS notice rejected: provider=tencent code=%s request_id=%s phone=%s",
+            code_value,
+            response_payload.get("RequestId") or "",
+            mask_phone(phone),
+        )
+        return SmsSendStatus(
+            ok=False,
+            provider_code=code_value,
+            provider_message=first_status.get("Message") or "notice send failed",
+        )
+
     def _build_headers(self, body: str, timestamp: int) -> dict[str, str]:
         date = datetime.utcfromtimestamp(timestamp).strftime("%Y-%m-%d")
         canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{_HOST}\nx-tc-action:{_ACTION.lower()}\n"

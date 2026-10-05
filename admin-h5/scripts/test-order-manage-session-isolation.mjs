@@ -165,9 +165,14 @@ assert.ok(
 }
 
 // ---- CASE 7 (static): the settle API contract itself is untouched ---------
+// 04B: confirmSettle posts the same settle-table request, still carrying the exact table + dining
+// session, plus the cashier's explicit collection confirmation (clicking 确认收款).
 assert.ok(
-  source.includes('await settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)'),
-  'confirmSettle must keep calling settleTable(tableNo, diningSessionId) unchanged',
+  source.includes("request.post('/v1/orders/settle-table', {")
+    && source.includes('table_no: settlingTable.value.tableNo,')
+    && source.includes('dining_session_id: settlingTable.value.diningSessionId || undefined,')
+    && source.includes('collection_confirmed: true,'),
+  'confirmSettle must post table_no + dining_session_id (+ collection_confirmed) to settle-table',
 )
 
 // ---- 待结账 stat must not count sessionless done orders --------------------

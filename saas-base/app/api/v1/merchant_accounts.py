@@ -90,6 +90,10 @@ async def auth_me(request: Request, db: AsyncSession = Depends(get_db)):
     )
     if principal.is_owner:
         data["name"] = tenant.name
+    from app.services.fulfilment_mode import get_fulfilment_mode
+
+    # Which kitchen workflow the admin should render; WORKBENCH on any doubt.
+    data["fulfilment_mode"] = await get_fulfilment_mode(db, principal.tenant_id)
     return success_response(data=data)
 
 

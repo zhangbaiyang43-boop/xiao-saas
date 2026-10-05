@@ -398,6 +398,9 @@ async def update_settings(data: FlatSettingsRequest, db: AsyncSession = Depends(
         tenant.payment_mode = payment_mode
     # 剩余所有扁平字段合入 business_info
     merged_business_info = {**(explicit_business_info or {}), **flat}
+    # fulfilment_mode is an operator-certified switch (printer proven per shop), never a
+    # merchant-writable setting: drop it from both the flat and nested business_info payloads.
+    merged_business_info.pop("fulfilment_mode", None)
     tenant, config = await service.update_tenant_settings(
         tenant,
         config,

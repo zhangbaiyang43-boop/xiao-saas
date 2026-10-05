@@ -159,7 +159,11 @@ class OrderStateMachineContractsTest(unittest.TestCase):
     def test_merchant_actions_follow_forward_sequence(self):
         self.assertIn("updateOrderStatus(order.id, 'preparing')", ORDER_MANAGE_SOURCE)
         self.assertIn("updateOrderStatus(order.id, 'done')", ORDER_MANAGE_SOURCE)
-        self.assertIn("settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)", ORDER_MANAGE_SOURCE)
+        # Phase 04B: the settle request is posted directly so it can carry the cashier's explicit
+        # collection confirmation; it is still bound to the exact table AND dining session.
+        self.assertIn("request.post('/v1/orders/settle-table', {", ORDER_MANAGE_SOURCE)
+        self.assertIn("table_no: settlingTable.value.tableNo,", ORDER_MANAGE_SOURCE)
+        self.assertIn("dining_session_id: settlingTable.value.diningSessionId || undefined,", ORDER_MANAGE_SOURCE)
         # P0-10 FINAL RECONCILIATION: the old table-only call is not a legitimate
         # contract any more -- settle-table must always be generation-bound.
         self.assertNotRegex(ORDER_MANAGE_SOURCE, re.compile(r"settleTable\(settlingTable\.value\.tableNo\)"))

@@ -99,14 +99,14 @@
     任何待办的时候整块不出现——"当前没有异常"这种话不需要每次都念一遍，商家是
     来处理事情的，没事情时这里就该是安静的，不用专门告诉他"没事"。 -->
     <div
-      v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0) && (pendingCount > 0 || p0Queue.length > 0)"
+      v-if="isLiveToday && !orderLoadError && !(loading && orders.length === 0) && (acceptTaskCount > 0 || p0Queue.length > 0)"
       class="section-block p0-queue"
     >
       <div class="p0-queue-head">
         <span class="p0-queue-title">现在要处理</span>
       </div>
-      <div v-if="pendingCount > 0" class="p0-next-task tap-shrink" @click="focusPendingAccept">
-        <div class="p0-next-count">{{ pendingCount }}</div>
+      <div v-if="acceptTaskCount > 0" class="p0-next-task tap-shrink" @click="focusPendingAccept">
+        <div class="p0-next-count">{{ acceptTaskCount }}</div>
         <div class="p0-next-label">新订单待接单</div>
         <div class="p0-next-copy">等待最久优先</div>
         <a-button type="primary" block class="p0-next-btn">去接单</a-button>
@@ -266,7 +266,7 @@
               <span>代点备注：{{ order.staffNote }}</span>
             </div>
             <div class="order-action-row">
-              <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
+              <a-button v-if="order.status === 'pending' && !isPrintFirst" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
               <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
               <a-tooltip v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" title="已付款订单不可直接取消"><InfoCircleOutlined class="paid-cancel-sop" /></a-tooltip>
               <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
@@ -311,7 +311,7 @@
             </a-button>
           </div>
           <div v-if="selectedTable.pendingOrders.length || selectedTable.preparingOrders.length || selectedTable.canSettle" class="table-actions">
-            <a-button v-if="selectedTable.pendingOrders.length" type="primary" :loading="selectedTable.updating" @click="acceptTableOrders(selectedTable)" class="order-action-btn">
+            <a-button v-if="selectedTable.pendingOrders.length && !isPrintFirst" type="primary" :loading="selectedTable.updating" @click="acceptTableOrders(selectedTable)" class="order-action-btn">
               全部接单 · {{ selectedTable.pendingOrders.length }} 单
             </a-button>
             <a-button v-if="selectedTable.preparingOrders.length" :loading="selectedTable.updating" @click="finishTableOrders(selectedTable)" class="order-action-btn order-action-btn--finish">
@@ -455,7 +455,7 @@
               class="order-action-btn"
               @click="openPickupSheet(order)"
             >发桌牌</a-button>
-            <a-button v-if="order.status === 'pending'" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
+            <a-button v-if="order.status === 'pending' && !isPrintFirst" type="primary" :loading="order.updating" @click="acceptOrder(order)" class="order-action-btn">接单</a-button>
             <a-button v-if="order.canReject" danger :loading="order.updating" @click="rejectOrder(order)" class="order-action-btn order-action-btn--reject">拒单</a-button>
             <a-tooltip v-else-if="order.status === 'pending' && order.paymentStatus === 'paid'" title="已付款订单不可直接取消"><InfoCircleOutlined class="paid-cancel-sop" /></a-tooltip>
             <a-button v-if="order.status === 'preparing'" :loading="order.updating" @click="finishOrder(order)" class="order-action-btn order-action-btn--finish">出餐完成</a-button>
@@ -711,7 +711,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { ReloadOutlined, OrderedListOutlined, EditOutlined, CheckCircleOutlined, InfoCircleOutlined, AppstoreOutlined } from '@ant-design/icons-vue'
-import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, reconcileRefundStatus, settleTable, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
+import { getOrders, getOrdersWithCursor, getOwnerOrderChanges, updateOrderStatus, serveOrder, updateOrderPickupNo, getPickupNoStatus, reprintOrder, refundPaidOrder, reconcileRefundStatus, getReviews, getTenantProfile, getMenuItems, createOrder, getEntranceCodes } from '../api'
 import { useWorkbenchSync } from '../composables/useWorkbenchSync'
 import { ownerActionableIdsFromOrders } from '../composables/workbenchSyncCore'
 import PickupNoPicker from '../components/PickupNoPicker.vue'
@@ -719,6 +719,8 @@ import { canReplacePickup, needsPickup, pickupConflictToast } from '../utils/pic
 import { sortMerchantOrders } from '../utils/orderListSort'
 import { formatOrderStatusText } from '../utils/orderStatusText'
 import { formatBeijingTime, formatBeijingDate, formatBeijingLong } from '../utils/beijingTime'
+import { useAuthStore } from '../stores/auth'
+import request from '../api/request'
 import { markPageContentReady } from '../utils/adminPerformance'
 
 function decodeJwtPayload(token) {
@@ -746,6 +748,10 @@ const reviewsMap = ref({}) // order_id -> review
 const view = ref(route.query.view === 'table' ? 'table' : 'list')
 const selectedTableKey = ref(null)
 const showTableDetail = ref(false)
+// PRINT_FIRST shops never click "accept": the printer already told the kitchen. WORKBENCH
+// (the default, and any doubt) keeps the legacy accept / prepare / finish workflow untouched.
+const auth = useAuthStore()
+const isPrintFirst = computed(() => auth.isPrintFirst)
 const showSettleDialog = ref(false)
 const settlingTable = ref(null)
 const settling = ref(false)
@@ -1109,6 +1115,7 @@ function mapOwnerOrders(raw) {
       canAssignPickupNo: !!o.can_assign_pickup_no,
       served_at: o.served_at || null,
       paymentStatus: o.payment_status || '',
+      paymentMode: o.payment_mode || '',
       canCancel: o.can_cancel === true,
       canReject: o.can_reject === true,
       refundRequired: o.refund_required === true,
@@ -1268,6 +1275,9 @@ async function manualRefresh() {
 }
 
 const pendingCount = computed(() => orders.value.filter(o => o.status === 'pending').length)
+// "Orders waiting to be accepted" is a task only in WORKBENCH mode. In PRINT_FIRST a pending
+// order is just a current order the printer already handled, so it must never read as a to-do.
+const acceptTaskCount = computed(() => (isPrintFirst.value ? 0 : pendingCount.value))
 const preparingCount = computed(() => orders.value.filter(o => o.status === 'preparing').length)
 // 待结账只统计属于明确桌台会话的 done 订单——没有 diningSessionId 的历史订单不构成
 // 一张真实可结账的桌台（见 tableGroups 上面的说明），不该被算进这个数字，否则跟桌台
@@ -1278,7 +1288,9 @@ const pendingPaymentCount = computed(() => orders.value.filter(o => o.status ===
 // 今日营收 Dashboard（底部"今日"tab）已经有，这里不重复展示，避免同一个数字
 // 两个地方各算一遍、以后各自改动漂移成两个不一样的口径。
 const statItems = computed(() => [
-  { label: '待接单', value: pendingCount.value, color: pendingCount.value > 0 ? '#ef4444' : '#374151' },
+  isPrintFirst.value
+    ? { label: '当前订单', value: pendingCount.value, color: '#374151' }
+    : { label: '待接单', value: pendingCount.value, color: pendingCount.value > 0 ? '#ef4444' : '#374151' },
   { label: '制作中', value: preparingCount.value, color: '#374151' },
   { label: '待结账', value: doneCount.value, color: '#16a34a' },
 ])
@@ -1352,16 +1364,16 @@ async function loadHistoricalOrders({ append = false } = {}) {
 }
 
 const statusFilter = ref('')
-const statusFilters = [
+const statusFilters = computed(() => [
   { label: '全部', val: '' },
-  { label: formatOrderStatusText('pending'), val: 'pending' },
+  { label: isPrintFirst.value ? '当前订单' : formatOrderStatusText('pending'), val: 'pending' },
   { label: formatOrderStatusText('preparing'), val: 'preparing' },
   { label: formatOrderStatusText('done'), val: 'done' },
   { label: formatOrderStatusText('settled'), val: 'settled' },
   { label: formatOrderStatusText('pending_payment'), val: 'pending_payment' },
   { label: formatOrderStatusText('rejected'), val: 'rejected' },
   { label: formatOrderStatusText('cancelled'), val: 'cancelled' },
-]
+])
 
 // 顾客来店里反馈"我这单有问题"时，能报出来的通常就是桌号、大概几点、点了什么菜——
 // 顾客小程序端"本桌已点菜品"里本来就会显示订单尾号（id 后4位），这里用同一套算法，
@@ -1465,12 +1477,12 @@ const tableGroups = computed(() => {
   return Object.values(map).map(t => ({
     ...t,
     pickupNo: t.orders.find(o => o.pickup_no)?.pickup_no || null,
-    pendingOrders: t.orders.filter(o => o.status === 'pending'),
+    pendingOrders: isPrintFirst.value ? [] : t.orders.filter(o => o.status === 'pending'),
     preparingOrders: t.orders.filter(o => o.status === 'preparing'),
     // Boolean(t.diningSessionId) 是第二道保险：本函数上面已经把没有会话的订单整个跳过、
     // 从不建组，理论上这里的 t.diningSessionId 必然存在——但结账能力判断本身必须独立
     // fail closed，不能只依赖分组阶段"恰好没漏"。
-    canSettle: Boolean(t.diningSessionId) && t.orders.length > 0 && t.orders.every(o => ['done', 'settled'].includes(o.status)) && t.orders.some(o => o.status === 'done') && t.pendingPaymentOrders.length === 0,
+    canSettle: Boolean(t.diningSessionId) && t.orders.length > 0 && t.orders.every(o => ['done', 'settled'].includes(o.status) || printFirstSettleable(o)) && t.orders.some(o => o.status === 'done' || printFirstSettleable(o)) && t.pendingPaymentOrders.length === 0,
     isSettled: t.orders.length > 0 && t.orders.every(o => o.status === 'settled'),
   })).sort((a, b) => {
     const p = t => t.pendingOrders.length ? 0 : t.preparingOrders.length ? 1 : t.canSettle ? 2 : 3
@@ -1584,6 +1596,7 @@ function tableTagClass(t) {
 
 function tableStatusText(t) {
   if (t.pendingOrders?.length) return String(t.pendingOrders.length) + ' 单待接'
+  if (isPrintFirst.value && t.orders?.some(o => o.status === 'pending') && !t.canSettle) return '当前订单'
   if (t.preparingOrders?.length) return formatOrderStatusText('preparing')
   if (t.canSettle) return t.checkoutRequestedAt ? '顾客催结账 ⏰' : '可结账'
   if (t.isSettled) return '已结账'
@@ -1600,6 +1613,8 @@ function staffSourceLabel(order) {
 }
 
 function statusLabel(order) {
+  // PRINT_FIRST: nobody accepts, so "待接单" would be a lie about what the shop is waiting for.
+  if (isPrintFirst.value && order?.status === 'pending') return '当前订单'
   // done 现在的真实含义是"厨房出餐完成"，端上桌是独立的 served_at 环节。
   // 没上菜时顶部标签显示"已出餐"，跟下面的"待上菜 / 确认已上菜"对得上；
   // served_at 有了才是"已上餐"。（settled 等其它状态不受影响。）
@@ -1718,6 +1733,16 @@ async function finishOrder(order) {
     } else { message.error(res.msg || '操作失败，请刷新页面重试'); await reconcileAfterOrderAction() }
   }
   catch { message.error('操作失败'); await reconcileAfterOrderAction() } finally { order.updating = false }
+}
+
+// PRINT_FIRST only: a ``pending`` order stops blocking the table once the money is in. A
+// postpay / table-account order is unpaid until the till collects it, which is exactly what the
+// "确认收款" dialog confirms, so it may be offered for settlement too. Mirrors the server's
+// print_first_pending_is_settleable(); the server is the authority.
+function printFirstSettleable(order) {
+  if (!isPrintFirst.value || order?.status !== 'pending') return false
+  if (order.paymentStatus === 'paid') return true
+  return ['postpay', 'table_account'].includes(order.paymentMode)
 }
 
 function orderNeedsServe(order) {
@@ -1960,7 +1985,13 @@ async function confirmSettle() {
   if (!settlingTable.value) return
   settling.value = true
   try {
-    const res = await settleTable(settlingTable.value.tableNo, settlingTable.value.diningSessionId)
+    // Clicking "确认收款" is the cashier's explicit collection confirmation; PRINT_FIRST needs it
+    // on the request for postpay / table-account orders (the server ignores it in WORKBENCH).
+    const res = await request.post('/v1/orders/settle-table', {
+      table_no: settlingTable.value.tableNo,
+      dining_session_id: settlingTable.value.diningSessionId || undefined,
+      collection_confirmed: true,
+    })
     if (res.code !== 200) {
       const statuses = res.data?.blocking_statuses
       const detail = Array.isArray(statuses) && statuses.length ? `（${statuses.map((s) => formatOrderStatusText(s)).join('、')}）` : ''

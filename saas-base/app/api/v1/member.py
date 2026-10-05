@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.api.v1.consumptions import serialize_consumption
-from app.api.v1.orders import build_order_financial_capabilities, order_status_text
+from app.api.v1.orders import build_order_financial_capabilities
 from app.config import settings
 from app.core.database import get_db
 from app.core.logger import logger, mask_phone
@@ -421,6 +421,8 @@ async def list_member_orders(
     db: AsyncSession = Depends(get_db),
 ):
     """Logged-in member order list. Does not change GET /orders/my (single-id poll)."""
+    from app.services.order_lifecycle_service import customer_status_text
+
     skip, limit = normalize_pagination(skip, limit)
     tenant_id, customer_id, error = current_customer(request)
     if error:
@@ -465,7 +467,7 @@ async def list_member_orders(
             {
                 "order_id": str(order.id),
                 "status": order.status,
-                "status_text": order_status_text(order.status),
+                "status_text": customer_status_text(order),
                 "total": float(order.total or 0),
                 "created_at": created_at,
                 "pickup_no": getattr(order, "pickup_no", None) or "",

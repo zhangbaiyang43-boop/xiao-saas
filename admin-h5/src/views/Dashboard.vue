@@ -182,8 +182,10 @@ import InsightCard from '../components/InsightCard.vue'
 import RankList from '../components/RankList.vue'
 import TrendChart from '../components/TrendChart.vue'
 import { formatBeijingTime } from '../utils/beijingTime'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
 const merchant = ref({ name: '', is_open: true, is_new_merchant: false })
 const stats = ref({ todayNewMembers: 0, secondOrderConversion: null })
 const memberPulse = ref({ total: 0, repeat7d: 0, pointsIssued: 0, pointsRedeemed: 0 })
@@ -282,7 +284,9 @@ const systemStatusCheckedLabel = computed(() => {
 // 没有待办时这一块完全不渲染，把版面让给下面的结果类信息（Jobs 原则：异常才说话，正常静默）。
 const todoItems = computed(() => {
   const items = []
-  if (orderStats.value.pending > 0) {
+  // "Waiting to be accepted" is a to-do only in WORKBENCH mode; in PRINT_FIRST the printer already
+  // told the kitchen, so a pending order is a current order, never a task for the owner.
+  if (orderStats.value.pending > 0 && !auth.isPrintFirst) {
     items.push({ key: 'pending', urgent: true, text: `有 ${orderStats.value.pending} 单待接单，请立即处理`, action: () => router.push('/orders') })
   }
   if (orderStats.value.canSettle > 0) {
@@ -379,6 +383,14 @@ async function toggleOpen() {
   }
 }
 
+// Same rule as OrderManage / the server's print_first_pending_is_settleable(): in PRINT_FIRST a
+// paid ``pending`` order (or a postpay / table-account one the till will collect) does not block.
+function printFirstSettleable(o) {
+  if (!auth.isPrintFirst || o.status !== 'pending') return false
+  if (o.payment_status === 'paid') return true
+  return ['postpay', 'table_account'].includes(o.payment_mode)
+}
+
 async function loadOrders(pollMeta = {}) {
   const res = await getOrders({ date_str: 'today' }, { meta: { fromPolling: Boolean(pollMeta.fromPolling), dedupe: true, dedupeKey: 'admin:orders:today' } })
   const raw = res?.data?.data || res?.data || []
@@ -408,8 +420,8 @@ async function loadOrders(pollMeta = {}) {
     pending, preparing,
     canSettle: Object.values(sessionMap).filter(t =>
       t.orders.length > 0 &&
-      t.orders.every(o => ['done', 'settled'].includes(o.status)) &&
-      t.orders.some(o => o.status === 'done') &&
+      t.orders.every(o => ['done', 'settled'].includes(o.status) || printFirstSettleable(o)) &&
+      t.orders.some(o => o.status === 'done' || printFirstSettleable(o)) &&
       t.pendingPaymentOrders.length === 0
     ).length,
   }
