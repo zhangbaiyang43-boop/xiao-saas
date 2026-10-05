@@ -107,6 +107,8 @@ Obsidian 知识库（本机，不在 git）：`C:\Users\15936\Documents\Obsidian
 - 仓库操作红线：[Claude.md](./Claude.md)
 - 发布知识库：[docs/engineering/release-process/](./docs/engineering/release-process/)
 - 发布总述：[docs/production-deployment.md](./docs/production-deployment.md)
+- 快麦云打印对接说明（接口事实 / 代码行为 / 实测 / 未验证）：[docs/engineering/KUAIMAI_PRINTER_INTEGRATION.md](./docs/engineering/KUAIMAI_PRINTER_INTEGRATION.md)
+- 单店 PRINT_FIRST 试点前检查清单：[docs/prelaunch/SINGLE_STORE_PILOT_CHECKLIST.md](./docs/prelaunch/SINGLE_STORE_PILOT_CHECKLIST.md)
 - 本机判断层：`...\12_部署运维\部署运维.md`
 
 ## AI 治理（本阶段新增）
