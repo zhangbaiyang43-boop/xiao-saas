@@ -50,6 +50,8 @@ _KUAIMAI_UNKNOWN_CODES = frozenset({
 })
 # Cancel slip: a ticket that tells the kitchen to stop an order it may already hold.
 CANCEL_SLIP_BANNER = "【取消单·请停止制作】"
+CANCEL_SLIP_TABLE_TAG = "【取消】"
+CANCEL_SLIP_QUANTITY_TEXT = "停做"
 _CANCEL_SLIP_TERMINAL_STATUSES = frozenset({"rejected", "cancelled"})
 # Print states after which a kitchen ticket may physically exist. UNKNOWN and SENDING are
 # included on purpose: a duplicate-looking "cancel" slip is cheap, a dish cooked for a
@@ -1357,15 +1359,30 @@ async def _print_paid_order_ticket_background(
 def _apply_cancel_slip_banner(render_data: dict) -> dict:
     """Mark a Kuaimai template payload as a cancel slip without needing a new template.
 
-    The console template is not visible from here, so the banner goes into every
-    free-text field that is certain to be printed: the shop-name header, the order-type
-    line (the "加菜单" slot) and the remark. Items and table stay, so the kitchen can see
-    exactly which order to stop.
+    The console template is not visible from here, and production showed that the shop-name
+    and order-type slots are not always bound, so the remark alone (usually small, near the
+    bottom) is not enough. The banner therefore also goes where the kitchen certainly looks:
+    the table number and the first row of the dish list. The real dishes stay below it so the
+    kitchen can see exactly which order to stop. Totals are left untouched.
     """
     data = dict(render_data)
     data["shop_name"] = f"{CANCEL_SLIP_BANNER} {data.get('shop_name') or ''}".strip()
     data["order_type_text"] = CANCEL_SLIP_BANNER
     data["remark"] = f"{CANCEL_SLIP_BANNER} {data.get('remark') or ''}".strip()
+    data["table_no"] = f"{data.get('table_no') or ''}{CANCEL_SLIP_TABLE_TAG}"
+    banner_row = {
+        "goods_name": CANCEL_SLIP_BANNER,
+        "display_name": CANCEL_SLIP_BANNER,
+        "quantity": 1,
+        "quantity_text": CANCEL_SLIP_QUANTITY_TEXT,
+        "unit_price": "0.00",
+        "item_amount": "0.00",
+        "item_amount_text": "0.00",
+        "sku_text": "",
+        "option_text": "",
+        "addons": "",
+    }
+    data["items"] = [banner_row, *list(data.get("items") or [])]
     return data
 
 

@@ -27,6 +27,8 @@ from app.services import order_print_service as ops
 from app.services.order_lifecycle_service import OrderLifecycleService
 from app.services.order_print_service import (
     CANCEL_SLIP_BANNER,
+    CANCEL_SLIP_QUANTITY_TEXT,
+    CANCEL_SLIP_TABLE_TAG,
     PrintResultUnknownError,
     _apply_cancel_slip_banner,
     _apply_cancel_slip_ticket_banner,
@@ -67,9 +69,27 @@ class BannerTest(unittest.TestCase):
         self.assertTrue(out["remark"].startswith(CANCEL_SLIP_BANNER))
         self.assertIn("少辣", out["remark"])
         self.assertEqual(out["order_no"], "123456")
-        self.assertEqual(out["table_no"], "A1")
-        self.assertEqual(out["items"], [{"goods_name": "牛肉汤"}])
+        self.assertEqual(out["table_no"], "A1" + CANCEL_SLIP_TABLE_TAG)
+        self.assertEqual(out["pay_amount"], "20.00", "totals must not change")
+        self.assertEqual(out["items"][0]["goods_name"], CANCEL_SLIP_BANNER)
+        self.assertEqual(out["items"][0]["quantity_text"], CANCEL_SLIP_QUANTITY_TEXT)
+        self.assertEqual(out["items"][1:], [{"goods_name": "牛肉汤"}], "real dishes stay below the banner row")
         self.assertEqual(data["shop_name"], "大宝羊肉馆", "input must not be mutated")
+        self.assertEqual(data["table_no"], "A1")
+        self.assertEqual(data["items"], [{"goods_name": "牛肉汤"}])
+
+    def test_the_banner_row_passes_the_real_payload_validation(self):
+        from app.services.kuaimai_service import build_order_template_render_data, validate_order_template_render_data
+
+        order = SimpleNamespace(id=123456789, table_no="A1", remark="", total="20.00", discount_amount=0,
+                                payment_method="mock", order_type="", parent_order_id="", pickup_no="",
+                                created_at=None)
+        item = SimpleNamespace(name="牛肉汤", qty=1, price="20.00", item_remark="")
+        data = _apply_cancel_slip_banner(build_order_template_render_data(order, [item], shop_name="店"))
+        self.assertEqual(validate_order_template_render_data(data, order), (True, ""))
+        self.assertEqual(data["total_amount"], "20.00")
+        self.assertEqual(data["pay_amount"], "20.00")
+        self.assertEqual([i["goods_name"] for i in data["items"]], [CANCEL_SLIP_BANNER, "牛肉汤"])
 
     def test_kuaimai_banner_survives_empty_shop_name_and_remark(self):
         out = _apply_cancel_slip_banner({"shop_name": "", "remark": None})
@@ -356,8 +376,9 @@ class RealRoutePayloadTest(_DbCase):
         render_data = sent.await_args.args[4]
         self.assertIn(CANCEL_SLIP_BANNER, render_data["shop_name"])
         self.assertEqual(render_data["order_type_text"], CANCEL_SLIP_BANNER)
-        self.assertEqual(render_data["table_no"], "A1")
-        self.assertEqual(render_data["items"][0]["goods_name"], "牛肉汤")
+        self.assertEqual(render_data["table_no"], "A1" + CANCEL_SLIP_TABLE_TAG)
+        self.assertEqual(render_data["items"][0]["goods_name"], CANCEL_SLIP_BANNER)
+        self.assertEqual(render_data["items"][1]["goods_name"], "牛肉汤")
         self.assertEqual(sent.await_args.args[0], "app_1")
         self.assertEqual(sent.await_args.args[2], "KM001")
 
@@ -370,6 +391,8 @@ class RealRoutePayloadTest(_DbCase):
         render_data = sent.await_args.args[4]
         self.assertNotIn(CANCEL_SLIP_BANNER, render_data["shop_name"])
         self.assertNotEqual(render_data["order_type_text"], CANCEL_SLIP_BANNER)
+        self.assertEqual(render_data["table_no"], "A1")
+        self.assertEqual([i["goods_name"] for i in render_data["items"]], ["牛肉汤"])
 
 
 if __name__ == "__main__":
