@@ -1,0 +1,156 @@
+# Phase 03R: disposable, localhost-only runtime for the Super Admin Phase 03 candidate.
+#
+# NOT staging, NOT production-like infrastructure. One purpose: let a browser open /super
+# on an exact, pinned candidate commit with synthetic data, then be destroyed with
+# `down -v` (see scripts/super-admin-cert.ps1).
+#
+# Build contexts point at ${CERT_SRC_DIR}: a `git archive` of the pinned candidate commit
+# extracted OUTSIDE the main working tree by `super-admin-cert.ps1 Prepare`. Nothing here
+# builds from the working tree, and nothing floats on a branch name.
+name: xiao-super-admin-cert
+
+x-backend-build: &backend-build
+  context: ${CERT_SRC_DIR}/saas-base
+  dockerfile: Dockerfile
+
+x-backend-environment: &backend-environment
+  APP_ENV: staging
+  DEBUG: "false"
+  AUTO_CREATE_TABLES: "false"
+  DATABASE_URL: mysql+asyncmy://cert_app:${CERT_DB_APP_PASSWORD}@mysql:3306/xiao_super_admin_cert?charset=utf8mb4
+  REDIS_URL: redis://redis:6379/0
+  REDIS_ENABLED: "true"
+  JWT_SECRET_KEY: ${CERT_JWT_SECRET_KEY}
+  # Test-only super credentials. Password only; TOTP stays unconfigured on purpose.
+  SUPER_ADMIN_PASSWORD: ${CERT_SUPER_ADMIN_PASSWORD}
+  SUPER_ADMIN_TOTP_SECRET: ""
+  # Login attempts during a manual certification must not trip the production limit.
+  RATE_LIMIT_LOGIN: "60/minute"
+  ALLOW_MOCK_MONEY_ENDPOINTS: "false"
+  ALLOW_MOCK_WECHAT_SESSION: "false"
+  SAAS_REAL_PAYMENT_ENABLED: "false"
+  SAAS_MANUAL_PAYMENT_ENABLED: "false"
+  # Every external integration is blank: this runtime can not reach WeChat, SMS, printers or COS.
+  TENCENTCLOUD_SECRET_ID: ""
+  TENCENTCLOUD_SECRET_KEY: ""
+  TENCENT_SMS_APP_ID: ""
+  TENCENT_SMS_SIGN_NAME: ""
+  TENCENT_SMS_LOGIN_TEMPLATE_ID: ""
+  WECHAT_APP_ID: ""
+  WECHAT_APP_SECRET: ""
+  WX_SP_MCHID: ""
+  WX_SP_APPID: ""
+  WX_SP_API_KEY_V3: ""
+  WX_SP_CERT_SERIAL: ""
+  WX_SP_PRIVATE_KEY: ""
+  FEIEYUN_USER: ""
+  FEIEYUN_UKEY: ""
+  PLATFORM_REGISTER_KEY: ""
+  OPS_ALERT_WEBHOOK_URL: ""
+  PUBLIC_BASE_URL: http://127.0.0.1:${CERT_ADMIN_PORT}
+  H5_ORDER_BASE_URL: http://127.0.0.1:${CERT_ADMIN_PORT}
+  CORS_ORIGINS: http://127.0.0.1:${CERT_ADMIN_PORT}
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: xiao_super_admin_cert
+      MYSQL_USER: cert_app
+      MYSQL_PASSWORD: ${CERT_DB_APP_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${CERT_DB_ROOT_PASSWORD}
+    volumes:
+      - cert_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - cert_private
+
+  redis:
+    image: redis:7.0-alpine
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - cert_private
+
+  migrate:
+    build: *backend-build
+    environment: *backend-environment
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - cert_private
+
+  seed:
+    build: *backend-build
+    environment:
+      <<: *backend-environment
+      CERT_SEED_ACK: SUPER_ADMIN_CERT_V1
+      PYTHONPATH: /app
+    entrypoint: ["python", "/cert/seed_super_cert.py"]
+    volumes:
+      - type: bind
+        source: ${CERT_TOOLING_DIR}/seed_super_cert.py
+        target: /cert/seed_super_cert.py
+        read_only: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - cert_private
+
+  backend:
+    build: *backend-build
+    environment: *backend-environment
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--lifespan", "off"]
+    ports:
+      - "127.0.0.1:${CERT_BACKEND_PORT}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    networks:
+      - cert_private
+
+  admin:
+    build:
+      context: ${CERT_SRC_DIR}
+      dockerfile: _cert/admin.Dockerfile
+      args:
+        CERT_ADMIN_SHA: ${CERT_ADMIN_SHA}
+        VITE_API_ORIGIN: http://127.0.0.1:${CERT_ADMIN_PORT}
+    ports:
+      - "127.0.0.1:${CERT_ADMIN_PORT}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - cert_private
+
+volumes:
+  cert_mysql_data:
+
+networks:
+  cert_private:
+    driver: bridge
