@@ -48,6 +48,16 @@ _KUAIMAI_UNKNOWN_CODES = frozenset({
     "KUAIMAI_UNKNOWN_ERROR",
     "KUAIMAI_INVALID_RESPONSE",
 })
+# Cancel slip: a ticket that tells the kitchen to stop an order it may already hold.
+CANCEL_SLIP_BANNER = "【取消单·请停止制作】"
+_CANCEL_SLIP_TERMINAL_STATUSES = frozenset({"rejected", "cancelled"})
+# Print states after which a kitchen ticket may physically exist. UNKNOWN and SENDING are
+# included on purpose: a duplicate-looking "cancel" slip is cheap, a dish cooked for a
+# cancelled order is not.
+_CANCEL_SLIP_TICKET_MAY_EXIST = frozenset({"SUCCESS", "UNKNOWN", "SENDING"})
+# One cancel slip per order. FAILED may be claimed again; SENDING / UNKNOWN / SUCCESS never
+# are, so a slow provider can not make the kitchen receive two.
+_CANCEL_SLIP_NO_RECLAIM = frozenset({"SENDING", "UNKNOWN", "SUCCESS"})
 _AUTO_RECONCILE_STATUSES = frozenset({"pending", "preparing", "done"})
 _FULFILLABLE_STATUSES = frozenset({"pending", "preparing", "done", "settled"})
 
@@ -188,6 +198,7 @@ def build_staff_print_summary(order: Order, *, defer_kitchen_print: bool = False
         "print_last_attempt_at": initial.get("last_attempt_at"),
         "print_provider": (initial.get("route") or {}).get("provider"),
         "print_printer_identifier": (initial.get("route") or {}).get("printer_identifier"),
+        "cancel_slip_status": (meta.get("cancel_slip") or {}).get("status") if meta else None,
         "manual_reprint_count": int(meta.get("manual_reprint_count") or 0),
         "manual_reprint_last_status": (
             (meta.get("manual_reprints") or [{}])[-1].get("status")
@@ -632,6 +643,8 @@ async def _execute_provider_with_frozen_route(
     order: Order,
     db: AsyncSession,
     initial_print: dict,
+    *,
+    cancel_slip: bool = False,
 ) -> str | None:
     from app.models.order import OrderItem
     from app.services.feieyun_service import build_order_ticket, print_order
@@ -668,6 +681,8 @@ async def _execute_provider_with_frozen_route(
             order_items,
             shop_name=getattr(tenant, "name", "") if tenant else "",
         )
+        if cancel_slip:
+            render_data = _apply_cancel_slip_banner(render_data)
         valid, error_code = validate_order_template_render_data(render_data, order)
         if not valid:
             raise RuntimeError(error_code)
@@ -689,10 +704,13 @@ async def _execute_provider_with_frozen_route(
             raise RuntimeError(str(error_code))
         return _bounded(result.get("provider_task_id"), PRINT_IDENTIFIER_MAX_CHARS)
 
+    ticket = build_order_ticket(order, order_items)
+    if cancel_slip:
+        ticket = _apply_cancel_slip_ticket_banner(ticket)
     result = await print_order(
         printer_identifier,
         credentials["credential"],
-        build_order_ticket(order, order_items),
+        ticket,
     )
     if result == "unknown":
         raise PrintResultUnknownError("FEIEYUN_PRINT_RESULT_UNKNOWN")
@@ -1331,3 +1349,209 @@ async def _print_paid_order_ticket_background(
                 "[PRINT_BACKGROUND_TASK_FAILED] order_id=%s reason=%s error=%s",
                 order_id, reason, exc,
             )
+
+
+# =========================================================================================
+# CANCEL SLIP
+# =========================================================================================
+def _apply_cancel_slip_banner(render_data: dict) -> dict:
+    """Mark a Kuaimai template payload as a cancel slip without needing a new template.
+
+    The console template is not visible from here, so the banner goes into every
+    free-text field that is certain to be printed: the shop-name header, the order-type
+    line (the "加菜单" slot) and the remark. Items and table stay, so the kitchen can see
+    exactly which order to stop.
+    """
+    data = dict(render_data)
+    data["shop_name"] = f"{CANCEL_SLIP_BANNER} {data.get('shop_name') or ''}".strip()
+    data["order_type_text"] = CANCEL_SLIP_BANNER
+    data["remark"] = f"{CANCEL_SLIP_BANNER} {data.get('remark') or ''}".strip()
+    return data
+
+
+def _apply_cancel_slip_ticket_banner(ticket: str) -> str:
+    """Same idea for the Feieyun plain-text ticket: swap the title line, keep the body."""
+    banner_line = f"<CB>{CANCEL_SLIP_BANNER}</CB>"
+    if "<CB>新订单</CB>" in ticket:
+        return ticket.replace("<CB>新订单</CB>", banner_line, 1)
+    return f"{banner_line}\n{ticket}"
+
+
+def cancel_slip_needed(order: Order) -> bool:
+    """True when the order just ended (rejected / cancelled) and the kitchen may hold its ticket."""
+    if str(getattr(order, "status", "") or "") not in _CANCEL_SLIP_TERMINAL_STATUSES:
+        return False
+    if str(getattr(order, "print_status", "") or "").upper() in _CANCEL_SLIP_TICKET_MAY_EXIST:
+        return True
+    # A ticket may also exist because staff reprinted a failed initial print.
+    meta = _get_print_meta(order)
+    for event in meta.get("manual_reprints") or []:
+        if isinstance(event, dict) and str(event.get("status") or "").upper() in _CANCEL_SLIP_TICKET_MAY_EXIST:
+            return True
+    return False
+
+
+async def _claim_cancel_slip(db: AsyncSession, order_id: int, tenant_id: str) -> Order | None:
+    """Row-locked check-and-set: at most one caller gets to send the slip."""
+    result = await db.execute(
+        select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
+    )
+    locked = result.scalar_one_or_none()
+    if not locked:
+        return None
+    await db.refresh(locked)
+    if not cancel_slip_needed(locked):
+        return None
+    meta = _get_print_meta(locked)
+    existing = meta.get("cancel_slip") if isinstance(meta.get("cancel_slip"), dict) else {}
+    if str(existing.get("status") or "").upper() in _CANCEL_SLIP_NO_RECLAIM:
+        return None
+    meta["cancel_slip"] = {
+        "status": "SENDING",
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "error_code": None,
+        "provider_task_id": None,
+    }
+    _set_print_meta(locked, meta)
+    await db.commit()
+    return locked
+
+
+async def _record_cancel_slip_result(
+    db: AsyncSession,
+    order_id: int,
+    tenant_id: str,
+    *,
+    status: str,
+    error_code: str | None,
+    provider_task_id: str | None,
+) -> None:
+    result = await db.execute(
+        select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id).with_for_update()
+    )
+    locked = result.scalar_one_or_none()
+    if not locked:
+        return
+    await db.refresh(locked)
+    meta = _get_print_meta(locked)
+    slip = dict(meta.get("cancel_slip") or {})
+    slip.update({
+        "status": status,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "error_code": _bounded(error_code, PRINT_ERROR_CODE_MAX_CHARS),
+        "provider_task_id": _bounded(provider_task_id, PRINT_IDENTIFIER_MAX_CHARS),
+    })
+    meta["cancel_slip"] = slip
+    _set_print_meta(locked, meta)
+    await db.commit()
+
+
+async def _print_cancel_slip(order: Order, db: AsyncSession, *, reason: str = "order_ended") -> dict:
+    """Best-effort: tell the kitchen to stop an order that was already sent to it.
+
+    Never raises into the caller and never touches ``print_status`` or the initial-print
+    state (those describe the original ticket). Its own outcome lives in
+    ``meta["cancel_slip"]`` and is exposed to staff as ``cancel_slip_status``.
+    """
+    if not order:
+        return {"success": False, "skipped": True, "code": "ORDER_NOT_FOUND"}
+    tenant_id = str(order.tenant_id)
+    order_id = int(order.id)
+    if not cancel_slip_needed(order):
+        return {"success": False, "skipped": True, "code": "CANCEL_SLIP_NOT_NEEDED"}
+
+    from app.core.plan_capabilities import CAP_KITCHEN_PRINT
+    from app.services.optional_entitlement import optional_capability_enabled
+
+    if not await optional_capability_enabled(tenant_id, CAP_KITCHEN_PRINT):
+        _log_print_skipped(order, reason="PLAN_CAPABILITY_DISABLED")
+        return {"success": False, "skipped": True, "code": "PLAN_CAPABILITY_DISABLED"}
+
+    claimed = await _claim_cancel_slip(db, order_id, tenant_id)
+    if not claimed:
+        return {"success": False, "skipped": True, "code": "CANCEL_SLIP_NOT_CLAIMED"}
+    initial = _initial_print_meta(_get_print_meta(claimed))
+    if not isinstance(initial.get("route"), dict) or not initial.get("route"):
+        # A reprint-only ticket has no frozen initial route to reuse.
+        await _record_cancel_slip_result(
+            db, order_id, tenant_id, status="FAILED", error_code="PRINT_ROUTE_UNAVAILABLE", provider_task_id=None,
+        )
+        logger.error("CANCEL_SLIP_FAILED order_id=%s error_category=PRINT_ROUTE_UNAVAILABLE", order_id)
+        return {"success": False, "status": "failed", "code": "PRINT_ROUTE_UNAVAILABLE"}
+    try:
+        task_id = await _execute_provider_with_frozen_route(claimed, db, initial, cancel_slip=True)
+        status, error_code = "SUCCESS", None
+        logger.info("CANCEL_SLIP_SENT order_id=%s reason=%s provider_task_id=%s", order_id, reason, task_id)
+    except Exception as exc:
+        task_id = None
+        status = "UNKNOWN" if _is_unknown_print_exception(exc) else "FAILED"
+        error_code = str(getattr(exc, "code", None) or str(exc) or type(exc).__name__)
+        logger.error(
+            "CANCEL_SLIP_FAILED order_id=%s result=%s error_category=%s", order_id, status, error_code,
+        )
+    await _record_cancel_slip_result(
+        db, order_id, tenant_id, status=status, error_code=error_code, provider_task_id=task_id,
+    )
+    return {"success": status == "SUCCESS", "status": status.lower(), "code": error_code}
+
+
+async def _print_cancel_slip_background(
+    order_id: int,
+    tenant_id: str,
+    *,
+    reason: str,
+    bind: Any = None,
+) -> None:
+    """Independent-session wrapper so the reject / cancel request never waits on the printer.
+
+    The session factory is imported inside the body for the same reason as in
+    _print_paid_order_ticket_background (tests load this module against a stubbed
+    sys.modules).
+    """
+    if bind is None:
+        from app.core.database import AsyncSessionLocal as session_factory
+    else:
+        session_factory = async_sessionmaker(bind=bind, expire_on_commit=False)
+
+    async with session_factory() as bg_db:
+        try:
+            TenantContext.set_tenant_id(tenant_id)
+            order_result = await bg_db.execute(
+                select(Order).where(Order.id == order_id, Order.tenant_id == tenant_id)
+            )
+            order = order_result.scalar_one_or_none()
+            if not order:
+                _log_print_skipped(None, reason="ORDER_NOT_FOUND")
+                return
+            await _print_cancel_slip(order, bg_db, reason=reason)
+        except Exception as exc:
+            logger.warning(
+                "[CANCEL_SLIP_BACKGROUND_TASK_FAILED] order_id=%s reason=%s error=%s",
+                order_id, reason, exc,
+            )
+
+
+def schedule_cancel_slip(order: Order, db: AsyncSession, *, reason: str) -> bool:
+    """Call after the reject / cancel transaction has committed. Returns whether a slip was scheduled.
+
+    Fire-and-forget on purpose: a printer problem must never fail or delay the reject.
+    """
+    try:
+        if not cancel_slip_needed(order):
+            return False
+        if not supports_independent_print_session(db):
+            logger.warning("[CANCEL_SLIP_SKIPPED] order_id=%s reason=no_independent_session", getattr(order, "id", None))
+            return False
+        _spawn_background_print_task(
+            _print_cancel_slip_background(
+                int(order.id),
+                str(order.tenant_id),
+                reason=reason,
+                bind=getattr(db, "bind", None),
+            )
+        )
+        return True
+    except Exception as exc:
+        logger.warning("[CANCEL_SLIP_SCHEDULE_FAILED] order_id=%s error=%s", getattr(order, "id", None), exc)
+        return False
