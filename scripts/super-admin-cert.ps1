@@ -122,8 +122,17 @@ function Invoke-Prepare {
     New-Item -ItemType Directory -Path $SrcDir -Force | Out-Null
     $tar = Join-Path $WorkRoot 'candidate.tar'
     Invoke-Git @('archive', '--format=tar', '-o', $tar, $CandidateSha) | Out-Null
-    & tar -xf $tar -C $SrcDir
+
+    # PowerShell may inherit Git Bash's PATH, where "tar" resolves to Git's
+    # /usr/bin/tar. That tar interprets Windows "C:\..." paths as host:path.
+    # Use Windows' built-in bsdtar explicitly so native Windows paths are safe.
+    $tarExe = Join-Path $env:WINDIR 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tarExe)) {
+        throw "Windows tar.exe not found at $tarExe"
+    }
+    & $tarExe -xf $tar -C $SrcDir
     if ($LASTEXITCODE -ne 0) { throw 'tar extraction failed' }
+
     Remove-Item -LiteralPath $tar -Force
     if (-not (Test-Path (Join-Path $SrcDir 'admin-h5\src\views\super\SuperAdminShell.vue'))) { throw 'extracted source lacks SuperAdminShell.vue' }
     if (Test-Path (Join-Path $SrcDir '.git')) { throw 'extracted source unexpectedly contains .git' }
