@@ -216,10 +216,17 @@ async def _summary() -> None:
         print("ORDERS_FOR_MERCHANT_A=%d" % await count(Order, Order.tenant_id == "cert-merchant-a"))
 
 
+async def _run() -> None:
+    # Keep seeding and verification on the same event loop. AsyncSessionLocal
+    # uses the application's global async engine/pool; creating a second loop
+    # can reuse asyncmy connections that are still bound to the first loop.
+    await _seed()
+    await _summary()
+
+
 def main() -> None:
     _guard()
-    asyncio.run(_seed())
-    asyncio.run(_summary())
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
