@@ -19,12 +19,7 @@
       </div>
     </div>
 
-    <div v-else class="admin-body">
-      <div class="top-bar animate-in">
-        <span class="top-title">平台中控台</span>
-        <button class="logout-btn tap-shrink" @click="logout">退出</button>
-      </div>
-
+    <SuperAdminShell v-else :pending-count="pendingPaymentCount" @logout="logout">
       <template v-if="isDetail">
         <div class="merchant-context">
           <button class="back-link tap-shrink" @click="backToMerchants">返回商户列表</button>
@@ -177,65 +172,125 @@
         </div>
       </template>
 
-      <template v-else>
-      <div class="console-tabs animate-in">
-        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'merchants' }" @click="activeTab = 'merchants'">商家管理</button>
-        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'billing' }" @click="activeTab = 'billing'">
-          待确认付款<span v-if="pendingPaymentCount > 0" class="tab-badge">{{ pendingPaymentCount }}</span>
-        </button>
-        <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'channel' }" @click="activeTab = 'channel'">渠道管理</button>
-      </div>
-
-      <div v-if="activeTab === 'merchants'">
-      <div class="stat-row animate-in">
-        <div class="stat-card"><div class="stat-num">{{ stats.total_merchants }}</div><div class="stat-label">商家总数</div></div>
-        <div class="stat-card"><div class="stat-num green">{{ stats.active_merchants }}</div><div class="stat-label">启用商户</div></div>
-        <div class="stat-card"><div class="stat-num blue">{{ stats.today_orders }}</div><div class="stat-label">今日订单</div></div>
-        <div class="stat-card"><div class="stat-num green">¥{{ stats.today_revenue?.toFixed(0) }}</div><div class="stat-label">今日营收</div></div>
-      </div>
-
-      <div class="section animate-in">
-        <div class="section-title">性能监控（P50/P95）</div>
-        <div v-if="perfStatsLoading" class="loading">加载中...</div>
-        <div v-else-if="perfStatsError" class="empty">加载失败</div>
-        <div v-else-if="!perfStats.length" class="empty">暂无采样数据</div>
-        <table v-else class="perf-table">
-          <thead>
-            <tr>
-              <th>指标</th>
-              <th class="num">样本数</th>
-              <th class="num">均值</th>
-              <th class="num">P50</th>
-              <th class="num">P95</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in perfStats" :key="row.metric">
-              <td>{{ row.metric }}</td>
-              <td class="num">{{ row.count }}</td>
-              <td class="num">{{ row.avg }} ms</td>
-              <td class="num">{{ row.p50 }} ms</td>
-              <td class="num">{{ row.p95 }} ms</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="section animate-in">
-        <div class="section-title">开通新商家</div>
-        <div class="create-form">
-          <input v-model="newMerchant.name" class="form-input" placeholder="* 店铺名称" />
-          <input v-model="newMerchant.phone" class="form-input" placeholder="* 手机号（登录账号）" maxlength="11" />
-          <input v-model="newMerchant.initial_code" class="form-input" placeholder="初始验证码（默认 123456）" />
-          <button class="create-btn tap-shrink" :disabled="creating" @click="createMerchant">{{ creating ? '创建中...' : '+ 立即开通' }}</button>
+      <template v-else-if="currentPage === 'overview'">
+        <div class="super-page-header animate-in">
+          <div>
+            <h1>平台总览</h1>
+            <p>先处理影响商户开通、收款和平台使用的问题。</p>
+          </div>
         </div>
-        <div v-if="createResult" class="create-result" :class="createResult.ok ? 'ok' : 'err'">{{ createResult.msg }}</div>
-      </div>
 
-      <div class="section animate-in">
+        <div v-if="overviewError" class="section overview-alert">
+          <span>{{ overviewError }}</span>
+          <button class="refresh-btn tap-shrink" @click="loadOverview(true)">重新加载</button>
+        </div>
+
+        <section class="section animate-in" aria-labelledby="action-title">
+          <div id="action-title" class="section-title title-row">
+            <span>需要处理</span>
+            <button class="refresh-btn tap-shrink" :disabled="overviewLoading" @click="loadOverview(true)">{{ overviewLoading ? '刷新中...' : '刷新' }}</button>
+          </div>
+          <div class="action-grid">
+            <button class="action-card" @click="router.push('/super/billing/pending')">
+              <span>待确认付款</span><strong>{{ pendingCountLoaded ? pendingPaymentCount : '—' }}</strong><small>进入付款核对</small>
+            </button>
+            <button class="action-card" @click="openMerchantFilter('pending')">
+              <span>支付待验证</span><strong>{{ merchantsLoaded ? paymentPendingVerifyCount : '—' }}</strong><small>查看商户</small>
+            </button>
+            <button class="action-card" @click="openMerchantFilter('unconfigured')">
+              <span>支付未配置</span><strong>{{ merchantsLoaded ? paymentUnconfiguredCount : '—' }}</strong><small>查看商户</small>
+            </button>
+            <button class="action-card" @click="openMerchantFilter('', 'disabled')">
+              <span>已停用商户</span><strong>{{ merchantsLoaded ? disabledMerchantCount : '—' }}</strong><small>查看商户</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="section animate-in" aria-labelledby="metrics-title">
+          <div id="metrics-title" class="section-title">经营辅助数据</div>
+          <div class="stat-row overview-stats">
+            <div class="stat-card"><div class="stat-num">{{ statsLoaded ? stats.total_merchants : '—' }}</div><div class="stat-label">商户总数</div></div>
+            <div class="stat-card"><div class="stat-num blue">{{ statsLoaded ? stats.today_orders : '—' }}</div><div class="stat-label">今日商户订单</div></div>
+            <div class="stat-card"><div class="stat-num">{{ statsLoaded ? `¥${Number(stats.today_revenue || 0).toFixed(0)}` : '—' }}</div><div class="stat-label">今日商户餐饮交易额</div></div>
+          </div>
+          <div class="metric-note">餐饮交易额来自商户经营流水，不代表开心点单 SaaS 收入。</div>
+        </section>
+      </template>
+
+      <template v-else-if="currentPage === 'merchant-create'">
+        <div class="super-page-header animate-in">
+          <div>
+            <button class="back-link header-back" @click="router.push('/super/merchants')">返回商户列表</button>
+            <h1>开通商户</h1>
+            <p>创建一家新的商户账号。开通后，商家使用手机号和短信验证码登录。</p>
+          </div>
+        </div>
+        <div class="section form-section animate-in">
+          <div class="create-form">
+            <input v-model="newMerchant.name" class="form-input" placeholder="* 商户名称" />
+            <input v-model="newMerchant.phone" class="form-input" placeholder="* 手机号（登录账号）" maxlength="11" />
+            <button class="create-btn tap-shrink" :disabled="creating" @click="createMerchant">{{ creating ? '创建中...' : '确认开通' }}</button>
+          </div>
+          <div v-if="createResult" class="create-result" :class="createResult.ok ? 'ok' : 'err'">{{ createResult.msg }}</div>
+        </div>
+      </template>
+
+      <template v-else-if="currentPage === 'performance'">
+        <div class="super-page-header animate-in">
+          <div>
+            <h1>性能</h1>
+            <p>查看开心点单平台运行指标，不是商户经营数据。</p>
+          </div>
+        </div>
+        <div class="section animate-in">
+          <div class="section-title title-row">
+            <span>性能采样（P50 / P95）</span>
+            <button class="refresh-btn tap-shrink" :disabled="perfStatsLoading" @click="loadPerfStats(true)">{{ perfStatsLoading ? '刷新中...' : '刷新' }}</button>
+          </div>
+        <div v-if="perfStatsLoading" class="loading">加载中...</div>
+        <div v-else-if="perfStatsError" class="empty error-state">
+          <div>性能采样加载失败</div>
+          <button class="refresh-btn tap-shrink" @click="loadPerfStats(true)">重新加载</button>
+        </div>
+        <div v-else-if="!perfStats.length" class="empty">暂无采样数据</div>
+        <div v-else class="perf-table-scroll">
+          <table class="perf-table">
+            <thead>
+              <tr>
+                <th>指标</th>
+                <th class="num">样本数</th>
+                <th class="num">均值</th>
+                <th class="num">P50</th>
+                <th class="num">P95</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in perfStats" :key="row.metric">
+                <td>{{ row.metric }}</td>
+                <td class="num">{{ row.count }}</td>
+                <td class="num">{{ row.avg }} ms</td>
+                <td class="num">{{ row.p50 }} ms</td>
+                <td class="num">{{ row.p95 }} ms</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        </div>
+      </template>
+
+      <template v-else-if="currentPage === 'merchant-list'">
+        <div class="super-page-header animate-in">
+          <div>
+            <h1>商户</h1>
+            <p>管理开心点单平台中的商户账号、收款和订阅状态。</p>
+          </div>
+          <button class="primary-action tap-shrink" @click="router.push('/super/merchants/new')">开通商户</button>
+        </div>
+
+        <div class="section animate-in">
         <div class="section-title title-row">
           <span>商户列表（{{ filteredMerchants.length }}/{{ merchants.length }}）</span>
-          <button class="refresh-btn tap-shrink" @click="loadData">刷新</button>
+          <button class="refresh-btn tap-shrink" :disabled="loadingList" @click="loadMerchants(true)">{{ loadingList ? '刷新中...' : '刷新' }}</button>
         </div>
         <input v-model="searchQuery" class="form-input search-input" placeholder="搜索商户名称、手机号或 Tenant ID" />
         <div class="filter-label">账号</div>
@@ -268,7 +323,11 @@
             @click="planFilter = f.value"
           >{{ f.label }}</button>
         </div>
-        <div v-if="loadingList" class="loading">加载中...</div>
+        <div v-if="loadingList && !merchants.length" class="loading">加载中...</div>
+        <div v-else-if="merchantListError" class="empty error-state">
+          <div>{{ merchantListError }}</div>
+          <button class="refresh-btn tap-shrink" @click="loadMerchants(true)">重新加载</button>
+        </div>
         <div v-else-if="merchants.length === 0" class="empty">暂无商户</div>
         <div v-else-if="filteredMerchants.length === 0" class="empty">没有匹配的商户</div>
         <div v-else class="merchant-list">
@@ -313,14 +372,29 @@
             </div>
           </div>
         </div>
-      </div>
-      </div>
-
-      <ManualPaymentPanel v-else-if="activeTab === 'billing'" :super-token="superToken" @update:count="pendingPaymentCount = $event" />
-
-      <ChannelPartnerPanel v-else :super-token="superToken" :highlight-partner-id="channelPartnerFocus" />
+        </div>
       </template>
-    </div>
+
+      <template v-else-if="currentPage === 'billing'">
+        <div class="super-page-header animate-in">
+          <div>
+            <h1>待确认付款</h1>
+            <p>核对商户提交的 SaaS 套餐付款，只按真实到账结果确认。</p>
+          </div>
+        </div>
+        <ManualPaymentPanel :super-token="superToken" @update:count="handlePendingCount" />
+      </template>
+
+      <template v-else-if="currentPage === 'channels'">
+        <div class="super-page-header animate-in">
+          <div>
+            <h1>渠道伙伴</h1>
+            <p>维护平台真实渠道伙伴；商户归属、佣金与结算工作流本阶段不扩张。</p>
+          </div>
+        </div>
+        <ChannelPartnerPanel :super-token="superToken" :highlight-partner-id="channelPartnerFocus" />
+      </template>
+    </SuperAdminShell>
 
     <div v-if="payConfigTarget" class="modal-mask" @click.self="closePayConfig">
       <div class="modal-box animate-in">
@@ -403,13 +477,14 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { listBillingInvoices } from '../api/superBilling'
+import { listBillingInvoices, listManualPayments } from '../api/superBilling'
 import superRequest from '../api/superRequest'
 import { getSuperSessionToken, setSuperSessionToken } from '../api/superSession'
 import { formatBeijingDate, formatBeijingDateTime } from '../utils/beijingTime'
 import { formatYuan, planDisplayName } from '../utils/subscriptionUi'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
+import SuperAdminShell from './super/SuperAdminShell.vue'
 
 const BASE = '/super'
 
@@ -423,11 +498,20 @@ const totpEnabled = ref(false)
 let superToken = ''
 superToken = getSuperSessionToken()
 if (superToken) authed.value = true
-const activeTab = ref('merchants')
 const pendingPaymentCount = ref(0)
+const pendingCountLoaded = ref(false)
+const pendingCountError = ref('')
 const route = useRoute()
 const router = useRouter()
 const isDetail = computed(() => route.name === 'SuperMerchantDetail' && !!route.params.tenantId)
+const currentPage = computed(() => ({
+  SuperOverview: 'overview',
+  SuperMerchantList: 'merchant-list',
+  SuperMerchantCreate: 'merchant-create',
+  SuperBillingPending: 'billing',
+  SuperChannels: 'channels',
+  SuperSystemPerformance: 'performance',
+}[route.name] || 'overview'))
 const channelPartnerFocus = computed(() => String(route.query.partner || ''))
 const detail = ref(null)
 const detailLoading = ref(false)
@@ -443,6 +527,8 @@ const invoicesLoaded = ref(false)
 const stats = reactive({ total_merchants: 0, active_merchants: 0, today_orders: 0, today_revenue: 0 })
 const merchants = ref([])
 const loadingList = ref(false)
+const merchantsLoaded = ref(false)
+const merchantListError = ref('')
 const searchQuery = ref('')
 const accountFilter = ref('')
 const accountFilters = [
@@ -500,6 +586,10 @@ const dangerOpenId = ref('')
 const perfStats = ref([])
 const perfStatsLoading = ref(false)
 const perfStatsError = ref(false)
+const perfStatsLoaded = ref(false)
+const statsLoading = ref(false)
+const statsLoaded = ref(false)
+const statsError = ref('')
 const revealedPhones = reactive(new Set())
 const copySourceId = ref('')
 const copyingPay = ref(false)
@@ -507,6 +597,11 @@ const copyingPay = ref(false)
 const copySources = computed(() => merchants.value.filter(m =>
   m.tenant_id !== payConfigTarget.value?.tenant_id && m.wx_mchid_masked && m.wx_mchid_masked !== '-'
 ))
+const paymentUnconfiguredCount = computed(() => merchants.value.filter(item => (item.payment_status || 'unconfigured') === 'unconfigured').length)
+const paymentPendingVerifyCount = computed(() => merchants.value.filter(item => item.payment_status === 'pending').length)
+const disabledMerchantCount = computed(() => merchants.value.filter(item => !item.status).length)
+const overviewLoading = computed(() => statsLoading.value || loadingList.value)
+const overviewError = computed(() => statsError.value || merchantListError.value || pendingCountError.value)
 
 function superHeaders() { return { 'X-Super-Token': superToken } }
 function rememberToken(value) {
@@ -521,8 +616,9 @@ function applyRoute() {
     detailSection.value = normalizeSection(route.query.section)
     return
   }
-  const tab = route.query.tab
-  if (tab === 'billing' || tab === 'channel' || tab === 'merchants') activeTab.value = tab
+  if (route.name === 'SuperOverview' && route.query.tab === 'billing') router.replace('/super/billing/pending')
+  else if (route.name === 'SuperOverview' && route.query.tab === 'channel') router.replace({ path: '/super/channels', query: route.query.partner ? { partner: route.query.partner } : {} })
+  else if (route.name === 'SuperOverview' && route.query.tab === 'merchants') router.replace('/super/merchants')
 }
 function matchesPlanFilter(sub, filter) {
   if (!sub || sub.load_error) return false
@@ -637,8 +733,10 @@ async function doLogin() {
       rememberToken(res.data.data.token)
       totpEnabled.value = !!res.data.data.totp_enabled
       authed.value = true
-      if (isDetail.value) loadMerchantDetail(false)
-      else loadData()
+      if (isDetail.value) {
+        loadMerchantDetail(false)
+        loadPendingPaymentCount(false)
+      } else loadCurrentPage(false)
     } else if (res.data?.data?.require_totp) {
       needTotp.value = true
       totpCode.value = ''
@@ -652,50 +750,116 @@ async function doLogin() {
   finally { logging.value = false }
 }
 
-async function loadPerfStats() {
+async function loadPerfStats(force = false) {
+  if (!force && perfStatsLoaded.value && !perfStatsError.value) return
   perfStatsLoading.value = true
   perfStatsError.value = false
   try {
     const res = await superRequest.get(`${BASE}/perf-stats`, { params: { days: 7 }, headers: superHeaders() })
     if (res.data?.code === 200) {
       perfStats.value = res.data.data?.stats || []
+      perfStatsLoaded.value = true
     } else {
       perfStats.value = []
       perfStatsError.value = true
+      perfStatsLoaded.value = false
     }
   } catch (e) {
     if (e?.response?.status === 401) authed.value = false
     else {
       perfStats.value = []
       perfStatsError.value = true
+      perfStatsLoaded.value = false
     }
   } finally {
     perfStatsLoading.value = false
   }
 }
 
-async function loadData() {
-  loadingList.value = true
+async function loadStats(force = false) {
+  if (!force && statsLoaded.value && !statsError.value) return
+  statsLoading.value = true
+  statsError.value = ''
   try {
-    const [statsRes, listRes] = await Promise.all([
-      superRequest.get(`${BASE}/stats`, { headers: superHeaders() }),
-      superRequest.get(`${BASE}/merchants`, { headers: superHeaders() }),
-    ])
-    if (statsRes.data?.code === 200) Object.assign(stats, statsRes.data.data)
-    if (listRes.data?.code === 200) merchants.value = listRes.data.data
-    loadPerfStats()
+    const res = await superRequest.get(`${BASE}/stats`, { headers: superHeaders() })
+    if (res.data?.code === 200) {
+      Object.assign(stats, res.data.data)
+      statsLoaded.value = true
+    } else {
+      statsError.value = res.data?.msg || '经营辅助数据加载失败'
+      statsLoaded.value = false
+    }
+  } catch (e) {
+    if (e?.response?.status === 401) authed.value = false
+    else statsError.value = backendMessage(e) || '经营辅助数据加载失败'
+    statsLoaded.value = false
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+async function loadMerchants(force = false) {
+  if (!force && merchantsLoaded.value && !merchantListError.value) return
+  loadingList.value = true
+  merchantListError.value = ''
+  try {
+    const res = await superRequest.get(`${BASE}/merchants`, { headers: superHeaders() })
+    if (res.data?.code === 200) {
+      merchants.value = res.data.data || []
+      merchantsLoaded.value = true
+    } else {
+      merchantListError.value = res.data?.msg || '商户列表加载失败'
+      merchantsLoaded.value = false
+    }
   } catch (e) {
     if (e?.response?.status === 401) authed.value = false
     else {
-      merchants.value = []
-      stats.total_merchants = 0
-      stats.active_merchants = 0
-      stats.today_orders = 0
-      stats.today_revenue = 0
-      console.error('商户数据加载失败:', e)
+      merchantListError.value = backendMessage(e) || '商户列表加载失败'
+      merchantsLoaded.value = false
     }
   }
   finally { loadingList.value = false }
+}
+
+async function loadPendingPaymentCount(force = false) {
+  if (!force && pendingCountLoaded.value && !pendingCountError.value) return
+  pendingCountError.value = ''
+  try {
+    const res = await listManualPayments(superToken)
+    if (res.data?.code === 200) {
+      pendingPaymentCount.value = (res.data.data || []).length
+      pendingCountLoaded.value = true
+    } else {
+      pendingCountError.value = res.data?.msg || '待确认付款数量加载失败'
+      pendingCountLoaded.value = false
+    }
+  } catch (e) {
+    if (e?.response?.status === 401) authed.value = false
+    else pendingCountError.value = backendMessage(e) || '待确认付款数量加载失败'
+    pendingCountLoaded.value = false
+  }
+}
+
+function handlePendingCount(value) {
+  pendingPaymentCount.value = Number(value || 0)
+  pendingCountLoaded.value = true
+  pendingCountError.value = ''
+}
+
+async function loadOverview(force = false) {
+  await Promise.all([
+    loadStats(force),
+    loadMerchants(force),
+    loadPendingPaymentCount(force),
+  ])
+}
+
+function loadCurrentPage(force = false) {
+  if (!superToken || !authed.value) return
+  if (currentPage.value === 'overview') return loadOverview(force)
+  if (currentPage.value === 'merchant-list') loadMerchants(force)
+  else if (currentPage.value === 'performance') loadPerfStats(force)
+  if (currentPage.value !== 'billing') loadPendingPaymentCount(force)
 }
 
 async function createMerchant() {
@@ -706,9 +870,10 @@ async function createMerchant() {
     const res = await superRequest.post(`${BASE}/merchants`, { ...newMerchant }, { headers: superHeaders() })
     if (res.data?.code === 200) {
       const d = res.data.data
-      createResult.value = { ok: true, msg: `已开通「${d.name}」，手机号 ${d.phone}，登录码 ${d.login_code}` }
+      createResult.value = { ok: true, msg: `已开通「${d.name}」。商家可使用手机号 ${d.phone} 通过短信验证码登录商家后台。` }
       newMerchant.name = ''; newMerchant.phone = ''; newMerchant.initial_code = '123456'
-      await loadData()
+      merchantsLoaded.value = false
+      statsLoaded.value = false
     } else createResult.value = { ok: false, msg: res.data?.msg || '创建失败' }
   } catch { createResult.value = { ok: false, msg: '网络错误，请重试' } }
   finally { creating.value = false }
@@ -937,10 +1102,14 @@ function logout() {
   pwd.value = ''
   needTotp.value = false
   totpCode.value = ''
+  pendingCountLoaded.value = false
+  merchantsLoaded.value = false
+  statsLoaded.value = false
+  perfStatsLoaded.value = false
 }
 
 function backToMerchants() {
-  router.push({ path: '/super', query: { tab: 'merchants' } })
+  router.push('/super/merchants')
 }
 
 function openMerchant(merchant, section = 'overview') {
@@ -958,7 +1127,27 @@ function setDetailSection(section) {
 }
 
 function openChannelPartner(partnerId) {
-  router.push({ path: '/super', query: { tab: 'channel', partner: partnerId || undefined } })
+  router.push({ path: '/super/channels', query: { partner: partnerId || undefined } })
+}
+
+function openMerchantFilter(paymentStatus = '', accountStatus = '') {
+  statusFilter.value = paymentStatus
+  accountFilter.value = accountStatus
+  router.push({
+    path: '/super/merchants',
+    query: {
+      payment: paymentStatus || undefined,
+      account: accountStatus || undefined,
+    },
+  })
+}
+
+function applyMerchantFiltersFromRoute() {
+  if (currentPage.value !== 'merchant-list') return
+  const payment = String(route.query.payment || '')
+  const account = String(route.query.account || '')
+  if (statusFilters.some(item => item.value === payment)) statusFilter.value = payment
+  if (accountFilters.some(item => item.value === account)) accountFilter.value = account
 }
 
 function payMerchantFromDetail() {
@@ -1087,17 +1276,22 @@ watch(() => route.query.section, () => {
   if (detailSection.value === 'subscription') loadInvoices(false)
 })
 
-watch(() => route.query.tab, () => {
-  if (isDetail.value) return
+watch(() => route.fullPath, () => {
   applyRoute()
+  applyMerchantFiltersFromRoute()
+  if (isDetail.value) return
+  loadCurrentPage(false)
 })
 
 onMounted(() => {
   applyRoute()
+  applyMerchantFiltersFromRoute()
   if (!superToken) return
   authed.value = true
-  if (isDetail.value) loadMerchantDetail(false)
-  else loadData()
+  if (isDetail.value) {
+    loadMerchantDetail(false)
+    loadPendingPaymentCount(false)
+  } else loadCurrentPage(false)
 })
 </script>
 
@@ -1144,14 +1338,23 @@ onMounted(() => {
 .login-btn:disabled, .create-btn:disabled, .verify-btn:disabled, .pause-btn:disabled, .toggle-btn:disabled { opacity: .55; cursor: not-allowed; }
 .login-err { color: var(--danger); font-size: 13px; margin-top: 8px; }
 
-/* ─── Console body ──────────────────────────────────────────── */
-.top-bar { display: flex; justify-content: space-between; align-items: center; padding: 52px 16px 12px; background: var(--hero-dark); color: #fff; }
-.top-title { font-size: 18px; font-weight: 900; }
-.logout-btn { border: 1px solid rgba(255,255,255,.25); border-radius: 8px; background: rgba(255,255,255,.08); color: #fff; cursor: pointer; padding: 5px 12px; font-size: 13px; }
-.console-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 16px 0; background: var(--hero-dark); }
-.tab-btn { position: relative; height: 40px; border: 1px solid rgba(255,255,255,.22); border-radius: 8px 8px 0 0; background: rgba(255,255,255,.08); color: rgba(255,255,255,.72); font-weight: 800; cursor: pointer; font-size: 13px; padding: 0 4px; }
-.tab-btn.active { background: var(--bg-page); border-color: var(--bg-page); color: var(--text-1); }
-.tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; margin-left: 4px; padding: 0 4px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 10px; font-weight: 800; vertical-align: middle; }
+/* ─── Control plane pages ───────────────────────────────────── */
+.super-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin: 0 16px 20px; }
+.super-page-header h1 { margin: 0; color: var(--text-1); font-size: 26px; font-weight: 900; line-height: 1.25; }
+.super-page-header p { max-width: 680px; margin: 7px 0 0; color: var(--text-2); font-size: 14px; line-height: 1.6; }
+.primary-action { flex: none; min-height: 40px; padding: 0 18px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; cursor: pointer; font-size: 14px; font-weight: 800; }
+.overview-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #fecaca; color: var(--danger); }
+.action-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.action-card { display: grid; min-height: 118px; align-content: center; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-page); color: var(--text-1); cursor: pointer; text-align: left; }
+.action-card:hover { border-color: var(--brand-mid); background: var(--brand-light); }
+.action-card span { color: var(--text-2); font-size: 13px; font-weight: 700; }
+.action-card strong { font-size: 26px; font-variant-numeric: tabular-nums; }
+.action-card small { color: var(--text-3); font-size: 11px; }
+.overview-stats { grid-template-columns: repeat(3, 1fr); padding: 0; }
+.overview-stats .stat-card { border: 1px solid var(--border); box-shadow: none; }
+.metric-note { margin-top: 12px; color: var(--text-3); font-size: 12px; }
+.form-section { max-width: 560px; }
+.header-back { margin: 0 0 10px; }
 .refresh-btn, .pay-cfg-btn, .cancel-btn, .fold-btn { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text-2); cursor: pointer; }
 .refresh-btn { padding: 5px 12px; font-size: 13px; }
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); padding: 12px 16px; gap: 8px; }
@@ -1172,6 +1375,7 @@ onMounted(() => {
 .filter-chip.active { border-color: var(--brand); background: var(--brand-light); color: var(--success); }
 .loading, .empty { text-align: center; color: var(--text-3); padding: 24px 0; font-size: 14px; }
 .perf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.perf-table-scroll { overflow-x: auto; }
 .perf-table th, .perf-table td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; }
 .perf-table th.num, .perf-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .perf-table th { color: var(--text-3); font-weight: 700; font-size: 12px; }
@@ -1256,7 +1460,17 @@ onMounted(() => {
 .bill-amount { flex: none; font-size: 16px; font-weight: 900; }
 .seed-block { margin-top: 8px; }
 .error-state { display: grid; justify-items: center; gap: 10px; }
+@media (max-width: 820px) {
+  .action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-stats { grid-template-columns: 1fr; }
+  .perf-table { min-width: 560px; }
+}
 @media (max-width: 420px) {
+  .super-page-header { flex-direction: column; margin-right: 0; margin-left: 0; }
+  .super-page-header h1 { font-size: 22px; }
+  .primary-action { width: 100%; }
+  .overview-alert { align-items: flex-start; flex-direction: column; }
+  .section { margin-right: 0; margin-left: 0; }
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .merchant-card { align-items: flex-start; }
   .receiver-grid { grid-template-columns: 1fr; }
