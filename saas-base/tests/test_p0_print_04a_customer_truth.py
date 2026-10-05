@@ -201,5 +201,44 @@ class StaticContractsTest(unittest.TestCase):
         self.assertIn("customer_visible_merchant_note", inspect.getsource(dining_module.DiningSessionService._serialize_order))
 
 
+class CustomerReachablePathsTest(unittest.TestCase):
+    """04A-R: free-order, mock-pay and member-history are customer paths too."""
+
+    def _src(self, module, name):
+        return inspect.getsource(getattr(module, name))
+
+    def test_p2_mock_and_free_payment_responses_use_the_customer_view(self):
+        from app.services import order_payment_service as pay
+
+        source = inspect.getsource(pay)
+        # both customer-facing serialize_order() call sites (mock pay + free order) are wrapped
+        self.assertEqual(source.count("serialize_order("), 2)
+        self.assertEqual(source.count("customer_order_view(serialize_order("), 2)
+        self.assertNotIn("**serialize_order(", source)
+
+    def test_p1_member_history_uses_customer_wording(self):
+        from app.api.v1 import member
+
+        source = inspect.getsource(member.list_member_orders)
+        self.assertIn("customer_status_text(order)", source)
+        self.assertNotIn("order_status_text(", source)
+        for forbidden in ("print_", "merchant_note", "PRINT_META"):
+            self.assertNotIn(forbidden, source)
+
+    def test_p1_every_customer_order_builder_exposes_no_print_internals(self):
+        view = customer_order_view({"id": "1", "print_status": "FAILED", "print_error": "x", "print_attempts": 3,
+                                    "print_task_id": "T", "print_printer": "SN", "merchant_note": None}, _order())
+        self.assertFalse([k for k in view if k.startswith("print_")])
+        self.assertIn("kitchen_notice", view)
+
+    def test_static_staff_only_routes_are_the_only_raw_serializer_callers(self):
+        # raw serialize_order()/_serialize_print_meta payloads are for the owner list, owner changes
+        # feed and manual reprint; each is gated by an owner/staff principal
+        source = inspect.getsource(orders_module)
+        self.assertIn("if not principal.is_owner", source)
+        for name in ("serialize_owner_order_rows", "list_orders"):
+            self.assertIn(name, source)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -239,17 +239,17 @@ export function useTableBillView({
     }
     if (!tableOrderGroups.value.length) return { icon: 'icon-list', title: '本桌还没有已点菜品', desc: '先点菜，后续加菜会自动合并', tone: 'settled' }
     // 展示口径：顶部这句话描述的是"这一桌的菜现在什么情况"，必须涵盖会话里全部订单，
-    // 否则同会话的 prepay 单还在制作中，顶部却会说"菜品已上齐"。
+    // 否则同会话的 prepay 单还在制作中，顶部却会说"厨房已出餐"。
     const statuses = validDisplayOrders.value.map(order => normalizeOrderStatus(order.status))
     if (statuses.includes('pending')) return { icon: 'icon-timefill', title: '订单已收到', desc: '订单已记录，如长时间未上菜可联系店员', tone: 'active' }
     if (statuses.includes('preparing')) return { icon: 'icon-beican', title: '菜品正在制作', desc: '厨房正在制作，可以继续加菜', tone: 'active' }
     if (statuses.includes('done')) {
       if (isPostpayMode.value) {
-        return { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '用餐结束请到收银台或联系服务员结账', tone: 'served' }
+        return { icon: 'icon-roundcheckfill', title: '厨房已出餐', desc: '用餐结束请到收银台或联系服务员结账', tone: 'served' }
       }
       return checkoutRequested.value
         ? { icon: 'icon-roundcheckfill', title: '已呼叫服务员', desc: '请稍候，服务员马上为您结账', tone: 'served' }
-        : { icon: 'icon-roundcheckfill', title: '菜品已上齐', desc: '吃好后可统一结账', tone: 'served' }
+        : { icon: 'icon-roundcheckfill', title: '厨房已出餐', desc: '吃好后可统一结账', tone: 'served' }
     }
     return { icon: 'icon-beican', title: '商家已接单', desc: '厨房正在为您制作，可以继续加菜', tone: 'active' }
   })

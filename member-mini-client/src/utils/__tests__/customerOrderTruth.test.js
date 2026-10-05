@@ -42,4 +42,18 @@ describe('customer order wording only states facts the system knows', () => {
     // real workbench-mode wording stays
     expect(source).toContain("preparing: '商家已接单，正在制作'")
   })
+
+  it('M4: pending -> preparing no longer toasts or vibrates; terminal events still do', () => {
+    const source = readSource('../../subpkg-order/composables/useOrderStatusPoll.js')
+    expect(source).not.toContain('merchantAccepted')
+    expect(source).not.toMatch(/newVal === 'preparing'/)
+    expect(source).toContain("newVal === 'done'")
+    expect(source).toContain("newVal === 'rejected'")
+  })
+
+  it('done is never described as food fully served', () => {
+    const source = readSource('../../subpkg-order/composables/useTableBillView.js')
+    expect(source).not.toContain("title: '菜品已上齐'")
+    expect(source).toContain("title: '厨房已出餐'")
+  })
 })

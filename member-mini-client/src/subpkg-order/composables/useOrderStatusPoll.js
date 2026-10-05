@@ -1,6 +1,6 @@
 import { watch } from 'vue'
 import { getOrderStatus } from '@/api/order'
-import { toastText, modalText } from '../utils/orderText.js'
+import { modalText } from '../utils/orderText.js'
 
 // 从 menu.vue 拆出来的"订单状态轮询"——顾客下单/支付成功后，每 15 秒问一次
 // 后端这单到没到"制作中/已完成"，以及本桌人数轮询（每 25 秒问一次本桌订单，
@@ -87,10 +87,10 @@ export function useOrderStatusPoll({
   }
 
   watch(orderStatus, (newVal, oldVal) => {
-    if (newVal === 'preparing' && oldVal === 'pending') {
-      uni.vibrateShort({ type: 'heavy' })
-      uni.showToast({ title: toastText.merchantAccepted, icon: 'none', duration: 2500 })
-    } else if (newVal === 'done') {
+    // pending -> preparing is deliberately silent: whether staff clicked "start" is not a fact
+    // customers need pushed at them (the kitchen already has the order). The status text still
+    // updates; only the toast + vibration are gone.
+    if (newVal === 'done') {
       uni.vibrateShort({ type: 'heavy' })
     } else if (newVal === 'rejected') {
       stopStatusPoll()
