@@ -25,6 +25,10 @@ export const useAuthStore = defineStore('auth', () => {
   const homePath = ref(localStorage.getItem('home_path') || ROLE_HOME[role.value] || '/')
   const authMethod = ref(localStorage.getItem('auth_method') || '')
   const loaded = ref(false)
+  // Which kitchen workflow to render. WORKBENCH on any doubt (unknown / missing / not yet loaded):
+  // the server is the authority and also refuses a manual accept in PRINT_FIRST.
+  const fulfilmentMode = ref('WORKBENCH')
+  const isPrintFirst = computed(() => fulfilmentMode.value === 'PRINT_FIRST')
 
   const isOwner = computed(() => role.value === 'owner' && !accountId.value)
 
@@ -64,6 +68,12 @@ export const useAuthStore = defineStore('auth', () => {
     homePath.value = nextHome
     authMethod.value = nextMethod
     loaded.value = true
+    if (Object.prototype.hasOwnProperty.call(data, 'fulfilment_mode')) {
+      fulfilmentMode.value = data.fulfilment_mode === 'PRINT_FIRST' ? 'PRINT_FIRST' : 'WORKBENCH'
+    } else {
+      // Login responses do not carry it; pick it up from /auth/me in the background.
+      refreshFulfilmentMode()
+    }
 
     saveSession({
       token: data.token,
@@ -88,7 +98,19 @@ export const useAuthStore = defineStore('auth', () => {
     if (username.value) localStorage.setItem('account_username', username.value)
   }
 
+  async function refreshFulfilmentMode() {
+    try {
+      const res = await getAuthMe()
+      if (res?.code === 200 && res.data) {
+        fulfilmentMode.value = res.data.fulfilment_mode === 'PRINT_FIRST' ? 'PRINT_FIRST' : 'WORKBENCH'
+      }
+    } catch {
+      /* keep WORKBENCH: the server still refuses a manual accept in PRINT_FIRST */
+    }
+  }
+
   function clearAuth() {
+    fulfilmentMode.value = 'WORKBENCH'
     role.value = 'owner'
     permissions.value = []
     accountId.value = null
@@ -170,6 +192,8 @@ export const useAuthStore = defineStore('auth', () => {
     homePath,
     authMethod,
     loaded,
+    fulfilmentMode,
+    isPrintFirst,
     isOwner,
     can,
     applySession,
