@@ -73,6 +73,22 @@ function Invoke-Compose {
     return @($out)
 }
 
+function Invoke-ComposeLive {
+    param([string[]]$Arguments)
+    $previous = $ErrorActionPreference
+    try {
+        # Stream Docker/BuildKit progress to the operator while still treating
+        # native stderr as normal output under Windows PowerShell 5.
+        $ErrorActionPreference = 'Continue'
+        & docker compose --project-name $ProjectName --env-file $EnvFile -f $ComposeFile @Arguments
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previous }
+    if ($code -ne 0) {
+        throw "docker compose $($Arguments -join ' ') failed with exit code $code"
+    }
+}
+
 function Assert-DockerReady {
     $previous = $ErrorActionPreference
     try {
@@ -170,17 +186,56 @@ function Invoke-Up {
     if (-not $ConfirmLocalBuildException) {
         throw 'Up builds the candidate inside Docker (LOCAL_BUILD_EXCEPTION, Phase 03R only). Re-run with -ConfirmLocalBuildException to confirm you authorise it.'
     }
+
     Assert-DockerReady
     $cfg = Read-EnvFile
-    if ($cfg['CERT_ADMIN_SHA'] -ne $CandidateSha) { throw 'env file is not pinned to the frozen candidate SHA' }
-    Invoke-Compose @('up', '-d', '--build') | Out-Null
-    $deadline = (Get-Date).AddMinutes(10)
+
+    if ($cfg['CERT_ADMIN_SHA'] -ne $CandidateSha) {
+        throw 'env file is not pinned to the frozen candidate SHA'
+    }
+
+    Write-Output '[1/5] Building isolated candidate images...'
+    Invoke-ComposeLive @('build', 'migrate', 'seed', 'backend', 'admin')
+
+    Write-Output '[2/5] Starting MySQL and Redis...'
+    Invoke-ComposeLive @('up', '-d', 'mysql', 'redis')
+
+    $deadline = (Get-Date).AddMinutes(5)
     do {
-        Start-Sleep -Seconds 5
-        $running = Invoke-Compose @('ps', '--format', '{{.Service}}={{.Health}}') | Out-String
-        $ready = ($running -match 'backend=healthy') -and ($running -match 'admin=')
-    } while (-not $ready -and (Get-Date) -lt $deadline)
-    if (-not $ready) { throw 'runtime did not become healthy within 10 minutes' }
+        Start-Sleep -Seconds 3
+        $services = Invoke-Compose @('ps', '--format', '{{.Service}}={{.Health}}') | Out-String
+        $infraReady = ($services -match 'mysql=healthy') -and ($services -match 'redis=healthy')
+    } while (-not $infraReady -and (Get-Date) -lt $deadline)
+
+    if (-not $infraReady) {
+        throw 'MySQL/Redis did not become healthy within 5 minutes'
+    }
+
+    Write-Output '[3/5] Running Alembic migration...'
+    Invoke-ComposeLive @('run', '--rm', '--no-deps', 'migrate')
+
+    Write-Output '[4/5] Loading synthetic certification fixtures...'
+    Invoke-ComposeLive @('run', '--rm', '--no-deps', 'seed')
+
+    Write-Output '[5/5] Starting backend...'
+    Invoke-ComposeLive @('up', '-d', '--no-deps', 'backend')
+
+    $deadline = (Get-Date).AddMinutes(5)
+    do {
+        Start-Sleep -Seconds 3
+        $services = Invoke-Compose @('ps', '--format', '{{.Service}}={{.Health}}') | Out-String
+        $backendReady = ($services -match 'backend=healthy')
+    } while (-not $backendReady -and (Get-Date) -lt $deadline)
+
+    if (-not $backendReady) {
+        throw 'backend did not become healthy within 5 minutes'
+    }
+
+    Write-Output '[5/5] Starting admin...'
+    Invoke-ComposeLive @('up', '-d', '--no-deps', 'admin')
+
+    Start-Sleep -Seconds 2
+
     Write-Result 'RUNTIME_UP' 'YES'
     Write-Result 'LOCAL_BUILD_RUN' 'YES'
     Write-Result 'LOCAL_BUILD_SCOPE' 'ISOLATED_DOCKER_ADMIN_RUNTIME_ONLY'
