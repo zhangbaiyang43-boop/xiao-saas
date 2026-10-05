@@ -22,6 +22,9 @@ HISTORY_REORDER_SOURCE = (
 DISH_LIST_SOURCE = (
     ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "components" / "DishList.vue"
 ).read_text(encoding="utf-8-sig")
+DISH_CARD_SOURCE = (
+    ROOT.parent / "member-mini-client" / "src" / "subpkg-order" / "components" / "DishCard.vue"
+).read_text(encoding="utf-8-sig")
 ORDERS_SOURCE = (ROOT / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
 ORDER_MODEL_SOURCE = (ROOT / "app" / "models" / "order.py").read_text(encoding="utf-8-sig")
 KUAIMAI_PATH = ROOT / "app" / "services" / "kuaimai_service.py"
@@ -99,8 +102,16 @@ class ProductSelectionConsistencyContractsTest(unittest.TestCase):
         self.assertIn("菜品已售罄", ORDERS_SOURCE)
         self.assertIn("import DishList from '../components/DishList.vue'", MENU_SOURCE)
         self.assertIn(":is-sold-out=\"isSoldOut\"", MENU_SOURCE)
-        self.assertIn("isSoldOut(dish)", DISH_LIST_SOURCE)
-        self.assertIn("dish-item--soldout", DISH_LIST_SOURCE)
+        # The list only builds the card model; DishCard owns how sold-out is rendered.
+        self.assertIn("soldOut: this.isSoldOut(dish)", DISH_LIST_SOURCE)
+        self.assertIn("'dish-item--soldout': model.soldOut", DISH_CARD_SOURCE)
+        # A sold-out card shows a non-interactive label and must come before every
+        # control that can add the dish (spec picker, quantity stepper).
+        sold_out_branch = DISH_CARD_SOURCE.index('v-if="model.soldOut" class="soldout-touch"')
+        self.assertLess(sold_out_branch, DISH_CARD_SOURCE.index('v-else-if="model.hasSpecs"'))
+        self.assertLess(sold_out_branch, DISH_CARD_SOURCE.index("$emit('add', model.dish)"))
+        # And the page-level add path still refuses a sold-out dish.
+        self.assertIn("if (isSoldOut(dish)) return", MENU_SOURCE)
 
     def test_history_reorder_revalidates_current_menu_state_before_cart_add(self):
         self.assertIn("import { useHomeTabView } from '../composables/useHomeTabView.js'", MENU_SOURCE)

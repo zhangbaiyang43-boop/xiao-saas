@@ -83,6 +83,17 @@ def _make_tenant(tenant_id: str) -> Tenant:
     return Tenant(tenant_id=tenant_id, name=tenant_id, password_hash="x", status=True)
 
 
+def _entitlement_at_fixed_now(db: AsyncSession) -> EntitlementService:
+    """EntitlementService captures its clock at first resolution (see its class
+    docstring). Pin it to FIXED_NOW so the grandfathered trial is judged at
+    migration time, the same instant the backfill and the subscription view below
+    use, instead of the wall clock of whoever runs the suite -- otherwise this
+    test silently starts failing once FIXED_NOW + TRIAL_DAYS is in the past."""
+    service = EntitlementService(db)
+    service._now = FIXED_NOW
+    return service
+
+
 class ExistingTenantGrandfatherTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -248,7 +259,7 @@ class ExistingTenantGrandfatherTest(unittest.IsolatedAsyncioTestCase):
         await self.db.commit()
 
         # Before backfill: zero-history tenant resolves FREE, lacks all four.
-        pre_service = EntitlementService(self.db)
+        pre_service = _entitlement_at_fixed_now(self.db)
         self.assertFalse(await pre_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_KITCHEN_PRINT))
         self.assertFalse(await pre_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_MEMBERSHIP))
         self.assertFalse(await pre_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_COUPONS))
@@ -257,7 +268,7 @@ class ExistingTenantGrandfatherTest(unittest.IsolatedAsyncioTestCase):
         await self._run_backfill()
 
         # Fresh EntitlementService instance -- no cross-instance cache to bias the result.
-        post_service = EntitlementService(self.db)
+        post_service = _entitlement_at_fixed_now(self.db)
         self.assertTrue(await post_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_KITCHEN_PRINT))
         self.assertTrue(await post_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_MEMBERSHIP))
         self.assertTrue(await post_service.has_capability(TENANT_A_ZERO_HISTORY, CAP_COUPONS))
@@ -287,7 +298,7 @@ class ExistingTenantGrandfatherTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view.subscription_status, "FREE")
         self.assertEqual(view.effective_plan.code, "FREE")
 
-        entitlement = EntitlementService(self.db)
+        entitlement = _entitlement_at_fixed_now(self.db)
         self.assertFalse(await entitlement.has_capability(TENANT_G_POST_MIGRATION_NEW, CAP_KITCHEN_PRINT))
 
     # ---- 30_DAY_EXPIRY_TO_FREE ---------------------------------------------
