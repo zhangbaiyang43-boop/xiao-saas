@@ -22,8 +22,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProjectName = 'xiao-super-admin-cert'
-$CandidateBranch = 'candidate/super-admin-ia-navigation'
-$CandidateSha = '41ca65d86b6697781e7b5dd0f646c873292e44c2'
+$CandidateBranch = 'candidate/super-admin-phase04-merchant-table'
+$CandidateSha = '7d1ba64168e539fb3b9aafd46fdaefa64b5f3ef5'
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $ToolingDir = Join-Path $RepoRoot 'deploy\super-admin-cert'
 $ComposeFile = Join-Path $ToolingDir 'compose.yml'
