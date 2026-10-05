@@ -9,6 +9,11 @@ Contract under test: such rows are examined once per cycle, the scan moves on,
 proven-stuck rows are remembered by the loop-owned memo, and nothing else about
 the recovery contract (UNKNOWN, stale SENDING, SUCCESS, per-cycle provider
 budget) changes.
+
+The request-driven path (reconcile_print_orders, used by the workbench and the
+order list) had the same flaw -- it truncated its input to the batch limit
+*before* deciding whether anything needed doing -- and now shares the
+recoverability rules (_auto_recovery_disposition) with the background loop.
 """
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ import unittest
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -40,9 +45,11 @@ from app.services.order_print_service import (
     PRINT_RETRY_COOLDOWN_SECONDS,
     PRINT_SENDING_STALE_SECONDS,
     _RecoveryScanMemo,
+    _auto_recovery_disposition,
     _get_print_meta,
     _set_print_meta,
     _sync_legacy_initial_fields,
+    reconcile_print_orders,
     recover_pending_print_orders_once,
 )
 from app.services.subscription_service import STATUS_TRIAL
@@ -126,6 +133,7 @@ class RecoveryQueueStarvationTest(unittest.IsolatedAsyncioTestCase):
         last_attempt_age_s: int | None = None,
         updated_age_s: int = 120,
         created_age_s: int = 0,
+        paid_age_s: int = 120,
     ) -> Order:
         """Paid prepay order with a frozen-route print intent in ``print_status``."""
         now = datetime.utcnow()
@@ -136,7 +144,7 @@ class RecoveryQueueStarvationTest(unittest.IsolatedAsyncioTestCase):
             status="pending",
             payment_mode="prepay",
             payment_status="paid",
-            payment_time=now.isoformat(),
+            payment_time=(now - timedelta(seconds=paid_age_s)).isoformat(),
             source="miniprogram",
             print_status=print_status,
         )
@@ -237,21 +245,34 @@ class RecoveryQueueStarvationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_memo_stops_re_examining_rows_proven_stuck(self):
         await self._make_exhausted_failed(TENANT_A, 3)
-        stuck = {"success": False, "skipped": True, "code": "PRINT_RETRY_LIMIT"}
-        examine = AsyncMock(return_value=stuck)
+        guard = MagicMock(wraps=_auto_recovery_disposition)
 
-        with patch.object(order_print_service, "_print_paid_order_ticket", examine):
+        with patch.object(order_print_service, "_auto_recovery_disposition", guard):
             memo = _RecoveryScanMemo()
             await recover_pending_print_orders_once(self.db, memo=memo)
-            after_first = examine.await_count
+            after_first = guard.call_count
             await recover_pending_print_orders_once(self.db, memo=memo)
-            after_second = examine.await_count
+            after_second = guard.call_count
             await recover_pending_print_orders_once(self.db)  # no memo: examines again
-            after_unmemoed = examine.await_count
+            after_unmemoed = guard.call_count
 
         self.assertEqual(after_first, 3)
         self.assertEqual(after_second, after_first)
         self.assertEqual(after_unmemoed, after_first + 3)
+        self.provider.assert_not_awaited()
+
+    async def test_provider_path_stuck_code_is_memoized_per_order(self):
+        # Defence in depth: a row that slips past the guard but is refused with a
+        # permanent code by the claim is still remembered.
+        await self._make_order(TENANT_A, print_status="PENDING")
+        stuck = AsyncMock(return_value={"success": False, "skipped": True, "code": "PRINT_RETRY_LIMIT"})
+
+        with patch.object(order_print_service, "_print_paid_order_ticket", stuck):
+            memo = _RecoveryScanMemo()
+            await recover_pending_print_orders_once(self.db, memo=memo)
+            await recover_pending_print_orders_once(self.db, memo=memo)
+
+        self.assertEqual(stuck.await_count, 1)
 
     # ------------------------------------------------------------------ 4
     async def test_stale_sending_is_still_quarantined_behind_zombies_and_past_the_age_window(self):
@@ -360,6 +381,198 @@ class RecoveryQueueStarvationTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         self.assertEqual(second, 1)
         self.assertEqual(order.print_status, "SUCCESS")
+
+    # ------------------------------------------------------------------ secondary path (S1-S7)
+    async def test_s1_reconcile_is_not_starved_by_exhausted_failed_rows(self):
+        zombies = await self._make_exhausted_failed(TENANT_A, PRINT_RECONCILE_BATCH_LIMIT + 1)
+        recoverable = await self._make_order(TENANT_A, print_status="PENDING")
+
+        attempted = await reconcile_print_orders(self.db, [*zombies, recoverable], trigger="reconcile")
+
+        await self.db.refresh(recoverable)
+        self.assertEqual(attempted, 1)
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(recoverable.print_status, "SUCCESS")
+
+    async def test_s1b_reconcile_is_not_starved_by_already_printed_orders(self):
+        # The common workbench shape: many printed orders ahead of the one that needs help.
+        printed = [
+            await self._make_order(TENANT_A, print_status="SUCCESS", attempts=1, last_attempt_age_s=600)
+            for _ in range(PRINT_RECONCILE_BATCH_LIMIT + 1)
+        ]
+        recoverable = await self._make_order(TENANT_A, print_status="PENDING")
+
+        attempted = await reconcile_print_orders(self.db, [*printed, recoverable], trigger="reconcile")
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(self.provider.await_count, 1)
+
+    async def test_s2_reconcile_never_sends_exhausted_failed_rows(self):
+        zombies = await self._make_exhausted_failed(TENANT_A, 3)
+
+        attempted = await reconcile_print_orders(self.db, zombies, trigger="reconcile")
+
+        self.assertEqual(attempted, 0)
+        self.provider.assert_not_awaited()
+
+    async def test_s3_reconcile_still_retries_recoverable_failed(self):
+        order = await self._make_order(
+            TENANT_A,
+            print_status="FAILED",
+            attempts=1,
+            last_attempt_age_s=PRINT_RETRY_COOLDOWN_SECONDS + 45,
+        )
+
+        attempted = await reconcile_print_orders(self.db, [order], trigger="reconcile")
+
+        await self.db.refresh(order)
+        self.assertEqual(attempted, 1)
+        self.assertEqual(self.provider.await_count, 1)
+        self.assertEqual(order.print_status, "SUCCESS")
+        self.assertEqual(int(_initial(order).get("attempts") or 0), 2)
+
+    async def test_s4_reconcile_quarantines_stale_sending_without_the_provider(self):
+        sending = await self._make_order(
+            TENANT_A,
+            print_status="SENDING",
+            attempts=1,
+            last_attempt_age_s=PRINT_SENDING_STALE_SECONDS + 90,
+            created_age_s=PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS + 3600,
+        )
+
+        attempted = await reconcile_print_orders(self.db, [sending], trigger="reconcile")
+
+        await self.db.refresh(sending)
+        self.assertEqual(attempted, 1)
+        self.assertEqual(sending.print_status, "UNKNOWN")
+        self.assertEqual(_initial(sending).get("last_error_code"), "STALE_SENDING")
+        self.provider.assert_not_awaited()
+
+    async def test_s4b_reconcile_leaves_a_fresh_sending_claim_alone(self):
+        sending = await self._make_order(
+            TENANT_A, print_status="SENDING", attempts=1, last_attempt_age_s=1,
+        )
+
+        attempted = await reconcile_print_orders(self.db, [sending], trigger="reconcile")
+
+        await self.db.refresh(sending)
+        self.assertEqual(attempted, 0)
+        self.assertEqual(sending.print_status, "SENDING")
+        self.provider.assert_not_awaited()
+
+    async def test_s5_reconcile_never_touches_unknown(self):
+        unknown = await self._make_order(
+            TENANT_A, print_status="UNKNOWN", attempts=1, last_attempt_age_s=600,
+        )
+
+        attempted = await reconcile_print_orders(self.db, [unknown], trigger="reconcile")
+
+        await self.db.refresh(unknown)
+        self.assertEqual(attempted, 0)
+        self.assertEqual(unknown.print_status, "UNKNOWN")
+        self.provider.assert_not_awaited()
+
+    async def test_s6_reconcile_does_not_auto_print_rows_outside_the_window(self):
+        too_old = PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS + 3600
+        old_pending = await self._make_order(TENANT_A, print_status="PENDING", created_age_s=too_old)
+        old_failed = await self._make_order(
+            TENANT_A,
+            print_status="FAILED",
+            attempts=1,
+            last_attempt_age_s=PRINT_RETRY_COOLDOWN_SECONDS + 45,
+            created_age_s=too_old,
+        )
+        fresh = await self._make_order(TENANT_A, print_status="PENDING")
+
+        attempted = await reconcile_print_orders(self.db, [old_pending, old_failed, fresh], trigger="reconcile")
+
+        self.assertEqual(attempted, 1)
+        self.assertEqual(self.provider.await_count, 1)
+        await self.db.refresh(old_pending)
+        await self.db.refresh(old_failed)
+        await self.db.refresh(fresh)
+        # Still visible to staff as PENDING / FAILED -- only the automatic print is withheld.
+        self.assertEqual(old_pending.print_status, "PENDING")
+        self.assertEqual(old_failed.print_status, "FAILED")
+        self.assertEqual(fresh.print_status, "SUCCESS")
+
+    async def test_s7_both_recovery_paths_agree_on_the_same_inputs(self):
+        too_old = PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS + 3600
+        retry_after = PRINT_RETRY_COOLDOWN_SECONDS + 45
+        cases = {
+            "pending_fresh": dict(print_status="PENDING"),
+            "pending_too_old": dict(print_status="PENDING", created_age_s=too_old),
+            "failed_retryable": dict(print_status="FAILED", attempts=1, last_attempt_age_s=retry_after, updated_age_s=retry_after),
+            "failed_exhausted": dict(print_status="FAILED", attempts=MAX_PRINT_RETRY_ATTEMPTS, last_attempt_age_s=retry_after, updated_age_s=retry_after),
+            "failed_too_old": dict(print_status="FAILED", attempts=1, last_attempt_age_s=retry_after, updated_age_s=retry_after, created_age_s=too_old),
+            "unknown": dict(print_status="UNKNOWN", attempts=1, last_attempt_age_s=600, updated_age_s=600),
+            "success": dict(print_status="SUCCESS", attempts=1, last_attempt_age_s=600, updated_age_s=600),
+            "sending_stale": dict(
+                print_status="SENDING", attempts=1,
+                last_attempt_age_s=PRINT_SENDING_STALE_SECONDS + 90, updated_age_s=PRINT_SENDING_STALE_SECONDS + 90,
+                created_age_s=too_old,
+            ),
+        }
+        request_path = {name: await self._make_order(TENANT_A, **kw) for name, kw in cases.items()}
+        loop_path = {name: await self._make_order(TENANT_B, **kw) for name, kw in cases.items()}
+
+        # The request path first; then the loop, with tenant A denied so it only sees B.
+        await reconcile_print_orders(self.db, list(request_path.values()), trigger="reconcile")
+        sent_by_request_path = {c.args[0].id for c in self.provider.await_args_list}
+        self.provider.reset_mock()
+        with patch(CAPABILITY_PATH, AsyncMock(side_effect=lambda tenant_id, capability_key: tenant_id != TENANT_A)):
+            await recover_pending_print_orders_once(self.db)
+        sent_by_loop = {c.args[0].id for c in self.provider.await_args_list}
+
+        for name in cases:
+            await self.db.refresh(request_path[name])
+            await self.db.refresh(loop_path[name])
+            self.assertEqual(
+                request_path[name].print_status, loop_path[name].print_status, f"final status differs for {name}",
+            )
+            self.assertEqual(
+                request_path[name].id in sent_by_request_path,
+                loop_path[name].id in sent_by_loop,
+                f"provider use differs for {name}",
+            )
+        self.assertEqual(request_path["pending_fresh"].print_status, "SUCCESS")
+        self.assertEqual(request_path["failed_retryable"].print_status, "SUCCESS")
+        self.assertEqual(request_path["sending_stale"].print_status, "UNKNOWN")
+        self.assertEqual(len(sent_by_request_path), 2)
+
+    def test_s7b_shared_rules_for_the_disposition_helper(self):
+        from datetime import timezone
+
+        def order(**kw):
+            row = Order(tenant_id=TENANT_A, status="pending", payment_mode="prepay", payment_status="paid")
+            row.print_status = kw.get("print_status", "PENDING")
+            row.created_at = datetime.utcnow() - timedelta(seconds=kw.get("created_age_s", 0))
+            meta = {"version": 2, "initial_print": {
+                "status": row.print_status, "attempts": kw.get("attempts", 0), "route": dict(ROUTE),
+            }}
+            _sync_legacy_initial_fields(meta)
+            _set_print_meta(row, meta)
+            return row
+
+        now = datetime.now(timezone.utc)
+        self.assertEqual(_auto_recovery_disposition(order(), now), "RETRY")
+        self.assertEqual(_auto_recovery_disposition(order(print_status="FAILED", attempts=1), now), "RETRY")
+        self.assertEqual(
+            _auto_recovery_disposition(order(print_status="FAILED", attempts=MAX_PRINT_RETRY_ATTEMPTS), now), "SKIP",
+        )
+        self.assertEqual(_auto_recovery_disposition(order(print_status="UNKNOWN", attempts=1), now), "SKIP")
+        self.assertEqual(_auto_recovery_disposition(order(print_status="SUCCESS", attempts=1), now), "SKIP")
+        self.assertEqual(_auto_recovery_disposition(order(print_status="SENDING", attempts=1), now), "QUARANTINE")
+        self.assertEqual(
+            _auto_recovery_disposition(order(created_age_s=PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS + 60), now), "SKIP",
+        )
+        # SENDING is exempt from the age window: quarantine never calls the provider.
+        self.assertEqual(
+            _auto_recovery_disposition(
+                order(print_status="SENDING", attempts=1, created_age_s=PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS + 60), now,
+            ),
+            "QUARANTINE",
+        )
 
     # ------------------------------------------------------------------ budget / wiring
     async def test_provider_attempts_stay_capped_per_cycle(self):

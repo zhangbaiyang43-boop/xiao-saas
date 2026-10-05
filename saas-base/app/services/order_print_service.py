@@ -536,6 +536,37 @@ def _eligible_at_for_reconcile(order: Order) -> datetime | None:
     return _parse_dt(getattr(order, "created_at", None))
 
 
+def _auto_recovery_disposition(order: Order, now: datetime) -> str:
+    """RETRY / QUARANTINE / SKIP: the recoverability rules both recovery paths share.
+
+    Used by recover_pending_print_orders_once (the background loop) and by
+    reconcile_print_orders (workbench / order-list triggered). Per-path timing gates
+    (PENDING grace, FAILED cooldown) stay with each path; everything else lives here.
+
+    - printed or UNKNOWN rows are never recovered (UNKNOWN: a resend could duplicate)
+    - SENDING goes to quarantine regardless of age: that never calls the provider
+    - FAILED with the retry budget spent can never progress on its own
+    - PENDING/FAILED older than PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS are left to manual reprint
+    ``now`` must be timezone-aware UTC.
+    """
+    db_status = str(getattr(order, "print_status", "") or "").upper()
+    meta = _get_print_meta(order)
+    meta_status = meta.get("status")
+    if db_status == "SUCCESS" or meta_status == "printed":
+        return "SKIP"
+    if db_status == "UNKNOWN" or meta_status == "unknown":
+        return "SKIP"
+    if db_status == "SENDING" or meta_status == "printing":
+        return "QUARANTINE"
+    is_failed = db_status == "FAILED" or meta_status == "failed"
+    if is_failed and int(meta.get("attempts") or 0) >= MAX_PRINT_RETRY_ATTEMPTS:
+        return "SKIP"
+    created_at = _parse_dt(getattr(order, "created_at", None))
+    if created_at is not None and (now - created_at).total_seconds() > PRINT_AUTO_RECOVERY_MAX_AGE_SECONDS:
+        return "SKIP"
+    return "RETRY"
+
+
 def _is_unknown_print_exception(exc: BaseException) -> bool:
     if isinstance(exc, PrintResultUnknownError):
         return True
@@ -957,19 +988,40 @@ async def reconcile_print_orders(
     trigger: str = "reconcile",
     pickup_settings: dict | None = None,
 ) -> int:
-    """Best-effort print recovery for a bounded batch of orders. Returns print call count."""
+    """Best-effort print recovery for orders a request just loaded.
+
+    Returns the number of print attempts plus stale-SENDING quarantines performed.
+    The cap applies to those actions, not to the input: orders that need nothing
+    (already printed, exhausted, too old, UNKNOWN) are skipped without using up the
+    PRINT_RECONCILE_BATCH_LIMIT budget, so they can no longer hide a recoverable order.
+    """
     from app.services.pickup_no_service import load_pickup_settings, should_defer_kitchen_print
 
     if not orders:
         return 0
 
-    batch = list(orders)[:PRINT_RECONCILE_BATCH_LIMIT]
     now = datetime.now(timezone.utc)
     settings_by_tenant: dict[str, dict] = {}
     attempted = 0
 
-    for order in batch:
+    for order in list(orders):
+        if attempted >= PRINT_RECONCILE_BATCH_LIMIT:
+            break
         if getattr(order, "status", None) not in _AUTO_RECONCILE_STATUSES:
+            continue
+
+        disposition = _auto_recovery_disposition(order, now)
+        if disposition == "SKIP":
+            continue
+        if disposition == "QUARANTINE":
+            # SENDING becomes UNKNOWN when stale; the provider is deliberately not called.
+            if await _quarantine_stale_sending(
+                db,
+                order_id=int(order.id),
+                tenant_id=str(order.tenant_id),
+                allow_provider_call=False,
+            ):
+                attempted += 1
             continue
 
         tenant_id = str(getattr(order, "tenant_id", "") or "")
@@ -993,17 +1045,10 @@ async def reconcile_print_orders(
         meta = _get_print_meta(order)
         db_print_status = str(getattr(order, "print_status", "") or "").upper()
         meta_status = meta.get("status")
-
-        # Result-unknown must never auto-retry (risk of duplicate tickets).
-        if db_print_status == "UNKNOWN" or meta_status == "unknown":
-            continue
-
         attempts = int(meta.get("attempts") or 0)
         is_failed = db_print_status == "FAILED" or meta_status == "failed"
 
         if is_failed:
-            if attempts >= MAX_PRINT_RETRY_ATTEMPTS:
-                continue
             last_at = _parse_dt(meta.get("last_attempt_at")) or _parse_dt(meta.get("failed_at"))
             if last_at and (now - last_at).total_seconds() < PRINT_RETRY_COOLDOWN_SECONDS:
                 continue
@@ -1193,6 +1238,9 @@ async def recover_pending_print_orders_once(
                     allow_provider_call=False,
                 ):
                     handled += 1
+                continue
+            if _auto_recovery_disposition(order, datetime.now(timezone.utc)) == "SKIP":
+                memo.remember_order(int(order.id), now)
                 continue
             result_data = await _print_paid_order_ticket(order, db, reason="startup_recovery")
             if (

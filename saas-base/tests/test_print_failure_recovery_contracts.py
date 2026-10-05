@@ -620,6 +620,9 @@ class PrintPhase4BContractsTest(unittest.TestCase):
 
     def test_reconcile_retries_failed_unpaid_postpay(self):
         order = FakeOrder()
+        # FakeOrder carries a fixed historical created_at; recovery only chases orders
+        # still inside the auto-recovery window, so make this one recent.
+        order.created_at = datetime.now(timezone.utc) - timedelta(seconds=120)
         order.payment_mode = "postpay"
         order.payment_status = "unpaid"
         order.print_status = "FAILED"
