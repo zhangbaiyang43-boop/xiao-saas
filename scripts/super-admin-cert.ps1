@@ -46,8 +46,16 @@ function Read-EnvFile {
 
 function Invoke-Git {
     param([string[]]$Arguments)
-    $out = & git -C $RepoRoot @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "git $($Arguments -join ' ') failed: $($out -join ' ')" }
+    $previous = $ErrorActionPreference
+    try {
+        # Git writes normal fetch/progress messages to stderr. Windows PowerShell 5
+        # would otherwise turn successful native-command stderr into a terminating error.
+        $ErrorActionPreference = 'Continue'
+        $out = & git -C $RepoRoot @Arguments 2>&1
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previous }
+    if ($code -ne 0) { throw "git $($Arguments -join ' ') failed: $($out -join ' ')" }
     return @($out)
 }
 
@@ -66,8 +74,14 @@ function Invoke-Compose {
 }
 
 function Assert-DockerReady {
-    $v = & docker info --format '{{.ServerVersion}}' 2>&1
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($v -join ''))) { throw 'Docker server is not available' }
+    $previous = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $v = & docker info --format '{{.ServerVersion}}' 2>&1
+        $code = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previous }
+    if ($code -ne 0 -or [string]::IsNullOrWhiteSpace(($v -join ''))) { throw 'Docker server is not available' }
 }
 
 function New-Secret([int]$Bytes = 24) {
