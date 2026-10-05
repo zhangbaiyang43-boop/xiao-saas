@@ -85,13 +85,21 @@
 
 ## 场景 5 — 退款 / 取消
 
+已付款订单**不能取消**，只能「拒单 → 退款」两步（`orders.py` 的 `ORDER_ALLOWED_TRANSITIONS` / `build_order_financial_capabilities`）。
+拒单只终止出餐，**不退钱**；退钱是商家随后点「退款」。拒单只在订单还是「待处理」（商家未开始制作）时可用。
+
 | 步 | 操作 | 期望屏幕 | 期望库 |
 |---|---|---|---|
-| 1 | 拿场景 1 的已支付单，商家侧发起取消/退款 | 提示退款处理中 → 成功 | `status=cancelled`；`refund_status=success`；`refund_amount ≤ total` |
-| 2 | 该单如果用了券 | 券应恢复为可用 | `SELECT status FROM coupon WHERE id=<coupon_id>` → 回到 `UNUSED`（不是 `USED`/`LOCKED`） |
-| 3 | 取消一个 postpay 未付单 | 直接取消，无退款 | `status=cancelled`，无 `refund_*` |
+| 1 | 拿场景 1 的已支付单（状态还是「待处理」），商家点**拒单** | 拒单确认框提示已付款订单拒单后需再退款；拒单后订单显示「需要退款处理」 | `status=rejected`；`payment_status=paid`；`refund_status` 为空；库存恢复；取餐号释放 |
+| 2 | 商家点**退款** | 退款处理中 → 已退款（处理中时页面会自动核对几次，仍未完成就刷新页面再看） | `status=rejected`；`refund_status=success`；`refund_amount ≤ total`；`refunded_at` 有值 |
+| 3 | 该单如果用了券 | 券应恢复为可用（**退款成功后**才恢复，不是拒单时） | `SELECT status FROM coupon WHERE id=<coupon_id>` → 回到 `UNUSED`（不是 `USED`/`LOCKED`） |
+| 4 | 另拿一张已付款单，**顾客**在小程序尝试取消 | 顾客没有取消成功，只看到请联系商家处理退款之类的提示 | 接口返回 409；`status` 不变 |
+| 5 | 另拿一张已付款单，商家先点**开始制作**，再找拒单/取消/退款入口 | **没有**拒单、取消、退款按钮 | `status=preparing`；系统内无退款路径（已知缺口，见试点清单第 11 节） |
+| 6 | 取消一个 postpay / table_account **未付**单（待处理） | 直接取消，无退款 | `status=cancelled`，无 `refund_*`；库存、券恢复 |
 
-必须成立：退款金额不超过实付；用掉的券取消后能再用。
+必须成立：退款金额不超过实付；用掉的券在**退款成功后**能再用；已付款订单走不通「取消」，只能走「拒单 → 退款」；拒单**不会**自动退款。
+
+注意：以前这一节写的是「商家取消已付款订单，`status=cancelled`、`refund_status=success`」。代码不是这样工作的（已付款取消返回 409，终态是 `rejected`），按旧文字验收会误判。
 
 ---
 

@@ -26,21 +26,36 @@ fetch from mainland China running at ~4-10KB/s and timing out even though
 never needs a COS secret to download from it: the public COS base URL is a
 plain HTTPS GET, no credentials required.
 
-**FIRST_MIGRATION_STATUS=NOT_YET_EXECUTED.** The tooling below (`scripts/
-deploy-production.sh`, `scripts/rollback-admin-h5.sh`) exists and is
-Linux-certified (see [GitHub Actions](#github-actions)), but the one-time
-production cutover described in [First migration](#first-migration-one-time-no-downtime-cutover)
-has not been run yet. Until it has, production nginx still serves
-`/www/wwwroot/admin-h5/dist` and the legacy source tree is still live there --
-this document describes the target end state and the exact steps to reach
-it, not something already true of production today.
+**FIRST_MIGRATION_STATUS=EXECUTED.** The one-time cutover described in
+[First migration](#first-migration-one-time-no-downtime-cutover) has been
+run: production serves admin-h5 from `/www/wwwroot/admin-h5/current` (an
+atomic symlink onto `releases/<sha>`) and releases go out with
+`scripts/deploy-production.sh`. The last release shipped this way was
+`43f4e673` (print recovery + print-first fulfilment mode). Do not take this
+paragraph as proof of the live state -- check it (see
+[Which commit is live](#layout)): `cat /www/wwwroot/admin-h5/current/release.json`
+and `git -C /www/wwwroot/xiao rev-parse HEAD`. The "First migration" and
+"Bootstrap mode" sections below are kept as history and for rebuilding a
+server from scratch; routine deploys never use them.
+
+The deploy is **HYBRID**: the backend is deployed by fast-forward `git pull`
+plus a `systemd` restart on the server itself, while admin-h5 is deployed
+from a prebuilt artifact. These are two different mechanisms with one
+trigger, so a backend-only change never produces a new admin release and an
+admin-only change never restarts the backend.
 
 ## The one command
 
 ```bash
 cd /www/wwwroot/xiao
-./scripts/deploy-production.sh
+bash scripts/deploy-production.sh
 ```
+
+Run it through `bash`. The scripts are executable in git, but a checkout can
+still lose the mode bit (it did once: `Permission denied`), and
+`bash scripts/...` always works. Never `chmod` a script on the production
+host: that dirties the working tree and the next deploy stops with
+`BLOCKED_DIRTY_PRODUCTION_TREE`.
 
 That's it. It:
 
@@ -63,8 +78,9 @@ That's it. It:
    any download, before the backend restart, before touching `current`.
 5. Only now: fast-forwards `main` (`git pull --ff-only`) -- never
    force-pulls, never rebases, never resets.
-6. If `admin-h5/**` changed: downloads the checksummed artifact for this
-   exact commit from the resolved `ARTIFACT_BASE_URL` (production: Tencent
+6. If `admin-h5/**` changed: downloads the checksummed artifact for
+   `ADMIN_ARTIFACT_SHA` -- the last commit that actually touched `admin-h5`,
+   which is *not* necessarily the deploy target -- from the resolved `ARTIFACT_BASE_URL` (production: Tencent
    COS -- never GitHub, see [Artifact transport](#artifact-transport-tencent-cos)),
    verifies its checksum and archive-entry safety, extracts it into an
    immutable, SHA-named release directory -- but does **not** switch
@@ -294,7 +310,7 @@ target changes, which nginx follows on every request without a reload.
 ```bash
 cd /www/wwwroot/xiao
 ls -1t /www/wwwroot/admin-h5/releases   # see what's available
-./scripts/rollback-admin-h5.sh <release-sha>
+bash scripts/rollback-admin-h5.sh <release-sha>
 ```
 
 This only re-points the `current` symlink to an already-built, already-
@@ -313,6 +329,33 @@ rollback based on whether the range being rolled back includes a migration.
 `deploy-production.sh` keeps `current`'s release plus at least 3 more of the
 most recently created releases; older ones are pruned automatically after a
 successful deploy. It never deletes the release `current` points to.
+
+## Merging a PR that touches admin-h5
+
+Merge with **squash**. The release workflow builds on the push to `main` and
+keys the artifact by that push's head SHA; the deploy script looks the
+artifact up by the last commit that touched `admin-h5` (`git log -1 --
+admin-h5`). Those two are the same commit for a squash merge. A merge commit,
+or a multi-commit push whose head is not the last commit touching admin-h5,
+can make them differ, and the deploy then stops with
+`ADMIN_ARTIFACT_NOT_READY` no matter how long you wait. A dry run
+(`bash scripts/deploy-production.sh --dry-run`) prints `ADMIN_ARTIFACT_SHA` so
+you can check it against the Actions run before the real deploy.
+
+## What the deploy prints
+
+The last `STATUS=` line is the verdict.
+
+| STATUS | Meaning | What to do |
+|---|---|---|
+| `DEPLOY_OK` | Backend (if changed) healthy, admin switched (if changed) | Verify, done |
+| `DRY_RUN_OK` | Dry run only | Nothing changed |
+| `BLOCKED_DIRTY_PRODUCTION_TREE` | Uncommitted changes on the server | Find out why; never reset/clean/stash |
+| `MIGRATION_REQUIRED_MANUAL_REVIEW` | A migration is in range, HEAD untouched | See [Migration releases](#migration-releases) |
+| `BLOCKED_ARTIFACT_TRANSPORT_NOT_CONFIGURED` | `ARTIFACT_BASE_URL` missing | Fix `/etc/xiao-deploy.env` |
+| `ADMIN_ARTIFACT_NOT_READY` | No artifact for `ADMIN_ARTIFACT_SHA` yet | Wait for the Actions run; if it already succeeded, suspect the merge method above |
+| `BACKEND_DEPLOY_FAILED` | Restart/health failed, `current` untouched | `journalctl -u saas-base.service -n 50 --no-pager` |
+| `ADMIN_DEPLOY_FAILED_ROLLED_BACK` | HTTP verification failed, `current` restored | Investigate before retrying |
 
 ## Migration releases
 
@@ -350,9 +393,9 @@ cd ..
 #    script's own diff would see "nothing changed" -- --force-backend (and
 #    --force-admin, if this same release also touches admin-h5) is what
 #    actually gets the already-pulled code deployed:
-./scripts/deploy-production.sh --force-backend
+bash scripts/deploy-production.sh --force-backend
 # or, if admin-h5 also changed in this release:
-./scripts/deploy-production.sh --force-backend --force-admin
+bash scripts/deploy-production.sh --force-backend --force-admin
 ```
 
 **Do not expect a bare re-run of `deploy-production.sh` (no flags) to pick
@@ -367,7 +410,7 @@ To see what a deploy *would* do without touching git, disk, or any running
 service:
 
 ```bash
-./scripts/deploy-production.sh --dry-run
+bash scripts/deploy-production.sh --dry-run
 ```
 
 This only runs `git fetch` + read-only diffs; it never checks out,

@@ -221,6 +221,22 @@ async def build_member_value_for_order(db: AsyncSession, order: Order) -> dict[s
     }
 
 
+def _schedule_cancel_slip_after_commit(order, db, *, reason: str) -> None:
+    """Tell the kitchen to stop an order it may already hold (best-effort, never raises).
+
+    Lazy import: order_print_service is loaded against stubbed modules by some tests, and
+    a printer problem must never fail or slow the reject / cancel itself.
+    """
+    try:
+        from app.services.order_print_service import schedule_cancel_slip
+
+        schedule_cancel_slip(order, db, reason=reason)
+    except Exception:
+        from app.core.logger import logger
+
+        logger.exception("cancel slip scheduling failed order_id=%s", getattr(order, "id", None))
+
+
 class OrderLifecycleService(BaseService):
     async def update_order_pickup_no(self, order_id: int, pickup_no_raw: str) -> ApiResponse:
         from app.services.pickup_no_service import PickupNoService
@@ -400,6 +416,7 @@ class OrderLifecycleService(BaseService):
                 str(order.tenant_id), session
             )
         await self.db.commit()
+        _schedule_cancel_slip_after_commit(order, self.db, reason=cancel_source)
         log_order_status_changed(
             order_id=order.id,
             tenant_id=str(order.tenant_id),
@@ -1131,6 +1148,12 @@ class OrderLifecycleService(BaseService):
             await PickupNoService(self.db).release_if_no_holding_orders(tenant_id, session)
         await self.db.commit()
         await self.db.refresh(order)
+        if body.status in ("rejected", "cancelled"):
+            _schedule_cancel_slip_after_commit(
+                order,
+                self.db,
+                reason="merchant_reject" if body.status == "rejected" else "merchant_cancel",
+            )
         log_order_status_changed(
             order_id=order.id,
             tenant_id=str(order.tenant_id),

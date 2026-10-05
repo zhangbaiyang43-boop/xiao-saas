@@ -236,6 +236,7 @@
                 <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
                 <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
                 <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
+                <a-tag v-if="['FAILED','UNKNOWN','failed','unknown'].includes(order.cancelSlipStatus)" size="small" class="order-tag-print-failed">取消单未打出，请通知后厨</a-tag>
                 <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
                 <a-tag v-else-if="order.refundStatus === 'processing'" color="warning">退款处理中</a-tag>
                 <a-tag v-else-if="order.refundStatus === 'success'" color="success">已退款</a-tag>
@@ -421,6 +422,7 @@
               <span v-else-if="orderNeedsPickup(order)" class="pickup-pending-hint"><span class="pickup-todo-dot" />待发桌牌</span>
               <a-tag v-if="order.printStatus === 'failed'" size="small" class="order-tag-print-failed">打印失败</a-tag>
               <a-tag v-else-if="order.printStatus === 'unknown'" size="small" class="order-tag-print-unknown">打印结果未知</a-tag>
+              <a-tag v-if="['FAILED','UNKNOWN','failed','unknown'].includes(order.cancelSlipStatus)" size="small" class="order-tag-print-failed">取消单未打出，请通知后厨</a-tag>
               <a-tag v-if="order.refundRequired" color="error">需要退款处理</a-tag>
               <a-tag v-else-if="order.refundStatus === 'processing'" color="warning">退款处理中</a-tag>
               <a-tag v-else-if="order.refundStatus === 'success'" color="success">已退款</a-tag>
@@ -1125,6 +1127,7 @@ function mapOwnerOrders(raw) {
       refundAmount: o.refund_amount != null ? Number(o.refund_amount) : null,
       refundedAt: o.refunded_at || null,
       printStatus: o.print_status || null,
+      cancelSlipStatus: o.cancel_slip_status || null,
       printErrorCode: o.print_error_code || '',
       printLastAttemptAt: o.print_last_attempt_at || '',
       printProvider: o.print_provider || '',
@@ -1692,6 +1695,9 @@ function applyPickupNoToOrders(pickupNo, orderIds) {
 // 真实误操作风险。这里照抄 cancelPendingPaymentOrder 的 Modal.confirm 结构，
 // 业务请求本身（updateOrderStatus/reconcileAfterOrderAction）原样不动，只是挪进
 // onOk 里，取消分支不触发任何请求。
+// 小票已打到后厨的订单被拒/取消后，后端会自动再打一张“取消单”（尽力而为，可能失败）。
+const CANCEL_SLIP_NOTICE = '如果这单已经打印给后厨，系统会自动再打一张“取消单”通知后厨停做；仍请当面确认。'
+
 function rejectOrder(order) {
   // 已付款订单的拒单只终止履约、不退款：拒单成功后订单变成 rejected+paid，
   // refund_required 变 true，商户再点已有的「退款」按钮走原退款流程。二次确认
@@ -1699,9 +1705,9 @@ function rejectOrder(order) {
   const isPaid = order.paymentStatus === 'paid'
   Modal.confirm({
     title: isPaid ? '确认拒绝已付款订单？' : '确认拒绝该订单？',
-    content: isPaid
+    content: (isPaid
       ? `该订单已微信付款 ¥${Number(order.total).toFixed(2)}。拒单后订单将停止处理，但不会自动退款；拒单成功后，请继续点击“退款”将款项原路退回顾客。`
-      : `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`,
+      : `桌${order.table} · 订单尾号${orderTail(order)} · ¥${Number(order.total).toFixed(2)}，拒绝后该订单将不再继续处理，顾客需要重新下单。`) + CANCEL_SLIP_NOTICE,
     okText: '拒绝订单',
     okType: 'danger',
     cancelText: '再想想',
