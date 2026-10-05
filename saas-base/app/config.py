@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     TENCENT_SMS_LOGIN_TEMPLATE_ID: str = ""
     TENCENT_SMS_LOGIN_TEMPLATE_PARAM_1: str = "????"
     TENCENT_SMS_REGION: str = "ap-guangzhou"
+    # Print exception escalation (server-side, SMS to the owner's login phone). Both
+    # template ids must be approved in the Tencent SMS console first; while either is
+    # empty the matching message is simply not sent (the exception is still logged).
+    # Alert template: one numeric parameter {1} = number of affected orders.
+    # Recovered template: no parameters.
+    TENCENT_SMS_PRINT_ALERT_TEMPLATE_ID: str = ""
+    TENCENT_SMS_PRINT_RECOVERED_TEMPLATE_ID: str = ""
+    PRINT_ALERT_ENABLED: bool = True
+    # Cost/abuse bound per phone per day, independent of the login-code budget.
+    PRINT_ALERT_SMS_DAILY_LIMIT: int = 20
     SMS_CODE_TTL_SECONDS: int = 300
     SMS_CODE_SEND_INTERVAL_SECONDS: int = 60
     SMS_CODE_DAILY_LIMIT: int = 10

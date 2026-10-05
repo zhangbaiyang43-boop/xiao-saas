@@ -61,6 +61,7 @@ from app.models import Base
 from app.plugins.plugin_manager import plugin_manager
 from app.services.consumption_event_handlers import handle_consumption_membership
 from app.services.order_print_service import print_recovery_loop
+from app.services.print_exception_alert_service import print_alert_loop
 
 os.makedirs("logs", exist_ok=True)
 os.makedirs("static", exist_ok=True)
@@ -72,6 +73,7 @@ app.state.limiter = limiter
 app.state.tenant_limiter = tenant_limiter
 
 _print_recovery_task: asyncio.Task[None] | None = None
+_print_alert_task: asyncio.Task[None] | None = None
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(TenantMiddleware)
@@ -561,6 +563,12 @@ async def startup():
     # Printing has its own retained task so shutdown can cancel it deterministically.
     _print_recovery_task = asyncio.create_task(print_recovery_loop())
 
+    # Server-side print exception escalation runs as its own task: an alerting failure
+    # must never be able to stall print recovery (or anything else).
+    global _print_alert_task
+    if settings.PRINT_ALERT_ENABLED:
+        _print_alert_task = asyncio.create_task(print_alert_loop())
+
 
 @app.on_event("shutdown")
 async def shutdown_print_recovery():
@@ -571,6 +579,17 @@ async def shutdown_print_recovery():
     with contextlib.suppress(asyncio.CancelledError):
         await _print_recovery_task
     _print_recovery_task = None
+
+
+@app.on_event("shutdown")
+async def shutdown_print_alert():
+    global _print_alert_task
+    if _print_alert_task is None:
+        return
+    _print_alert_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _print_alert_task
+    _print_alert_task = None
 
 
 @app.get("/")
