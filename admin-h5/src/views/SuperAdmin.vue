@@ -36,7 +36,7 @@
       <div v-if="activeTab === 'merchants'">
       <div class="stat-row animate-in">
         <div class="stat-card"><div class="stat-num">{{ stats.total_merchants }}</div><div class="stat-label">商家总数</div></div>
-        <div class="stat-card"><div class="stat-num green">{{ stats.active_merchants }}</div><div class="stat-label">活跃商家</div></div>
+        <div class="stat-card"><div class="stat-num green">{{ stats.active_merchants }}</div><div class="stat-label">启用商户</div></div>
         <div class="stat-card"><div class="stat-num blue">{{ stats.today_orders }}</div><div class="stat-label">今日订单</div></div>
         <div class="stat-card"><div class="stat-num green">¥{{ stats.today_revenue?.toFixed(0) }}</div><div class="stat-label">今日营收</div></div>
       </div>
@@ -107,15 +107,28 @@
               </div>
               <div class="mc-meta">今日订单 <b>{{ m.today_orders }}</b> 单</div>
               <div class="mc-pay-row">
-                <span class="mc-pay-badge" :class="statusClass(m.payment_status)">{{ statusText(m.payment_status) }} {{ m.wx_mchid_masked || '' }}</span>
+                <span class="mc-pay-badge" :class="statusClass(m.payment_status)">支付：{{ statusText(m.payment_status) }} {{ m.wx_mchid_masked || '' }}</span>
                 <button class="pay-cfg-btn tap-shrink" @click="openPayConfig(m)">收款配置</button>
-                <button class="pay-cfg-btn tap-shrink" :disabled="seedingId === m.tenant_id" @click="seedTestData(m)">{{ seedingId === m.tenant_id ? '填充中...' : '填充测试数据' }}</button>
+                <button class="more-btn tap-shrink" @click="toggleDanger(m.tenant_id)">{{ dangerOpenId === m.tenant_id ? '收起' : '更多' }}</button>
               </div>
+              <div v-if="dangerOpenId === m.tenant_id" class="danger-zone card-danger">
+                <div class="danger-zone-label">危险操作</div>
+                <div class="danger-ops-actions">
+                  <button
+                    class="toggle-btn tap-shrink"
+                    :class="m.status ? 'stop' : 'resume'"
+                    :disabled="rowBusy(m.tenant_id)"
+                    @click="confirmToggleStatus(m)"
+                  >{{ statusButtonText(m) }}</button>
+                  <button class="seed-btn tap-shrink" :disabled="rowBusy(m.tenant_id)" @click="seedTestData(m)">{{ seedingId === m.tenant_id ? '填充中...' : '填充测试数据' }}</button>
+                </div>
+                <div class="seed-hint">测试 / 开发辅助。没有订单的商户会先被清掉菜单、会员、入口码和优惠券模板，再写入演示数据。</div>
+              </div>
+              <div v-if="statusResult && statusResult.tenant_id === m.tenant_id" class="create-result" :class="statusResult.ok ? 'ok' : 'err'">{{ statusResult.msg }}</div>
               <div v-if="seedResult && seedResult.tenant_id === m.tenant_id" class="create-result" :class="seedResult.ok ? 'ok' : 'err'">{{ seedResult.msg }}</div>
             </div>
             <div class="mc-right">
-              <span class="mc-badge" :class="m.status ? 'on' : 'off'">{{ m.status ? '营业中' : '已停用' }}</span>
-              <button class="toggle-btn tap-shrink" :class="m.status ? 'stop' : 'resume'" @click="toggleStatus(m)">{{ m.status ? '停用' : '恢复' }}</button>
+              <span class="mc-badge" :class="m.status ? 'on' : 'off'">账号：{{ m.status ? '启用' : '已停用' }}</span>
             </div>
           </div>
         </div>
@@ -259,6 +272,9 @@ const pausingPay = ref(false)
 const payConfigResult = ref(null)
 const seedingId = ref('')
 const seedResult = ref(null)
+const statusBusyId = ref('')
+const statusResult = ref(null)
+const dangerOpenId = ref('')
 const perfStats = ref([])
 const perfStatsLoading = ref(false)
 const perfStatsError = ref(false)
@@ -511,8 +527,45 @@ async function pausePay(totpCodeInput = '') {
   finally { pausingPay.value = false }
 }
 
+function rowBusy(tenantId) {
+  return statusBusyId.value === tenantId || seedingId.value === tenantId
+}
+
+function toggleDanger(tenantId) {
+  dangerOpenId.value = dangerOpenId.value === tenantId ? '' : tenantId
+}
+
+function statusButtonText(merchant) {
+  if (statusBusyId.value === merchant.tenant_id) return merchant.status ? '停用中...' : '恢复中...'
+  return merchant.status ? '停用商户' : '恢复商户'
+}
+
+function backendMessage(error) {
+  const data = error?.response?.data
+  if (typeof data?.msg === 'string' && data.msg.trim()) return data.msg.trim()
+  const detail = data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  if (typeof detail?.message === 'string' && detail.message.trim()) return detail.message.trim()
+  return ''
+}
+
+function confirmToggleStatus(merchant) {
+  if (rowBusy(merchant.tenant_id)) return
+  const name = merchant.name || '该商户'
+  const message = merchant.status
+    ? `确认停用「${name}」？\n\n这是平台停用该商户账号，不是餐厅今天休息。\n停用后，该商户不能继续登录使用开心点单，顾客也不能再通过该商户下单。\n\n如果只是今天不营业，请让商家在经营后台自己切换营业状态。`
+    : `确认恢复「${name}」？\n\n恢复后，该商户账号将重新启用。\n商家当天是否营业，仍由商家在经营后台设置。`
+  if (!window.confirm(message)) return
+  toggleStatus(merchant)
+}
+
 async function seedTestData(merchant) {
-  if (!window.confirm(`确定要给「${merchant.name}」填充测试数据吗？\n会生成菜品、会员、优惠券和近30天的历史订单。`)) return
+  if (rowBusy(merchant.tenant_id)) return
+  const name = merchant.name || '该商户'
+  const ok = window.confirm(
+    `为「${name}」填充测试数据？\n\n这是测试/开发辅助操作，不是开店步骤。\n\n该商户如果还没有订单，此操作会先删除已有的：\n· 全部菜品\n· 会员\n· 入口码（含桌码、海报码等）\n· 优惠券模板\n\n然后写入演示菜品、演示会员、演示优惠券模板、演示桌码，以及近 30 天和今日的演示订单。\n\n已经有订单的商户会被拒绝，不会删除真实订单。\n如果这是已经开始配置的真实商户，请取消。`,
+  )
+  if (!ok) return
   seedingId.value = merchant.tenant_id
   seedResult.value = null
   try {
@@ -520,18 +573,46 @@ async function seedTestData(merchant) {
     if (res.data?.code === 200) {
       const d = res.data.data
       seedResult.value = { tenant_id: merchant.tenant_id, ok: true, msg: `填充成功：${d.menu_items} 道菜 · ${d.customers} 位会员 · 历史 ${d.history_orders} 单 · 今日 ${d.today_orders} 单` }
-    } else seedResult.value = { tenant_id: merchant.tenant_id, ok: false, msg: res.data?.msg || '填充失败' }
+    } else {
+      seedResult.value = { tenant_id: merchant.tenant_id, ok: false, msg: res.data?.msg || '测试数据写入失败，未确认操作完成，请重新检查该商户的菜单、会员和入口码。' }
+    }
   } catch (e) {
-    seedResult.value = { tenant_id: merchant.tenant_id, ok: false, msg: e?.response?.data?.msg || '网络错误，请重试' }
+    seedResult.value = { tenant_id: merchant.tenant_id, ok: false, msg: backendMessage(e) || '测试数据写入失败，未确认操作完成，请重新检查该商户的菜单、会员和入口码。' }
   }
   finally { seedingId.value = '' }
 }
 
 async function toggleStatus(merchant) {
+  const disabling = !!merchant.status
+  const name = merchant.name || '该商户'
+  statusBusyId.value = merchant.tenant_id
+  statusResult.value = null
   try {
     const res = await superRequest.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
-    if (res.data?.code === 200) merchant.status = res.data.data.status
-  } catch {}
+    if (res.data?.code === 200) {
+      merchant.status = res.data.data.status
+      statusResult.value = {
+        tenant_id: merchant.tenant_id,
+        ok: true,
+        msg: merchant.status ? `已恢复「${name}」的商户账号` : `已停用「${name}」的商户账号`,
+      }
+    } else {
+      statusResult.value = {
+        tenant_id: merchant.tenant_id,
+        ok: false,
+        msg: res.data?.msg || (disabling ? '停用失败，请重试。' : '恢复失败，请重试。'),
+      }
+    }
+  } catch (e) {
+    if (e?.response?.status === 401) authed.value = false
+    statusResult.value = {
+      tenant_id: merchant.tenant_id,
+      ok: false,
+      msg: backendMessage(e) || (disabling ? '停用失败，请重试。' : '恢复失败，请重试。'),
+    }
+  } finally {
+    statusBusyId.value = ''
+  }
 }
 
 function logout() { superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
@@ -577,7 +658,7 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .login-input:focus, .form-input:focus { border-color: var(--hero-dark); box-shadow: 0 0 0 2px rgba(26,26,46,.12); }
 .login-btn { width: 100%; height: 48px; background: var(--hero-dark); color: #fff; border: 0; border-radius: 8px; font-size: 15px; font-weight: 800; cursor: pointer; }
 .create-btn { height: 44px; background: var(--brand); color: #fff; border: 0; border-radius: 8px; font-size: 15px; font-weight: 800; cursor: pointer; }
-.login-btn:disabled, .create-btn:disabled, .verify-btn:disabled, .pause-btn:disabled { opacity: .55; cursor: not-allowed; }
+.login-btn:disabled, .create-btn:disabled, .verify-btn:disabled, .pause-btn:disabled, .toggle-btn:disabled { opacity: .55; cursor: not-allowed; }
 .login-err { color: var(--danger); font-size: 13px; margin-top: 8px; }
 
 /* ─── Console body ──────────────────────────────────────────── */
@@ -657,7 +738,13 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .pause-btn { width: 100%; background: #fef2f2; color: #dc2626; }
 .cancel-btn { width: 100%; height: 40px; margin-top: 8px; }
 .danger-zone { margin-top: 20px; padding: 12px; border: 1px solid #fecaca; border-radius: var(--radius-card); background: #fff5f5; }
+.danger-zone.card-danger { margin-top: 8px; }
 .danger-zone-label { font-size: 11px; font-weight: 800; letter-spacing: .04em; color: #dc2626; margin-bottom: 8px; }
+.more-btn { border: 0; background: transparent; color: var(--text-3); font-size: 12px; font-weight: 700; padding: 3px 4px; cursor: pointer; }
+.danger-ops-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.seed-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #fcd34d; background: #fffbeb; color: #92400e; cursor: pointer; font-weight: 700; }
+.seed-btn:disabled, .more-btn:disabled { opacity: .55; cursor: not-allowed; }
+.seed-hint { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #92400e; }
 @media (max-width: 420px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .merchant-card { align-items: flex-start; }
