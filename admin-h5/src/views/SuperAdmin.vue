@@ -25,6 +25,159 @@
         <button class="logout-btn tap-shrink" @click="logout">退出</button>
       </div>
 
+      <template v-if="isDetail">
+        <div class="merchant-context">
+          <button class="back-link tap-shrink" @click="backToMerchants">返回商户列表</button>
+
+          <div v-if="detailLoading && !detail" class="section">
+            <div class="context-kicker">正在打开商户</div>
+            <div class="context-name">{{ route.params.tenantId }}</div>
+            <div class="loading">加载中...</div>
+          </div>
+          <div v-else-if="!detail" class="section">
+            <div class="context-kicker">商户</div>
+            <div class="context-name">{{ route.params.tenantId }}</div>
+            <div class="empty error-state">
+              <div>{{ detailError || '商户信息加载失败' }}</div>
+              <button class="refresh-btn tap-shrink" @click="loadMerchantDetail(false)">重试</button>
+            </div>
+          </div>
+          <template v-else>
+            <div class="merchant-context-head section">
+              <div class="context-kicker">当前商户</div>
+              <div class="context-name">{{ detail.tenant.name || '未命名商户' }}</div>
+              <div class="context-pills">
+                <span class="mc-badge" :class="detail.tenant.status ? 'on' : 'off'">账号：{{ detail.tenant.status ? '启用' : '已停用' }}</span>
+                <span class="mc-pay-badge" :class="statusClass(paymentStatusOf(detail))">收款：{{ statusText(paymentStatusOf(detail)) }}</span>
+                <span class="mc-badge" :class="detail.subscription?.load_error ? 'off' : 'on'">套餐：{{ subscriptionLabel(detail.subscription) }}</span>
+              </div>
+              <div class="context-meta">Tenant ID <span class="tenant-id">{{ detail.tenant.tenant_id }}</span></div>
+              <div class="context-meta">
+                手机号
+                <span class="phone-reveal tap-shrink" @click="togglePhone(detail.tenant.tenant_id)">{{ revealedPhones.has(detail.tenant.tenant_id) ? (detail.tenant.phone || '-') : (detail.tenant.phone_masked || maskPhone(detail.tenant.phone)) }}</span>
+              </div>
+              <div class="context-meta">注册时间 {{ detail.tenant.created_at || '未记录' }}</div>
+              <div v-if="detailError" class="create-result err">{{ detailError }}</div>
+            </div>
+
+            <div class="detail-tabs">
+              <button class="filter-chip tap-shrink" :class="{ active: detailSection === 'overview' }" @click="setDetailSection('overview')">概览</button>
+              <button class="filter-chip tap-shrink" :class="{ active: detailSection === 'payment' }" @click="setDetailSection('payment')">收款</button>
+              <button class="filter-chip tap-shrink" :class="{ active: detailSection === 'subscription' }" @click="setDetailSection('subscription')">订阅与付款</button>
+              <button class="filter-chip tap-shrink" :class="{ active: detailSection === 'channel' }" @click="setDetailSection('channel')">渠道归属</button>
+            </div>
+
+            <div v-if="detailSection === 'overview'" class="section">
+              <div class="section-title">平台状态</div>
+              <div class="fact-list">
+                <div class="fact-row"><span>账号状态</span><strong>{{ detail.tenant.status ? '账号启用' : '账号已停用' }}</strong></div>
+                <div class="fact-row"><span>收款状态</span><strong>{{ statusText(paymentStatusOf(detail)) }}</strong></div>
+                <div class="fact-row">
+                  <span>套餐状态</span>
+                  <strong v-if="!detail.subscription?.load_error">{{ subscriptionLabel(detail.subscription) }}</strong>
+                  <strong v-else>套餐信息加载失败 <button class="text-link tap-shrink" @click="loadMerchantDetail(true)">重试</button></strong>
+                </div>
+                <div class="fact-row"><span>到期时间</span><strong>{{ expiryLabel(detail.subscription) }}</strong></div>
+                <div class="fact-row"><span>渠道来源</span><strong>{{ channelLabel(detail.channel) }}</strong></div>
+                <div class="fact-row">
+                  <span>今日订单</span>
+                  <strong v-if="!detail.operations?.load_error">{{ detail.operations?.today_order_count ?? 0 }} 单</strong>
+                  <strong v-else>今日订单加载失败 <button class="text-link tap-shrink" @click="loadMerchantDetail(true)">重试</button></strong>
+                </div>
+                <div class="fact-row"><span>注册时间</span><strong>{{ detail.tenant.created_at || '未记录' }}</strong></div>
+              </div>
+
+              <div class="danger-zone">
+                <div class="danger-zone-label">危险操作 · {{ detail.tenant.name || '该商户' }}</div>
+                <div class="danger-ops-actions">
+                  <button
+                    class="toggle-btn tap-shrink"
+                    :class="detail.tenant.status ? 'stop' : 'resume'"
+                    :disabled="rowBusy(detail.tenant.tenant_id)"
+                    @click="confirmToggleStatus(detail.tenant)"
+                  >{{ statusButtonText(detail.tenant) }}</button>
+                  <button class="more-btn tap-shrink" @click="detailSeedOpen = !detailSeedOpen">{{ detailSeedOpen ? '收起' : '更多' }}</button>
+                </div>
+                <div v-if="detailSeedOpen" class="seed-block">
+                  <div class="seed-hint">测试 / 开发辅助。没有订单的商户会先被清掉菜单、会员、入口码和优惠券模板，再写入演示数据。</div>
+                  <button class="seed-btn tap-shrink" :disabled="rowBusy(detail.tenant.tenant_id)" @click="seedTestData(detail.tenant)">{{ seedingId === detail.tenant.tenant_id ? '填充中...' : '填充测试数据' }}</button>
+                </div>
+                <div v-if="statusResult && statusResult.tenant_id === detail.tenant.tenant_id" class="create-result" :class="statusResult.ok ? 'ok' : 'err'">{{ statusResult.msg }}</div>
+                <div v-if="seedResult && seedResult.tenant_id === detail.tenant.tenant_id" class="create-result" :class="seedResult.ok ? 'ok' : 'err'">{{ seedResult.msg }}</div>
+              </div>
+            </div>
+
+            <div v-else-if="detailSection === 'payment'" class="section">
+              <div class="section-title">微信支付收款 — {{ detail.tenant.name }}</div>
+              <div v-if="paymentStatusOf(detail) === 'unconfigured'" class="empty">尚未配置微信支付收款</div>
+              <div v-else class="fact-list">
+                <div class="fact-row"><span>收款状态</span><strong>{{ statusText(paymentStatusOf(detail)) }}</strong></div>
+                <div class="fact-row"><span>微信商户号</span><strong>{{ detail.payment?.merchant_no_masked || detail.payment?.wx_mchid_masked || '-' }}</strong></div>
+                <div class="fact-row"><span>收款账户</span><strong>{{ detail.payment?.locked || detail.payment?.payment_locked ? '已锁定' : '未锁定' }}</strong></div>
+                <div class="fact-row"><span>最后验证时间</span><strong>{{ detail.payment?.verified_time || '未验证' }}</strong></div>
+              </div>
+              <button class="create-btn tap-shrink pay-open-btn" @click="openPayConfig(payMerchantFromDetail())">打开收款配置</button>
+            </div>
+
+            <div v-else-if="detailSection === 'subscription'" class="section">
+              <div class="section-title">当前套餐</div>
+              <div v-if="detail.subscription?.load_error" class="empty error-state">
+                <div>套餐信息加载失败</div>
+                <button class="refresh-btn tap-shrink" @click="loadMerchantDetail(true)">重试</button>
+              </div>
+              <div v-else class="fact-list">
+                <div class="fact-row"><span>当前套餐</span><strong>{{ detail.subscription?.plan_name || '免费版' }}</strong></div>
+                <div class="fact-row"><span>状态</span><strong>{{ subscriptionLabel(detail.subscription) }}</strong></div>
+                <div class="fact-row"><span>开始时间</span><strong>{{ displayDate(detail.subscription?.started_at) }}</strong></div>
+                <div class="fact-row"><span>到期时间</span><strong>{{ expiryLabel(detail.subscription) }}</strong></div>
+                <div class="fact-row"><span>试用</span><strong>{{ detail.subscription?.is_trial ? '试用中' : '不是试用' }}</strong></div>
+              </div>
+
+              <div class="section-title bill-title">付款记录</div>
+              <div v-if="invoicesLoading" class="loading">加载中...</div>
+              <div v-else-if="invoicesError" class="empty error-state">
+                <div>付款记录加载失败</div>
+                <button class="refresh-btn tap-shrink" @click="loadInvoices(true)">重试</button>
+              </div>
+              <div v-else-if="!invoices.length" class="empty">尚无付款记录</div>
+              <div v-else class="bill-list">
+                <div v-for="invoice in invoices" :key="invoice.id" class="bill-row">
+                  <div class="bill-main">
+                    <div class="bill-name">{{ invoiceTitle(invoice) }}</div>
+                    <div class="bill-meta">{{ invoice.invoice_no }} · {{ invoiceStatusText(invoice.status) }}</div>
+                    <div class="bill-meta">创建 {{ displayDateTime(invoice.created_at) }}<template v-if="invoice.paid_at"> · 支付 {{ displayDateTime(invoice.paid_at) }}</template></div>
+                  </div>
+                  <div class="bill-amount">{{ formatYuan(invoice.amount_cents) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="section">
+              <div class="section-title">渠道归属</div>
+              <div v-if="detail.channel?.load_error" class="empty error-state">
+                <div>渠道信息加载失败</div>
+                <button class="refresh-btn tap-shrink" @click="loadMerchantDetail(true)">重试</button>
+              </div>
+              <div v-else-if="!detail.channel?.bound" class="empty">尚未绑定渠道伙伴</div>
+              <div v-else class="fact-list">
+                <div class="fact-row">
+                  <span>渠道伙伴</span>
+                  <strong>
+                    <button class="text-link tap-shrink" @click="openChannelPartner(detail.channel.partner_id)">{{ detail.channel.partner_name || '渠道伙伴资料缺失' }}</button>
+                  </strong>
+                </div>
+                <div class="fact-row"><span>绑定状态</span><strong>{{ bindingStatusText(detail.channel.binding_status) }}</strong></div>
+                <div class="fact-row"><span>佣金比例</span><strong>{{ commissionText(detail.channel.commission_rate_bps) }}</strong></div>
+                <div class="fact-row"><span>归属开始</span><strong>{{ displayDate(detail.channel.started_at) }}</strong></div>
+                <div class="fact-row"><span>归属结束</span><strong>{{ displayDate(detail.channel.ends_at) }}</strong></div>
+                <div v-if="detail.channel.commission_term_months != null" class="fact-row"><span>佣金期限</span><strong>{{ detail.channel.commission_term_months }} 个月</strong></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <template v-else>
       <div class="console-tabs animate-in">
         <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'merchants' }" @click="activeTab = 'merchants'">商家管理</button>
         <button class="tab-btn tap-shrink" :class="{ active: activeTab === 'billing' }" @click="activeTab = 'billing'">
@@ -81,33 +234,61 @@
 
       <div class="section animate-in">
         <div class="section-title title-row">
-          <span>商家列表（{{ filteredMerchants.length }}/{{ merchants.length }}）</span>
+          <span>商户列表（{{ filteredMerchants.length }}/{{ merchants.length }}）</span>
           <button class="refresh-btn tap-shrink" @click="loadData">刷新</button>
         </div>
-        <input v-model="searchQuery" class="form-input search-input" placeholder="搜索店铺名称或手机号" />
+        <input v-model="searchQuery" class="form-input search-input" placeholder="搜索商户名称、手机号或 Tenant ID" />
+        <div class="filter-label">账号</div>
+        <div class="filter-row">
+          <button
+            v-for="f in accountFilters"
+            :key="f.value"
+            class="filter-chip tap-shrink"
+            :class="{ active: accountFilter === f.value }"
+            @click="accountFilter = f.value"
+          >{{ f.label }}</button>
+        </div>
+        <div class="filter-label">收款</div>
         <div class="filter-row">
           <button
             v-for="f in statusFilters"
-            :key="f.value"
+            :key="'pay-' + f.value"
             class="filter-chip tap-shrink"
             :class="{ active: statusFilter === f.value }"
             @click="statusFilter = f.value"
           >{{ f.label }}</button>
         </div>
+        <div class="filter-label">套餐</div>
+        <div class="filter-row">
+          <button
+            v-for="f in planFilters"
+            :key="'plan-' + f.value"
+            class="filter-chip tap-shrink"
+            :class="{ active: planFilter === f.value }"
+            @click="planFilter = f.value"
+          >{{ f.label }}</button>
+        </div>
         <div v-if="loadingList" class="loading">加载中...</div>
-        <div v-else-if="merchants.length === 0" class="empty">暂无商家</div>
-        <div v-else-if="filteredMerchants.length === 0" class="empty">没有匹配的商家</div>
+        <div v-else-if="merchants.length === 0" class="empty">暂无商户</div>
+        <div v-else-if="filteredMerchants.length === 0" class="empty">没有匹配的商户</div>
         <div v-else class="merchant-list">
           <div v-for="m in filteredMerchants" :key="m.tenant_id" class="merchant-card">
             <div class="mc-left">
-              <div class="mc-name">{{ m.name }}</div>
+              <button class="mc-name-btn tap-shrink" @click="openMerchant(m)">{{ m.name }}</button>
               <div class="mc-meta">
-                <span class="phone-reveal tap-shrink" @click="togglePhone(m.tenant_id)">{{ revealedPhones.has(m.tenant_id) ? m.phone : maskPhone(m.phone) }}</span>
-                · 注册 {{ m.created_at }}
+                <span class="phone-reveal tap-shrink" @click="togglePhone(m.tenant_id)">{{ revealedPhones.has(m.tenant_id) ? m.phone : (m.phone_masked || maskPhone(m.phone)) }}</span>
+                · <span class="tenant-id">{{ m.tenant_id }}</span>
               </div>
-              <div class="mc-meta">今日订单 <b>{{ m.today_orders }}</b> 单</div>
+              <div class="mc-facts">
+                <span class="mc-fact">账号 <b>{{ m.status ? '启用' : '已停用' }}</b></span>
+                <span class="mc-fact">收款 <b :class="statusClass(m.payment_status)">{{ statusText(m.payment_status) }}</b></span>
+                <span class="mc-fact">套餐 <b>{{ subscriptionLabel(m.subscription) }}</b></span>
+                <span class="mc-fact">到期 <b>{{ expiryLabel(m.subscription) }}</b></span>
+                <span class="mc-fact">渠道 <b>{{ channelLabel(m.channel) }}</b></span>
+                <span class="mc-fact">今日订单 <b>{{ m.today_orders }}</b></span>
+              </div>
               <div class="mc-pay-row">
-                <span class="mc-pay-badge" :class="statusClass(m.payment_status)">支付：{{ statusText(m.payment_status) }} {{ m.wx_mchid_masked || '' }}</span>
+                <button class="pay-cfg-btn tap-shrink" @click="openMerchant(m)">查看</button>
                 <button class="pay-cfg-btn tap-shrink" @click="openPayConfig(m)">收款配置</button>
                 <button class="more-btn tap-shrink" @click="toggleDanger(m.tenant_id)">{{ dangerOpenId === m.tenant_id ? '收起' : '更多' }}</button>
               </div>
@@ -137,7 +318,8 @@
 
       <ManualPaymentPanel v-else-if="activeTab === 'billing'" :super-token="superToken" @update:count="pendingPaymentCount = $event" />
 
-      <ChannelPartnerPanel v-else :super-token="superToken" />
+      <ChannelPartnerPanel v-else :super-token="superToken" :highlight-partner-id="channelPartnerFocus" />
+      </template>
     </div>
 
     <div v-if="payConfigTarget" class="modal-mask" @click.self="closePayConfig">
@@ -219,8 +401,13 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { listBillingInvoices } from '../api/superBilling'
 import superRequest from '../api/superRequest'
+import { getSuperSessionToken, setSuperSessionToken } from '../api/superSession'
+import { formatBeijingDate, formatBeijingDateTime } from '../utils/beijingTime'
+import { formatYuan, planDisplayName } from '../utils/subscriptionUi'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 
@@ -234,13 +421,35 @@ const needTotp = ref(false)
 const totpCode = ref('')
 const totpEnabled = ref(false)
 let superToken = ''
+superToken = getSuperSessionToken()
+if (superToken) authed.value = true
 const activeTab = ref('merchants')
 const pendingPaymentCount = ref(0)
+const route = useRoute()
+const router = useRouter()
+const isDetail = computed(() => route.name === 'SuperMerchantDetail' && !!route.params.tenantId)
+const channelPartnerFocus = computed(() => String(route.query.partner || ''))
+const detail = ref(null)
+const detailLoading = ref(false)
+const detailError = ref('')
+const detailSection = ref('overview')
+const detailSeedOpen = ref(false)
+const invoices = ref([])
+const invoicesLoading = ref(false)
+const invoicesError = ref('')
+const invoicesTenantId = ref('')
+const invoicesLoaded = ref(false)
 
 const stats = reactive({ total_merchants: 0, active_merchants: 0, today_orders: 0, today_revenue: 0 })
 const merchants = ref([])
 const loadingList = ref(false)
 const searchQuery = ref('')
+const accountFilter = ref('')
+const accountFilters = [
+  { value: '', label: '全部' },
+  { value: 'enabled', label: '启用' },
+  { value: 'disabled', label: '已停用' },
+]
 const statusFilter = ref('')
 const statusFilters = [
   { value: '', label: '全部' },
@@ -249,12 +458,25 @@ const statusFilters = [
   { value: 'verified', label: '已验证' },
   { value: 'paused', label: '暂停' },
 ]
+const planFilter = ref('')
+const planFilters = [
+  { value: '', label: '全部' },
+  { value: 'trial', label: '试用中' },
+  { value: 'active', label: '付费中' },
+  { value: 'free', label: '免费版' },
+  { value: 'ended', label: '已到期' },
+]
 const filteredMerchants = computed(() => {
   const q = searchQuery.value.trim()
+  const qLower = q.toLowerCase()
   return merchants.value.filter(m => {
+    if (accountFilter.value === 'enabled' && !m.status) return false
+    if (accountFilter.value === 'disabled' && m.status) return false
     if (statusFilter.value && (m.payment_status || 'unconfigured') !== statusFilter.value) return false
-    if (q && !m.name.includes(q) && !(m.phone || '').includes(q)) return false
-    return true
+    if (planFilter.value && !matchesPlanFilter(m.subscription, planFilter.value)) return false
+    if (!q) return true
+    const tenantId = String(m.tenant_id || '').toLowerCase()
+    return m.name.includes(q) || (m.phone || '').includes(q) || tenantId.includes(qLower)
   })
 })
 const newMerchant = reactive({ name: '', phone: '', initial_code: '123456' })
@@ -287,6 +509,89 @@ const copySources = computed(() => merchants.value.filter(m =>
 ))
 
 function superHeaders() { return { 'X-Super-Token': superToken } }
+function rememberToken(value) {
+  superToken = value || ''
+  setSuperSessionToken(superToken)
+}
+function normalizeSection(section) {
+  return ['overview', 'payment', 'subscription', 'channel'].includes(section) ? section : 'overview'
+}
+function applyRoute() {
+  if (isDetail.value) {
+    detailSection.value = normalizeSection(route.query.section)
+    return
+  }
+  const tab = route.query.tab
+  if (tab === 'billing' || tab === 'channel' || tab === 'merchants') activeTab.value = tab
+}
+function matchesPlanFilter(sub, filter) {
+  if (!sub || sub.load_error) return false
+  if (filter === 'trial') return !!sub.is_trial || sub.status === 'TRIAL'
+  if (filter === 'active') return sub.status === 'ACTIVE'
+  if (filter === 'free') return sub.status === 'FREE'
+  if (filter === 'ended') return sub.status === 'EXPIRED' || sub.status === 'CANCELLED'
+  return true
+}
+function subscriptionLabel(sub) {
+  if (!sub || sub.load_error) return '套餐加载失败'
+  const name = sub.plan_name || '免费版'
+  if (sub.is_trial || sub.status === 'TRIAL') return `${name}试用`
+  if (sub.status === 'ACTIVE' || sub.status === 'FREE') return name
+  if (sub.status === 'EXPIRED') return '已到期'
+  if (sub.status === 'CANCELLED') return '已取消'
+  return name
+}
+function expiryLabel(sub) {
+  if (!sub || sub.load_error || !sub.expires_at) return '—'
+  const date = formatBeijingDate(sub.expires_at)
+  if (!date) return '—'
+  if (typeof sub.days_remaining === 'number') return `${date} · 剩余 ${sub.days_remaining} 天`
+  return date
+}
+function channelLabel(channel) {
+  if (!channel || channel.load_error) return '加载失败'
+  if (!channel.bound) return '未绑定'
+  return channel.partner_name || '渠道伙伴资料缺失'
+}
+function paymentStatusOf(payload) {
+  return payload?.payment?.status || payload?.payment?.payment_status || 'unconfigured'
+}
+function displayDate(value) {
+  if (!value) return '未记录'
+  return formatBeijingDate(value) || '未记录'
+}
+function displayDateTime(value) {
+  if (!value) return '未记录'
+  return formatBeijingDateTime(value) || '未记录'
+}
+function bindingStatusText(status) {
+  if (status === 'ACTIVE') return '生效中'
+  if (!status) return '未记录'
+  return '未生效'
+}
+function commissionText(bps) {
+  if (bps === null || bps === undefined || bps === '') return '未记录'
+  const rate = Number(bps)
+  if (!Number.isFinite(rate)) return '未记录'
+  const percent = rate / 100
+  return Number.isInteger(percent) ? `${percent}%` : `${percent.toFixed(2)}%`
+}
+function invoiceStatusText(status) {
+  return {
+    PENDING: '待支付',
+    PAID: '已支付',
+    CANCELLED: '已取消',
+    EXPIRED: '已过期',
+    REFUNDED: '已退款',
+    PARTIALLY_REFUNDED: '部分退款',
+  }[status] || '状态待确认'
+}
+function invoiceTitle(invoice) {
+  const plan = planDisplayName(invoice?.plan_code)
+  const period = invoice?.billing_period === 'YEAR' ? '年付' : invoice?.billing_period === 'MONTH' ? '月付' : ''
+  if (plan) return period ? `${plan} · ${period}` : plan
+  return invoice?.description || '套餐账单'
+}
 function statusText(status) { return { unconfigured: '未配置', pending: '待验证', verified: '已验证', paused: '暂停' }[status] || '未配置' }
 function statusClass(status) { return { unconfigured: 'pay-off', pending: 'pay-pending', verified: 'pay-on', paused: 'pay-paused' }[status] || 'pay-off' }
 function receiverTypeText(type) { return type === 'individual' ? '个体' : '企业' }
@@ -329,10 +634,11 @@ async function doLogin() {
   try {
     const res = await superRequest.post(`${BASE}/login`, { password: pwd.value, totp_code: totpCode.value.trim() || undefined })
     if (res.data?.code === 200) {
-      superToken = res.data.data.token
+      rememberToken(res.data.data.token)
       totpEnabled.value = !!res.data.data.totp_enabled
       authed.value = true
-      loadData()
+      if (isDetail.value) loadMerchantDetail(false)
+      else loadData()
     } else if (res.data?.data?.require_totp) {
       needTotp.value = true
       totpCode.value = ''
@@ -443,6 +749,7 @@ async function savePayConfig() {
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: '保存成功，请继续验证配置' }
       applyPaymentData(payConfigTarget.value, res.data.data)
+      refreshDetailAfterPayment()
       applyPaymentData(payConfigForm, res.data.data)
       payConfigForm.wx_api_key_v3 = ''; payConfigForm.wx_cert_serial = ''; payConfigForm.wx_private_key = ''; payConfigForm.wx_public_key = ''
     } else payConfigResult.value = { ok: false, msg: res.data?.msg || '保存失败' }
@@ -458,6 +765,7 @@ async function verifyPayConfig() {
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
       applyPaymentData(payConfigTarget.value, res.data.data)
+      refreshDetailAfterPayment()
       applyPaymentData(payConfigForm, res.data.data)
       payConfigForm.wx_api_key_v3 = ''; payConfigForm.wx_cert_serial = ''; payConfigForm.wx_private_key = ''; payConfigForm.wx_public_key = ''
     } else payConfigResult.value = { ok: false, msg: res.data?.msg || '验证失败' }
@@ -497,6 +805,7 @@ async function copyPayConfig(totpCodeInput = '') {
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: res.data?.msg || '复制成功，请继续验证配置' }
       applyPaymentData(payConfigTarget.value, res.data.data)
+      refreshDetailAfterPayment()
       applyPaymentData(payConfigForm, res.data.data)
       copySourceId.value = ''
     } else payConfigResult.value = { ok: false, msg: res.data?.msg || '复制失败' }
@@ -521,6 +830,7 @@ async function pausePay(totpCodeInput = '') {
     if (res.data?.code === 200) {
       payConfigResult.value = { ok: true, msg: '已暂停支付' }
       applyPaymentData(payConfigTarget.value, res.data.data)
+      refreshDetailAfterPayment()
       applyPaymentData(payConfigForm, res.data.data)
     } else payConfigResult.value = { ok: false, msg: res.data?.msg || '暂停失败' }
   } catch (e) { payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '暂停失败' } }
@@ -573,6 +883,7 @@ async function seedTestData(merchant) {
     if (res.data?.code === 200) {
       const d = res.data.data
       seedResult.value = { tenant_id: merchant.tenant_id, ok: true, msg: `填充成功：${d.menu_items} 道菜 · ${d.customers} 位会员 · 历史 ${d.history_orders} 单 · 今日 ${d.today_orders} 单` }
+      if (isDetail.value) loadMerchantDetail(true)
     } else {
       seedResult.value = { tenant_id: merchant.tenant_id, ok: false, msg: res.data?.msg || '测试数据写入失败，未确认操作完成，请重新检查该商户的菜单、会员和入口码。' }
     }
@@ -591,6 +902,11 @@ async function toggleStatus(merchant) {
     const res = await superRequest.patch(`${BASE}/merchants/${merchant.tenant_id}/status`, {}, { headers: superHeaders() })
     if (res.data?.code === 200) {
       merchant.status = res.data.data.status
+      const listed = merchants.value.find(item => item.tenant_id === merchant.tenant_id)
+      if (listed && listed !== merchant) listed.status = merchant.status
+      if (detail.value?.tenant && detail.value.tenant.tenant_id === merchant.tenant_id && detail.value.tenant !== merchant) {
+        detail.value.tenant.status = merchant.status
+      }
       statusResult.value = {
         tenant_id: merchant.tenant_id,
         ok: true,
@@ -615,7 +931,174 @@ async function toggleStatus(merchant) {
   }
 }
 
-function logout() { superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
+function logout() {
+  rememberToken('')
+  authed.value = false
+  pwd.value = ''
+  needTotp.value = false
+  totpCode.value = ''
+}
+
+function backToMerchants() {
+  router.push({ path: '/super', query: { tab: 'merchants' } })
+}
+
+function openMerchant(merchant, section = 'overview') {
+  if (!merchant?.tenant_id) return
+  const query = section && section !== 'overview' ? { section } : {}
+  router.push({ name: 'SuperMerchantDetail', params: { tenantId: merchant.tenant_id }, query })
+}
+
+function setDetailSection(section) {
+  detailSection.value = normalizeSection(section)
+  const query = { ...route.query }
+  if (detailSection.value === 'overview') delete query.section
+  else query.section = detailSection.value
+  router.replace({ name: 'SuperMerchantDetail', params: { tenantId: route.params.tenantId }, query })
+}
+
+function openChannelPartner(partnerId) {
+  router.push({ path: '/super', query: { tab: 'channel', partner: partnerId || undefined } })
+}
+
+function payMerchantFromDetail() {
+  const current = detail.value
+  if (!current?.tenant) return null
+  const payment = current.payment || {}
+  return {
+    tenant_id: current.tenant.tenant_id,
+    name: current.tenant.name,
+    status: current.tenant.status,
+    wx_mchid: '',
+    wx_mchid_masked: payment.merchant_no_masked || payment.wx_mchid_masked || '',
+    wx_pay_enabled: payment.wx_pay_enabled,
+    receiver_name: payment.receiver_name || current.tenant.name || '',
+    receiver_type: payment.receiver_type || 'enterprise',
+    receiver_verified: !!payment.receiver_verified,
+    payment_locked: payment.locked ?? payment.payment_locked ?? true,
+    payment_status: payment.status || payment.payment_status || 'unconfigured',
+    verified_time: payment.verified_time || '',
+  }
+}
+
+let detailRequestSeq = 0
+let invoiceRequestSeq = 0
+
+async function loadMerchantDetail(silent = false) {
+  const tenantId = String(route.params.tenantId || '')
+  if (!tenantId || !superToken) return
+  const requestSeq = ++detailRequestSeq
+  if (!silent) detailLoading.value = true
+  try {
+    const res = await superRequest.get(`${BASE}/merchants/${tenantId}`, { headers: superHeaders() })
+    if (requestSeq !== detailRequestSeq || String(route.params.tenantId || '') !== tenantId) return
+    if (res.data?.code === 200) {
+      detail.value = res.data.data
+      detailError.value = ''
+      syncListedMerchant(tenantId, res.data.data)
+      if (detailSection.value === 'subscription') loadInvoices(false)
+    } else if (!detail.value) {
+      detailError.value = res.data?.msg || '商户信息加载失败'
+    } else {
+      detailError.value = res.data?.msg || '商户信息刷新失败'
+    }
+  } catch (e) {
+    if (requestSeq !== detailRequestSeq) return
+    if (e?.response?.status === 401) authed.value = false
+    else if (!detail.value) detailError.value = backendMessage(e) || '商户信息加载失败'
+    else detailError.value = backendMessage(e) || '商户信息刷新失败'
+  } finally {
+    if (requestSeq === detailRequestSeq) detailLoading.value = false
+  }
+}
+
+async function loadInvoices(force = false) {
+  const tenantId = String(route.params.tenantId || '')
+  if (!tenantId || !superToken) return
+  if (!force && invoicesLoaded.value && invoicesTenantId.value === tenantId && !invoicesError.value) return
+  const requestSeq = ++invoiceRequestSeq
+  invoicesLoading.value = true
+  invoicesError.value = ''
+  try {
+    const res = await listBillingInvoices(superToken, tenantId)
+    if (requestSeq !== invoiceRequestSeq || String(route.params.tenantId || '') !== tenantId) return
+    if (res.data?.code === 200) {
+      invoices.value = (res.data.data || []).filter(row => row.tenant_id === tenantId)
+      invoicesTenantId.value = tenantId
+      invoicesLoaded.value = true
+    } else {
+      invoicesError.value = res.data?.msg || '付款记录加载失败'
+      invoicesLoaded.value = false
+    }
+  } catch (e) {
+    if (requestSeq !== invoiceRequestSeq) return
+    if (e?.response?.status === 401) authed.value = false
+    invoicesError.value = backendMessage(e) || '付款记录加载失败'
+    invoicesLoaded.value = false
+  } finally {
+    if (requestSeq === invoiceRequestSeq) invoicesLoading.value = false
+  }
+}
+
+function refreshDetailAfterPayment() {
+  if (isDetail.value) loadMerchantDetail(true)
+}
+
+function syncListedMerchant(tenantId, payload) {
+  const row = merchants.value.find(item => item.tenant_id === tenantId)
+  if (!row || !payload) return
+  const payment = payload.payment || {}
+  row.status = payload.tenant?.status
+  row.payment_status = payment.status || payment.payment_status || row.payment_status
+  row.wx_mchid_masked = payment.merchant_no_masked || payment.wx_mchid_masked || row.wx_mchid_masked
+  row.payment_locked = payment.locked ?? payment.payment_locked
+  row.receiver_verified = payment.receiver_verified
+  row.receiver_name = payment.receiver_name || row.receiver_name
+  row.receiver_type = payment.receiver_type || row.receiver_type
+  row.verified_time = payment.verified_time || row.verified_time
+  row.wx_pay_enabled = payment.wx_pay_enabled ?? row.wx_pay_enabled
+  row.subscription = payload.subscription
+  if (payload.channel) {
+    row.channel = {
+      bound: payload.channel.bound,
+      partner_id: payload.channel.partner_id,
+      partner_name: payload.channel.partner_name,
+      load_error: payload.channel.load_error,
+    }
+  }
+  if (payload.operations && !payload.operations.load_error) row.today_orders = payload.operations.today_order_count
+}
+
+watch(() => route.params.tenantId, (tenantId) => {
+  invoices.value = []
+  invoicesTenantId.value = ''
+  invoicesLoaded.value = false
+  invoicesError.value = ''
+  detailSeedOpen.value = false
+  applyRoute()
+  if (!authed.value || !tenantId) return
+  detail.value = null
+  loadMerchantDetail(false)
+})
+
+watch(() => route.query.section, () => {
+  if (!isDetail.value) return
+  applyRoute()
+  if (detailSection.value === 'subscription') loadInvoices(false)
+})
+
+watch(() => route.query.tab, () => {
+  if (isDetail.value) return
+  applyRoute()
+})
+
+onMounted(() => {
+  applyRoute()
+  if (!superToken) return
+  authed.value = true
+  if (isDetail.value) loadMerchantDetail(false)
+  else loadData()
+})
 </script>
 
 <style scoped>
@@ -745,6 +1228,34 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .seed-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #fcd34d; background: #fffbeb; color: #92400e; cursor: pointer; font-weight: 700; }
 .seed-btn:disabled, .more-btn:disabled { opacity: .55; cursor: not-allowed; }
 .seed-hint { margin-top: 8px; font-size: 11px; line-height: 1.5; color: #92400e; }
+.filter-label { font-size: 11px; font-weight: 800; color: var(--text-3); margin: 2px 0 6px; }
+.mc-name-btn { display: block; max-width: 100%; border: 0; background: transparent; padding: 0; text-align: left; font-size: 15px; font-weight: 800; color: var(--text-1); cursor: pointer; }
+.mc-facts { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.mc-fact { font-size: 12px; color: var(--text-3); }
+.mc-fact b { color: var(--text-1); font-weight: 800; }
+.tenant-id { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: var(--text-3); }
+.merchant-context { padding-top: 12px; }
+.back-link { margin: 0 16px 8px; border: 0; background: transparent; color: var(--text-2); font-size: 13px; font-weight: 700; cursor: pointer; padding: 0; }
+.merchant-context-head { position: sticky; top: 0; z-index: 4; }
+.context-kicker { font-size: 12px; font-weight: 800; color: var(--text-3); }
+.context-name { margin-top: 2px; font-size: 22px; font-weight: 900; line-height: 1.3; }
+.context-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.context-meta { margin-top: 6px; font-size: 12px; color: var(--text-2); }
+.detail-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 16px 12px; }
+.fact-list { display: grid; gap: 8px; }
+.fact-row { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.fact-row span { color: var(--text-3); }
+.fact-row strong { color: var(--text-1); text-align: right; font-weight: 800; }
+.text-link { border: 0; background: transparent; padding: 0; color: #1677ff; font: inherit; font-weight: 800; cursor: pointer; }
+.pay-open-btn { width: 100%; margin-top: 14px; }
+.bill-title { margin-top: 18px; }
+.bill-list { display: grid; gap: 8px; }
+.bill-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px; border-radius: 10px; background: var(--bg-page); }
+.bill-name { font-size: 14px; font-weight: 800; }
+.bill-meta { margin-top: 3px; font-size: 12px; color: var(--text-2); }
+.bill-amount { flex: none; font-size: 16px; font-weight: 900; }
+.seed-block { margin-top: 8px; }
+.error-state { display: grid; justify-items: center; gap: 10px; }
 @media (max-width: 420px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
   .merchant-card { align-items: flex-start; }

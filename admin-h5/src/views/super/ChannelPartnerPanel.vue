@@ -43,7 +43,7 @@
       </div>
       <div v-else-if="!partners.length" class="empty">暂无渠道伙伴</div>
       <div v-else class="partner-list">
-        <div v-for="partner in partners" :key="partner.id" class="partner-card">
+        <div v-for="partner in partners" :key="partner.id" :id="'partner-' + partner.id" class="partner-card" :class="{ highlighted: String(partner.id) === String(highlightPartnerId) }">
           <div class="partner-main">
             <div class="partner-name">{{ partner.name || '未命名渠道' }}</div>
             <div class="partner-meta">{{ maskPhone(partner.mobile) }} · {{ partnerTypeText(partner.partner_type) }}</div>
@@ -58,12 +58,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { createChannelPartner, listChannelPartners } from '../../api/superChannel'
 import { formatBeijingDateTime } from '../../utils/beijingTime'
 
 const props = defineProps({
   superToken: { type: String, required: true },
+  highlightPartnerId: { type: String, default: '' },
 })
 
 const partnerTypeOptions = [
@@ -185,6 +186,12 @@ async function submitPartner() {
 }
 
 onMounted(loadPartners)
+
+watch(() => [props.highlightPartnerId, partners.value.length], async () => {
+  if (!props.highlightPartnerId || !partners.value.length) return
+  await nextTick()
+  document.getElementById(`partner-${props.highlightPartnerId}`)?.scrollIntoView({ block: 'nearest' })
+})
 </script>
 
 <style scoped>
@@ -212,6 +219,7 @@ onMounted(loadPartners)
 .error-state { display: grid; justify-items: center; gap: 10px; }
 .partner-list { display: grid; gap: 10px; }
 .partner-card { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 12px; background: var(--bg-page); border-radius: 10px; }
+.partner-card.highlighted { box-shadow: inset 0 0 0 2px var(--brand); }
 .partner-main { min-width: 0; }
 .partner-name { font-size: 15px; font-weight: 800; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .partner-meta { font-size: 12px; color: var(--text-2); margin-top: 3px; word-break: break-all; }

@@ -280,6 +280,18 @@ class SubscriptionService:
             can_renew=True,
         )
 
+    async def read_trial_started_at(self, tenant_id: str, *, now: Optional[datetime] = None) -> Optional[datetime]:
+        """Read-only display field for the super-admin merchant context.
+
+        Uses the same effective-row selection as get_effective_subscription_view.
+        Does not create, renew, cancel, or write Tenant.status.
+        """
+        now = now or datetime.utcnow()
+        current, _latest = await self._resolve_effective_subscription(tenant_id, now=now)
+        if current is not None and self.is_trial(current):
+            return current.trial_started_at
+        return None
+
     async def validate_renewal_purchase(
         self, tenant_id: str, plan_code: str, billing_period: str, *, now: Optional[datetime] = None
     ) -> tuple[Plan, int]:

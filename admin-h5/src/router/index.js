@@ -49,6 +49,7 @@ const routes = [
   { path: '/activation', name: 'ActivationHome', component: ActivationHome, meta: ownerOnly },
   { path: '/order', name: 'OrderPage', component: OrderPage },
   { path: '/super', name: 'SuperAdmin', component: SuperAdmin },
+  { path: '/super/merchants/:tenantId', name: 'SuperMerchantDetail', component: SuperAdmin },
   { path: '/queue/display', name: 'QueueDisplay', component: QueueDisplay },
   { path: '/queue/status', name: 'QueueStatus', component: QueueStatus },
   {
@@ -135,7 +136,7 @@ router.beforeEach(async (to, from, next) => {
   const isLogin = to.path === '/login'
   const isDemo = to.path === '/demo'
   const isOrder = to.path === '/order'
-  const isSuper = to.path === '/super'
+  const isSuper = to.path === '/super' || to.path.startsWith('/super/')
   const isH5 = to.path.startsWith('/h5/')
   const isQueueDisplay = to.path === '/queue/display'
   const isQueueStatus = to.path === '/queue/status'

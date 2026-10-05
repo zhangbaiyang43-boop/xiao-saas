@@ -11,12 +11,19 @@ from app.core.database import get_db
 from app.core.logger import logger
 from app.core.rate_limiter import login_limit
 from app.core.response import RespVo, error_response, success_response
+from app.models.channel_revenue import ChannelPartner, ChannelPartnerTenantBinding
 from app.models.order import Order
 from app.models.tenant import Tenant
 from app.services.merchant_provisioning_service import (
     MerchantProvisioningService,
     PhoneAlreadyRegisteredError,
     ProvisioningSource,
+)
+from app.services.subscription_service import (
+    STATUS_ACTIVE,
+    STATUS_TRIAL,
+    PlanDataIntegrityError,
+    SubscriptionService,
 )
 
 router = APIRouter(prefix="/api/super", tags=["平台中控台"])
@@ -110,6 +117,162 @@ def _payment_status(tenant: Tenant) -> str:
     if getattr(tenant, "receiver_verified", False):
         return "verified"
     return "pending"
+
+
+def _mask_phone(phone: str | None) -> str:
+    value = (phone or "").strip()
+    if len(value) < 7:
+        return value
+    return f"{value[:3]}****{value[-4:]}"
+
+
+def _iso_dt(value: datetime | None) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _subscription_error() -> dict:
+    return {
+        "load_error": True,
+        "status": None,
+        "plan_code": None,
+        "plan_name": None,
+        "is_trial": False,
+        "started_at": None,
+        "expires_at": None,
+        "days_remaining": None,
+    }
+
+
+def _channel_empty() -> dict:
+    return {
+        "bound": False,
+        "partner_id": None,
+        "partner_name": None,
+        "binding_status": None,
+        "commission_rate_bps": None,
+        "commission_term_months": None,
+        "started_at": None,
+        "ends_at": None,
+        "load_error": False,
+    }
+
+
+def _channel_error() -> dict:
+    payload = _channel_empty()
+    payload["load_error"] = True
+    return payload
+
+
+def _channel_for_list(summary: dict) -> dict:
+    return {
+        "bound": summary["bound"],
+        "partner_id": summary["partner_id"],
+        "partner_name": summary["partner_name"],
+        "load_error": summary["load_error"],
+    }
+
+
+async def _subscription_summaries(db: AsyncSession, tenant_ids: list[str]) -> dict[str, dict]:
+    """Read model only. Judgment stays in SubscriptionService; this does not write."""
+    service = SubscriptionService(db)
+    now = datetime.utcnow()
+    summaries: dict[str, dict] = {}
+    for tenant_id in tenant_ids:
+        try:
+            view = await service.get_effective_subscription_view(tenant_id, now=now)
+        except PlanDataIntegrityError as exc:
+            logger.error("[SUPER_SUBSCRIPTION_READ] tenant_id=%s error=%s", tenant_id, exc)
+            summaries[tenant_id] = _subscription_error()
+            continue
+        except Exception:
+            logger.exception("[SUPER_SUBSCRIPTION_READ] tenant_id=%s", tenant_id)
+            summaries[tenant_id] = _subscription_error()
+            continue
+        started = None
+        expires = None
+        if view.subscription_status == STATUS_ACTIVE:
+            started = view.paid_started_at
+            expires = view.paid_ends_at
+        elif view.is_trial or view.subscription_status == STATUS_TRIAL:
+            expires = view.trial_ends_at
+            try:
+                started = await service.read_trial_started_at(tenant_id, now=now)
+            except Exception:
+                logger.exception("[SUPER_SUBSCRIPTION_READ] trial_started tenant_id=%s", tenant_id)
+                started = None
+        summaries[tenant_id] = {
+            "load_error": False,
+            "status": view.subscription_status,
+            "plan_code": view.effective_plan.code,
+            "plan_name": view.effective_plan.name,
+            "is_trial": bool(view.is_trial),
+            "started_at": _iso_dt(started),
+            "expires_at": _iso_dt(expires),
+            "days_remaining": view.days_remaining if expires is not None else None,
+        }
+    return summaries
+
+
+async def _channel_summaries(db: AsyncSession, tenant_ids: list[str]) -> tuple[dict[str, dict], bool]:
+    if not tenant_ids:
+        return {}, False
+    allowed = set(tenant_ids)
+    try:
+        result = await db.execute(
+            select(ChannelPartnerTenantBinding, ChannelPartner)
+            .outerjoin(ChannelPartner, ChannelPartner.id == ChannelPartnerTenantBinding.partner_id)
+            .where(ChannelPartnerTenantBinding.tenant_id.in_(tenant_ids))
+        )
+    except Exception:
+        logger.exception("[SUPER_CHANNEL_READ]")
+        return {}, True
+    found: dict[str, dict] = {}
+    for binding, partner in result.all():
+        if binding.tenant_id not in allowed or binding.tenant_id in found:
+            continue
+        found[binding.tenant_id] = {
+            "bound": True,
+            "partner_id": str(binding.partner_id) if binding.partner_id is not None else None,
+            "partner_name": partner.name if partner is not None else None,
+            "binding_status": binding.status,
+            "commission_rate_bps": binding.commission_rate_bps,
+            "commission_term_months": binding.commission_term_months,
+            "started_at": _iso_dt(binding.commission_started_at),
+            "ends_at": _iso_dt(binding.commission_ends_at),
+            "load_error": False,
+        }
+    return found, False
+
+
+def _today_start_utc_naive() -> datetime:
+    tz8 = timezone(timedelta(hours=8))
+    today = datetime.now(tz8).date()
+    return datetime(today.year, today.month, today.day, tzinfo=tz8).astimezone(timezone.utc).replace(tzinfo=None)
+
+
+async def _today_order_count_for_tenant(db: AsyncSession, tenant_id: str) -> int | None:
+    try:
+        result = await db.execute(
+            select(func.count(Order.id)).where(
+                Order.tenant_id == tenant_id,
+                Order.created_at >= _today_start_utc_naive(),
+            )
+        )
+        return int(result.scalar() or 0)
+    except Exception:
+        logger.exception("[SUPER_ORDER_READ] tenant_id=%s", tenant_id)
+        return None
+
+
+def _payment_summary(tenant: Tenant) -> dict:
+    view = _payment_view(tenant)
+    return {
+        "status": view["payment_status"],
+        "merchant_no_masked": view["wx_mchid_masked"],
+        "locked": view["payment_locked"],
+        "wx_pay_enabled": bool(getattr(tenant, "wx_pay_enabled", False)),
+        **view,
+    }
 
 
 def _payment_view(tenant: Tenant) -> dict:
@@ -225,32 +388,79 @@ async def super_login(request: Request, data: SuperLoginRequest):
 async def list_merchants(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Tenant).order_by(Tenant.created_at.desc()))
     tenants = result.scalars().all()
-
-    tz8 = timezone(timedelta(hours=8))
-    today = datetime.now(tz8).date()
-    today_start = datetime(today.year, today.month, today.day, tzinfo=tz8).astimezone(timezone.utc).replace(tzinfo=None)
+    tenant_ids = [t.tenant_id for t in tenants]
 
     order_result = await db.execute(
         select(Order.tenant_id, func.count(Order.id).label("cnt"))
-        .where(Order.created_at >= today_start)
+        .where(Order.created_at >= _today_start_utc_naive())
         .group_by(Order.tenant_id)
     )
     today_orders = {row.tenant_id: row.cnt for row in order_result}
 
+    try:
+        subscriptions = await _subscription_summaries(db, tenant_ids)
+    except Exception:
+        logger.exception("[SUPER_SUBSCRIPTION_READ] list")
+        subscriptions = {}
+    channels, channel_failed = await _channel_summaries(db, tenant_ids)
+
     data = []
     for t in tenants:
+        channel = _channel_error() if channel_failed else channels.get(t.tenant_id) or _channel_empty()
         data.append({
             "id": str(t.id),
             "tenant_id": t.tenant_id,
             "name": t.name,
             "phone": t.phone or "",
+            "phone_masked": _mask_phone(t.phone),
             "status": t.status,
             "today_orders": today_orders.get(t.tenant_id, 0),
             "wx_pay_enabled": getattr(t, "wx_pay_enabled", False) or False,
             "created_at": t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
             **_payment_view(t),
+            "subscription": subscriptions.get(t.tenant_id) or _subscription_error(),
+            "channel": _channel_for_list(channel),
         })
     return success_response(data=data, msg="ok")
+
+
+@router.get("/merchants/{tenant_id}", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
+async def get_merchant_summary(tenant_id: str, db: AsyncSession = Depends(get_db)):
+    """Read-only merchant context. Does not change payment, subscription, or billing writes."""
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return error_response(code=404, msg="商家不存在")
+
+    try:
+        subscriptions = await _subscription_summaries(db, [tenant.tenant_id])
+        subscription = subscriptions.get(tenant.tenant_id) or _subscription_error()
+    except Exception:
+        logger.exception("[SUPER_SUBSCRIPTION_READ] tenant_id=%s", tenant.tenant_id)
+        subscription = _subscription_error()
+
+    channels, channel_failed = await _channel_summaries(db, [tenant.tenant_id])
+    channel = _channel_error() if channel_failed else channels.get(tenant.tenant_id) or _channel_empty()
+    today_count = await _today_order_count_for_tenant(db, tenant.tenant_id)
+
+    return success_response(data={
+        "tenant": {
+            "id": str(tenant.id),
+            "tenant_id": tenant.tenant_id,
+            "name": tenant.name,
+            "phone": tenant.phone or "",
+            "phone_masked": _mask_phone(tenant.phone),
+            "created_at": tenant.created_at.strftime("%Y-%m-%d %H:%M") if tenant.created_at else "",
+            "status": tenant.status,
+        },
+        "payment": _payment_summary(tenant),
+        "subscription": subscription,
+        "channel": channel,
+        "operations": {
+            "today_order_count": today_count,
+            "load_error": today_count is None,
+        },
+    }, msg="ok")
 
 
 @router.post("/merchants", response_model=RespVo, dependencies=[Depends(_verify_super_token)])

@@ -6,6 +6,13 @@ function superHeaders(superToken) {
   return { 'X-Super-Token': superToken }
 }
 
+export async function listBillingInvoices(superToken, tenantId) {
+  return superRequest.get(`${BASE}/invoices`, {
+    params: { tenant_id: tenantId },
+    headers: superHeaders(superToken),
+  })
+}
+
 export async function listManualPayments(superToken, reviewStatus = 'WAITING_CONFIRMATION') {
   return superRequest.get(`${BASE}/manual-payments`, {
     params: { review_status: reviewStatus },

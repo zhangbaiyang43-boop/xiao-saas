@@ -6,7 +6,10 @@
         <button class="refresh-btn tap-shrink" :disabled="loading" @click="loadPayments">{{ loading ? '刷新中...' : '刷新' }}</button>
       </div>
 
-      <div v-if="actionResult" class="action-result" :class="actionResult.ok ? 'ok' : 'err'">{{ actionResult.msg }}</div>
+      <div v-if="actionResult" class="action-result" :class="actionResult.ok ? 'ok' : 'err'">
+        <span>{{ actionResult.msg }}</span>
+        <button v-if="actionResult.ok && actionResult.tenant_id" type="button" class="text-link tap-shrink" @click="openMerchantContext(actionResult)">查看商户</button>
+      </div>
 
       <div v-if="loading && !payments.length" class="loading">加载中...</div>
       <div v-else-if="loadError" class="empty error-state">
@@ -16,7 +19,7 @@
       <div v-else-if="!payments.length" class="empty">暂无待确认付款</div>
       <div v-else class="payment-list">
         <div v-for="item in payments" :key="item.payment_id" class="payment-card">
-          <div class="pc-name">{{ item.tenant_name || '未知商户' }}</div>
+          <button type="button" class="pc-name pc-name-link tap-shrink" :disabled="!item.tenant_id" @click="openMerchantContext(item)">{{ item.tenant_name || '未知商户' }}</button>
           <div class="pc-plan">{{ planPeriodText(item) }}</div>
           <div class="pc-amount">{{ amountText(item) }}</div>
 
@@ -48,6 +51,7 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { confirmManualPayment, listManualPayments, rejectManualPayment } from '../../api/superBilling'
 import { formatYuan, planDisplayName } from '../../utils/subscriptionUi'
 
@@ -55,6 +59,12 @@ const props = defineProps({
   superToken: { type: String, required: true },
 })
 const emit = defineEmits(['update:count'])
+const router = useRouter()
+
+function openMerchantContext(item) {
+  if (!item?.tenant_id) return
+  router.push({ name: 'SuperMerchantDetail', params: { tenantId: item.tenant_id }, query: { section: 'subscription' } })
+}
 
 const payments = ref([])
 const loading = ref(false)
@@ -171,7 +181,7 @@ async function doConfirm(item) {
   try {
     const res = await confirmManualPayment(props.superToken, item.payment_id)
     if (res.data?.code === 200) {
-      actionResult.value = { ok: true, msg: '已确认到账，套餐已自动开通' }
+      actionResult.value = { ok: true, msg: '已确认到账，套餐已自动开通', tenant_id: item.tenant_id }
       await loadPayments()
     } else if (isStateConflict(res.data?.msg)) {
       actionResult.value = { ok: false, msg: '该付款状态已更新' }
@@ -226,6 +236,9 @@ onMounted(loadPayments)
 .payment-list { display: grid; gap: 10px; }
 .payment-card { padding: 14px; background: var(--bg-page); border-radius: 10px; }
 .pc-name { font-size: 15px; font-weight: 800; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-name-link { display: block; width: 100%; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.pc-name-link:disabled { cursor: default; text-decoration: none; }
+.text-link { margin-left: 8px; border: 0; background: transparent; padding: 0; color: inherit; font-weight: 800; text-decoration: underline; cursor: pointer; }
 .pc-plan { margin-top: 2px; font-size: 12px; color: var(--text-2); }
 .pc-amount { margin-top: 6px; font-size: 22px; font-weight: 900; color: var(--text-1); }
 .pc-field { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
