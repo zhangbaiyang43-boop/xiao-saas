@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.core.crypto import decrypt_secret, encrypt_secret
@@ -14,6 +15,13 @@ from app.core.response import RespVo, error_response, success_response
 from app.models.channel_revenue import ChannelPartner, ChannelPartnerTenantBinding
 from app.models.order import Order
 from app.models.tenant import Tenant
+from app.models.tenant_config import TenantConfig
+from app.services.fulfilment_mode import (
+    FULFILMENT_MODE_KEY,
+    FULFILMENT_MODES,
+    fulfilment_mode_from_business_info,
+    get_fulfilment_mode,
+)
 from app.services.merchant_provisioning_service import (
     MerchantProvisioningService,
     PhoneAlreadyRegisteredError,
@@ -64,6 +72,11 @@ class WxPayConfigRequest(BaseModel):
     receiver_type: str | None = None
 
 
+class FulfilmentModeUpdateRequest(BaseModel):
+    mode: str
+    reason: str
+
+
 def _totp_configured() -> bool:
     return bool((settings.SUPER_ADMIN_TOTP_SECRET or "").strip())
 
@@ -79,13 +92,24 @@ def _verify_totp_code(code: str | None) -> bool:
     return totp.verify(code.strip(), valid_window=1)
 
 
-def _audit(action: str, request: Request | None, tenant_id: str = "", detail: str = "") -> None:
-    """最基础的操作审计：谁（IP）在什么时候对哪个商户做了什么。没有独立操作人身份，
-    只能定位到 IP，但至少留下痕迹，比现在完全没有日志强。"""
+def _audit(
+    action: str,
+    request: Request | None,
+    tenant_id: str = "",
+    detail: str = "",
+    *,
+    operator: str = "super_admin",
+) -> None:
+    """Existing Super Audit stream with operator, request correlation, and client IP."""
     ip = "unknown"
+    request_id = "unknown"
     if request is not None:
         ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
-    logger.info(f"[SUPER_AUDIT] action={action} tenant={tenant_id or '-'} ip={ip} detail={detail}")
+        request_id = getattr(request.state, "request_id", None) or "unknown"
+    logger.info(
+        f"[SUPER_AUDIT] action={action} tenant={tenant_id or '-'} "
+        f"operator={operator or 'super_admin'} request_id={request_id} ip={ip} detail={detail}"
+    )
 
 
 def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token")) -> str:
@@ -467,12 +491,79 @@ async def get_merchant_summary(tenant_id: str, db: AsyncSession = Depends(get_db
         "payment": _payment_summary(tenant),
         "subscription": subscription,
         "subscription_adjustment": subscription_adjustment,
+        "fulfilment_mode": await get_fulfilment_mode(db, tenant.tenant_id),
         "channel": channel,
         "operations": {
             "today_order_count": today_count,
             "load_error": today_count is None,
         },
     }, msg="ok")
+
+
+@router.patch("/merchants/{tenant_id}/fulfilment-mode", response_model=RespVo)
+async def update_merchant_fulfilment_mode(
+    tenant_id: str,
+    data: FulfilmentModeUpdateRequest,
+    request: Request,
+    operator: str = Depends(_verify_super_token),
+    db: AsyncSession = Depends(get_db),
+):
+    mode = data.mode.strip()
+    reason = " ".join(data.reason.split())
+    if mode not in FULFILMENT_MODES:
+        return error_response(code=400, msg="不支持的接单方式")
+    if not reason:
+        return error_response(code=400, msg="请填写调整原因")
+    if len(reason) > 200:
+        return error_response(code=400, msg="调整原因不能超过200个字符")
+
+    tenant_result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+    if tenant_result.scalar_one_or_none() is None:
+        return error_response(code=404, msg="商家不存在")
+
+    config_result = await db.execute(
+        select(TenantConfig)
+        .where(TenantConfig.tenant_id == tenant_id)
+        .with_for_update()
+    )
+    config = config_result.scalar_one_or_none()
+    if config is None:
+        return error_response(code=409, msg="商户配置缺失，无法调整接单方式")
+
+    before_mode = fulfilment_mode_from_business_info(config.business_info)
+    if before_mode == mode:
+        return success_response(
+            data={
+                "tenant_id": tenant_id,
+                "fulfilment_mode": mode,
+                "idempotent": True,
+            },
+            msg="接单方式未变化",
+        )
+
+    business_info = dict(config.business_info or {})
+    business_info[FULFILMENT_MODE_KEY] = mode
+    config.business_info = business_info
+    flag_modified(config, "business_info")
+    await db.commit()
+
+    _audit(
+        "fulfilment_mode_change",
+        request,
+        tenant_id,
+        detail=(
+            f"before_mode={before_mode} after_mode={mode} reason={reason}"
+        ),
+        operator=operator,
+    )
+    return success_response(
+        data={
+            "tenant_id": tenant_id,
+            "fulfilment_mode": mode,
+            "idempotent": False,
+        },
+        msg="接单方式已更新",
+    )
 
 
 @router.post("/merchants", response_model=RespVo, dependencies=[Depends(_verify_super_token)])

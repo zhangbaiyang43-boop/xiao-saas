@@ -82,6 +82,15 @@
                 <div class="fact-row"><span>注册时间</span><strong>{{ detail.tenant.created_at || '未记录' }}</strong></div>
               </div>
 
+              <FulfilmentModeControl
+                :super-token="superToken"
+                :tenant-id="detail.tenant.tenant_id"
+                :merchant-name="detail.tenant.name"
+                :mode="detail.fulfilment_mode"
+                @updated="refreshDetailAfterFulfilmentMode"
+                @auth-expired="logout"
+              />
+
               <div class="danger-zone">
                 <div class="danger-zone-label">危险操作 · {{ detail.tenant.name || '该商户' }}</div>
                 <div class="danger-ops-actions">
@@ -239,6 +248,7 @@
           <div class="create-form">
             <input v-model="newMerchant.name" class="form-input" placeholder="* 商户名称" />
             <input v-model="newMerchant.phone" class="form-input" placeholder="* 手机号（登录账号）" maxlength="11" />
+            <div class="create-default-note"><strong>默认接单方式：自动接单</strong><span>开通后无需人工确认新订单，可随时在 Merchant 360 中调整。</span></div>
             <button class="create-btn tap-shrink" :disabled="creating" @click="createMerchant">{{ creating ? '创建中...' : '确认开通' }}</button>
           </div>
           <div v-if="createResult" class="create-result" :class="createResult.ok ? 'ok' : 'err'">{{ createResult.msg }}</div>
@@ -428,6 +438,7 @@ import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 import MerchantList from './super/MerchantList.vue'
 import SuperAdminShell from './super/SuperAdminShell.vue'
 import SubscriptionAdjustmentModal from './super/SubscriptionAdjustmentModal.vue'
+import FulfilmentModeControl from './super/FulfilmentModeControl.vue'
 import {
   channelLabel,
   expiryLabel,
@@ -1099,6 +1110,10 @@ async function loadMerchantDetail(silent = false) {
   }
 }
 
+async function refreshDetailAfterFulfilmentMode() {
+  await loadMerchantDetail(true)
+}
+
 async function loadInvoices(force = false) {
   const tenantId = String(route.params.tenantId || '')
   if (!tenantId || !superToken) return
@@ -1267,6 +1282,8 @@ onMounted(() => {
 .section-title { font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--text-1); }
 .title-row { display: flex; align-items: center; justify-content: space-between; }
 .create-form { display: grid; gap: 8px; }
+.create-default-note { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid #a7f3d0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 12px; line-height: 1.5; }
+.create-default-note span { color: #475569; }
 .create-result { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
 .create-result.ok { background: var(--brand-light); color: var(--success); } .create-result.err { background: #fef2f2; color: var(--danger); }
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
