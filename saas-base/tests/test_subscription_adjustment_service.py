@@ -59,7 +59,8 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(Base.metadata.create_all)
         self.SessionLocal = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
         self.db = self.SessionLocal()
-        self.tenant = Tenant(tenant_id="tenant-adjust", name="Adjustment Tenant", password_hash="x", status=True)
+        self.tenant_id = "tenant-adjust"
+        self.tenant = Tenant(tenant_id=self.tenant_id, name="Adjustment Tenant", password_hash="x", status=True)
         self.free = Plan(code="FREE", name="免费版", is_active=True)
         self.pro = Plan(code="PRO", name="专业版", is_active=True, price_month_cents=9900, price_year_cents=102200)
         self.db.add_all([self.tenant, self.free, self.pro])
@@ -81,7 +82,7 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
         created_at = created_at or self.NOW - timedelta(days=10)
         plan = plan or self.pro
         row = Subscription(
-            tenant_id=self.tenant.tenant_id,
+            tenant_id=self.tenant_id,
             plan_id=plan.id,
             status=status,
             started_at=created_at if status == STATUS_ACTIVE else None,
@@ -106,7 +107,7 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
             "now": self.NOW,
         }
         payload.update(overrides)
-        return await self.service.preview(self.tenant.tenant_id, **payload)
+        return await self.service.preview(self.tenant_id, **payload)
 
     async def _commit(self, preview, **overrides):
         payload = {
@@ -127,7 +128,7 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
             "now": self.NOW,
         }
         payload.update(overrides)
-        return await self.service.commit(self.tenant.tenant_id, **payload)
+        return await self.service.commit(self.tenant_id, **payload)
 
     async def _assert_error(self, code, awaitable):
         with self.assertRaises(SubscriptionAdjustmentError) as caught:
@@ -269,8 +270,13 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
     async def test_stale_subscription_id_and_expiry_are_rejected(self):
         await self._add_subscription(expiry=self.NOW + timedelta(days=10))
         preview = await self._preview()
+        subscription_id = int(preview["subscription_id"])
         await self._assert_error("STALE_SUBSCRIPTION", self._commit(preview, expected_subscription_id=1))
         await self._assert_error("STALE_SUBSCRIPTION", self._commit(preview, expected_before_expiry="2026-10-16T08:00:00Z"))
+        fresh = (await self.db.execute(select(Subscription).where(Subscription.id == subscription_id))).scalar_one()
+        count = await self.db.scalar(select(func.count()).select_from(SubscriptionAdjustment))
+        self.assertEqual(fresh.ends_at, self.NOW + timedelta(days=10))
+        self.assertEqual(count, 0)
 
     async def test_same_key_same_fingerprint_replays_once(self):
         await self._add_subscription(expiry=self.NOW + timedelta(days=10))
@@ -294,11 +300,12 @@ class SubscriptionAdjustmentServiceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_flush_failure_rolls_back_ledger_and_expiry(self):
         row = await self._add_subscription(expiry=self.NOW + timedelta(days=10))
+        subscription_id = row.id
         preview = await self._preview()
         with patch.object(self.db, "flush", AsyncMock(side_effect=RuntimeError("forced flush failure"))):
             with self.assertRaises(RuntimeError):
                 await self._commit(preview)
-        fresh = (await self.db.execute(select(Subscription).where(Subscription.id == row.id))).scalar_one()
+        fresh = (await self.db.execute(select(Subscription).where(Subscription.id == subscription_id))).scalar_one()
         count = await self.db.scalar(select(func.count()).select_from(SubscriptionAdjustment))
         self.assertEqual(fresh.ends_at, self.NOW + timedelta(days=10))
         self.assertEqual(count, 0)
