@@ -44,7 +44,7 @@
               <div class="context-pills">
                 <span class="mc-badge" :class="detail.tenant.status ? 'on' : 'off'">账号：{{ detail.tenant.status ? '启用' : '已停用' }}</span>
                 <span class="mc-pay-badge" :class="statusClass(paymentStatusOf(detail))">收款：{{ statusText(paymentStatusOf(detail)) }}</span>
-                <span class="mc-badge" :class="detail.subscription?.load_error ? 'off' : 'on'">套餐：{{ subscriptionLabel(detail.subscription) }}</span>
+                <span class="mc-badge" :class="displaySubscription?.load_error ? 'off' : 'on'">套餐：{{ subscriptionLabel(displaySubscription) }}</span>
               </div>
               <div class="context-meta">Tenant ID <span class="tenant-id">{{ detail.tenant.tenant_id }}</span></div>
               <div class="context-meta">
@@ -69,10 +69,10 @@
                 <div class="fact-row"><span>收款状态</span><strong>{{ statusText(paymentStatusOf(detail)) }}</strong></div>
                 <div class="fact-row">
                   <span>套餐状态</span>
-                  <strong v-if="!detail.subscription?.load_error">{{ subscriptionLabel(detail.subscription) }}</strong>
+                  <strong v-if="!displaySubscription?.load_error">{{ subscriptionLabel(displaySubscription) }}</strong>
                   <strong v-else>套餐信息加载失败 <button class="text-link tap-shrink" @click="loadMerchantDetail(true)">重试</button></strong>
                 </div>
-                <div class="fact-row"><span>到期时间</span><strong>{{ expiryLabel(detail.subscription) }}</strong></div>
+                <div class="fact-row"><span>到期时间</span><strong>{{ expiryLabel(displaySubscription) }}</strong></div>
                 <div class="fact-row"><span>渠道来源</span><strong>{{ channelLabel(detail.channel) }}</strong></div>
                 <div class="fact-row">
                   <span>今日订单</span>
@@ -121,12 +121,22 @@
                 <button class="refresh-btn tap-shrink" @click="loadMerchantDetail(true)">重试</button>
               </div>
               <div v-else class="fact-list">
-                <div class="fact-row"><span>当前套餐</span><strong>{{ detail.subscription?.plan_name || '免费版' }}</strong></div>
-                <div class="fact-row"><span>状态</span><strong>{{ subscriptionLabel(detail.subscription) }}</strong></div>
-                <div class="fact-row"><span>开始时间</span><strong>{{ displayDate(detail.subscription?.started_at) }}</strong></div>
-                <div class="fact-row"><span>到期时间</span><strong>{{ expiryLabel(detail.subscription) }}</strong></div>
-                <div class="fact-row"><span>试用</span><strong>{{ detail.subscription?.is_trial ? '试用中' : '不是试用' }}</strong></div>
+                <div class="fact-row"><span>当前套餐</span><strong>{{ displaySubscription?.plan_name || '免费版' }}</strong></div>
+                <div class="fact-row"><span>状态</span><strong>{{ subscriptionDomainStatus(displaySubscription) }}</strong></div>
+                <div class="fact-row"><span>开始时间</span><strong>{{ displayDate(displaySubscription?.started_at) }}</strong></div>
+                <div class="fact-row"><span>到期时间</span><strong>{{ displayDateTime(displaySubscription?.expires_at) }}</strong></div>
+                <div class="fact-row"><span>剩余时间</span><strong>{{ subscriptionRemainingText(displaySubscription) }}</strong></div>
+                <div class="fact-row"><span>试用</span><strong>{{ displaySubscription?.is_trial ? '试用中' : '不是试用' }}</strong></div>
               </div>
+
+              <SubscriptionAdjustmentModal
+                :super-token="superToken"
+                :tenant-id="detail.tenant.tenant_id"
+                :merchant-name="detail.tenant.name"
+                :context="detail.subscription_adjustment"
+                @committed="refreshDetailAfterAdjustment"
+                @auth-expired="logout"
+              />
 
               <div class="section-title bill-title">付款记录</div>
               <div v-if="invoicesLoading" class="loading">加载中...</div>
@@ -417,6 +427,7 @@ import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 import MerchantList from './super/MerchantList.vue'
 import SuperAdminShell from './super/SuperAdminShell.vue'
+import SubscriptionAdjustmentModal from './super/SubscriptionAdjustmentModal.vue'
 import {
   channelLabel,
   expiryLabel,
@@ -506,6 +517,22 @@ const paymentPendingVerifyCount = computed(() => merchants.value.filter(item => 
 const disabledMerchantCount = computed(() => merchants.value.filter(item => !item.status).length)
 const overviewLoading = computed(() => statsLoading.value || loadingList.value)
 const overviewError = computed(() => statsError.value || merchantListError.value || pendingCountError.value)
+const displaySubscription = computed(() => {
+  const current = detail.value?.subscription
+  const context = detail.value?.subscription_adjustment
+  if (!context?.adjustable || !context.natural_expiry_recovery) return current
+  return {
+    ...current,
+    plan_code: context.plan_code,
+    plan_name: context.plan_name,
+    status: 'EXPIRED',
+    is_trial: context.stored_status === 'TRIAL',
+    started_at: context.started_at,
+    expires_at: context.expires_at,
+    days_remaining: context.days_remaining,
+    load_error: false,
+  }
+})
 
 function superHeaders() { return { 'X-Super-Token': superToken } }
 function rememberToken(value) {
@@ -534,6 +561,19 @@ function displayDate(value) {
 function displayDateTime(value) {
   if (!value) return '未记录'
   return formatBeijingDateTime(value) || '未记录'
+}
+function subscriptionDomainStatus(subscription) {
+  if (!subscription || subscription.load_error) return '加载失败'
+  if (subscription.status === 'TRIAL' || subscription.is_trial) return '试用中'
+  if (subscription.status === 'ACTIVE') return '生效中'
+  if (subscription.status === 'EXPIRED') return '已到期'
+  if (subscription.status === 'CANCELLED') return '已取消'
+  if (subscription.status === 'FREE') return '免费版'
+  return '状态待确认'
+}
+function subscriptionRemainingText(subscription) {
+  if (!subscription?.expires_at || typeof subscription.days_remaining !== 'number') return '—'
+  return subscription.days_remaining > 0 ? `${subscription.days_remaining} 天` : '已到期'
 }
 function bindingStatusText(status) {
   if (status === 'ACTIVE') return '生效中'
@@ -1088,6 +1128,10 @@ async function loadInvoices(force = false) {
 }
 
 function refreshDetailAfterPayment() {
+  if (isDetail.value) loadMerchantDetail(true)
+}
+
+function refreshDetailAfterAdjustment() {
   if (isDetail.value) loadMerchantDetail(true)
 }
 

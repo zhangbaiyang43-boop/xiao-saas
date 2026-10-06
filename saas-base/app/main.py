@@ -41,6 +41,11 @@ from app.api.v1.channel import router as channel_router
 from app.api.v1.super_billing import router as super_billing_router
 from app.api.v1.super_channel import router as super_channel_router
 from app.api.v1.super_admin import router as super_admin_router
+from app.api.v1.super_subscription_adjustments import (
+    SubscriptionAdjustmentAuthorizationError,
+    router as super_subscription_adjustments_router,
+    subscription_adjustment_authorization_error_handler,
+)
 from app.config import settings
 from app.core.database import async_engine
 from app.core.events import CONSUMPTION_CREATED, event_bus
@@ -125,6 +130,7 @@ app.include_router(subscription_router)
 app.include_router(channel_router)
 app.include_router(queue_router)
 app.include_router(super_admin_router)
+app.include_router(super_subscription_adjustments_router)
 app.include_router(super_billing_router)
 app.include_router(super_channel_router)
 
@@ -135,6 +141,10 @@ event_bus.register(CONSUMPTION_CREATED, plugin_manager.dispatch_event)
 
 app.add_exception_handler(BusinessException, business_exception_handler)
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(
+    SubscriptionAdjustmentAuthorizationError,
+    subscription_adjustment_authorization_error_handler,
+)
 app.add_exception_handler(Exception, general_exception_handler)
 
 

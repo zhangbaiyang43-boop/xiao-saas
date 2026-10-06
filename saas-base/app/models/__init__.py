@@ -31,6 +31,7 @@ from app.models.perf_sample import PerfSample
 from app.models.staff_assisted_payment_handoff import StaffAssistedPaymentHandoff
 from app.models.billing import BillingInvoice, BillingPayment
 from app.models.subscription import Plan, Subscription
+from app.models.subscription_adjustment import SubscriptionAdjustment
 from app.models.channel_revenue import (
     ChannelCommissionLedger,
     ChannelCommissionSettlement,
@@ -88,6 +89,7 @@ __all__ = [
     'BillingPayment',
     'Plan',
     'Subscription',
+    'SubscriptionAdjustment',
     'ChannelPartner',
     'ChannelLeadMobileLock',
     'ChannelLead',

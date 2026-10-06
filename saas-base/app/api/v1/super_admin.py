@@ -25,6 +25,7 @@ from app.services.subscription_service import (
     PlanDataIntegrityError,
     SubscriptionService,
 )
+from app.services.subscription_adjustment_service import SubscriptionAdjustmentService
 
 router = APIRouter(prefix="/api/super", tags=["平台中控台"])
 
@@ -439,6 +440,16 @@ async def get_merchant_summary(tenant_id: str, db: AsyncSession = Depends(get_db
         logger.exception("[SUPER_SUBSCRIPTION_READ] tenant_id=%s", tenant.tenant_id)
         subscription = _subscription_error()
 
+    try:
+        subscription_adjustment = await SubscriptionAdjustmentService(db).get_adjustment_context(tenant.tenant_id)
+    except Exception:
+        logger.exception("[SUPER_SUBSCRIPTION_ADJUSTMENT_READ] tenant_id=%s", tenant.tenant_id)
+        subscription_adjustment = {
+            "adjustable": False,
+            "action": None,
+            "error_code": "CONCURRENT_MODIFICATION",
+        }
+
     channels, channel_failed = await _channel_summaries(db, [tenant.tenant_id])
     channel = _channel_error() if channel_failed else channels.get(tenant.tenant_id) or _channel_empty()
     today_count = await _today_order_count_for_tenant(db, tenant.tenant_id)
@@ -455,6 +466,7 @@ async def get_merchant_summary(tenant_id: str, db: AsyncSession = Depends(get_db
         },
         "payment": _payment_summary(tenant),
         "subscription": subscription,
+        "subscription_adjustment": subscription_adjustment,
         "channel": channel,
         "operations": {
             "today_order_count": today_count,
