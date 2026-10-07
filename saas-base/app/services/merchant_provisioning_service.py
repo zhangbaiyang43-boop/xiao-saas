@@ -5,10 +5,12 @@ from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.logger import logger
 from app.models.subscription import Subscription
 from app.models.tenant import Tenant
+from app.services.fulfilment_mode import FULFILMENT_MODE_KEY, FULFILMENT_PRINT_FIRST
 from app.services.subscription_service import SubscriptionService
 from app.services.tenant_service import TenantService
 from app.utils.id_generator import generate_tenant_id
@@ -155,6 +157,16 @@ class MerchantProvisioningService:
                 payment_mode=payment_mode,
                 commit=False,
             )
+
+            # Write the new-merchant policy at the unified provisioning authority.
+            # The global/missing-key fallback stays WORKBENCH for historical tenants.
+            config = await tenant_service.get_tenant_config(tenant.tenant_id)
+            if config is None:
+                raise RuntimeError("tenant config missing during merchant provisioning")
+            business_info = dict(config.business_info or {})
+            business_info[FULFILMENT_MODE_KEY] = FULFILMENT_PRINT_FIRST
+            config.business_info = business_info
+            flag_modified(config, "business_info")
 
             subscription: Optional[Subscription] = None
             if trial_policy == TrialPolicy.GRANT_DEFAULT_TRIAL:

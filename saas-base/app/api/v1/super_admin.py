@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
 from app.core.crypto import decrypt_secret, encrypt_secret
@@ -13,6 +14,12 @@ from app.core.rate_limiter import login_limit
 from app.core.response import RespVo, error_response, success_response
 from app.models.order import Order
 from app.models.tenant import Tenant
+from app.models.tenant_config import TenantConfig
+from app.services.fulfilment_mode import (
+    FULFILMENT_MODE_KEY,
+    FULFILMENT_MODES,
+    fulfilment_mode_from_business_info,
+)
 from app.services.merchant_provisioning_service import (
     MerchantProvisioningService,
     PhoneAlreadyRegisteredError,
@@ -56,6 +63,11 @@ class WxPayConfigRequest(BaseModel):
     receiver_type: str | None = None
 
 
+class FulfilmentModeUpdateRequest(BaseModel):
+    mode: str
+    reason: str
+
+
 def _totp_configured() -> bool:
     return bool((settings.SUPER_ADMIN_TOTP_SECRET or "").strip())
 
@@ -89,6 +101,27 @@ def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token"))
         return payload.get("sub", "")
     except Exception:
         raise __import__("fastapi").HTTPException(status_code=401, detail="中控台鉴权失败")
+
+
+def _verify_fulfilment_super_token(
+    x_super_token: str | None = Header(default=None, alias="X-Super-Token"),
+) -> str:
+    """Fulfilment control owns its explicit 401/403 contract without changing other Super APIs."""
+    import jwt
+
+    if not x_super_token or not x_super_token.strip():
+        raise HTTPException(status_code=401, detail="中控台鉴权失败")
+    try:
+        payload = jwt.decode(
+            x_super_token.strip(),
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="中控台鉴权失败") from exc
+    if payload.get("type") != "super_admin":
+        raise HTTPException(status_code=403, detail="无权修改接单方式")
+    return payload.get("sub", "")
 
 
 def _mask_mchid(mchid: str | None) -> str:
@@ -237,6 +270,14 @@ async def list_merchants(db: AsyncSession = Depends(get_db)):
     )
     today_orders = {row.tenant_id: row.cnt for row in order_result}
 
+    config_result = await db.execute(
+        select(TenantConfig.tenant_id, TenantConfig.business_info)
+    )
+    fulfilment_modes = {
+        row.tenant_id: fulfilment_mode_from_business_info(row.business_info)
+        for row in config_result
+    }
+
     data = []
     for t in tenants:
         data.append({
@@ -246,11 +287,78 @@ async def list_merchants(db: AsyncSession = Depends(get_db)):
             "phone": t.phone or "",
             "status": t.status,
             "today_orders": today_orders.get(t.tenant_id, 0),
+            "fulfilment_mode": fulfilment_modes.get(t.tenant_id, "WORKBENCH"),
             "wx_pay_enabled": getattr(t, "wx_pay_enabled", False) or False,
             "created_at": t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else "",
             **_payment_view(t),
         })
     return success_response(data=data, msg="ok")
+
+
+@router.patch("/merchants/{tenant_id}/fulfilment-mode", response_model=RespVo)
+async def update_merchant_fulfilment_mode(
+    tenant_id: str,
+    data: FulfilmentModeUpdateRequest,
+    request: Request,
+    operator: str = Depends(_verify_fulfilment_super_token),
+    db: AsyncSession = Depends(get_db),
+):
+    mode = data.mode.strip()
+    reason = " ".join(data.reason.split())
+    if mode not in FULFILMENT_MODES:
+        return error_response(code=400, msg="不支持的接单方式")
+    if not reason:
+        return error_response(code=400, msg="请填写调整原因")
+    if len(reason) > 200:
+        return error_response(code=400, msg="调整原因不能超过200个字符")
+
+    tenant = await db.scalar(select(Tenant).where(Tenant.tenant_id == tenant_id))
+    if tenant is None:
+        return error_response(code=404, msg="商家不存在")
+
+    config = await db.scalar(
+        select(TenantConfig)
+        .where(TenantConfig.tenant_id == tenant_id)
+        .with_for_update()
+    )
+    if config is None:
+        return error_response(code=409, msg="商户配置缺失，无法调整接单方式")
+
+    before_mode = fulfilment_mode_from_business_info(config.business_info)
+    if before_mode == mode:
+        return success_response(
+            data={
+                "tenant_id": tenant_id,
+                "fulfilment_mode": mode,
+                "idempotent": True,
+            },
+            msg="接单方式未变化",
+        )
+
+    business_info = dict(config.business_info or {})
+    business_info[FULFILMENT_MODE_KEY] = mode
+    config.business_info = business_info
+    flag_modified(config, "business_info")
+    await db.commit()
+
+    request_id = getattr(request.state, "request_id", None) or "unknown"
+    _audit(
+        "fulfilment_mode_change",
+        request,
+        tenant_id,
+        detail=(
+            f"before_mode={before_mode} after_mode={mode} reason={reason} "
+            f"operator={operator or 'super_admin'} request_id={request_id}"
+        ),
+    )
+    return success_response(
+        data={
+            "tenant_id": tenant_id,
+            "fulfilment_mode": mode,
+            "idempotent": False,
+        },
+        msg="接单方式已更新",
+    )
 
 
 @router.post("/merchants", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
