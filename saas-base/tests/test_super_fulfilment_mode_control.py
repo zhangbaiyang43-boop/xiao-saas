@@ -282,6 +282,17 @@ class SuperFulfilmentModeControlTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self._assert_auth_error(response, 403, "FORBIDDEN")
 
+    async def test_non_super_token_cannot_update_fulfilment_mode(self):
+        response = await self.client.patch(
+            "/api/super/merchants/auth-contract/fulfilment-mode",
+            headers={"X-Super-Token": self._token("tenant")},
+            json={
+                "mode": FULFILMENT_PRINT_FIRST,
+                "reason": "must be rejected before the write path",
+            },
+        )
+        self._assert_auth_error(response, 403, "FORBIDDEN")
+
     async def test_valid_super_token_passes_shared_authentication(self):
         response = await self.client.get(
             "/api/super/merchants",
