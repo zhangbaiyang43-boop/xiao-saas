@@ -48,8 +48,9 @@ def make_notify_request() -> Request:
 
     request = Request(
         {
-            "type": "http", "method": "POST", "path": "/api/v1/orders/wxpay-notify",
-            "headers": [], "query_string": f"tenant_id={TENANT_ID}".encode(),
+            "type": "http", "method": "POST",
+            "path": f"/api/v1/orders/wxpay-notify/{TENANT_ID}",
+            "headers": [], "query_string": b"",
             "server": ("testserver", 80), "scheme": "http",
             "client": ("testclient", 50000),
         }
@@ -143,7 +144,7 @@ class CouponLatePaymentSafetyTest(unittest.IsolatedAsyncioTestCase):
             patch("app.services.order_payment_service._print_paid_order_ticket", new_callable=AsyncMock),
             patch("app.services.coupon_service.settings.REDIS_ENABLED", False),
         ):
-            return await wxpay_notify(make_notify_request(), db=self.db)
+            return await wxpay_notify(TENANT_ID, make_notify_request(), db=self.db)
 
     async def test_scenario_a_o2_only_locked_when_o1_late_payment_arrives(self):
         o1 = await self._make_o1_locked_and_timed_out()
@@ -170,7 +171,7 @@ class CouponLatePaymentSafetyTest(unittest.IsolatedAsyncioTestCase):
         # 12:17: O1's late payment confirmation arrives.
         response = await self._deliver_o1_late_payment(o1)
 
-        self.assertEqual(response.get("code"), "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(o1)
         self.assertEqual(o1.payment_status, "paid")   # payment truth recorded
         self.assertEqual(o1.status, "cancelled")       # stays terminal, not resurrected
@@ -209,7 +210,7 @@ class CouponLatePaymentSafetyTest(unittest.IsolatedAsyncioTestCase):
 
         response = await self._deliver_o1_late_payment(o1)
 
-        self.assertEqual(response.get("code"), "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(o1)
         self.assertEqual(o1.payment_status, "paid")
         self.assertEqual(o1.status, "cancelled")
@@ -230,7 +231,7 @@ class CouponLatePaymentSafetyTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(o1)
 
         response = await self._deliver_o1_late_payment(o1)
-        self.assertEqual(response.get("code"), "SUCCESS")
+        self.assertEqual(response.status_code, 204)
 
         await self.db.refresh(o1)
         self.assertEqual(o1.payment_status, "paid")

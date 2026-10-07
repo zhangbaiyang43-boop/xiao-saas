@@ -28,9 +28,9 @@ def make_notify_request(tenant_id=TENANT_A):
         {
             "type": "http",
             "method": "POST",
-            "path": "/api/v1/orders/wxpay-notify",
+            "path": f"/api/v1/orders/wxpay-notify/{tenant_id}",
             "headers": [],
-            "query_string": f"tenant_id={tenant_id}".encode(),
+            "query_string": b"",
             "server": ("testserver", 80),
             "scheme": "http",
             "client": ("testclient", 50000),
@@ -79,9 +79,9 @@ class WxpayAmountReconciliationTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \
              patch.object(WxPayService, "verify_notify", return_value=self._fake_resource(1)):
             # order.total is 28.00 元 (2800 分)；回调却只带来 1 分钱的确认，必须被拒绝
-            result = await wxpay_notify(make_notify_request(), db=self.db)
+            result = await wxpay_notify(TENANT_A, make_notify_request(), db=self.db)
 
-        self.assertEqual(result.get("code"), "FAIL")
+        self.assertEqual(result.status_code, 422)
         await self.db.refresh(self.order)
         self.assertEqual(self.order.payment_status, "unpaid")
         self.assertEqual(self.order.status, "pending_payment")
@@ -89,9 +89,9 @@ class WxpayAmountReconciliationTest(unittest.IsolatedAsyncioTestCase):
     async def test_matching_callback_amount_marks_order_paid(self):
         with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \
              patch.object(WxPayService, "verify_notify", return_value=self._fake_resource(2800)):
-            result = await wxpay_notify(make_notify_request(), db=self.db)
+            result = await wxpay_notify(TENANT_A, make_notify_request(), db=self.db)
 
-        self.assertEqual(result.get("code"), "SUCCESS")
+        self.assertEqual(result.status_code, 204)
         await self.db.refresh(self.order)
         self.assertEqual(self.order.payment_status, "paid")
 
@@ -124,9 +124,9 @@ class WxpayAmountReconciliationTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(WxPayService, "enabled", new_callable=PropertyMock, return_value=True), \
              patch.object(WxPayService, "verify_notify", return_value=resource):
-            result = await wxpay_notify(make_notify_request(TENANT_A), db=self.db)
+            result = await wxpay_notify(TENANT_A, make_notify_request(TENANT_A), db=self.db)
 
-        self.assertEqual(result, {"code": "SUCCESS", "message": "ok"})
+        self.assertEqual(result.status_code, 404)
         await self.db.refresh(order_b)
         self.assertEqual(order_b.payment_status, "unpaid")
         self.assertEqual(order_b.status, "pending_payment")

@@ -44,9 +44,9 @@ def make_notify_request() -> Request:
         {
             "type": "http",
             "method": "POST",
-            "path": "/api/v1/orders/wxpay-notify",
+            "path": f"/api/v1/orders/wxpay-notify/{TENANT_ID}",
             "headers": [],
-            "query_string": f"tenant_id={TENANT_ID}".encode(),
+            "query_string": b"",
             "server": ("testserver", 80),
             "scheme": "http",
             "client": ("testclient", 50000),
@@ -153,7 +153,7 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch("app.services.coupon_service.settings.REDIS_ENABLED", False),
         ):
-            return await wxpay_notify(make_notify_request(), db=self.db)
+            return await wxpay_notify(TENANT_ID, make_notify_request(), db=self.db)
 
     async def recover(self, order: Order, fact: dict) -> bool:
         with (
@@ -173,7 +173,7 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
 
     async def assert_unpaid_after_notify(self, order: Order, fact: dict):
         response = await self.notify(fact)
-        self.assertEqual(response.get("code"), "FAIL")
+        self.assertEqual(response.status_code, 422)
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "unpaid")
         self.assertEqual(order.status, "pending_payment")
@@ -216,8 +216,8 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
         first_response = await self.notify(self.resource(first, transaction_id=transaction_id))
         second_response = await self.notify(self.resource(second, transaction_id=transaction_id))
 
-        self.assertEqual(first_response.get("code"), "SUCCESS")
-        self.assertEqual(second_response.get("code"), "FAIL")
+        self.assertEqual(first_response.status_code, 204)
+        self.assertEqual(second_response.status_code, 409)
         await self.db.refresh(first)
         await self.db.refresh(second)
         self.assertEqual(first.wx_transaction_id, transaction_id)
@@ -236,9 +236,12 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
             patch("app.services.order_payment_service.logger.warning") as warning,
             patch("app.services.order_payment_service.logger.exception") as exception,
         ):
-            responses = [await wxpay_notify(make_notify_request(), db=self.db) for _ in range(3)]
+            responses = [
+                await wxpay_notify(TENANT_ID, make_notify_request(), db=self.db)
+                for _ in range(3)
+            ]
 
-        self.assertEqual([item.get("code") for item in responses], ["SUCCESS"] * 3)
+        self.assertEqual([item.status_code for item in responses], [204] * 3)
         duplicate_warnings = [
             call for call in warning.call_args_list
             if call.args and call.args[0] == "WXPAY_CALLBACK_DUPLICATE"
@@ -265,9 +268,9 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
             patch.object(WxPayService, "verify_notify", return_value=fact),
             patch("app.services.order_payment_service._print_paid_order_ticket", printer),
         ):
-            response = await wxpay_notify(make_notify_request(), db=self.db)
+            response = await wxpay_notify(TENANT_ID, make_notify_request(), db=self.db)
 
-        self.assertEqual(response.get("code"), "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(order)
         self.assertEqual(order.wx_transaction_id, fact["transaction_id"])
         self.assertEqual(printer.await_count, 0)
@@ -321,7 +324,7 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(PaymentHandoffService, "mark_order_paid", fail_after_handoff_mutation):
             failed = await self.notify(fact)
 
-        self.assertEqual(failed.get("code"), "FAIL")
+        self.assertEqual(failed.status_code, 500)
         await self.db.refresh(order)
         await self.db.refresh(coupon)
         await self.db.refresh(handoff)
@@ -339,11 +342,11 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(points_count, 0)
 
         retried = await self.notify(fact)
-        self.assertEqual(retried.get("code"), "SUCCESS")
+        self.assertEqual(retried.status_code, 204)
         duplicate_responses = [await self.notify(fact) for _ in range(2)]
         self.assertEqual(
-            [item.get("code") for item in duplicate_responses],
-            ["SUCCESS", "SUCCESS"],
+            [item.status_code for item in duplicate_responses],
+            [204, 204],
         )
         await self.db.refresh(order)
         await self.db.refresh(coupon)
@@ -386,14 +389,18 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(
                             await OrderPaymentService(self.db)._recover_wxpay_order_if_paid(order)
                         )
-                        response = await wxpay_notify(make_notify_request(), db=self.db)
+                        response = await wxpay_notify(
+                            TENANT_ID, make_notify_request(), db=self.db
+                        )
                     else:
-                        response = await wxpay_notify(make_notify_request(), db=self.db)
+                        response = await wxpay_notify(
+                            TENANT_ID, make_notify_request(), db=self.db
+                        )
                         self.assertTrue(
                             await OrderPaymentService(self.db)._recover_wxpay_order_if_paid(order)
                         )
 
-                self.assertEqual(response.get("code"), "SUCCESS")
+                self.assertEqual(response.status_code, 204)
                 await self.db.refresh(order)
                 self.assertEqual(order.payment_status, "paid")
                 self.assertEqual(order.wx_transaction_id, fact["transaction_id"])
@@ -408,9 +415,9 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
             patch.object(WxPayService, "verify_notify", return_value=fact),
             patch.object(OrderPaymentService, "_refund_orphaned_wxpay_payment", refund),
         ):
-            response = await wxpay_notify(make_notify_request(), db=self.db)
+            response = await wxpay_notify(TENANT_ID, make_notify_request(), db=self.db)
 
-        self.assertEqual(response.get("code"), "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         refund.assert_awaited_once()
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "paid")
@@ -425,10 +432,10 @@ class PaymentTruthContractsTest(unittest.IsolatedAsyncioTestCase):
         await self.db.refresh(order)
         self.assertIsNone(order.wx_transaction_id)
 
-    async def test_unknown_order_callback_preserves_existing_success_ack_policy(self):
+    async def test_unknown_order_callback_is_rejected_without_mutation(self):
         order = await self.make_order()
         response = await self.notify(self.resource(order, out_trade_no="999999999999"))
-        self.assertEqual(response, {"code": "SUCCESS", "message": "ok"})
+        self.assertEqual(response.status_code, 404)
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "unpaid")
 

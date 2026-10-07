@@ -107,7 +107,6 @@ class FakeDB:
 
 class FakeRequest:
     headers = {"wechatpay-signature": "valid"}
-    query_params = {"tenant_id": "tenant_1"}
 
     async def body(self):
         return b'{"same":"legal callback payload"}'
@@ -319,11 +318,11 @@ class WxPayNotifyIdempotencyTest(unittest.TestCase):
         payment_module.OrderPaymentService._run_post_commit_payment_effects = fake_post_commit
 
         results = [
-            asyncio.run(module.wxpay_notify(FakeRequest(), db))
+            asyncio.run(module.wxpay_notify("tenant_1", FakeRequest(), db))
             for _ in range(3)
         ]
 
-        self.assertEqual(results, [{"code": "SUCCESS", "message": "ok"}] * 3)
+        self.assertEqual([result.status_code for result in results], [204] * 3)
         self.assertEqual(order.status, "pending")
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(db.order_query_count, 3)

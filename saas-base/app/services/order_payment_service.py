@@ -1,8 +1,11 @@
 import json
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, TYPE_CHECKING, TypedDict, cast
+from urllib.parse import quote
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -76,6 +79,50 @@ class PaymentFactError(ValueError):
 
 class PaymentTransactionConflict(PaymentFactError):
     pass
+
+
+@dataclass(frozen=True)
+class WxPayCallbackOutcome:
+    status_code: int
+    code: str
+    message: str
+
+    @classmethod
+    def success(cls) -> "WxPayCallbackOutcome":
+        return cls(status_code=204, code="SUCCESS", message="")
+
+    @classmethod
+    def failure(cls, status_code: int, message: str) -> "WxPayCallbackOutcome":
+        return cls(status_code=status_code, code="FAIL", message=message)
+
+
+def _build_order_wxpay_notify_url(tenant_id: str) -> str:
+    base = str(settings.H5_ORDER_BASE_URL or "").strip().rstrip("/")
+    if not base.lower().startswith("https://"):
+        raise RuntimeError("WeChat Pay callback base URL must use HTTPS")
+    routed_tenant_id = quote(str(tenant_id or "").strip(), safe="")
+    if not routed_tenant_id:
+        raise RuntimeError("WeChat Pay callback tenant id is required")
+    return f"{base}/api/v1/orders/wxpay-notify/{routed_tenant_id}"
+
+
+def _wxpay_callback_credential_view(tenant: Any) -> SimpleNamespace:
+    """Use retained credentials for an already-created payment callback.
+
+    ``wx_pay_enabled`` controls creation of new payments.  A merchant may pause
+    new collection while a previously-created WeChat order is still in flight,
+    so callback verification must not use that flag as a credential gate.  This
+    plain view avoids mutating or leaking the routed Tenant ORM instance.
+    """
+    return SimpleNamespace(
+        wx_pay_enabled=True,
+        wx_mchid=getattr(tenant, "wx_mchid", None),
+        wx_api_key_v3=getattr(tenant, "wx_api_key_v3", None),
+        wx_cert_serial=getattr(tenant, "wx_cert_serial", None),
+        wx_private_key=getattr(tenant, "wx_private_key", None),
+        wx_public_key_id=getattr(tenant, "wx_public_key_id", None),
+        wx_public_key=getattr(tenant, "wx_public_key", None),
+    )
 
 
 def _numeric_decimal(value: object) -> Decimal:
@@ -1135,7 +1182,7 @@ class OrderPaymentService(BaseService):
                     "PAYMENT_REQUESTED order_id=%s tenant_id=%s amount_fen=%s client_request_id=%s",
                     order.id, order.tenant_id, amount_fen, getattr(order, "client_request_id", None),
                 )
-                notify_url = f"{settings.H5_ORDER_BASE_URL}/api/v1/orders/wxpay-notify"
+                notify_url = _build_order_wxpay_notify_url(str(order.tenant_id))
                 pay_params = await svc.create_jsapi_order(
                     openid=openid,
                     out_trade_no=str(order.id),
@@ -1184,8 +1231,12 @@ class OrderPaymentService(BaseService):
             raise HTTPException(status_code=500, detail={"success": False, "code": "PAYMENT_INTERNAL_ERROR", "message": "支付服务异常，请稍后重试"})
 
 
-    async def wxpay_notify(self, request: Request) -> dict[str, str]:
-        """Handle WeChat Pay notify for direct merchant mode."""
+    async def wxpay_notify(
+        self,
+        tenant_id: str,
+        request: Request,
+    ) -> WxPayCallbackOutcome:
+        """Handle one routed merchant callback without credential fallback."""
         from app.models.tenant import Tenant
         from app.services.wxpay_service import WxPayService
 
@@ -1193,77 +1244,91 @@ class OrderPaymentService(BaseService):
             headers = dict(request.headers)
             raw_body = await request.body()
 
-            resource = None
-            tenant_id = request.query_params.get("tenant_id")
-            matched_tenant = None
-            verify_reasons: list[str] = []
-            if tenant_id:
-                tenant_result = await self.db.execute(
-                    select(Tenant).where(
-                        Tenant.tenant_id == tenant_id,
-                        Tenant.wx_pay_enabled == True,
-                        Tenant.wx_mchid.isnot(None),
-                    )
+            routed_tenant_id = str(tenant_id or "").strip()
+            tenant_result = await self.db.execute(
+                select(Tenant).where(Tenant.tenant_id == routed_tenant_id)
+            )
+            matched_tenant = tenant_result.scalar_one_or_none()
+            if not matched_tenant:
+                logger.warning(
+                    "WXPAY_CALLBACK_TENANT_NOT_FOUND",
+                    extra={
+                        "event": "WXPAY_CALLBACK_TENANT_NOT_FOUND",
+                        "tenant_id": routed_tenant_id,
+                        "reason": "TENANT_NOT_FOUND",
+                    },
                 )
-                matched_tenant = tenant_result.scalar_one_or_none()
-                if matched_tenant:
-                    svc = WxPayService(matched_tenant)
-                    if svc.enabled:
-                        resource = svc.verify_notify(headers, raw_body)
-                        if not resource:
-                            verify_reasons.append(getattr(svc, "last_verify_reason", "UNKNOWN_VERIFY_FAILURE"))
-                    else:
-                        verify_reasons.append("CERTIFICATE_MISMATCH")
+                return WxPayCallbackOutcome.failure(404, "callback target not found")
 
-            if not resource:
-                tenant_result = await self.db.execute(
-                    select(Tenant).where(Tenant.wx_pay_enabled == True, Tenant.wx_mchid.isnot(None))
-                )
-                tenants = tenant_result.scalars().all()
-                for t in tenants:
-                    svc = WxPayService(t)
-                    if not svc.enabled:
-                        verify_reasons.append("CERTIFICATE_MISMATCH")
-                        continue
-                    resource = svc.verify_notify(headers, raw_body)
-                    if resource:
-                        matched_tenant = t
-                        break
-                    verify_reasons.append(getattr(svc, "last_verify_reason", "UNKNOWN_VERIFY_FAILURE"))
-            if not resource:
-                reason = _summarize_wxpay_verify_reasons(verify_reasons)
+            svc = WxPayService(_wxpay_callback_credential_view(matched_tenant))
+            if not svc.enabled:
                 logger.warning(
                     "WXPAY_CALLBACK_VERIFY_FAILED",
-                    extra={"event": "WXPAY_CALLBACK_VERIFY_FAILED", "reason": reason},
+                    extra={
+                        "event": "WXPAY_CALLBACK_VERIFY_FAILED",
+                        "tenant_id": routed_tenant_id,
+                        "reason": "CERTIFICATE_MISMATCH",
+                    },
                 )
-                return {"code": "FAIL", "message": "验证失败"}
+                return WxPayCallbackOutcome.failure(400, "callback verification failed")
+
+            resource = svc.verify_notify(headers, raw_body)
+            if not resource:
+                reason = _summarize_wxpay_verify_reasons(
+                    [getattr(svc, "last_verify_reason", "UNKNOWN_VERIFY_FAILURE")]
+                )
+                logger.warning(
+                    "WXPAY_CALLBACK_VERIFY_FAILED",
+                    extra={
+                        "event": "WXPAY_CALLBACK_VERIFY_FAILED",
+                        "tenant_id": routed_tenant_id,
+                        "reason": reason,
+                    },
+                )
+                return WxPayCallbackOutcome.failure(400, "callback verification failed")
 
             out_trade_no = resource.get("out_trade_no", "")
             trade_state = resource.get("trade_state", "")
             safe_log(
                 logger.info,
                 "WXPAY_CALLBACK_RECEIVED tenant_id=%s out_trade_no=%s trade_state=%s",
-                getattr(matched_tenant, "tenant_id", None), out_trade_no, trade_state,
+                routed_tenant_id, out_trade_no, trade_state,
                 extra={
                     "event": "WXPAY_CALLBACK_RECEIVED",
-                    "tenant_id": getattr(matched_tenant, "tenant_id", None),
+                    "tenant_id": routed_tenant_id,
                     "out_trade_no": out_trade_no,
                     "trade_state": trade_state,
                     "transaction_id": resource.get("transaction_id") or None,
                 },
             )
             if trade_state != "SUCCESS":
-                return {"code": "SUCCESS", "message": "ok"}
+                logger.warning(
+                    "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                    extra={
+                        "event": "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                        "tenant_id": routed_tenant_id,
+                        "reason": "PAYMENT_NOT_SUCCESSFUL",
+                    },
+                )
+                return WxPayCallbackOutcome.failure(422, "invalid payment fact")
 
             try:
                 order_id = int(out_trade_no)
             except (TypeError, ValueError):
-                return {"code": "FAIL", "message": "invalid out_trade_no"}
+                logger.warning(
+                    "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                    extra={
+                        "event": "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                        "tenant_id": routed_tenant_id,
+                        "reason": "INVALID_OUT_TRADE_NO",
+                    },
+                )
+                return WxPayCallbackOutcome.failure(400, "invalid payment reference")
             result = await self.db.execute(
                 select(Order)
                 .where(
                     Order.id == order_id,
-                    Order.tenant_id == str(matched_tenant.tenant_id),
+                    Order.tenant_id == routed_tenant_id,
                 )
                 .with_for_update()
             )
@@ -1273,20 +1338,25 @@ class OrderPaymentService(BaseService):
                     "WXPAY_CALLBACK_ORDER_NOT_FOUND",
                     extra={
                         "event": "WXPAY_CALLBACK_ORDER_NOT_FOUND",
-                        "tenant_id": getattr(matched_tenant, "tenant_id", None),
+                        "tenant_id": routed_tenant_id,
                         "out_trade_no": out_trade_no,
                         "transaction_id": resource.get("transaction_id") or None,
                         "trade_state": trade_state,
                         "reason": "ORDER_NOT_FOUND",
                     },
                 )
-                return {"code": "SUCCESS", "message": "ok"}
-            if matched_tenant and str(order.tenant_id) != str(matched_tenant.tenant_id):
+                return WxPayCallbackOutcome.failure(404, "payment order not found")
+            if str(order.tenant_id) != routed_tenant_id:
                 logger.warning(
-                    f"wxpay notify tenant mismatch: order_id={out_trade_no} "
-                    f"order_tenant_id={order.tenant_id} notify_tenant_id={matched_tenant.tenant_id}"
+                    "WXPAY_CALLBACK_TENANT_MISMATCH",
+                    extra={
+                        "event": "WXPAY_CALLBACK_TENANT_MISMATCH",
+                        "tenant_id": routed_tenant_id,
+                        "order_id": order.id,
+                        "reason": "TENANT_MISMATCH",
+                    },
                 )
-                return {"code": "FAIL", "message": "tenant mismatch"}
+                return WxPayCallbackOutcome.failure(409, "payment tenant mismatch")
 
             if order.status in ("cancelled", "rejected"):
                 terminal_status = str(order.status)
@@ -1308,7 +1378,7 @@ class OrderPaymentService(BaseService):
                     out_trade_no,
                     terminal_status,
                 )
-                return {"code": "SUCCESS", "message": "ok"}
+                return WxPayCallbackOutcome.success()
 
             transaction_id = self._validate_confirmed_wx_payment(order, resource)
             claim = await self._claim_wx_transaction(order, transaction_id)
@@ -1329,21 +1399,47 @@ class OrderPaymentService(BaseService):
                     "WXPAY_CALLBACK_DUPLICATE",
                     extra=duplicate_log_extra,
                 )
-                return {"code": "SUCCESS", "message": "ok"}
+                return WxPayCallbackOutcome.success()
 
             if order.status == "pending_payment" and order.payment_mode == "prepay":
                 await self._on_payment_success(order, payment_method="wxpay")
                 await self.db.commit()
                 await self._run_post_commit_payment_effects(order)
                 logger.info(f"微信支付回调成功: order_id={out_trade_no}")
-                return {"code": "SUCCESS", "message": "ok"}
+                return WxPayCallbackOutcome.success()
 
             raise PaymentFactError("order cannot accept online payment")
 
+        except PaymentTransactionConflict as exc:
+            await self.db.rollback()
+            logger.warning(
+                "WXPAY_CALLBACK_TRANSACTION_CONFLICT",
+                extra={
+                    "event": "WXPAY_CALLBACK_TRANSACTION_CONFLICT",
+                    "tenant_id": str(tenant_id or ""),
+                    "reason": str(exc),
+                },
+            )
+            return WxPayCallbackOutcome.failure(409, "payment transaction conflict")
+        except PaymentFactError as exc:
+            await self.db.rollback()
+            logger.warning(
+                "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                extra={
+                    "event": "WXPAY_CALLBACK_PAYMENT_FACT_REJECTED",
+                    "tenant_id": str(tenant_id or ""),
+                    "reason": str(exc),
+                },
+            )
+            return WxPayCallbackOutcome.failure(422, "invalid payment fact")
         except Exception as e:
             await self.db.rollback()
             logger.exception(
                 "WXPAY_CALLBACK_FAILED",
-                extra={"event": "WXPAY_CALLBACK_FAILED", "error_type": type(e).__name__},
+                extra={
+                    "event": "WXPAY_CALLBACK_FAILED",
+                    "tenant_id": str(tenant_id or ""),
+                    "error_type": type(e).__name__,
+                },
             )
-            return {"code": "FAIL", "message": "error"}
+            return WxPayCallbackOutcome.failure(500, "callback processing failed")

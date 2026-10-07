@@ -88,7 +88,6 @@ WHITELIST = {
     "/api/v1/entrance-codes/resolve",
     "/api/v1/miniapp/entry/join",
     "/api/v1/open/pos/verify",
-    "/api/v1/orders/wxpay-notify",
     "/api/v1/billing/wxpay-notify",
     "/api/v1/dining-sessions/resolve",
     "/api/v1/demo/sessions/start",
@@ -122,9 +121,20 @@ CHANNEL_PATH_PREFIX = "/api/v1/channel"
 MERCHANT_PATH_PREFIX = "/api/v1"
 
 
+def _is_order_wxpay_notify_path(path: str) -> bool:
+    prefix = "/api/v1/orders/wxpay-notify/"
+    if not str(path or "").startswith(prefix):
+        return False
+    tenant_id = str(path)[len(prefix) :]
+    return bool(tenant_id) and "/" not in tenant_id
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
+            return await call_next(request)
+
+        if request.method == "POST" and _is_order_wxpay_notify_path(request.url.path):
             return await call_next(request)
 
         if request.url.path in WHITELIST or request.url.path.startswith("/static/"):

@@ -191,7 +191,14 @@ class OpsAlertContractTest(unittest.TestCase):
         self.assertTrue(ops_alert.is_core_exception_path("GET", "/api/v1/shop/info"))
         self.assertTrue(ops_alert.is_core_exception_path("POST", "/api/v1/orders"))
         self.assertTrue(ops_alert.is_core_exception_path("POST", "/api/v1/orders/99/pay"))
-        self.assertTrue(ops_alert.is_core_exception_path("POST", "/api/v1/orders/wxpay-notify"))
+        self.assertTrue(
+            ops_alert.is_core_exception_path(
+                "POST", "/api/v1/orders/wxpay-notify/tenant-a"
+            )
+        )
+        self.assertFalse(
+            ops_alert.is_core_exception_path("POST", "/api/v1/orders/wxpay-notify")
+        )
         self.assertFalse(ops_alert.is_core_exception_path("GET", "/api/v1/orders/workbench"))
         self.assertFalse(ops_alert.is_core_exception_path("POST", "/api/v1/orders/99/cancel"))
         self.assertFalse(ops_alert.is_core_exception_path("POST", "/api/v1/orders/99/reprint"))

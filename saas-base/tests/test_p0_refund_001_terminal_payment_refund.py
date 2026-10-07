@@ -30,9 +30,9 @@ def make_notify_request() -> Request:
         {
             "type": "http",
             "method": "POST",
-            "path": "/api/v1/orders/wxpay-notify",
+            "path": f"/api/v1/orders/wxpay-notify/{TENANT_ID}",
             "headers": [],
-            "query_string": f"tenant_id={TENANT_ID}".encode(),
+            "query_string": b"",
             "server": ("testserver", 80),
             "scheme": "http",
             "client": ("testclient", 50000),
@@ -105,14 +105,14 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
 
     async def _notify(self, order: Order, fake_wxpay):
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay):
-            return await wxpay_notify(make_notify_request(), self.db)
+            return await wxpay_notify(TENANT_ID, make_notify_request(), self.db)
 
     async def test_case_a_cancelled_success_pays_then_refunds_once(self):
         order = await self._make_order(status="cancelled")
         fake = self._wxpay(order)
         response = await self._notify(order, fake)
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(order)
         self.assertEqual(order.status, "cancelled")
         self.assertEqual(order.payment_status, "paid")
@@ -129,7 +129,7 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
         fake = self._wxpay(order)
         response = await self._notify(order, fake)
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(order)
         self.assertEqual(order.status, "rejected")
         self.assertEqual(order.payment_status, "paid")
@@ -142,8 +142,8 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
         first = await self._notify(order, fake)
         second = await self._notify(order, fake)
 
-        self.assertEqual(first["code"], "SUCCESS")
-        self.assertEqual(second["code"], "SUCCESS")
+        self.assertEqual(first.status_code, 204)
+        self.assertEqual(second.status_code, 204)
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.refund_status, "success")
@@ -154,7 +154,7 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
         fake = self._wxpay(order, refund_error=RuntimeError("wxpay gateway timeout"))
         response = await self._notify(order, fake)
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "paid")
         self.assertEqual(order.status, "cancelled")
@@ -179,9 +179,9 @@ class P0Refund001TerminalPaymentRefundTest(unittest.IsolatedAsyncioTestCase):
         ) as effects, patch.object(
             OrderPaymentService, "_refund_orphaned_wxpay_payment", new=AsyncMock()
         ) as refund:
-            response = await wxpay_notify(make_notify_request(), self.db)
+            response = await wxpay_notify(TENANT_ID, make_notify_request(), self.db)
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         on_success.assert_awaited_once()
         effects.assert_awaited_once()
         refund.assert_not_called()

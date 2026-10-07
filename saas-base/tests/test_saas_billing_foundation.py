@@ -303,7 +303,8 @@ class SaasBillingFoundationTest(unittest.IsolatedAsyncioTestCase):
         order_payment_source = (root / "app" / "services" / "order_payment_service.py").read_text(encoding="utf-8-sig")
         order_api_source = (root / "app" / "api" / "v1" / "orders.py").read_text(encoding="utf-8-sig")
         self.assertIn('out_trade_no=str(order.id)', order_payment_source)
-        self.assertIn('@router.post("/orders/wxpay-notify")', order_api_source)
+        self.assertIn('@router.post("/orders/wxpay-notify/{tenant_id}")', order_api_source)
+        self.assertNotIn('@router.post("/orders/wxpay-notify")', order_api_source)
 
 
 if __name__ == "__main__":

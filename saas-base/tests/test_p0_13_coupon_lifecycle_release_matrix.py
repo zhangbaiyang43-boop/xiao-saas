@@ -54,8 +54,9 @@ def make_notify_request() -> Request:
 
     request = Request(
         {
-            "type": "http", "method": "POST", "path": "/api/v1/orders/wxpay-notify",
-            "headers": [], "query_string": f"tenant_id={TENANT}".encode(),
+            "type": "http", "method": "POST",
+            "path": f"/api/v1/orders/wxpay-notify/{TENANT}",
+            "headers": [], "query_string": b"",
             "server": ("testserver", 80), "scheme": "http",
             "client": ("testclient", 50000),
         }
@@ -202,8 +203,8 @@ class CouponLifecycleReleaseMatrixTest(unittest.IsolatedAsyncioTestCase):
             patch("app.services.order_payment_service._print_paid_order_ticket", new_callable=AsyncMock),
             patch("app.services.coupon_service.settings.REDIS_ENABLED", False),
         ):
-            response = await wxpay_notify(make_notify_request(), db=self.db)
-        self.assertEqual(response.get("code"), "SUCCESS")
+            response = await wxpay_notify(TENANT, make_notify_request(), db=self.db)
+        self.assertEqual(response.status_code, 204)
         await self.db.refresh(order)
         await self.db.refresh(coupon)
         self.assertEqual(order.payment_status, "paid")
@@ -223,8 +224,8 @@ class CouponLifecycleReleaseMatrixTest(unittest.IsolatedAsyncioTestCase):
             patch("app.services.coupon_service.settings.REDIS_ENABLED", False),
         ):
             for _ in range(3):
-                response = await wxpay_notify(make_notify_request(), db=self.db)
-                self.assertEqual(response.get("code"), "SUCCESS")
+                response = await wxpay_notify(TENANT, make_notify_request(), db=self.db)
+                self.assertEqual(response.status_code, 204)
 
         await self.db.refresh(order)
         await self.db.refresh(coupon)

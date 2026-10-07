@@ -158,7 +158,6 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         }
         request = AsyncMock()
         request.headers = {}
-        request.query_params = {"tenant_id": TENANT_ID}
         request.body = AsyncMock(return_value=b"{}")
         fake_wxpay = AsyncMock()
         fake_wxpay.enabled = True
@@ -169,9 +168,9 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), patch.object(
             OrderPaymentService, "_on_payment_success", new=AsyncMock()
         ) as fulfill:
-            response = await OrderPaymentService(self.db).wxpay_notify(request)
+            response = await OrderPaymentService(self.db).wxpay_notify(TENANT_ID, request)
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         fake_wxpay.refund.assert_awaited_once()
         fulfill.assert_not_called()
         await self.db.refresh(order)
@@ -232,7 +231,6 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
         def request():
             value = AsyncMock()
             value.headers = {}
-            value.query_params = {"tenant_id": TENANT_ID}
             value.body = AsyncMock(return_value=b"{}")
             return value
 
@@ -252,8 +250,8 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
                     "amount": {"total": 2800, "payer_total": 2800, "currency": "CNY"},
                 }
                 for _ in range(3):
-                    response = await service.wxpay_notify(request())
-                    self.assertEqual(response["code"], "SUCCESS")
+                    response = await service.wxpay_notify(TENANT_ID, request())
+                    self.assertEqual(response.status_code, 204)
                 await self.db.refresh(order)
                 self.assertEqual((order.status, order.payment_status), ("cancelled", "paid"))
                 self.assertEqual(order.wx_transaction_id, current_resource["transaction_id"])
@@ -267,7 +265,10 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
                 "amount": {"total": 2800, "payer_total": 2800, "currency": "CNY"},
             }
             self.assertTrue(await service._recover_wxpay_order_if_paid(query_first))
-            self.assertEqual((await service.wxpay_notify(request()))["code"], "SUCCESS")
+            self.assertEqual(
+                (await service.wxpay_notify(TENANT_ID, request())).status_code,
+                204,
+            )
 
             callback_first = await self.make_order(status="rejected")
             current_resource = {
@@ -276,7 +277,10 @@ class P009MoneySafetyContractTest(unittest.IsolatedAsyncioTestCase):
                 "transaction_id": f"wx-p009-cq-{callback_first.id}",
                 "amount": {"total": 2800, "payer_total": 2800, "currency": "CNY"},
             }
-            self.assertEqual((await service.wxpay_notify(request()))["code"], "SUCCESS")
+            self.assertEqual(
+                (await service.wxpay_notify(TENANT_ID, request())).status_code,
+                204,
+            )
             self.assertTrue(await service._recover_wxpay_order_if_paid(callback_first))
 
         self.assertEqual(fake_wxpay.refund.await_count, 7)

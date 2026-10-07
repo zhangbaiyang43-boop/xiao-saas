@@ -1443,10 +1443,22 @@ async def create_wxpay_order(
     return await OrderPaymentService(db).create_wxpay_order(order_id, body, request)
 
 
-@router.post("/orders/wxpay-notify")
-async def wxpay_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """Handle WeChat Pay notify for direct merchant mode."""
-    return await OrderPaymentService(db).wxpay_notify(request)
+@router.post("/orders/wxpay-notify/{tenant_id}")
+async def wxpay_notify(
+    tenant_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Route a WeChat Pay callback to exactly one merchant credential set."""
+    from fastapi.responses import JSONResponse
+
+    outcome = await OrderPaymentService(db).wxpay_notify(tenant_id, request)
+    if outcome.status_code == 204:
+        return Response(status_code=204)
+    return JSONResponse(
+        status_code=outcome.status_code,
+        content={"code": outcome.code, "message": outcome.message},
+    )
 
 
 class OrderStatusUpdate(PydanticBase):
