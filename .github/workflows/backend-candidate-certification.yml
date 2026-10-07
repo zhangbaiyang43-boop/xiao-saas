@@ -8,17 +8,22 @@ name: Backend Candidate Certification
 # (Gate B), in parallel with a full serial run, so a candidate can be
 # certified without waiting on Full's ~60-70min authority every time.
 #
-# Same TEST-INFRA-01 identity model: the workflow DEFINITION is dispatched
-# from whatever ref you pick (normally main -- that's WORKFLOW_REF/
-# WORKFLOW_SHA), but the CODE under test is target_ref, checked out
-# explicitly in every job. TARGET_HEAD_SHA is the certification authority,
-# never GITHUB_SHA.
+# Same TEST-INFRA-01 identity model: workflow_dispatch tests target_ref, while
+# pull_request tests GitHub's proposed merge ref against the current main.
+# Every job records the checked-out SHA; PR head/base identity is recorded
+# separately so a merge-ref result can never be mistaken for the feature SHA.
 #
 # CI infrastructure (this file, the Gate B manifest, the path-validation
 # helper) always comes from whatever ref dispatched the workflow -- a P0
 # candidate branch never needs to carry any of it. See the "infra checkout"
 # steps in gate-a/gate-b below.
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'saas-base/**'
+      - '.github/workflows/backend-candidate-certification.yml'
   workflow_dispatch:
     inputs:
       target_ref:
@@ -26,8 +31,11 @@ on:
         required: true
         default: 'main'
 
+permissions:
+  contents: read
+
 concurrency:
-  group: backend-candidate-${{ inputs.target_ref }}
+  group: backend-candidate-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || inputs.target_ref }}
   cancel-in-progress: true
 
 defaults:
@@ -35,6 +43,10 @@ defaults:
     shell: bash
 
 env:
+  CERT_EVENT: ${{ github.event_name }}
+  TARGET_REF: ${{ github.event_name == 'pull_request' && github.ref || inputs.target_ref }}
+  PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+  PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
   REDIS_ENABLED: 'false'
   # CI-only dummy signing key, unrelated to any real secret -- see
   # backend-full.yml's identical comment for why this is required at all
@@ -47,11 +59,13 @@ jobs:
     name: Gate A (candidate's own new/changed backend tests)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
     steps:
       - name: Checkout target ref (candidate under test)
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ env.TARGET_REF }}
           path: target
           fetch-depth: 2 # need HEAD^ for the Gate A diff base
 
@@ -61,15 +75,20 @@ jobs:
           path: infra
 
       - name: Identity proof
-        env:
-          TARGET_REF: ${{ inputs.target_ref }}
+        id: identity
         working-directory: target/saas-base
         run: |
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "CERT_EVENT=${CERT_EVENT}"
           echo "WORKFLOW_REF=${GITHUB_REF}"
           echo "WORKFLOW_SHA=${GITHUB_SHA}"
           echo "TARGET_REF=${TARGET_REF}"
-          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
+          echo "PR_BASE_SHA=${PR_BASE_SHA}"
+          echo "CHECKED_OUT_SHA=${CHECKED_OUT_SHA}"
+          echo "TARGET_HEAD_SHA=${CHECKED_OUT_SHA}"
           echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
           echo "--- git status --porcelain (must be empty) ---"
           git status --porcelain
           if [ -n "$(git status --porcelain)" ]; then
@@ -118,12 +137,11 @@ jobs:
         working-directory: target/saas-base
         run: |
           set -o pipefail
-          # Gate A assumes the current P0 candidate contract: exactly one
-          # final commit on top of the previously certified base, so HEAD^ is
-          # always the right diff base (see identity-proof step's root-commit
-          # guard above). If this project ever moves to a multi-commit
-          # candidate model, this diff base needs to become an explicit
-          # base_ref/merge-base input instead -- not assumed here.
+          # workflow_dispatch preserves the existing one-final-commit
+          # candidate contract, where HEAD^ is the previously certified base.
+          # For pull_request, HEAD is GitHub's proposed merge commit and HEAD^
+          # is its first parent (the current base), so this same diff covers
+          # the complete feature PR without changing Gate A's test selection.
           #
           # The pathspec below is relative to cwd (target/saas-base), which is
           # correct as-is. But git diff --name-only always PRINTS paths
@@ -168,11 +186,13 @@ jobs:
     name: Gate B (cumulative P0 contracts + static core regression)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
     steps:
       - name: Checkout target ref (candidate under test)
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ env.TARGET_REF }}
           path: target
 
       - name: Checkout CI infra ref (manifest + helper script)
@@ -181,15 +201,20 @@ jobs:
           path: infra
 
       - name: Identity proof
-        env:
-          TARGET_REF: ${{ inputs.target_ref }}
+        id: identity
         working-directory: target/saas-base
         run: |
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "CERT_EVENT=${CERT_EVENT}"
           echo "WORKFLOW_REF=${GITHUB_REF}"
           echo "WORKFLOW_SHA=${GITHUB_SHA}"
           echo "TARGET_REF=${TARGET_REF}"
-          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
+          echo "PR_BASE_SHA=${PR_BASE_SHA}"
+          echo "CHECKED_OUT_SHA=${CHECKED_OUT_SHA}"
+          echo "TARGET_HEAD_SHA=${CHECKED_OUT_SHA}"
           echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
           echo "--- git status --porcelain (must be empty) ---"
           git status --porcelain
           if [ -n "$(git status --porcelain)" ]; then
@@ -267,22 +292,29 @@ jobs:
     name: Backend Full (serial, authoritative -- same semantics as backend-full.yml)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    outputs:
+      checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
     steps:
       - name: Checkout target ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target_ref }}
+          ref: ${{ env.TARGET_REF }}
 
       - name: Identity proof
-        env:
-          TARGET_REF: ${{ inputs.target_ref }}
+        id: identity
         working-directory: saas-base
         run: |
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "CERT_EVENT=${CERT_EVENT}"
           echo "WORKFLOW_REF=${GITHUB_REF}"
           echo "WORKFLOW_SHA=${GITHUB_SHA}"
           echo "TARGET_REF=${TARGET_REF}"
-          echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
+          echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
+          echo "PR_BASE_SHA=${PR_BASE_SHA}"
+          echo "CHECKED_OUT_SHA=${CHECKED_OUT_SHA}"
+          echo "TARGET_HEAD_SHA=${CHECKED_OUT_SHA}"
           echo "TARGET_TREE_SHA=$(git rev-parse HEAD^{tree})"
+          echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
           echo "--- git status --porcelain (must be empty) ---"
           git status --porcelain
           if [ -n "$(git status --porcelain)" ]; then
@@ -335,15 +367,30 @@ jobs:
     steps:
       - name: Report candidate certification status
         env:
-          TARGET_REF: ${{ inputs.target_ref }}
           GATE_A_RESULT: ${{ needs.gate-a.result }}
           GATE_B_RESULT: ${{ needs.gate-b.result }}
           FULL_RESULT: ${{ needs.full.result }}
+          GATE_A_CHECKED_OUT_SHA: ${{ needs.gate-a.outputs.checked_out_sha }}
+          GATE_B_CHECKED_OUT_SHA: ${{ needs.gate-b.outputs.checked_out_sha }}
+          FULL_CHECKED_OUT_SHA: ${{ needs.full.outputs.checked_out_sha }}
         run: |
+          echo "CERT_EVENT=${CERT_EVENT}"
           echo "TARGET_REF=${TARGET_REF}"
+          echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
+          echo "PR_BASE_SHA=${PR_BASE_SHA}"
+          echo "CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}"
+          echo "GATE_A_CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}"
+          echo "GATE_B_CHECKED_OUT_SHA=${GATE_B_CHECKED_OUT_SHA}"
+          echo "FULL_CHECKED_OUT_SHA=${FULL_CHECKED_OUT_SHA}"
           echo "GATE_A=${GATE_A_RESULT}"
           echo "GATE_B=${GATE_B_RESULT}"
           echo "FULL=${FULL_RESULT}"
+          if [ -z "$GATE_A_CHECKED_OUT_SHA" ] || \
+             [ "$GATE_A_CHECKED_OUT_SHA" != "$GATE_B_CHECKED_OUT_SHA" ] || \
+             [ "$GATE_A_CHECKED_OUT_SHA" != "$FULL_CHECKED_OUT_SHA" ]; then
+            echo "CERTIFICATION_CHECKOUT_SHA_MISMATCH"
+            exit 1
+          fi
           if [ "$GATE_A_RESULT" = "success" ] && [ "$GATE_B_RESULT" = "success" ] && [ "$FULL_RESULT" = "success" ]; then
             echo "CANDIDATE_CERTIFIED=YES"
           else
