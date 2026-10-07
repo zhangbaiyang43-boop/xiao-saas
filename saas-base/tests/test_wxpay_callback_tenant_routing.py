@@ -161,8 +161,8 @@ class WxpayCallbackRouteContractTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_dynamic_route_replaces_legacy_route(self):
         route_paths = {getattr(route, "path", "") for route in router.routes}
-        self.assertIn("/orders/wxpay-notify/{tenant_id}", route_paths)
-        self.assertNotIn("/orders/wxpay-notify", route_paths)
+        self.assertIn("/api/v1/orders/wxpay-notify/{tenant_id}", route_paths)
+        self.assertNotIn("/api/v1/orders/wxpay-notify", route_paths)
 
     async def test_notify_url_strips_trailing_slash_and_path_encodes_tenant(self):
         with patch(
