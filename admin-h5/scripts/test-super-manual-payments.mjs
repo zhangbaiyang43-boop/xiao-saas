@@ -17,9 +17,9 @@ const api = readFileSync(new URL('../src/api/superBilling.js', import.meta.url),
 
 // ---- SuperAdmin.vue wiring: new tab, new panel, existing auth pattern ----
 assert.match(superAdmin, /ManualPaymentPanel/)
-assert.match(superAdmin, /activeTab === 'billing'/)
+assert.match(superAdmin, /currentPage === 'billing'/)
 assert.match(superAdmin, /待确认付款/)
-assert.match(superAdmin, /const activeTab = ref\('merchants'\)/)
+assert.match(superAdmin, /SuperBillingPending: 'billing'/)
 assert.match(superAdmin, /let superToken = ''/)
 assert.doesNotMatch(superAdmin, /localStorage\.setItem\(['"]superToken/)
 

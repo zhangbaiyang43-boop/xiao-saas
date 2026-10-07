@@ -2,15 +2,17 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const superAdmin = readFileSync(new URL('../src/views/SuperAdmin.vue', import.meta.url), 'utf8')
+const superShell = readFileSync(new URL('../src/views/super/SuperAdminShell.vue', import.meta.url), 'utf8')
 const panel = readFileSync(new URL('../src/views/super/ChannelPartnerPanel.vue', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../src/api/superChannel.js', import.meta.url), 'utf8')
 
 assert.match(superAdmin, /ChannelPartnerPanel/)
-assert.match(superAdmin, /activeTab === 'merchants'/)
-assert.match(superAdmin, /activeTab === 'channel'/)
-assert.match(superAdmin, /商家管理/)
-assert.match(superAdmin, /渠道管理/)
-assert.match(superAdmin, /const activeTab = ref\('merchants'\)/)
+assert.match(superAdmin, /currentPage === 'merchant-list'/)
+assert.match(superAdmin, /currentPage === 'channels'/)
+assert.match(superAdmin, /SuperMerchantList: 'merchant-list'/)
+assert.match(superAdmin, /SuperChannels: 'channels'/)
+assert.match(superShell, /label: '商户列表'/)
+assert.match(superShell, /label: '渠道伙伴'/)
 assert.match(superAdmin, /let superToken = ''/)
 assert.doesNotMatch(superAdmin, /localStorage\.setItem\(['"]superToken/)
 assert.match(superAdmin, /superRequest\.post\(`\$\{BASE\}\/merchants`/)
