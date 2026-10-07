@@ -74,6 +74,7 @@
           <input v-model="newMerchant.name" class="form-input" placeholder="* 店铺名称" />
           <input v-model="newMerchant.phone" class="form-input" placeholder="* 手机号（登录账号）" maxlength="11" />
           <input v-model="newMerchant.initial_code" class="form-input" placeholder="初始验证码（默认 123456）" />
+          <div class="create-default-note"><strong>默认接单方式：自动接单</strong><span>开通后无需人工确认新订单，可随时在 Merchant 360 经营设置中调整。</span></div>
           <button class="create-btn tap-shrink" :disabled="creating" @click="createMerchant">{{ creating ? '创建中...' : '+ 立即开通' }}</button>
         </div>
         <div v-if="createResult" class="create-result" :class="createResult.ok ? 'ok' : 'err'">{{ createResult.msg }}</div>
@@ -99,24 +100,40 @@
         <div v-else-if="filteredMerchants.length === 0" class="empty">没有匹配的商家</div>
         <div v-else class="merchant-list">
           <div v-for="m in filteredMerchants" :key="m.tenant_id" class="merchant-card">
-            <div class="mc-left">
-              <div class="mc-name">{{ m.name }}</div>
-              <div class="mc-meta">
-                <span class="phone-reveal tap-shrink" @click="togglePhone(m.tenant_id)">{{ revealedPhones.has(m.tenant_id) ? m.phone : maskPhone(m.phone) }}</span>
-                · 注册 {{ m.created_at }}
+            <div class="merchant-card-summary">
+              <div class="mc-left">
+                <div class="mc-name">{{ m.name }}</div>
+                <div class="mc-meta">
+                  <span class="phone-reveal tap-shrink" @click="togglePhone(m.tenant_id)">{{ revealedPhones.has(m.tenant_id) ? m.phone : maskPhone(m.phone) }}</span>
+                  · 注册 {{ m.created_at }}
+                </div>
+                <div class="mc-meta">今日订单 <b>{{ m.today_orders }}</b> 单</div>
+                <div class="mc-pay-row">
+                  <span class="mc-pay-badge" :class="statusClass(m.payment_status)">{{ statusText(m.payment_status) }} {{ m.wx_mchid_masked || '' }}</span>
+                  <button class="pay-cfg-btn tap-shrink" @click="openPayConfig(m)">收款配置</button>
+                  <button class="pay-cfg-btn tap-shrink" :disabled="seedingId === m.tenant_id" @click="seedTestData(m)">{{ seedingId === m.tenant_id ? '填充中...' : '填充测试数据' }}</button>
+                </div>
+                <div v-if="seedResult && seedResult.tenant_id === m.tenant_id" class="create-result" :class="seedResult.ok ? 'ok' : 'err'">{{ seedResult.msg }}</div>
               </div>
-              <div class="mc-meta">今日订单 <b>{{ m.today_orders }}</b> 单</div>
-              <div class="mc-pay-row">
-                <span class="mc-pay-badge" :class="statusClass(m.payment_status)">{{ statusText(m.payment_status) }} {{ m.wx_mchid_masked || '' }}</span>
-                <button class="pay-cfg-btn tap-shrink" @click="openPayConfig(m)">收款配置</button>
-                <button class="pay-cfg-btn tap-shrink" :disabled="seedingId === m.tenant_id" @click="seedTestData(m)">{{ seedingId === m.tenant_id ? '填充中...' : '填充测试数据' }}</button>
+              <div class="mc-right">
+                <span class="mc-badge" :class="m.status ? 'on' : 'off'">{{ m.status ? '营业中' : '已停用' }}</span>
+                <button class="toggle-btn tap-shrink" :class="m.status ? 'stop' : 'resume'" @click="toggleStatus(m)">{{ m.status ? '停用' : '恢复' }}</button>
               </div>
-              <div v-if="seedResult && seedResult.tenant_id === m.tenant_id" class="create-result" :class="seedResult.ok ? 'ok' : 'err'">{{ seedResult.msg }}</div>
             </div>
-            <div class="mc-right">
-              <span class="mc-badge" :class="m.status ? 'on' : 'off'">{{ m.status ? '营业中' : '已停用' }}</span>
-              <button class="toggle-btn tap-shrink" :class="m.status ? 'stop' : 'resume'" @click="toggleStatus(m)">{{ m.status ? '停用' : '恢复' }}</button>
-            </div>
+            <button class="merchant-360-toggle tap-shrink" type="button" @click="toggleFulfilmentSettings(m.tenant_id)">
+              <span>Merchant 360 · 经营设置</span>
+              <strong>接单方式：{{ fulfilmentModeLabel(m.fulfilment_mode) }}</strong>
+              <span>{{ fulfilmentOpenId === m.tenant_id ? '收起' : '调整' }}</span>
+            </button>
+            <FulfilmentModeControl
+              v-if="fulfilmentOpenId === m.tenant_id"
+              :super-token="superToken"
+              :tenant-id="m.tenant_id"
+              :merchant-name="m.name"
+              :mode="m.fulfilment_mode"
+              @updated="applyFulfilmentModeUpdate(m, $event)"
+              @auth-expired="logout"
+            />
           </div>
         </div>
       </div>
@@ -209,6 +226,7 @@
 import { computed, reactive, ref } from 'vue'
 import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
+import FulfilmentModeControl from './super/FulfilmentModeControl.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 
 const BASE = '/super'
@@ -259,6 +277,7 @@ const pausingPay = ref(false)
 const payConfigResult = ref(null)
 const seedingId = ref('')
 const seedResult = ref(null)
+const fulfilmentOpenId = ref('')
 const perfStats = ref([])
 const perfStatsLoading = ref(false)
 const perfStatsError = ref(false)
@@ -271,6 +290,11 @@ const copySources = computed(() => merchants.value.filter(m =>
 ))
 
 function superHeaders() { return { 'X-Super-Token': superToken } }
+function fulfilmentModeLabel(mode) { return mode === 'PRINT_FIRST' ? '自动接单' : '手动接单' }
+function toggleFulfilmentSettings(tenantId) { fulfilmentOpenId.value = fulfilmentOpenId.value === tenantId ? '' : tenantId }
+function applyFulfilmentModeUpdate(merchant, payload) {
+  merchant.fulfilment_mode = payload?.fulfilment_mode || merchant.fulfilment_mode
+}
 function statusText(status) { return { unconfigured: '未配置', pending: '待验证', verified: '已验证', paused: '暂停' }[status] || '未配置' }
 function statusClass(status) { return { unconfigured: 'pay-off', pending: 'pay-pending', verified: 'pay-on', paused: 'pay-paused' }[status] || 'pay-off' }
 function receiverTypeText(type) { return type === 'individual' ? '个体' : '企业' }
@@ -600,6 +624,8 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .section-title { font-size: 15px; font-weight: 800; margin-bottom: 12px; color: var(--text-1); }
 .title-row { display: flex; align-items: center; justify-content: space-between; }
 .create-form { display: grid; gap: 8px; }
+.create-default-note { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid #a7f3d0; border-radius: 8px; background: #ecfdf5; color: #047857; font-size: 12px; line-height: 1.5; }
+.create-default-note span { color: #475569; }
 .create-result { margin-top: 10px; padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; }
 .create-result.ok { background: var(--brand-light); color: var(--success); } .create-result.err { background: #fef2f2; color: var(--danger); }
 .search-input { margin-bottom: 10px; }
@@ -612,7 +638,8 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .perf-table th.num, .perf-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .perf-table th { color: var(--text-3); font-weight: 700; font-size: 12px; }
 .merchant-list { display: grid; gap: 10px; }
-.merchant-card { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 12px; background: var(--bg-page); border-radius: 10px; }
+.merchant-card { display: grid; padding: 12px; background: var(--bg-page); border-radius: 10px; }
+.merchant-card-summary { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .mc-left { min-width: 0; }
 .mc-name { font-size: 15px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
 .mc-meta { font-size: 12px; color: var(--text-2); margin-top: 3px; }
@@ -626,6 +653,9 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .toggle-btn.stop { background: #fef2f2; color: var(--danger); } .toggle-btn.resume { background: var(--brand-light); color: var(--success); }
 .mc-pay-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .pay-cfg-btn { font-size: 11px; padding: 3px 10px; }
+.merchant-360-toggle { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; width: 100%; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text-2); text-align: left; cursor: pointer; }
+.merchant-360-toggle strong { color: var(--text-1); font-size: 12px; }
+.merchant-360-toggle span:last-child { color: var(--brand); font-size: 12px; font-weight: 800; }
 .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 999; padding: 18px; }
 .modal-box { width: min(520px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; background: var(--bg-card); border-radius: 16px; padding: 18px; }
 .modal-title { font-size: 17px; font-weight: 900; margin-bottom: 12px; color: var(--text-1); }
@@ -660,7 +690,9 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .danger-zone-label { font-size: 11px; font-weight: 800; letter-spacing: .04em; color: #dc2626; margin-bottom: 8px; }
 @media (max-width: 420px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
-  .merchant-card { align-items: flex-start; }
+  .merchant-card-summary { align-items: flex-start; }
+  .merchant-360-toggle { grid-template-columns: 1fr auto; }
+  .merchant-360-toggle strong { grid-column: 1 / -1; grid-row: 2; }
   .receiver-grid { grid-template-columns: 1fr; }
 }
 </style>
