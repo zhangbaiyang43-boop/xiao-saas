@@ -88,7 +88,8 @@ class SuperAdminCorsTest(unittest.TestCase):
         res_no_token = self.client.get(
             "/api/super/billing/manual-payments", headers={"Origin": ALLOWED_DEV_ORIGIN}
         )
-        self.assertEqual(res_no_token.status_code, 422)
+        self.assertEqual(res_no_token.status_code, 401)
+        self.assertEqual(res_no_token.json()["data"]["error_code"], "UNAUTHORIZED")
 
 
 if __name__ == "__main__":

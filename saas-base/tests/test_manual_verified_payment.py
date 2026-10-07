@@ -532,10 +532,10 @@ class ManualVerifiedPaymentRouteAuthTest(unittest.IsolatedAsyncioTestCase):
             "/api/super/billing/manual-payments/1/confirm",
             json={}, headers=self._merchant_headers("owner"),
         )
-        # No X-Super-Token header at all (Authorization: Bearer is a
-        # different header) -- _verify_super_token's own Header(...) dependency
-        # rejects the request before the route body ever runs.
-        self.assertEqual(resp.status_code, 422)  # FastAPI: required header missing
+        # Authorization: Bearer is a different header. The shared Super auth
+        # dependency owns the missing-header classification and returns 401.
+        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.json()["data"]["error_code"], "UNAUTHORIZED")
 
     async def test_case_5_owner_jwt_used_as_super_token_is_rejected(self):
         owner_token = create_access_token(TENANT_A)
@@ -543,9 +543,9 @@ class ManualVerifiedPaymentRouteAuthTest(unittest.IsolatedAsyncioTestCase):
             "/api/super/billing/manual-payments/1/confirm",
             json={}, headers={"X-Super-Token": owner_token},
         )
-        # _verify_super_token decodes the token and requires type=="super_admin";
-        # a merchant-type token fails that check and is rejected with 401.
-        self.assertEqual(resp.status_code, 401)
+        # The credential is valid, but it does not carry Super privileges.
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["data"]["error_code"], "FORBIDDEN")
 
     # ---- Case 6: staff attempts the SuperAdmin confirm endpoint -----------
 
@@ -555,7 +555,8 @@ class ManualVerifiedPaymentRouteAuthTest(unittest.IsolatedAsyncioTestCase):
             "/api/super/billing/manual-payments/1/confirm",
             json={}, headers={"X-Super-Token": staff_token},
         )
-        self.assertEqual(resp.status_code, 401)
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["data"]["error_code"], "FORBIDDEN")
 
     async def test_case_6_staff_cannot_reach_merchant_manual_claim_either(self):
         # Defense-in-depth: the middleware's staff default-deny already

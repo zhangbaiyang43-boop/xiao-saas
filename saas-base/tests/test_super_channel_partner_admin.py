@@ -114,9 +114,12 @@ class SuperChannelPartnerAdminTest(unittest.IsolatedAsyncioTestCase):
         merchant = await self.client.get("/api/super/channel/partners", headers={"X-Super-Token": merchant_token})
         channel = await self.client.get("/api/super/channel/partners", headers={"X-Super-Token": channel_token})
 
-        self.assertNotEqual(no_token.status_code, 200)
-        self.assertEqual(merchant.status_code, 401)
-        self.assertEqual(channel.status_code, 401)
+        self.assertEqual(no_token.status_code, 401)
+        self.assertEqual(no_token.json()["data"]["error_code"], "UNAUTHORIZED")
+        self.assertEqual(merchant.status_code, 403)
+        self.assertEqual(merchant.json()["data"]["error_code"], "FORBIDDEN")
+        self.assertEqual(channel.status_code, 403)
+        self.assertEqual(channel.json()["data"]["error_code"], "FORBIDDEN")
 
 
 if __name__ == "__main__":

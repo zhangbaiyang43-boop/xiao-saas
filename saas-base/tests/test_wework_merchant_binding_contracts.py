@@ -8,6 +8,7 @@ from fastapi import HTTPException
 import jwt
 
 from app.config import settings
+from app.api.v1.super_subscription_adjustments import SubscriptionAdjustmentAuthorizationError
 from app.api.v1 import wework
 from app.api.v1.super_admin import _verify_super_token
 from app.middleware.auth_middleware import WHITELIST, WHITELIST_PREFIXES
@@ -174,13 +175,15 @@ class WeworkMerchantBindingContractsTest(unittest.TestCase):
             wework._require_wework_super_token(None)
         self.assertEqual(missing_header.exception.status_code, 401)
 
-        with self.assertRaises(HTTPException) as merchant_token:
+        with self.assertRaises(SubscriptionAdjustmentAuthorizationError) as merchant_token:
             wework._require_wework_super_token(_super_token("merchant"))
-        self.assertEqual(merchant_token.exception.status_code, 401)
+        self.assertEqual(merchant_token.exception.http_status, 403)
+        self.assertEqual(merchant_token.exception.error_code, "FORBIDDEN")
 
-        with self.assertRaises(HTTPException) as staff_token:
+        with self.assertRaises(SubscriptionAdjustmentAuthorizationError) as staff_token:
             wework._require_wework_super_token(_super_token("staff"))
-        self.assertEqual(staff_token.exception.status_code, 401)
+        self.assertEqual(staff_token.exception.http_status, 403)
+        self.assertEqual(staff_token.exception.error_code, "FORBIDDEN")
 
         self.assertEqual(wework._require_wework_super_token(_super_token("super_admin")), "contract")
 
