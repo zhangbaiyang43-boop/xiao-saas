@@ -75,7 +75,12 @@ const reason = ref('')
 const saving = ref(false)
 const errorText = ref('')
 const successText = ref('')
-const currentLabel = computed(() => props.mode === MODE_PRINT_FIRST ? '自动接单' : '手动接单')
+
+function modeLabel(mode) {
+  return mode === MODE_PRINT_FIRST ? '自动接单' : '手动接单'
+}
+
+const currentLabel = computed(() => modeLabel(props.mode))
 
 function confirmationText(nextMode) {
   if (nextMode === MODE_PRINT_FIRST) {
@@ -94,7 +99,16 @@ async function selectMode(nextMode) {
     return
   }
   const merchant = props.merchantName || '该商户'
-  if (!window.confirm(`确认修改「${merchant}」的接单方式？\n\n${confirmationText(nextMode)}\n\n本次调整只影响后续新订单，不会修改历史订单。`)) return
+  const confirmation = [
+    '确认修改接单方式？',
+    `商户：${merchant}`,
+    `当前接单方式：${currentLabel.value}`,
+    `目标接单方式：${modeLabel(nextMode)}`,
+    `调整原因：${normalizedReason}`,
+    confirmationText(nextMode),
+    '本次调整只影响后续新订单，不会修改历史订单。',
+  ].join('\n\n')
+  if (!window.confirm(confirmation)) return
 
   saving.value = true
   try {

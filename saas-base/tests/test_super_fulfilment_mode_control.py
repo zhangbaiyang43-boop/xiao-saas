@@ -1,12 +1,18 @@
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
+import httpx
+import jwt
 from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1 import super_admin
+from app.config import settings
+from app.core.database import get_db
+from app.main import app
 from app.models.base import Base
 from app.models.order import Order
 from app.models.tenant import Tenant
@@ -48,9 +54,37 @@ class SuperFulfilmentModeControlTest(unittest.IsolatedAsyncioTestCase):
         self.db = self.SessionLocal()
         self._tenant_seq = 0
 
+        async def override_get_db():
+            yield self.db
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        )
+
     async def asyncTearDown(self):
+        await self.client.aclose()
+        app.dependency_overrides.clear()
         await self.db.close()
         await self.engine.dispose()
+
+    @staticmethod
+    def _token(token_type: str, *, expires_in: timedelta = timedelta(hours=1)) -> str:
+        return jwt.encode(
+            {
+                "sub": f"{token_type}-actor",
+                "type": token_type,
+                "exp": datetime.utcnow() + expires_in,
+            },
+            settings.JWT_SECRET_KEY,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+
+    def _assert_auth_error(self, response: httpx.Response, status: int, error_code: str) -> None:
+        self.assertEqual(response.status_code, status)
+        self.assertEqual(response.json()["code"], status)
+        self.assertEqual(response.json()["data"]["error_code"], error_code)
 
     async def _create_existing_tenant(self, tenant_id: str, mode: str | None) -> Tenant:
         self._tenant_seq += 1
@@ -219,6 +253,42 @@ class SuperFulfilmentModeControlTest(unittest.IsolatedAsyncioTestCase):
 
         source = getsource(super_admin.update_merchant_fulfilment_mode)
         self.assertIn("Depends(_verify_super_token)", source)
+
+    async def test_missing_empty_invalid_and_expired_super_tokens_are_unauthorized(self):
+        cases = (
+            ("/api/super/merchants", {}),
+            ("/api/super/billing/invoices", {"X-Super-Token": ""}),
+            ("/api/super/channel/partners", {"X-Super-Token": "not-a-jwt"}),
+            (
+                "/api/super/merchants/missing-tenant",
+                {"X-Super-Token": self._token("super_admin", expires_in=timedelta(seconds=-1))},
+            ),
+        )
+        for path, headers in cases:
+            with self.subTest(path=path, headers=headers):
+                response = await self.client.get(path, headers=headers)
+                self._assert_auth_error(response, 401, "UNAUTHORIZED")
+
+    async def test_valid_merchant_and_staff_tokens_are_forbidden(self):
+        cases = (
+            ("/api/super/merchants", "tenant"),
+            ("/api/super/billing/invoices", "staff"),
+        )
+        for path, token_type in cases:
+            with self.subTest(path=path, token_type=token_type):
+                response = await self.client.get(
+                    path,
+                    headers={"X-Super-Token": self._token(token_type)},
+                )
+                self._assert_auth_error(response, 403, "FORBIDDEN")
+
+    async def test_valid_super_token_passes_shared_authentication(self):
+        response = await self.client.get(
+            "/api/super/merchants",
+            headers={"X-Super-Token": self._token("super_admin")},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 200)
 
 
 if __name__ == "__main__":

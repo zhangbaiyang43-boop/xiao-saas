@@ -112,15 +112,41 @@ def _audit(
     )
 
 
-def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token")) -> str:
+def _verify_super_token(
+    x_super_token: str | None = Header(default=None, alias="X-Super-Token"),
+) -> str:
     import jwt
+
+    # Imported lazily because the adjustment router imports this module's audit
+    # helper. Its registered handler provides the established {code,msg,data}
+    # Super auth error envelope for every route that shares this dependency.
+    from app.api.v1.super_subscription_adjustments import SubscriptionAdjustmentAuthorizationError
+
+    if not x_super_token or not x_super_token.strip():
+        raise SubscriptionAdjustmentAuthorizationError(
+            "UNAUTHORIZED",
+            "中控台鉴权失败",
+            401,
+        )
     try:
-        payload = jwt.decode(x_super_token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("type") != "super_admin":
-            raise ValueError
-        return payload.get("sub", "")
-    except Exception:
-        raise __import__("fastapi").HTTPException(status_code=401, detail="中控台鉴权失败")
+        payload = jwt.decode(
+            x_super_token.strip(),
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError as exc:
+        raise SubscriptionAdjustmentAuthorizationError(
+            "UNAUTHORIZED",
+            "中控台鉴权失败",
+            401,
+        ) from exc
+    if payload.get("type") != "super_admin":
+        raise SubscriptionAdjustmentAuthorizationError(
+            "FORBIDDEN",
+            "无权访问平台中控台",
+            403,
+        )
+    return payload.get("sub", "")
 
 
 def _mask_mchid(mchid: str | None) -> str:

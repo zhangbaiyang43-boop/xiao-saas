@@ -6,7 +6,8 @@ name: admin-h5 CI
 # an ephemeral merge commit, not the PR's real head commit -- that merge ref
 # is not what actually gets merged, so this workflow explicitly checks out
 # github.event.pull_request.head.sha and asserts the checkout landed exactly
-# there before running anything. On push, the target is simply github.sha.
+# there before running anything. A manual candidate run must supply target_ref,
+# which is checked out directly. On push, the target is simply github.sha.
 on:
   push:
     branches: [main]
@@ -18,6 +19,12 @@ on:
     paths:
       - 'admin-h5/**'
       - '.github/workflows/admin-h5-ci.yml'
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Candidate branch, tag, or commit SHA to certify'
+        required: true
+        type: string
 
 defaults:
   run:
@@ -32,11 +39,14 @@ jobs:
       - name: Checkout target commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: Identity proof
+        env:
+          TARGET_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.target_ref || github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           echo "EVENT=${{ github.event_name }}"
+          echo "TARGET_REF=$TARGET_REF"
           echo "TARGET_HEAD_SHA=$(git rev-parse HEAD)"
           echo "EXPECTED_PR_HEAD_SHA=${{ github.event.pull_request.head.sha }}"
           if [ "${{ github.event_name }}" = "pull_request" ]; then
