@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta, timezone
+from typing import Any, TypeAlias
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +29,7 @@ from app.services.merchant_provisioning_service import (
 )
 
 router = APIRouter(prefix="/api/super", tags=["平台中控台"])
+ApiResponse: TypeAlias = RespVo[Any]
 
 SUPER_TOKEN_EXPIRE_HOURS = 12
 
@@ -100,7 +103,28 @@ def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token"))
             raise ValueError
         return payload.get("sub", "")
     except Exception:
-        raise __import__("fastapi").HTTPException(status_code=401, detail="中控台鉴权失败")
+        raise HTTPException(status_code=401, detail="中控台鉴权失败")
+
+
+def _verify_payment_readiness_super_token(
+    x_super_token: str | None = Header(default=None, alias="X-Super-Token"),
+) -> str:
+    """Keep legacy Super auth intact while owning this endpoint's 401/403 contract."""
+    import jwt
+
+    if not x_super_token or not x_super_token.strip():
+        raise HTTPException(status_code=401, detail="中控台鉴权失败")
+    try:
+        payload = jwt.decode(
+            x_super_token.strip(),
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="中控台鉴权失败") from exc
+    if payload.get("type") != "super_admin":
+        raise HTTPException(status_code=403, detail="无权查看收款体检")
+    return _verify_super_token(x_super_token.strip())
 
 
 def _verify_fulfilment_super_token(
@@ -358,6 +382,34 @@ async def update_merchant_fulfilment_mode(
             "idempotent": False,
         },
         msg="接单方式已更新",
+    )
+
+
+@router.get(
+    "/merchants/{tenant_id}/payment-readiness",
+    response_model=RespVo,
+    dependencies=[Depends(_verify_payment_readiness_super_token)],
+)
+async def get_merchant_payment_readiness(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse | JSONResponse:
+    """Read one tenant's local-only customer WeChat collection readiness."""
+    result = await db.execute(
+        select(Tenant).where(Tenant.tenant_id == tenant_id)
+    )
+    tenant = result.scalar_one_or_none()
+    if tenant is None:
+        return JSONResponse(
+            status_code=404,
+            content=error_response(code=404, msg="商家不存在").model_dump(),
+        )
+
+    from app.services.payment_readiness_service import evaluate_payment_readiness
+
+    return success_response(
+        data=evaluate_payment_readiness(tenant, settings),
+        msg="ok",
     )
 
 
