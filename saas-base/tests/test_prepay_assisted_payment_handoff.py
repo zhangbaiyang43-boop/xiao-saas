@@ -92,9 +92,9 @@ def make_notify_request(order_id: int):
         {
             "type": "http",
             "method": "POST",
-            "path": "/api/v1/orders/wxpay-notify",
+            "path": f"/api/v1/orders/wxpay-notify/{TENANT}",
             "headers": [],
-            "query_string": f"tenant_id={TENANT}".encode(),
+            "query_string": b"",
             "server": ("testserver", 80),
             "scheme": "http",
             "client": ("testclient", 50000),
@@ -390,9 +390,11 @@ class PrepayAssistedPaymentHandoffTest(unittest.IsolatedAsyncioTestCase):
                  patch("app.services.membership_service.MembershipService.apply_consumption", return_value=None), \
                  patch("app.services.subscribe_message_service.send_order_success_subscribe", return_value=None), \
                  patch("app.services.order_payment_service.logger"):
-                result = await wxpay_notify(make_notify_request(int(order.id)), db=db)
+                result = await wxpay_notify(
+                    TENANT, make_notify_request(int(order.id)), db=db
+                )
 
-            self.assertEqual(result.get("code"), "SUCCESS")
+            self.assertEqual(result.status_code, 204)
             row = (
                 await db.execute(select(StaffAssistedPaymentHandoff).where(
                     StaffAssistedPaymentHandoff.order_id == order.id

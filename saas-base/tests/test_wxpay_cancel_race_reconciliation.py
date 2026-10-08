@@ -195,7 +195,6 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
     def _fake_request(self, out_trade_no: str):
         req = AsyncMock()
         req.headers = {}
-        req.query_params = {"tenant_id": TENANT_A}
         req.body = AsyncMock(return_value=b"{}")
         self._resource = {
             "out_trade_no": out_trade_no,
@@ -215,9 +214,11 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
              patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock()) as on_success:
-            response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
+            response = await wxpay_notify(
+                TENANT_A, self._fake_request(str(order.id)), self.db
+            )
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         on_success.assert_not_called()  # must not run the "fulfil the order" side effects
         await self.db.refresh(order)
         self.assertEqual(order.status, "cancelled")  # not resurrected
@@ -235,9 +236,11 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
              patch.object(OrderPaymentService, "_refund_orphaned_wxpay_payment", new=auto_refund):
-            response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
+            response = await wxpay_notify(
+                TENANT_A, self._fake_request(str(order.id)), self.db
+            )
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         auto_refund.assert_not_called()
 
     async def test_normal_pending_payment_callback_still_fulfils_the_order(self):
@@ -253,9 +256,11 @@ class WxpayNotifyRaceWithCancelTest(RaceReconciliationTestBase):
 
         with patch("app.services.wxpay_service.WxPayService", return_value=fake_wxpay), \
              patch.object(OrderPaymentService, "_on_payment_success", new=AsyncMock(side_effect=fake_on_success)) as on_success:
-            response = await wxpay_notify(self._fake_request(str(order.id)), self.db)
+            response = await wxpay_notify(
+                TENANT_A, self._fake_request(str(order.id)), self.db
+            )
 
-        self.assertEqual(response["code"], "SUCCESS")
+        self.assertEqual(response.status_code, 204)
         on_success.assert_awaited_once()
         await self.db.refresh(order)
         self.assertEqual(order.payment_status, "paid")

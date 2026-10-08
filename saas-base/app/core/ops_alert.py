@@ -77,6 +77,14 @@ def reset_ops_alert_state() -> None:
         _inflight.clear()
 
 
+def _is_order_wxpay_notify_path(path: str) -> bool:
+    prefix = "/api/v1/orders/wxpay-notify/"
+    if not path.startswith(prefix):
+        return False
+    tenant_id = path[len(prefix) :]
+    return bool(tenant_id) and "/" not in tenant_id
+
+
 def is_core_exception_path(method: str | None, path: str | None) -> bool:
     path = str(path or "")
     method = str(method or "").upper()
@@ -84,7 +92,7 @@ def is_core_exception_path(method: str | None, path: str | None) -> bool:
         return True
     if method != "POST":
         return False
-    if path == "/api/v1/orders" or path == "/api/v1/orders/wxpay-notify":
+    if path == "/api/v1/orders" or _is_order_wxpay_notify_path(path):
         return True
     prefix = "/api/v1/orders/"
     if path.startswith(prefix) and path.endswith("/pay"):
