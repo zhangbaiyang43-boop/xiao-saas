@@ -185,6 +185,27 @@ def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token"))
         raise HTTPException(status_code=401, detail="中控台鉴权失败")
 
 
+def _verify_wxpay_super_token(
+    x_super_token: str | None = Header(default=None, alias="X-Super-Token"),
+) -> str:
+    """Own the explicit 401/403 contract for dangerous WxPay operations."""
+    import jwt
+
+    if not x_super_token or not x_super_token.strip():
+        raise HTTPException(status_code=401, detail="中控台鉴权失败")
+    try:
+        payload = jwt.decode(
+            x_super_token.strip(),
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="中控台鉴权失败") from exc
+    if payload.get("type") != "super_admin":
+        raise HTTPException(status_code=403, detail="无权执行支付凭证操作")
+    return payload.get("sub", "")
+
+
 def _verify_payment_readiness_super_token(
     x_super_token: str | None = Header(default=None, alias="X-Super-Token"),
 ) -> str:
@@ -525,7 +546,7 @@ async def config_merchant_wxpay(
     request: Request,
     data: WxPayConfigRequest,
     db: AsyncSession = Depends(get_db),
-    operator: str = Depends(_verify_super_token),
+    operator: str = Depends(_verify_wxpay_super_token),
 ):
     step_up_error = _step_up_error(request, data)
     if step_up_error:
@@ -694,7 +715,7 @@ async def copy_merchant_wxpay(
     tenant_id: str,
     request: Request,
     data: CopyWxPayRequest,
-    operator: str = Depends(_verify_super_token),
+    operator: str = Depends(_verify_wxpay_super_token),
 ):
     _audit_wxpay(
         "wxpay_copy_disabled",
@@ -715,7 +736,7 @@ async def verify_merchant_wxpay(
     request: Request,
     data: StepUpRequest,
     db: AsyncSession = Depends(get_db),
-    operator: str = Depends(_verify_super_token),
+    operator: str = Depends(_verify_wxpay_super_token),
 ):
     step_up_error = _step_up_error(request, data)
     if step_up_error:
@@ -771,7 +792,7 @@ async def pause_merchant_wxpay(
     request: Request,
     data: StepUpRequest,
     db: AsyncSession = Depends(get_db),
-    operator: str = Depends(_verify_super_token),
+    operator: str = Depends(_verify_wxpay_super_token),
 ):
     emergency_pause = bool(data.emergency_password is not None or data.emergency_confirmation is not None)
     reason = (data.reason or "").strip()

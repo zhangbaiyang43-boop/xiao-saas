@@ -301,6 +301,7 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tenant.wx_private_key, "legacy-private-key")
 
     async def test_emergency_pause_requires_password_and_exact_confirmation_and_changes_only_enabled(self):
+        await self.create_tenant()
         for password, confirmation, expected in (
             ("wrong", f"PAUSE_WXPAY:{TENANT_ID}", 401),
             ("test-only-super-password", "wrong-confirmation", 400),
@@ -375,7 +376,7 @@ class WxPayHardeningStaticContractTest(unittest.TestCase):
         readiness_source = inspect.getsource(payment_readiness_service)
         self.assertIn('@router.post("/orders/wxpay-notify/{tenant_id}")', order_source)
         self.assertNotIn('@router.post("/orders/wxpay-notify")', order_source)
-        self.assertIn('"readiness_state": "UNKNOWN"', readiness_source)
+        self.assertIn('"readiness_state": READINESS_UNKNOWN', readiness_source)
 
     def test_sdk_and_super_validation_logs_do_not_embed_raw_exception_or_provider_body(self):
         from app.services import wxpay_service
