@@ -121,7 +121,7 @@
               </div>
             </div>
             <button class="merchant-360-toggle tap-shrink" type="button" @click="toggleFulfilmentSettings(m.tenant_id)">
-              <span>Merchant 360 · 经营设置</span>
+              <span>Merchant 360 · 经营设置 / 收款</span>
               <strong>接单方式：{{ fulfilmentModeLabel(m.fulfilment_mode) }}</strong>
               <span>{{ fulfilmentOpenId === m.tenant_id ? '收起' : '调整' }}</span>
             </button>
@@ -132,6 +132,13 @@
               :merchant-name="m.name"
               :mode="m.fulfilment_mode"
               @updated="applyFulfilmentModeUpdate(m, $event)"
+              @auth-expired="logout"
+            />
+            <PaymentReadinessPanel
+              v-if="fulfilmentOpenId === m.tenant_id"
+              :super-token="superToken"
+              :tenant-id="m.tenant_id"
+              :merchant-name="m.name"
               @auth-expired="logout"
             />
           </div>
@@ -228,6 +235,7 @@ import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import FulfilmentModeControl from './super/FulfilmentModeControl.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
+import PaymentReadinessPanel from './super/PaymentReadinessPanel.vue'
 
 const BASE = '/super'
 
