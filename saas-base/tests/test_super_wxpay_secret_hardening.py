@@ -71,6 +71,10 @@ class StrictSecretEncryptionTest(unittest.TestCase):
         self.assertTrue(encrypted.startswith("gAAAAA"))
         self.assertEqual(crypto.decrypt_secret(encrypted), API_V3_KEY)
 
+    def test_strict_writer_is_not_an_alias_for_the_legacy_permissive_writer(self):
+        source = inspect.getsource(crypto.encrypt_secret_strict)
+        self.assertNotIn("encrypt_secret(", source)
+
 
 class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

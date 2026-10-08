@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeAlias
 
@@ -9,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
-from app.core.crypto import decrypt_secret, encrypt_secret
+from app.core.crypto import (
+    SecretEncryptionUnavailable,
+    decrypt_secret,
+    encrypt_secret_strict,
+)
 from app.core.database import get_db
 from app.core.logger import logger
 from app.core.rate_limiter import login_limit
@@ -52,18 +57,25 @@ class CopyWxPayRequest(BaseModel):
 
 class StepUpRequest(BaseModel):
     totp_code: str | None = None
+    reason: str | None = None
+    confirmed: bool = False
+    emergency_password: str | None = None
+    emergency_confirmation: str | None = None
 
 
 class WxPayConfigRequest(BaseModel):
-    wx_mchid: str
-    wx_api_key_v3: str
-    wx_cert_serial: str
-    wx_private_key: str
+    wx_mchid: str | None = None
+    wx_api_key_v3: str | None = None
+    wx_cert_serial: str | None = None
+    wx_private_key: str | None = None
     wx_public_key_id: str | None = None
     wx_public_key: str | None = None
-    wx_pay_enabled: bool = True
+    wx_pay_enabled: bool | None = None
     receiver_name: str | None = None
     receiver_type: str | None = None
+    totp_code: str | None = None
+    reason: str | None = None
+    confirmed: bool = False
 
 
 class FulfilmentModeUpdateRequest(BaseModel):
@@ -93,6 +105,73 @@ def _audit(action: str, request: Request | None, tenant_id: str = "", detail: st
     if request is not None:
         ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
     logger.info(f"[SUPER_AUDIT] action={action} tenant={tenant_id or '-'} ip={ip} detail={detail}")
+
+
+def _request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", None) or "unknown"
+
+
+def _request_ip(request: Request) -> str:
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return forwarded or (request.client.host if request.client else "unknown")
+
+
+def _wxpay_error(request: Request, status_code: int, reason_code: str, msg: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content=error_response(
+            code=status_code,
+            msg=msg,
+            data={"reason_code": reason_code, "request_id": _request_id(request)},
+        ).model_dump(),
+    )
+
+
+def _step_up_error(request: Request, data: StepUpRequest | WxPayConfigRequest) -> JSONResponse | None:
+    if not _totp_configured():
+        return _wxpay_error(request, 503, "WXPAY_STEP_UP_UNAVAILABLE", "动态口令未配置，危险操作已拒绝")
+    reason = (data.reason or "").strip()
+    if not data.totp_code or not reason or not data.confirmed:
+        return _wxpay_error(request, 400, "WXPAY_STEP_UP_REQUIRED", "需要动态口令、操作原因和明确确认")
+    if len(reason) > 200:
+        return _wxpay_error(request, 400, "WXPAY_STEP_UP_REQUIRED", "操作原因不能超过200个字符")
+    if not _verify_totp_code(data.totp_code):
+        return _wxpay_error(request, 401, "WXPAY_STEP_UP_INVALID", "动态口令错误或已过期")
+    return None
+
+
+def _audit_wxpay(
+    operation: str,
+    request: Request,
+    *,
+    tenant_id: str,
+    operator_id: str,
+    reason: str,
+    result: str,
+    changed_field_names: list[str] | None = None,
+    verification_invalidated: bool = False,
+    emergency_pause: bool = False,
+    source_tenant_id: str | None = None,
+) -> None:
+    safe_reason = " ".join(reason.split())[:200]
+    logger.info(
+        "WXPAY_SECURITY_OPERATION",
+        extra={
+            "event": "WXPAY_SECURITY_OPERATION",
+            "operation": operation,
+            "operator_id": operator_id or "super_admin",
+            "tenant_id": tenant_id,
+            "source_tenant_id": source_tenant_id,
+            "request_id": _request_id(request),
+            "reason": safe_reason,
+            "result": result,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "changed_field_names": sorted(changed_field_names or []),
+            "verification_invalidated": verification_invalidated,
+            "emergency_pause": emergency_pause,
+            "ip": _request_ip(request),
+        },
+    )
 
 
 def _verify_super_token(x_super_token: str = Header(..., alias="X-Super-Token")) -> str:
@@ -194,38 +273,38 @@ def _validate_wxpay_client(tenant: Tenant) -> tuple[bool, str]:
     private_key_pem = decrypt_secret(tenant.wx_private_key)
 
     if not tenant.wx_mchid:
-        return False, "商户号不能为空"
+        return False, "WXPAY_CONFIG_MCHID_REQUIRED"
     if not re.match(r"^\d{10,15}$", tenant.wx_mchid):
-        return False, "商户号格式错误，应为10-15位数字"
+        return False, "WXPAY_CONFIG_MCHID_INVALID"
 
     if not api_key_v3:
-        return False, "APIv3密钥不能为空"
+        return False, "WXPAY_CONFIG_API_KEY_REQUIRED"
     if len(api_key_v3) != 32:
-        return False, "APIv3密钥必须为32位"
+        return False, "WXPAY_CONFIG_API_KEY_INVALID"
 
     if not tenant.wx_cert_serial:
-        return False, "商户证书序列号不能为空"
+        return False, "WXPAY_CONFIG_CERT_SERIAL_REQUIRED"
     if not re.match(r"^[A-Fa-f0-9]{40,64}$", tenant.wx_cert_serial):
-        return False, "商户证书序列号格式错误，应为40~64位十六进制"
+        return False, "WXPAY_CONFIG_CERT_SERIAL_INVALID"
 
     if not private_key_pem:
-        return False, "商户私钥不能为空"
+        return False, "WXPAY_CONFIG_PRIVATE_KEY_REQUIRED"
     try:
         private_key = private_key_pem.replace("\\n", "\n")
         serialization.load_pem_private_key(private_key.encode(), password=None, backend=default_backend())
     except Exception:
-        return False, "商户私钥无法解析，请确认是 apiclient_key.pem 内容"
+        return False, "WXPAY_CONFIG_PRIVATE_KEY_INVALID"
 
     if tenant.wx_public_key_id and tenant.wx_public_key:
         try:
             public_key = tenant.wx_public_key.replace("\\n", "\n")
             serialization.load_pem_public_key(public_key.encode(), backend=default_backend())
         except Exception:
-            return False, "微信支付公钥无法解析，请确认格式正确"
+            return False, "WXPAY_CONFIG_PUBLIC_KEY_INVALID"
     elif not tenant.wx_public_key_id and not tenant.wx_public_key:
         pass
     else:
-        return False, "微信支付公钥ID和公钥内容必须同时填写"
+        return False, "WXPAY_CONFIG_PUBLIC_KEY_PAIR_REQUIRED"
 
     try:
         from app.services.wxpay_service import _build_client
@@ -238,17 +317,17 @@ def _validate_wxpay_client(tenant: Tenant) -> tuple[bool, str]:
             public_key_pem=tenant.wx_public_key,
         )
         if not client:
-            return False, "微信支付 SDK 初始化失败，请检查凭证或依赖"
+            return False, "WXPAY_SDK_INIT_FAILED"
         for method_name in ("certificates", "get_certificates"):
             method = getattr(client, method_name, None)
             if callable(method):
                 code, body = method()
                 if int(code) in (200, 204):
-                    return True, "微信接口验证通过"
-                return False, f"微信接口验证失败：{body}"
-        return True, "微信支付凭证格式验证通过"
-    except Exception as exc:
-        return False, f"微信支付验证失败：{exc}"
+                    return True, "OK"
+                return False, "WXPAY_VERIFICATION_FAILED"
+        return True, "OK"
+    except Exception:
+        return False, "WXPAY_VERIFICATION_FAILED"
 
 
 @router.post("/login", response_model=RespVo)
@@ -439,136 +518,304 @@ async def create_merchant(request: Request, data: CreateMerchantRequest, db: Asy
     )
 
 
-@router.patch("/merchants/{tenant_id}/wxpay", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
-async def config_merchant_wxpay(tenant_id: str, request: Request, data: WxPayConfigRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+@router.patch("/merchants/{tenant_id}/wxpay", response_model=RespVo)
+@login_limit()
+async def config_merchant_wxpay(
+    tenant_id: str,
+    request: Request,
+    data: WxPayConfigRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: str = Depends(_verify_super_token),
+):
+    step_up_error = _step_up_error(request, data)
+    if step_up_error:
+        return step_up_error
+
+    fields_set = set(data.model_fields_set)
+    config_fields = fields_set - {"totp_code", "reason", "confirmed"}
+    secret_fields = {"wx_api_key_v3", "wx_private_key"}
+    for field in secret_fields & config_fields:
+        value = getattr(data, field)
+        if value is None or not value.strip():
+            return _wxpay_error(request, 400, "WXPAY_SECRET_CLEAR_NOT_ALLOWED", "敏感凭证不能通过空值清除")
+
+    encrypted_secrets: dict[str, str] = {}
+    try:
+        for field in secret_fields & config_fields:
+            encrypted_secrets[field] = encrypt_secret_strict(getattr(data, field).strip())
+    except SecretEncryptionUnavailable:
+        return _wxpay_error(
+            request,
+            503,
+            "WXPAY_SECRET_ENCRYPTION_UNAVAILABLE",
+            "支付密钥安全存储暂不可用，未保存任何修改",
+        )
+    if len(encrypted_secrets.get("wx_api_key_v3", "")) > 256 or len(encrypted_secrets.get("wx_private_key", "")) > 4096:
+        return _wxpay_error(request, 400, "WXPAY_SECRET_TOO_LONG", "密钥内容过长，请联系技术支持处理")
+
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update())
     tenant = result.scalar_one_or_none()
     if not tenant:
-        return error_response(code=404, msg="商家不存在")
+        await db.rollback()
+        return _wxpay_error(request, 404, "MERCHANT_NOT_FOUND", "商家不存在")
 
-    next_mchid = data.wx_mchid.strip()
-    if getattr(tenant, "payment_locked", False) and tenant.wx_mchid and tenant.wx_mchid != next_mchid:
-        return error_response(code=403, msg="收款账户已锁定，不能修改微信支付商户号")
+    if "wx_pay_enabled" in config_fields and data.wx_pay_enabled != tenant.wx_pay_enabled:
+        await db.rollback()
+        return _wxpay_error(
+            request,
+            409,
+            "WXPAY_PAYMENT_STATE_ENDPOINT_REQUIRED",
+            "支付启停必须使用验证或暂停接口",
+        )
 
-    encrypted_api_key = encrypt_secret(data.wx_api_key_v3.strip())
-    encrypted_private_key = encrypt_secret(data.wx_private_key.strip())
-    # 加密后是密文，比明文长；防止极少数超长私钥（罕见的 4096 位商户证书）加密后超出列宽被静默截断，
-    # 截断的私钥会直接导致这个商户的支付全部失效且不容易发现，所以这里宁可拒绝也不要保存坏数据。
-    if len(encrypted_api_key or "") > 256 or len(encrypted_private_key or "") > 4096:
-        return error_response(code=400, msg="密钥内容过长，请联系技术支持处理")
+    changed_fields: list[str] = []
+    credential_changed = False
+    credential_fields = {
+        "wx_mchid",
+        "wx_api_key_v3",
+        "wx_cert_serial",
+        "wx_private_key",
+        "wx_public_key_id",
+        "wx_public_key",
+    }
 
-    old_identity = (tenant.wx_mchid or "", tenant.wx_cert_serial or "")
-    tenant.wx_mchid = next_mchid
-    tenant.wx_api_key_v3 = encrypted_api_key
-    tenant.wx_cert_serial = data.wx_cert_serial.strip()
-    tenant.wx_private_key = encrypted_private_key
-    tenant.wx_public_key_id = data.wx_public_key_id.strip() if data.wx_public_key_id else None
-    tenant.wx_public_key = data.wx_public_key.strip() if data.wx_public_key else None
-    tenant.wx_pay_enabled = data.wx_pay_enabled
-    tenant.receiver_name = (data.receiver_name or tenant.receiver_name or tenant.name).strip()
-    tenant.receiver_type = data.receiver_type if data.receiver_type in ("enterprise", "individual") else (tenant.receiver_type or "enterprise")
-    tenant.payment_locked = True
-    if old_identity != (tenant.wx_mchid or "", tenant.wx_cert_serial or ""):
+    scalar_updates: dict[str, str | None] = {}
+    for field in {"wx_mchid", "wx_cert_serial", "wx_public_key_id", "wx_public_key", "receiver_name"} & config_fields:
+        raw_value = getattr(data, field)
+        value = raw_value.strip() if isinstance(raw_value, str) else None
+        if field == "receiver_name" and not value:
+            value = tenant.name
+        scalar_updates[field] = value or None
+    if "receiver_type" in config_fields:
+        if data.receiver_type not in ("enterprise", "individual"):
+            await db.rollback()
+            return _wxpay_error(request, 400, "WXPAY_RECEIVER_TYPE_INVALID", "开户类型无效")
+        scalar_updates["receiver_type"] = data.receiver_type
+
+    next_mchid = scalar_updates.get("wx_mchid", tenant.wx_mchid)
+    if "wx_mchid" in config_fields and (not next_mchid or not next_mchid.isdigit() or not 10 <= len(next_mchid) <= 15):
+        await db.rollback()
+        return _wxpay_error(request, 400, "WXPAY_CONFIG_MCHID_INVALID", "商户号格式无效")
+    if "wx_api_key_v3" in config_fields and len(data.wx_api_key_v3.strip()) != 32:
+        await db.rollback()
+        return _wxpay_error(request, 400, "WXPAY_CONFIG_API_KEY_INVALID", "APIv3 密钥格式无效")
+    if "wx_cert_serial" in config_fields:
+        import re
+        cert_serial = scalar_updates.get("wx_cert_serial") or ""
+        if not re.fullmatch(r"[A-Fa-f0-9]{40,64}", cert_serial):
+            await db.rollback()
+            return _wxpay_error(request, 400, "WXPAY_CONFIG_CERT_SERIAL_INVALID", "证书序列号格式无效")
+    if "wx_private_key" in config_fields:
+        from cryptography.hazmat.primitives import serialization
+        try:
+            serialization.load_pem_private_key(data.wx_private_key.strip().replace("\\n", "\n").encode(), password=None)
+        except Exception:
+            await db.rollback()
+            return _wxpay_error(request, 400, "WXPAY_CONFIG_PRIVATE_KEY_INVALID", "商户私钥格式无效")
+    next_public_key_id = scalar_updates.get("wx_public_key_id", tenant.wx_public_key_id)
+    next_public_key = scalar_updates.get("wx_public_key", tenant.wx_public_key)
+    if bool(next_public_key_id) != bool(next_public_key):
+        await db.rollback()
+        return _wxpay_error(request, 400, "WXPAY_CONFIG_PUBLIC_KEY_PAIR_REQUIRED", "微信支付公钥 ID 与公钥必须同时填写")
+    if "wx_public_key" in config_fields and next_public_key:
+        from cryptography.hazmat.primitives import serialization
+        try:
+            serialization.load_pem_public_key(next_public_key.replace("\\n", "\n").encode())
+        except Exception:
+            await db.rollback()
+            return _wxpay_error(request, 400, "WXPAY_CONFIG_PUBLIC_KEY_INVALID", "微信支付公钥格式无效")
+
+    if getattr(tenant, "payment_locked", False) and tenant.wx_mchid and next_mchid != tenant.wx_mchid:
+        await db.rollback()
+        return _wxpay_error(request, 403, "WXPAY_RECEIVER_LOCKED", "收款账户已锁定，不能修改微信支付商户号")
+
+    for field, value in scalar_updates.items():
+        if getattr(tenant, field) != value:
+            setattr(tenant, field, value)
+            changed_fields.append(field)
+            credential_changed = credential_changed or field in credential_fields
+
+    for field, encrypted_value in encrypted_secrets.items():
+        clear_value = getattr(data, field).strip()
+        if decrypt_secret(getattr(tenant, field)) != clear_value:
+            setattr(tenant, field, encrypted_value)
+            changed_fields.append(field)
+            credential_changed = True
+
+    if credential_changed:
         tenant.receiver_verified = False
         tenant.verified_time = None
-    await db.commit()
-    await db.refresh(tenant)
-    action = "已保存" if data.wx_pay_enabled else "已暂停"
-    _audit("wxpay_save", request, tenant_id, detail=f"mchid_changed={old_identity != (tenant.wx_mchid or '', tenant.wx_cert_serial or '')}")
+        tenant.wx_pay_enabled = False
+    tenant.payment_locked = True
+
+    try:
+        await db.commit()
+        await db.refresh(tenant)
+    except Exception:
+        await db.rollback()
+        _audit_wxpay(
+            "wxpay_config_patch",
+            request,
+            tenant_id=tenant_id,
+            operator_id=operator,
+            reason=data.reason or "",
+            result="failed",
+            changed_field_names=changed_fields,
+            verification_invalidated=credential_changed,
+        )
+        return _wxpay_error(request, 500, "WXPAY_CONFIG_SAVE_FAILED", "微信支付配置保存失败")
+
+    _audit_wxpay(
+        "wxpay_config_patch",
+        request,
+        tenant_id=tenant_id,
+        operator_id=operator,
+        reason=data.reason or "",
+        result="success",
+        changed_field_names=changed_fields,
+        verification_invalidated=credential_changed,
+    )
     return success_response(
-        data={"tenant_id": tenant_id, "wx_mchid": tenant.wx_mchid, "wx_pay_enabled": tenant.wx_pay_enabled, **_payment_view(tenant)},
-        msg=f"{action}微信支付配置",
+        data={
+            "tenant_id": tenant_id,
+            "wx_mchid": tenant.wx_mchid,
+            "wx_pay_enabled": tenant.wx_pay_enabled,
+            "changed_field_names": sorted(changed_fields),
+            "verification_invalidated": credential_changed,
+            **_payment_view(tenant),
+        },
+        msg="微信支付配置已保存",
     )
 
 
-@router.post("/merchants/{tenant_id}/wxpay/copy-from", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
-async def copy_merchant_wxpay(tenant_id: str, request: Request, data: CopyWxPayRequest, db: AsyncSession = Depends(get_db)):
-    if not _verify_totp_code(data.totp_code):
-        _audit("wxpay_copy_denied", request, tenant_id, detail="动态口令校验失败")
-        return error_response(code=401, msg="动态口令错误或已过期，复制配置需要重新验证")
-    if tenant_id == data.source_tenant_id:
-        return error_response(code=400, msg="源商户和目标商户不能是同一个")
-
-    source_result = await db.execute(select(Tenant).where(Tenant.tenant_id == data.source_tenant_id))
-    source = source_result.scalar_one_or_none()
-    if not source:
-        return error_response(code=404, msg="源商户不存在")
-    if not source.wx_mchid:
-        return error_response(code=400, msg="源商户还没有配置支付信息，无法复制")
-
-    target_result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
-    target = target_result.scalar_one_or_none()
-    if not target:
-        return error_response(code=404, msg="目标商户不存在")
-
-    if getattr(target, "payment_locked", False) and target.wx_mchid and target.wx_mchid != source.wx_mchid:
-        return error_response(code=403, msg="目标商户的收款账户已锁定，不能覆盖为其它商户号")
-
-    old_identity = (target.wx_mchid or "", target.wx_cert_serial or "")
-    target.wx_mchid = source.wx_mchid
-    target.wx_api_key_v3 = source.wx_api_key_v3
-    target.wx_cert_serial = source.wx_cert_serial
-    target.wx_private_key = source.wx_private_key
-    target.wx_public_key_id = source.wx_public_key_id
-    target.wx_public_key = source.wx_public_key
-    target.wx_pay_enabled = True
-    target.receiver_name = source.receiver_name or source.name
-    target.receiver_type = source.receiver_type or "enterprise"
-    target.payment_locked = True
-    if old_identity != (target.wx_mchid or "", target.wx_cert_serial or ""):
-        target.receiver_verified = False
-        target.verified_time = None
-    await db.commit()
-    await db.refresh(target)
-    _audit("wxpay_copy", request, tenant_id, detail=f"source={data.source_tenant_id}")
-    return success_response(
-        data={"tenant_id": tenant_id, **_payment_view(target)},
-        msg=f"已从「{source.name}」复制支付配置，请继续验证配置",
+@router.post("/merchants/{tenant_id}/wxpay/copy-from", response_model=RespVo)
+@login_limit()
+async def copy_merchant_wxpay(
+    tenant_id: str,
+    request: Request,
+    data: CopyWxPayRequest,
+    operator: str = Depends(_verify_super_token),
+):
+    _audit_wxpay(
+        "wxpay_copy_disabled",
+        request,
+        tenant_id=tenant_id,
+        source_tenant_id=data.source_tenant_id,
+        operator_id=operator,
+        reason="cross-tenant secret copy disabled",
+        result="denied",
     )
+    return _wxpay_error(request, 409, "WXPAY_SECRET_COPY_DISABLED", "跨商户复制支付密钥已停用")
 
 
-@router.post("/merchants/{tenant_id}/wxpay/verify", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
-async def verify_merchant_wxpay(tenant_id: str, request: Request, db: AsyncSession = Depends(get_db)):
-    from fastapi import HTTPException
-    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+@router.post("/merchants/{tenant_id}/wxpay/verify", response_model=RespVo)
+@login_limit()
+async def verify_merchant_wxpay(
+    tenant_id: str,
+    request: Request,
+    data: StepUpRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: str = Depends(_verify_super_token),
+):
+    step_up_error = _step_up_error(request, data)
+    if step_up_error:
+        return step_up_error
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update())
     tenant = result.scalar_one_or_none()
     if not tenant:
-        raise HTTPException(status_code=404, detail={"success": False, "code": "MERCHANT_NOT_FOUND", "message": "商家不存在"})
-    ok, msg = _validate_wxpay_client(tenant)
+        await db.rollback()
+        return _wxpay_error(request, 404, "MERCHANT_NOT_FOUND", "商家不存在")
+
+    ok, validation_code = _validate_wxpay_client(tenant)
     if not ok:
-        tenant.receiver_verified = False
-        await db.commit()
-        _audit("wxpay_verify_failed", request, tenant_id, detail=msg)
-        if "无法解析" in msg:
-            raise HTTPException(status_code=422, detail={"success": False, "code": "CERT_PARSE_ERROR", "message": msg})
-        if "微信接口验证失败" in msg:
-            raise HTTPException(status_code=502, detail={"success": False, "code": "WXPAY_VERIFY_FAILED", "message": msg})
-        raise HTTPException(status_code=400, detail={"success": False, "code": "CONFIG_INVALID", "message": msg})
+        await db.rollback()
+        _audit_wxpay(
+            "wxpay_verify",
+            request,
+            tenant_id=tenant_id,
+            operator_id=operator,
+            reason=data.reason or "",
+            result=validation_code,
+        )
+        status_code = 502 if validation_code in {"WXPAY_SDK_INIT_FAILED", "WXPAY_VERIFICATION_FAILED"} else 400
+        return _wxpay_error(request, status_code, validation_code, "微信支付配置验证失败")
+
     tenant.receiver_name = tenant.receiver_name or tenant.name
     tenant.receiver_type = tenant.receiver_type or "enterprise"
     tenant.receiver_verified = True
     tenant.payment_locked = True
     tenant.wx_pay_enabled = True
     tenant.verified_time = datetime.utcnow()
-    await db.commit()
-    await db.refresh(tenant)
-    _audit("wxpay_verify_success", request, tenant_id)
-    return success_response(data={"tenant_id": tenant_id, **_payment_view(tenant)}, msg=msg)
+    try:
+        await db.commit()
+        await db.refresh(tenant)
+    except Exception:
+        await db.rollback()
+        return _wxpay_error(request, 500, "WXPAY_VERIFY_COMMIT_FAILED", "微信支付配置验证未完成")
+    _audit_wxpay(
+        "wxpay_verify",
+        request,
+        tenant_id=tenant_id,
+        operator_id=operator,
+        reason=data.reason or "",
+        result="success",
+        changed_field_names=["receiver_verified", "verified_time", "wx_pay_enabled"],
+    )
+    return success_response(data={"tenant_id": tenant_id, **_payment_view(tenant)}, msg="微信支付配置验证通过")
 
 
-@router.patch("/merchants/{tenant_id}/wxpay/pause", response_model=RespVo, dependencies=[Depends(_verify_super_token)])
-async def pause_merchant_wxpay(tenant_id: str, request: Request, data: StepUpRequest = StepUpRequest(), db: AsyncSession = Depends(get_db)):
-    if not _verify_totp_code(data.totp_code):
-        _audit("wxpay_pause_denied", request, tenant_id, detail="动态口令校验失败")
-        return error_response(code=401, msg="动态口令错误或已过期，暂停操作需要重新验证")
-    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id))
+@router.patch("/merchants/{tenant_id}/wxpay/pause", response_model=RespVo)
+@login_limit()
+async def pause_merchant_wxpay(
+    tenant_id: str,
+    request: Request,
+    data: StepUpRequest,
+    db: AsyncSession = Depends(get_db),
+    operator: str = Depends(_verify_super_token),
+):
+    emergency_pause = bool(data.emergency_password is not None or data.emergency_confirmation is not None)
+    reason = (data.reason or "").strip()
+    if emergency_pause:
+        if not reason or not data.confirmed:
+            return _wxpay_error(request, 400, "WXPAY_STEP_UP_REQUIRED", "需要操作原因和明确确认")
+        expected_confirmation = f"PAUSE_WXPAY:{tenant_id}"
+        if data.emergency_confirmation != expected_confirmation:
+            return _wxpay_error(request, 400, "WXPAY_EMERGENCY_CONFIRMATION_INVALID", "紧急暂停确认短语不正确")
+        expected_password = settings.SUPER_ADMIN_PASSWORD or ""
+        supplied_password = data.emergency_password or ""
+        if not expected_password or not secrets.compare_digest(supplied_password, expected_password):
+            return _wxpay_error(request, 401, "WXPAY_EMERGENCY_PASSWORD_INVALID", "紧急暂停密码校验失败")
+    else:
+        step_up_error = _step_up_error(request, data)
+        if step_up_error:
+            return step_up_error
+
+    result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update())
     tenant = result.scalar_one_or_none()
     if not tenant:
-        return error_response(code=404, msg="商家不存在")
-    tenant.wx_pay_enabled = False
-    await db.commit()
-    await db.refresh(tenant)
-    _audit("wxpay_pause", request, tenant_id)
+        await db.rollback()
+        return _wxpay_error(request, 404, "MERCHANT_NOT_FOUND", "商家不存在")
+    changed = bool(tenant.wx_pay_enabled)
+    if changed:
+        tenant.wx_pay_enabled = False
+        try:
+            await db.commit()
+            await db.refresh(tenant)
+        except Exception:
+            await db.rollback()
+            return _wxpay_error(request, 500, "WXPAY_PAUSE_FAILED", "暂停微信支付失败")
+    else:
+        await db.rollback()
+    _audit_wxpay(
+        "wxpay_emergency_pause" if emergency_pause else "wxpay_pause",
+        request,
+        tenant_id=tenant_id,
+        operator_id=operator,
+        reason=reason,
+        result="success",
+        changed_field_names=["wx_pay_enabled"] if changed else [],
+        emergency_pause=emergency_pause,
+    )
     return success_response(data={"tenant_id": tenant_id, "wx_pay_enabled": False, **_payment_view(tenant)}, msg="已暂停微信支付")
 
 

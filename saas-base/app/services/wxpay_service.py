@@ -80,8 +80,10 @@ def _build_client(
     except ImportError:
         logger.warning("wechatpayv3 未安装，请执行: pip install wechatpayv3")
         return None
-    except Exception as e:
-        logger.error(f"微信支付 SDK 初始化失败: {e}")
+    except Exception:
+        # SDK exceptions can echo constructor inputs. Never place merchant
+        # credentials or provider response bodies in application logs.
+        logger.error("微信支付 SDK 初始化失败 code=WXPAY_SDK_INIT_FAILED")
         return None
 
 

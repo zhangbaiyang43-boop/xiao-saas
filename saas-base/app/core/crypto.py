@@ -15,6 +15,10 @@ from cryptography.fernet import Fernet, InvalidToken
 from app.config import settings
 
 
+class SecretEncryptionUnavailable(RuntimeError):
+    """Raised when a sensitive write cannot be encrypted safely."""
+
+
 @lru_cache(maxsize=1)
 def _get_fernet() -> Fernet | None:
     key = (settings.SECRET_ENCRYPTION_KEY or "").strip()
@@ -29,6 +33,17 @@ def encrypt_secret(value: str | None) -> str | None:
     fernet = _get_fernet()
     if fernet is None:
         return value
+    return fernet.encrypt(value.encode()).decode()
+
+
+def encrypt_secret_strict(value: str) -> str:
+    """Encrypt a new secret or fail closed without exposing key material."""
+    try:
+        fernet = _get_fernet()
+    except (TypeError, ValueError) as exc:
+        raise SecretEncryptionUnavailable("secret encryption is unavailable") from exc
+    if fernet is None:
+        raise SecretEncryptionUnavailable("secret encryption is unavailable")
     return fernet.encrypt(value.encode()).decode()
 
 
