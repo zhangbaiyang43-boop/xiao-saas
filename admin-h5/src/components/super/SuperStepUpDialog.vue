@@ -6,7 +6,7 @@
     :mask-closable="false"
     destroy-on-close
     wrap-class-name="super-step-up-modal"
-    @cancel="emit('cancel')"
+    @cancel="handleCancel"
   >
     <div class="step-up-body">
       <div class="step-up-alert">这是敏感操作。系统只记录操作原因，不会记录动态口令或密码。</div>
@@ -61,7 +61,7 @@
       </a-checkbox>
 
       <div class="step-up-actions">
-        <a-button block @click="emit('cancel')">取消</a-button>
+        <a-button block @click="handleCancel">取消</a-button>
         <a-button block type="primary" danger :loading="loading" :disabled="!canSubmit" @click="submit">
           {{ confirmText }}
         </a-button>
@@ -71,7 +71,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, watch } from 'vue'
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -109,9 +109,8 @@ const form = reactive({
   emergencyConfirmation: '',
 })
 
-watch(() => props.open, (open) => {
-  if (!open) return
-  Object.assign(form, {
+function clearSensitiveState(target = form) {
+  Object.assign(target, {
     totpCode: '',
     reason: '',
     confirmed: false,
@@ -119,7 +118,17 @@ watch(() => props.open, (open) => {
     emergencyPassword: '',
     emergencyConfirmation: '',
   })
+}
+
+watch(() => props.open, (open) => {
+  if (!open) {
+    clearSensitiveState()
+    return
+  }
+  clearSensitiveState()
 })
+
+onBeforeUnmount(clearSensitiveState)
 
 const canSubmit = computed(() => {
   if (!form.reason.trim() || !form.confirmed) return false
@@ -129,14 +138,21 @@ const canSubmit = computed(() => {
 
 function submit() {
   if (!canSubmit.value) return
-  emit('confirm', {
+  const payload = {
     totpCode: form.totpCode.trim(),
     reason: form.reason.trim(),
     confirmed: form.confirmed,
     emergency: form.emergency,
     emergencyPassword: form.emergencyPassword,
     emergencyConfirmation: form.emergencyConfirmation,
-  })
+  }
+  clearSensitiveState()
+  emit('confirm', payload)
+}
+
+function handleCancel() {
+  clearSensitiveState()
+  emit('cancel')
 }
 </script>
 

@@ -235,7 +235,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import FulfilmentModeControl from './super/FulfilmentModeControl.vue'
@@ -289,6 +289,7 @@ const savingPay = ref(false)
 const verifyingPay = ref(false)
 const pausingPay = ref(false)
 const payConfigResult = ref(null)
+let payConfigSessionId = 0
 const seedingId = ref('')
 const seedResult = ref(null)
 const fulfilmentOpenId = ref('')
@@ -345,7 +346,52 @@ function applyPaymentData(target, data) {
     verified_time: data.verified_time ?? target.verified_time,
   })
 }
-function closePayConfig() { closeStepUp(); payConfigTarget.value = null }
+
+function clearPayConfigSecrets(target = payConfigForm) {
+  target.wx_api_key_v3 = ''
+  target.wx_private_key = ''
+}
+
+function payConfigRequestContext() {
+  const target = payConfigTarget.value
+  if (!target) return null
+  return { sessionId: payConfigSessionId, tenantId: target.tenant_id, target }
+}
+
+function isPayConfigSessionCurrent(
+  context,
+  currentSessionId = payConfigSessionId,
+  currentTenantId = payConfigTarget.value?.tenant_id,
+) {
+  return !!context
+    && context.sessionId === currentSessionId
+    && context.tenantId === currentTenantId
+}
+
+function resetPayConfigOperationState() {
+  savingPay.value = false
+  verifyingPay.value = false
+  pausingPay.value = false
+  stepUpLoading.value = false
+}
+
+function closePayConfig() {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+  payConfigTarget.value = null
+  resetPayConfigOperationState()
+}
+
+watch(payConfigTarget, (target) => {
+  if (!target) clearPayConfigSecrets()
+})
+
+onBeforeUnmount(() => {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+})
 
 async function doLogin() {
   if (!needTotp.value && !pwd.value.trim()) return
@@ -435,6 +481,10 @@ async function createMerchant() {
 }
 
 function openPayConfig(m) {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+  resetPayConfigOperationState()
   payConfigTarget.value = m
   techOpen.value = false
   payConfigResult.value = null
@@ -454,10 +504,11 @@ function openStepUp(action) {
   stepUpOpen.value = true
 }
 
-function closeStepUp() {
-  if (stepUpLoading.value) return
+function closeStepUp(force = false) {
+  if (stepUpLoading.value && !force) return
   stepUpOpen.value = false
   stepUpAction.value = ''
+  if (force) stepUpLoading.value = false
 }
 
 function savePayConfig() {
@@ -474,19 +525,27 @@ function verifyPayConfig() { openStepUp('verify') }
 function confirmPausePay() { openStepUp('pause') }
 
 async function confirmStepUp(stepUp) {
+  const context = payConfigRequestContext()
+  const action = stepUpAction.value
+  if (!context || !action) return
   stepUpLoading.value = true
   try {
-    if (stepUpAction.value === 'save') await performSavePayConfig(stepUp)
-    else if (stepUpAction.value === 'verify') await performVerifyPayConfig(stepUp)
-    else if (stepUpAction.value === 'pause') await performPausePay(stepUp)
-    stepUpOpen.value = false
-    stepUpAction.value = ''
+    if (action === 'save') await performSavePayConfig(stepUp, context)
+    else if (action === 'verify') await performVerifyPayConfig(stepUp, context)
+    else if (action === 'pause') await performPausePay(stepUp, context)
   } finally {
-    stepUpLoading.value = false
+    stepUp.totpCode = ''
+    stepUp.emergencyPassword = ''
+    stepUp.emergencyConfirmation = ''
+    if (isPayConfigSessionCurrent(context)) {
+      stepUpOpen.value = false
+      stepUpAction.value = ''
+      stepUpLoading.value = false
+    }
   }
 }
 
-async function performSavePayConfig(stepUp) {
+async function performSavePayConfig(stepUp, context) {
   savingPay.value = true
   payConfigResult.value = null
   const payload = {
@@ -509,38 +568,52 @@ async function performSavePayConfig(stepUp) {
   if (!payload.wx_public_key_id) delete payload.wx_public_key_id
   if (!payload.wx_public_key) delete payload.wx_public_key
   try {
-    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, payload, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${context.tenantId}/wxpay`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: res.data.data?.verification_invalidated ? '配置已保存并暂停，请重新验证后开启。' : '配置已保存' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-      payConfigForm.wx_api_key_v3 = ''; payConfigForm.wx_cert_serial = ''; payConfigForm.wx_private_key = ''; payConfigForm.wx_public_key = ''; payConfigForm.wx_public_key_id = ''
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '保存失败' }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: res.data.data?.verification_invalidated ? '配置已保存并暂停，请重新验证后开启。' : '配置已保存' }
+        applyPaymentData(payConfigForm, res.data.data)
+        clearPayConfigSecrets()
+        payConfigForm.wx_cert_serial = ''; payConfigForm.wx_public_key = ''; payConfigForm.wx_public_key_id = ''
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '保存失败' }
   } catch (e) {
-    payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '网络错误，请重试' }
-  } finally { savingPay.value = false }
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '网络错误，请重试' }
+  } finally {
+    if ('wx_api_key_v3' in payload) payload.wx_api_key_v3 = ''
+    if ('wx_private_key' in payload) payload.wx_private_key = ''
+    payload.totp_code = ''
+    if (isPayConfigSessionCurrent(context)) savingPay.value = false
+  }
 }
 
-async function performVerifyPayConfig(stepUp) {
+async function performVerifyPayConfig(stepUp, context) {
   verifyingPay.value = true
   payConfigResult.value = null
+  const payload = {
+    reason: stepUp.reason,
+    totp_code: stepUp.totpCode,
+    confirmed: stepUp.confirmed,
+  }
   try {
-    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {
-      reason: stepUp.reason,
-      totp_code: stepUp.totpCode,
-      confirmed: stepUp.confirmed,
-    }, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${context.tenantId}/wxpay/verify`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '验证失败' }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
+        applyPaymentData(payConfigForm, res.data.data)
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '验证失败' }
   } catch (e) {
-    payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '验证失败' }
-  } finally { verifyingPay.value = false }
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '验证失败' }
+  } finally {
+    payload.totp_code = ''
+    if (isPayConfigSessionCurrent(context)) verifyingPay.value = false
+  }
 }
 
-async function performPausePay(stepUp) {
+async function performPausePay(stepUp, context) {
   pausingPay.value = true
   payConfigResult.value = null
   const payload = {
@@ -554,14 +627,22 @@ async function performPausePay(stepUp) {
     })
   } else payload.totp_code = stepUp.totpCode
   try {
-    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, payload, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${context.tenantId}/wxpay/pause`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: '已暂停支付' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '暂停失败' }
-  } catch (e) { payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '暂停失败' } }
-  finally { pausingPay.value = false }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: '已暂停支付' }
+        applyPaymentData(payConfigForm, res.data.data)
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '暂停失败' }
+  } catch (e) {
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '暂停失败' }
+  } finally {
+    if ('totp_code' in payload) payload.totp_code = ''
+    if ('emergency_password' in payload) payload.emergency_password = ''
+    if ('emergency_confirmation' in payload) payload.emergency_confirmation = ''
+    if (isPayConfigSessionCurrent(context)) pausingPay.value = false
+  }
 }
 
 async function seedTestData(merchant) {
@@ -587,7 +668,7 @@ async function toggleStatus(merchant) {
   } catch {}
 }
 
-function logout() { superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
+function logout() { closePayConfig(); superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
 </script>
 
 <style scoped>
