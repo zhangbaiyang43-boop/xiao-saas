@@ -553,7 +553,8 @@ def test_runner_boundary_is_github_hosted_with_read_only_token_and_no_secrets() 
     text = _workflow_text()
 
     assert set(re.findall(r"^\s*runs-on:\s*(\S+)", text, flags=re.MULTILINE)) == {"ubuntu-latest"}
-    assert "self-hosted" not in text
+    code_lines = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("self-hosted" in line for line in code_lines)
     assert "secrets." not in text
     assert "pull_request_target" not in text
     section = text[text.index("\n  keyring-systemd:\n"): text.index("\n  certification-summary:\n")]
