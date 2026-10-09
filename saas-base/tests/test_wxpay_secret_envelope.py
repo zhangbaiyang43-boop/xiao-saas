@@ -25,6 +25,7 @@ from app.core.wxpay_secret_crypto import (
     encrypt_secret,
     envelope_length_for_plaintext,
     get_keyring,
+    initialize_keyring,
     load_keyring,
 )
 from app.services.wxpay_service import WxPayService
@@ -245,6 +246,17 @@ class EnvelopeContractTest(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as executor:
             results = list(executor.map(lambda _: decrypt_secret(envelope, SecretField.API_V3_KEY), range(64)))
         self.assertEqual(results, [API_KEY] * 64)
+
+    def test_startup_initializes_the_process_snapshot_and_missing_file_is_nonfatal(self):
+        from app.main import startup
+
+        self.assertIn("initialize_keyring()", __import__("inspect").getsource(startup))
+        self.assertEqual(initialize_keyring(), "CONFIGURED")
+        self.assertIs(get_keyring(), get_keyring())
+
+        settings.WXPAY_SECRET_KEYRING_PATH = str(self.keyring.path.parent / "missing.json")
+        get_keyring.cache_clear()
+        self.assertEqual(initialize_keyring(), "WXPAY_KEYRING_MISSING")
 
     def test_keyring_rejects_unknown_fields_duplicate_ids_bad_usage_and_insecure_mode(self):
         base_key = Fernet.generate_key().decode()
