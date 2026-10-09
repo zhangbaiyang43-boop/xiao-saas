@@ -175,16 +175,10 @@
 
         <button class="fold-btn tap-shrink" @click="techOpen = !techOpen">{{ techOpen ? '收起技术配置' : '展开技术配置（平台管理员）' }}</button>
         <div v-if="techOpen" class="tech-box animate-in">
-          <div v-if="copySources.length" class="copy-box">
-            <div class="modal-label">从其它商户复制配置</div>
-            <div class="field-hint">已验证过的商户可以直接复制过来，不用逐字段重新抄一遍</div>
-            <div class="copy-row">
-              <select v-model="copySourceId" class="form-input copy-select">
-                <option value="">选择源商户...</option>
-                <option v-for="s in copySources" :key="s.tenant_id" :value="s.tenant_id">{{ s.name }}（{{ statusText(s.payment_status) }}）</option>
-              </select>
-              <button class="copy-btn tap-shrink" :disabled="!copySourceId || copyingPay" @click="confirmCopyPayConfig">{{ copyingPay ? '复制中...' : '复制' }}</button>
-            </div>
+          <div class="copy-box copy-box--disabled">
+            <div class="modal-label">跨商户复制已停用</div>
+            <div class="field-hint">为防止密钥跨商户扩散，请为当前商户单独录入并验证支付凭证。</div>
+            <div class="copy-disabled-code">WXPAY_SECRET_COPY_DISABLED</div>
           </div>
           <div class="modal-label">收款主体</div>
           <input v-model="payConfigForm.receiver_name" class="form-input" placeholder="自动读取失败时可填商户主体名称" />
@@ -216,26 +210,38 @@
         <div v-if="payConfigResult" class="create-result" :class="payConfigResult.ok ? 'ok' : 'err'">{{ payConfigResult.msg }}</div>
         <div class="modal-actions">
           <button class="create-btn tap-shrink" :disabled="savingPay" @click="savePayConfig">{{ savingPay ? '保存中...' : '保存' }}</button>
-          <button class="verify-btn tap-shrink" :class="{ 'verify-btn--pending': payConfigTarget.wx_mchid && !payConfigForm.receiver_verified }" :disabled="verifyingPay || !payConfigTarget.wx_mchid" @click="verifyPayConfig">{{ verifyingPay ? '验证中...' : '验证配置' }}</button>
+          <button class="verify-btn tap-shrink" :class="{ 'verify-btn--pending': hasPayConfig && !payConfigForm.receiver_verified }" :disabled="verifyingPay || !hasPayConfig" @click="verifyPayConfig">{{ verifyingPay ? '验证中...' : '验证配置' }}</button>
         </div>
         <button class="cancel-btn tap-shrink" @click="closePayConfig">关闭</button>
 
         <div class="danger-zone">
           <div class="danger-zone-label">危险操作</div>
-          <button class="pause-btn tap-shrink" :disabled="pausingPay || !payConfigTarget.wx_mchid" @click="confirmPausePay">{{ pausingPay ? '暂停中...' : '暂停支付' }}</button>
+          <button class="pause-btn tap-shrink" :disabled="pausingPay || !hasPayConfig" @click="confirmPausePay">{{ pausingPay ? '暂停中...' : '暂停支付' }}</button>
         </div>
       </div>
     </div>
+
+    <SuperStepUpDialog
+      :open="stepUpOpen"
+      :title="stepUpTitle"
+      :confirm-text="stepUpConfirmText"
+      :loading="stepUpLoading"
+      :allow-emergency="stepUpAction === 'pause'"
+      :exact-confirmation="emergencyConfirmationPhrase"
+      @cancel="closeStepUp"
+      @confirm="confirmStepUp"
+    />
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import superRequest from '../api/superRequest'
 import ChannelPartnerPanel from './super/ChannelPartnerPanel.vue'
 import FulfilmentModeControl from './super/FulfilmentModeControl.vue'
 import ManualPaymentPanel from './super/ManualPaymentPanel.vue'
 import PaymentReadinessPanel from './super/PaymentReadinessPanel.vue'
+import SuperStepUpDialog from '../components/super/SuperStepUpDialog.vue'
 
 const BASE = '/super'
 
@@ -283,6 +289,7 @@ const savingPay = ref(false)
 const verifyingPay = ref(false)
 const pausingPay = ref(false)
 const payConfigResult = ref(null)
+let payConfigSessionId = 0
 const seedingId = ref('')
 const seedResult = ref(null)
 const fulfilmentOpenId = ref('')
@@ -290,12 +297,16 @@ const perfStats = ref([])
 const perfStatsLoading = ref(false)
 const perfStatsError = ref(false)
 const revealedPhones = reactive(new Set())
-const copySourceId = ref('')
-const copyingPay = ref(false)
-
-const copySources = computed(() => merchants.value.filter(m =>
-  m.tenant_id !== payConfigTarget.value?.tenant_id && m.wx_mchid_masked && m.wx_mchid_masked !== '-'
-))
+const stepUpOpen = ref(false)
+const stepUpAction = ref('')
+const stepUpLoading = ref(false)
+const stepUpTitle = computed(() => ({ save: '确认保存支付配置', verify: '确认验证并开启支付', pause: '确认暂停支付' }[stepUpAction.value] || '安全确认'))
+const stepUpConfirmText = computed(() => ({ save: '确认保存', verify: '确认验证', pause: '确认暂停' }[stepUpAction.value] || '确认操作'))
+const emergencyConfirmationPhrase = computed(() => payConfigTarget.value ? `PAUSE_WXPAY:${payConfigTarget.value.tenant_id}` : '')
+const hasPayConfig = computed(() => {
+  const target = payConfigTarget.value
+  return !!target && (!!target.wx_mchid || (!!target.wx_mchid_masked && target.wx_mchid_masked !== '-'))
+})
 
 function superHeaders() { return { 'X-Super-Token': superToken } }
 function fulfilmentModeLabel(mode) { return mode === 'PRINT_FIRST' ? '自动接单' : '手动接单' }
@@ -335,7 +346,52 @@ function applyPaymentData(target, data) {
     verified_time: data.verified_time ?? target.verified_time,
   })
 }
-function closePayConfig() { payConfigTarget.value = null }
+
+function clearPayConfigSecrets(target = payConfigForm) {
+  target.wx_api_key_v3 = ''
+  target.wx_private_key = ''
+}
+
+function payConfigRequestContext() {
+  const target = payConfigTarget.value
+  if (!target) return null
+  return { sessionId: payConfigSessionId, tenantId: target.tenant_id, target }
+}
+
+function isPayConfigSessionCurrent(
+  context,
+  currentSessionId = payConfigSessionId,
+  currentTenantId = payConfigTarget.value?.tenant_id,
+) {
+  return !!context
+    && context.sessionId === currentSessionId
+    && context.tenantId === currentTenantId
+}
+
+function resetPayConfigOperationState() {
+  savingPay.value = false
+  verifyingPay.value = false
+  pausingPay.value = false
+  stepUpLoading.value = false
+}
+
+function closePayConfig() {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+  payConfigTarget.value = null
+  resetPayConfigOperationState()
+}
+
+watch(payConfigTarget, (target) => {
+  if (!target) clearPayConfigSecrets()
+})
+
+onBeforeUnmount(() => {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+})
 
 async function doLogin() {
   if (!needTotp.value && !pwd.value.trim()) return
@@ -425,122 +481,168 @@ async function createMerchant() {
 }
 
 function openPayConfig(m) {
+  payConfigSessionId += 1
+  clearPayConfigSecrets()
+  closeStepUp(true)
+  resetPayConfigOperationState()
   payConfigTarget.value = m
   techOpen.value = false
   payConfigResult.value = null
-  copySourceId.value = ''
   Object.assign(payConfigForm, {
-    wx_mchid: m.wx_mchid || '', wx_mchid_masked: m.wx_mchid_masked || maskMchid(m.wx_mchid), wx_api_key_v3: '', wx_cert_serial: '', wx_private_key: '', wx_pay_enabled: m.wx_pay_enabled ?? true,
+    wx_mchid: m.wx_mchid || '', wx_mchid_masked: m.wx_mchid_masked || maskMchid(m.wx_mchid), wx_api_key_v3: '', wx_cert_serial: '', wx_private_key: '', wx_public_key_id: '', wx_public_key: '', wx_pay_enabled: m.wx_pay_enabled ?? true,
     receiver_name: m.receiver_name || m.name || '', receiver_type: m.receiver_type || 'enterprise', receiver_verified: !!m.receiver_verified,
     payment_locked: m.payment_locked ?? true, payment_status: m.payment_status || 'unconfigured', verified_time: m.verified_time || '',
   })
 }
 
-async function savePayConfig() {
-  if (!payConfigForm.wx_mchid.trim() || !payConfigForm.wx_api_key_v3.trim() || !payConfigForm.wx_cert_serial.trim() || !payConfigForm.wx_private_key.trim()) {
-    payConfigResult.value = { ok: false, msg: '请完整填写技术配置后保存' }
+function openStepUp(action) {
+  if (!totpEnabled.value && action !== 'pause') {
+    payConfigResult.value = { ok: false, msg: '动态口令未配置，敏感操作已锁定' }
+    return
+  }
+  stepUpAction.value = action
+  stepUpOpen.value = true
+}
+
+function closeStepUp(force = false) {
+  if (stepUpLoading.value && !force) return
+  stepUpOpen.value = false
+  stepUpAction.value = ''
+  if (force) stepUpLoading.value = false
+}
+
+function savePayConfig() {
+  const isNew = payConfigForm.payment_status === 'unconfigured'
+  if (isNew && (!payConfigForm.wx_mchid.trim() || !payConfigForm.wx_api_key_v3.trim() || !payConfigForm.wx_cert_serial.trim() || !payConfigForm.wx_private_key.trim())) {
+    payConfigResult.value = { ok: false, msg: '首次配置请完整填写商户号、APIv3 密钥、证书序列号和私钥' }
     techOpen.value = true
     return
   }
+  openStepUp('save')
+}
+
+function verifyPayConfig() { openStepUp('verify') }
+function confirmPausePay() { openStepUp('pause') }
+
+async function confirmStepUp(stepUp) {
+  const context = payConfigRequestContext()
+  const action = stepUpAction.value
+  if (!context || !action) return
+  stepUpLoading.value = true
+  try {
+    if (action === 'save') await performSavePayConfig(stepUp, context)
+    else if (action === 'verify') await performVerifyPayConfig(stepUp, context)
+    else if (action === 'pause') await performPausePay(stepUp, context)
+  } finally {
+    stepUp.totpCode = ''
+    stepUp.emergencyPassword = ''
+    stepUp.emergencyConfirmation = ''
+    if (isPayConfigSessionCurrent(context)) {
+      stepUpOpen.value = false
+      stepUpAction.value = ''
+      stepUpLoading.value = false
+    }
+  }
+}
+
+async function performSavePayConfig(stepUp, context) {
   savingPay.value = true
   payConfigResult.value = null
+  const payload = {
+    wx_mchid: payConfigForm.wx_mchid.trim(),
+    wx_api_key_v3: payConfigForm.wx_api_key_v3.trim(),
+    wx_cert_serial: payConfigForm.wx_cert_serial.trim(),
+    wx_private_key: payConfigForm.wx_private_key.trim(),
+    wx_public_key_id: payConfigForm.wx_public_key_id.trim(),
+    wx_public_key: payConfigForm.wx_public_key.trim(),
+    receiver_name: payConfigForm.receiver_name.trim(),
+    receiver_type: payConfigForm.receiver_type,
+    reason: stepUp.reason,
+    totp_code: stepUp.totpCode,
+    confirmed: stepUp.confirmed,
+  }
+  if (!payload.wx_mchid) delete payload.wx_mchid
+  if (!payload.wx_api_key_v3) delete payload.wx_api_key_v3
+  if (!payload.wx_cert_serial) delete payload.wx_cert_serial
+  if (!payload.wx_private_key) delete payload.wx_private_key
+  if (!payload.wx_public_key_id) delete payload.wx_public_key_id
+  if (!payload.wx_public_key) delete payload.wx_public_key
   try {
-    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay`, {
-      wx_mchid: payConfigForm.wx_mchid.trim(),
-      wx_api_key_v3: payConfigForm.wx_api_key_v3.trim(),
-      wx_cert_serial: payConfigForm.wx_cert_serial.trim(),
-      wx_private_key: payConfigForm.wx_private_key.trim(),
-      wx_public_key_id: payConfigForm.wx_public_key_id.trim() || null,
-      wx_public_key: payConfigForm.wx_public_key.trim() || null,
-      wx_pay_enabled: true,
-      receiver_name: payConfigForm.receiver_name.trim(),
-      receiver_type: payConfigForm.receiver_type,
-    }, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${context.tenantId}/wxpay`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: '保存成功，请继续验证配置' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-      payConfigForm.wx_api_key_v3 = ''; payConfigForm.wx_cert_serial = ''; payConfigForm.wx_private_key = ''; payConfigForm.wx_public_key = ''
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '保存失败' }
-  } catch (e) { payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || e?.response?.data?.detail?.message || '网络错误，请重试' } }
-  finally { savingPay.value = false }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: res.data.data?.verification_invalidated ? '配置已保存并暂停，请重新验证后开启。' : '配置已保存' }
+        applyPaymentData(payConfigForm, res.data.data)
+        clearPayConfigSecrets()
+        payConfigForm.wx_cert_serial = ''; payConfigForm.wx_public_key = ''; payConfigForm.wx_public_key_id = ''
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '保存失败' }
+  } catch (e) {
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '网络错误，请重试' }
+  } finally {
+    if ('wx_api_key_v3' in payload) payload.wx_api_key_v3 = ''
+    if ('wx_private_key' in payload) payload.wx_private_key = ''
+    payload.totp_code = ''
+    if (isPayConfigSessionCurrent(context)) savingPay.value = false
+  }
 }
 
-async function verifyPayConfig() {
+async function performVerifyPayConfig(stepUp, context) {
   verifyingPay.value = true
   payConfigResult.value = null
-  try {
-    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/verify`, {}, { headers: superHeaders() })
-    if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-      payConfigForm.wx_api_key_v3 = ''; payConfigForm.wx_cert_serial = ''; payConfigForm.wx_private_key = ''; payConfigForm.wx_public_key = ''
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '验证失败' }
-  } catch (e) {
-    const detail = e?.response?.data?.detail
-    const msg = detail?.message || e?.response?.data?.msg || '验证失败'
-    payConfigResult.value = { ok: false, msg }
+  const payload = {
+    reason: stepUp.reason,
+    totp_code: stepUp.totpCode,
+    confirmed: stepUp.confirmed,
   }
-  finally { verifyingPay.value = false }
-}
-
-function _promptTotpCode() {
-  if (!totpEnabled.value) return ''
-  const code = window.prompt('请输入认证器 App 里的 6 位动态口令完成二次验证') || ''
-  return code.trim()
-}
-
-function confirmCopyPayConfig() {
-  if (!copySourceId.value) return
-  const source = merchants.value.find(m => m.tenant_id === copySourceId.value)
-  const sourceName = source?.name || copySourceId.value
-  const targetName = payConfigTarget.value.name
-  if (!window.confirm(`确定要把「${sourceName}」的支付配置复制到「${targetName}」吗？\n复制后需要重新点击"验证配置"。`)) return
-  const totp = _promptTotpCode()
-  if (totpEnabled.value && !totp) return
-  copyPayConfig(totp)
-}
-
-async function copyPayConfig(totpCodeInput = '') {
-  copyingPay.value = true
-  payConfigResult.value = null
   try {
-    const res = await superRequest.post(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/copy-from`, {
-      source_tenant_id: copySourceId.value,
-      totp_code: totpCodeInput || undefined,
-    }, { headers: superHeaders() })
+    const res = await superRequest.post(`${BASE}/merchants/${context.tenantId}/wxpay/verify`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: res.data?.msg || '复制成功，请继续验证配置' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-      copySourceId.value = ''
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '复制失败' }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: res.data?.msg || '验证通过' }
+        applyPaymentData(payConfigForm, res.data.data)
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '验证失败' }
   } catch (e) {
-    payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '网络错误，请重试' }
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '验证失败' }
+  } finally {
+    payload.totp_code = ''
+    if (isPayConfigSessionCurrent(context)) verifyingPay.value = false
   }
-  finally { copyingPay.value = false }
 }
 
-function confirmPausePay() {
-  if (!window.confirm(`确定要暂停「${payConfigTarget.value.name}」的收款吗？暂停后顾客将无法在线支付。`)) return
-  const totp = _promptTotpCode()
-  if (totpEnabled.value && !totp) return
-  pausePay(totp)
-}
-
-async function pausePay(totpCodeInput = '') {
+async function performPausePay(stepUp, context) {
   pausingPay.value = true
   payConfigResult.value = null
+  const payload = {
+    reason: stepUp.reason,
+    confirmed: stepUp.confirmed,
+  }
+  if (stepUp.emergency) {
+    Object.assign(payload, {
+      emergency_password: stepUp.emergencyPassword,
+      emergency_confirmation: stepUp.emergencyConfirmation,
+    })
+  } else payload.totp_code = stepUp.totpCode
   try {
-    const res = await superRequest.patch(`${BASE}/merchants/${payConfigTarget.value.tenant_id}/wxpay/pause`, { totp_code: totpCodeInput || undefined }, { headers: superHeaders() })
+    const res = await superRequest.patch(`${BASE}/merchants/${context.tenantId}/wxpay/pause`, payload, { headers: superHeaders() })
     if (res.data?.code === 200) {
-      payConfigResult.value = { ok: true, msg: '已暂停支付' }
-      applyPaymentData(payConfigTarget.value, res.data.data)
-      applyPaymentData(payConfigForm, res.data.data)
-    } else payConfigResult.value = { ok: false, msg: res.data?.msg || '暂停失败' }
-  } catch (e) { payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '暂停失败' } }
-  finally { pausingPay.value = false }
+      applyPaymentData(context.target, res.data.data)
+      if (isPayConfigSessionCurrent(context)) {
+        payConfigResult.value = { ok: true, msg: '已暂停支付' }
+        applyPaymentData(payConfigForm, res.data.data)
+      }
+    } else if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: res.data?.msg || '暂停失败' }
+  } catch (e) {
+    if (isPayConfigSessionCurrent(context)) payConfigResult.value = { ok: false, msg: e?.response?.data?.msg || '暂停失败' }
+  } finally {
+    if ('totp_code' in payload) payload.totp_code = ''
+    if ('emergency_password' in payload) payload.emergency_password = ''
+    if ('emergency_confirmation' in payload) payload.emergency_confirmation = ''
+    if (isPayConfigSessionCurrent(context)) pausingPay.value = false
+  }
 }
 
 async function seedTestData(merchant) {
@@ -566,7 +668,7 @@ async function toggleStatus(merchant) {
   } catch {}
 }
 
-function logout() { superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
+function logout() { closePayConfig(); superToken = ''; authed.value = false; pwd.value = ''; needTotp.value = false; totpCode.value = '' }
 </script>
 
 <style scoped>
@@ -680,6 +782,8 @@ function logout() { superToken = ''; authed.value = false; pwd.value = ''; needT
 .fold-btn { width: 100%; height: 40px; margin-top: 12px; font-weight: 800; }
 .tech-box { display: grid; gap: 8px; margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--bg-page); }
 .copy-box { padding: 10px; margin-bottom: 4px; border: 1px dashed var(--brand-mid); border-radius: 10px; background: var(--brand-light); }
+.copy-box--disabled { border-color: #d9d9d9; background: #fafafa; }
+.copy-disabled-code { margin-top: 6px; color: #8c8c8c; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .copy-row { display: flex; gap: 8px; }
 .copy-select { flex: 1; height: 40px; }
 .copy-btn { flex: none; height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; font-weight: 800; font-size: 13px; cursor: pointer; }
