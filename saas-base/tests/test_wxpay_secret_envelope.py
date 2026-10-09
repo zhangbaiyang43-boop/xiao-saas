@@ -251,12 +251,16 @@ class EnvelopeContractTest(unittest.TestCase):
         from app.main import startup
 
         self.assertIn("initialize_keyring()", __import__("inspect").getsource(startup))
-        self.assertEqual(initialize_keyring(), "CONFIGURED")
+        configured_status = initialize_keyring()
+        self.assertEqual(configured_status, "CONFIGURED")
+        self.assertNotIn(str(self.keyring.path), configured_status)
         self.assertIs(get_keyring(), get_keyring())
 
         settings.WXPAY_SECRET_KEYRING_PATH = str(self.keyring.path.parent / "missing.json")
         get_keyring.cache_clear()
-        self.assertEqual(initialize_keyring(), "WXPAY_KEYRING_MISSING")
+        missing_status = initialize_keyring()
+        self.assertEqual(missing_status, "WXPAY_KEYRING_MISSING")
+        self.assertNotIn(str(self.keyring.path), missing_status)
 
     def test_keyring_rejects_unknown_fields_duplicate_ids_bad_usage_and_insecure_mode(self):
         base_key = Fernet.generate_key().decode()
