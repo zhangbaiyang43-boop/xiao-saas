@@ -10,7 +10,8 @@ set -u
 
 SAAS_BASE="$(cd "${1:?usage: $0 <saas-base>}" && pwd)"
 PY="$(python -c 'import os,sys; print(os.path.realpath(sys.executable))')"
-WORK=/opt/wxpay-keyring-gate
+# /opt is world-writable on GitHub runners, which the policy correctly rejects.
+WORK=/var/lib/wxpay-keyring-gate
 FAILED=0
 N=0
 
@@ -73,6 +74,11 @@ scenario() { # scenario <label> <expected RESULT> <keyring path> [extra systemd-
     FAILED=1
   fi
 }
+
+# Diagnostic only: how systemd really materializes a LoadCredential file for User=nobody.
+sudo systemd-run --quiet --wait --pipe --collect --unit=wxpay-keyring-gate-diag \
+  -p User=nobody -p LoadCredential="wxpay-keyring:$WORK/root-dir/keyring.json" \
+  /bin/sh -c 'echo "CREDENTIALS_DIRECTORY=$CREDENTIALS_DIRECTORY euid=$(id -u)"; stat -c "DIAG %u:%g %a %h %n" "$CREDENTIALS_DIRECTORY" "$CREDENTIALS_DIRECTORY"/wxpay-keyring; ls -ldn /run /run/credentials; getfacl -p "$CREDENTIALS_DIRECTORY"/wxpay-keyring 2>&1 || true' 2>&1 | sed 's/^/      diag: /'
 
 # Source A: root-only original file, service runs as root.
 scenario "root service, root-only file" CONFIGURED "$WORK/root-dir/keyring.json"
