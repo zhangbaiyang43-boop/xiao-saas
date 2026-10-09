@@ -8,6 +8,15 @@
 # asserts which keyring sources are trusted. Synthetic keys only.
 set -u
 
+# This script runs candidate code as root. It is only acceptable on an ephemeral
+# GitHub-hosted runner that holds no production credential, so refuse anywhere else
+# before doing anything privileged.
+if [ "${GITHUB_ACTIONS:-}" != "true" ] || [ "${RUNNER_ENVIRONMENT:-}" != "github-hosted" ]; then
+  echo "REFUSING: must run on a GitHub-hosted runner (GITHUB_ACTIONS=${GITHUB_ACTIONS:-} RUNNER_ENVIRONMENT=${RUNNER_ENVIRONMENT:-})" >&2
+  echo "KEYRING_SYSTEMD_GATE=REFUSED"
+  exit 1
+fi
+
 SAAS_BASE="$(cd "${1:?usage: $0 <saas-base>}" && pwd)"
 PY="$(python -c 'import os,sys; print(os.path.realpath(sys.executable))')"
 # /opt is world-writable on GitHub runners, which the policy correctly rejects.

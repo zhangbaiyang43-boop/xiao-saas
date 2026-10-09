@@ -21,9 +21,6 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
-    paths:
-      - 'saas-base/**'
-      - '.github/workflows/backend-candidate-certification.yml'
   workflow_dispatch:
     inputs:
       target_ref:
@@ -55,14 +52,56 @@ env:
   JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
 
 jobs:
+  scope:
+    name: Certification scope and identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
+      pr_identity_gate: ${{ steps.pr_identity.outputs.result }}
+      scope: ${{ steps.classify.outputs.scope }}
+      authority_changed: ${{ steps.classify.outputs.authority_changed }}
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ env.TARGET_REF }}
+          fetch-depth: 2 # the merge commit's parents are needed for the real PR diff
+
+      - name: Identity proof
+        id: identity
+        run: |
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "CHECKED_OUT_SHA=${CHECKED_OUT_SHA}"
+          echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
+          test -z "$(git status --porcelain)"
+
+      - name: Checkout CI infra ref (authority scripts)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: infra
+
+      - name: PR merge-ref identity gate
+        id: pr_identity
+        working-directory: ${{ github.workspace }}
+        run: bash "${{ github.workspace }}/infra/.github/scripts/verify_certification_identity.sh"
+
+      - name: Classify the PR from its real file diff
+        id: classify
+        working-directory: ${{ github.workspace }}
+        run: bash "${{ github.workspace }}/infra/.github/scripts/classify_certification_scope.sh"
+
   gate-a:
     name: Gate A (candidate's own new/changed backend tests)
     runs-on: ubuntu-latest
+    needs: [scope]
+    if: ${{ needs.scope.outputs.scope != 'NOT_APPLICABLE' }}
     timeout-minutes: 30
     outputs:
       checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
       pr_identity_gate: ${{ steps.pr_identity.outputs.result }}
-      authority_changed: ${{ steps.authority_changed.outputs.result }}
     steps:
       - name: Checkout target ref (candidate under test)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -108,20 +147,6 @@ jobs:
         id: pr_identity
         working-directory: target
         run: bash "${{ github.workspace }}/infra/.github/scripts/verify_certification_identity.sh"
-
-      - name: Detect PR changes to CI authority files
-        id: authority_changed
-        if: ${{ env.CERT_EVENT == 'pull_request' }}
-        working-directory: target
-        run: |
-          # A pull_request run executes the workflow and scripts from the PR's own
-          # merge commit. If the PR changes any of them it is certifying itself, so
-          # the summary fails closed and the change needs manual bootstrap review.
-          if git diff --quiet HEAD^1 HEAD -- .github/workflows/backend-candidate-certification.yml .github/scripts; then
-            echo "result=NO" >> "$GITHUB_OUTPUT"
-          else
-            echo "result=YES" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -208,6 +233,8 @@ jobs:
   gate-b:
     name: Gate B (cumulative P0 contracts + static core regression)
     runs-on: ubuntu-latest
+    needs: [scope]
+    if: ${{ needs.scope.outputs.scope != 'NOT_APPLICABLE' }}
     timeout-minutes: 60
     outputs:
       checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
@@ -322,6 +349,8 @@ jobs:
   full:
     name: Backend Full (serial, authoritative -- same semantics as backend-full.yml)
     runs-on: ubuntu-latest
+    needs: [scope]
+    if: ${{ needs.scope.outputs.scope != 'NOT_APPLICABLE' }}
     timeout-minutes: 120
     outputs:
       checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
@@ -405,6 +434,8 @@ jobs:
   mysql-schema:
     name: MySQL 5.7 schema convergence
     runs-on: ubuntu-latest
+    needs: [scope]
+    if: ${{ needs.scope.outputs.scope != 'NOT_APPLICABLE' }}
     timeout-minutes: 30
     outputs:
       checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
@@ -485,11 +516,17 @@ jobs:
       - name: Verify Alembic convergence on MySQL 5.7
         if: steps.activation.outputs.result == 'ACTIVE'
         working-directory: saas-base
-        run: git ls-files 'tests/test_*_schema_mysql.py' | xargs python -m pytest -q -W error::RuntimeWarning
+        run: git ls-files -z 'tests/test_*_schema_mysql.py' | xargs -0 python -m pytest -q -W error::RuntimeWarning
 
   keyring-systemd:
     name: Keyring source policy under real systemd
     runs-on: ubuntu-latest
+    # Runs candidate code as root: GitHub-hosted ephemeral runner only (never self-hosted),
+    # read-only token, no secrets, no production network access.
+    permissions:
+      contents: read
+    needs: [scope]
+    if: ${{ needs.scope.outputs.scope != 'NOT_APPLICABLE' }}
     timeout-minutes: 15
     outputs:
       checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
@@ -559,21 +596,26 @@ jobs:
     name: Certification summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [gate-a, gate-b, full, mysql-schema, keyring-systemd]
+    needs: [scope, gate-a, gate-b, full, mysql-schema, keyring-systemd]
     if: always()
     steps:
       - name: Report candidate certification status
         env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE: ${{ needs.scope.outputs.scope }}
+          AUTHORITY_CHANGED_BY_PR: ${{ needs.scope.outputs.authority_changed }}
           GATE_A_RESULT: ${{ needs.gate-a.result }}
           GATE_B_RESULT: ${{ needs.gate-b.result }}
           FULL_RESULT: ${{ needs.full.result }}
           MYSQL_SCHEMA_RESULT: ${{ needs.mysql-schema.result }}
           KEYRING_SYSTEMD_RESULT: ${{ needs.keyring-systemd.result }}
+          SCOPE_CHECKED_OUT_SHA: ${{ needs.scope.outputs.checked_out_sha }}
           GATE_A_CHECKED_OUT_SHA: ${{ needs.gate-a.outputs.checked_out_sha }}
           GATE_B_CHECKED_OUT_SHA: ${{ needs.gate-b.outputs.checked_out_sha }}
           FULL_CHECKED_OUT_SHA: ${{ needs.full.outputs.checked_out_sha }}
           MYSQL_SCHEMA_CHECKED_OUT_SHA: ${{ needs.mysql-schema.outputs.checked_out_sha }}
           KEYRING_SYSTEMD_CHECKED_OUT_SHA: ${{ needs.keyring-systemd.outputs.checked_out_sha }}
+          SCOPE_IDENTITY: ${{ needs.scope.outputs.pr_identity_gate }}
           GATE_A_IDENTITY: ${{ needs.gate-a.outputs.pr_identity_gate }}
           GATE_B_IDENTITY: ${{ needs.gate-b.outputs.pr_identity_gate }}
           FULL_IDENTITY: ${{ needs.full.outputs.pr_identity_gate }}
@@ -581,18 +623,14 @@ jobs:
           KEYRING_SYSTEMD_IDENTITY: ${{ needs.keyring-systemd.outputs.pr_identity_gate }}
           MYSQL_ACTIVATION: ${{ needs.mysql-schema.outputs.activation }}
           SYSTEMD_ACTIVATION: ${{ needs.keyring-systemd.outputs.activation }}
-          AUTHORITY_CHANGED_BY_PR: ${{ needs.gate-a.outputs.authority_changed }}
         run: |
           echo "CERT_EVENT=${CERT_EVENT}"
           echo "TARGET_REF=${TARGET_REF}"
           echo "PR_HEAD_SHA=${PR_HEAD_SHA}"
           echo "PR_BASE_SHA=${PR_BASE_SHA}"
-          echo "CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}"
-          echo "GATE_A_CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}"
-          echo "GATE_B_CHECKED_OUT_SHA=${GATE_B_CHECKED_OUT_SHA}"
-          echo "FULL_CHECKED_OUT_SHA=${FULL_CHECKED_OUT_SHA}"
-          echo "MYSQL_SCHEMA_CHECKED_OUT_SHA=${MYSQL_SCHEMA_CHECKED_OUT_SHA}"
-          echo "KEYRING_SYSTEMD_CHECKED_OUT_SHA=${KEYRING_SYSTEMD_CHECKED_OUT_SHA}"
+          echo "CERT_SCOPE=${SCOPE}"
+          echo "SCOPE_JOB=${SCOPE_RESULT}"
+          echo "CHECKED_OUT_SHA=${SCOPE_CHECKED_OUT_SHA}"
           echo "GATE_A=${GATE_A_RESULT}"
           echo "GATE_B=${GATE_B_RESULT}"
           echo "FULL=${FULL_RESULT}"
@@ -603,41 +641,71 @@ jobs:
           echo "SYSTEMD_ACTIVATION=${SYSTEMD_ACTIVATION}"
           FAILED=0
 
-          # 1. Every required job must have succeeded; failure, cancelled and
-          #    skipped all fail closed.
-          for result in "$GATE_A_RESULT" "$GATE_B_RESULT" "$FULL_RESULT" "$MYSQL_SCHEMA_RESULT" "$KEYRING_SYSTEMD_RESULT"; do
-            [ "$result" = "success" ] || FAILED=1
-          done
+          # 0. The scope job decides applicability; without a clean verdict nothing passes.
+          [ "$SCOPE_RESULT" = "success" ] || FAILED=1
+          case "$SCOPE" in
+            AUTHORITY|BACKEND|NOT_APPLICABLE) ;;
+            *) FAILED=1 ;;
+          esac
 
-          # 2. All jobs must have certified the same commit.
-          if [ -z "$GATE_A_CHECKED_OUT_SHA" ] || \
-             [ "$GATE_A_CHECKED_OUT_SHA" != "$GATE_B_CHECKED_OUT_SHA" ] || \
-             [ "$GATE_A_CHECKED_OUT_SHA" != "$FULL_CHECKED_OUT_SHA" ] || \
-             [ "$GATE_A_CHECKED_OUT_SHA" != "$MYSQL_SCHEMA_CHECKED_OUT_SHA" ] || \
-             [ "$GATE_A_CHECKED_OUT_SHA" != "$KEYRING_SYSTEMD_CHECKED_OUT_SHA" ]; then
-            echo "CERTIFICATION_CHECKOUT_SHA_MISMATCH"
-            FAILED=1
-          fi
-
-          # 3. Identity gate: every job must report the result the event demands.
+          # 1. Identity: every job that ran must report what the event demands.
           if [ "$CERT_EVENT" = "pull_request" ]; then
             EXPECTED_IDENTITY=PASS
           else
             EXPECTED_IDENTITY=NOT_APPLICABLE
             echo "PR_MERGE_REF_CERTIFIED=NO"
+            [ "$SCOPE" != "NOT_APPLICABLE" ] || FAILED=1
           fi
+          [ "$SCOPE_IDENTITY" = "$EXPECTED_IDENTITY" ] || FAILED=1
+
+          if [ "$SCOPE" = "NOT_APPLICABLE" ]; then
+            # 2a. Only a pull request whose every path is on the unrelated allowlist.
+            #     Every authoritative job must have been skipped, none may have run.
+            for result in "$GATE_A_RESULT" "$GATE_B_RESULT" "$FULL_RESULT" "$MYSQL_SCHEMA_RESULT" "$KEYRING_SYSTEMD_RESULT"; do
+              [ "$result" = "skipped" ] || FAILED=1
+            done
+            echo "B1_REQUIRED_TESTS_ACTIVE=NO"
+            if [ "$FAILED" -eq 0 ]; then
+              echo "PR_IDENTITY_GATE=${EXPECTED_IDENTITY}"
+              echo "CERTIFICATION_SUMMARY=PASS"
+              echo "CANDIDATE_CERTIFIED=NOT_APPLICABLE"
+              exit 0
+            fi
+            echo "CERTIFICATION_SUMMARY=FAIL"
+            echo "CANDIDATE_CERTIFIED=NO"
+            exit 1
+          fi
+
+          # 2b. Backend/authority scope: every required job must have succeeded;
+          #     failure, cancelled and skipped all fail closed.
+          for result in "$GATE_A_RESULT" "$GATE_B_RESULT" "$FULL_RESULT" "$MYSQL_SCHEMA_RESULT" "$KEYRING_SYSTEMD_RESULT"; do
+            [ "$result" = "success" ] || FAILED=1
+          done
+
+          # 3. All jobs must have certified the same commit.
+          if [ -z "$SCOPE_CHECKED_OUT_SHA" ] || \
+             [ "$SCOPE_CHECKED_OUT_SHA" != "$GATE_A_CHECKED_OUT_SHA" ] || \
+             [ "$SCOPE_CHECKED_OUT_SHA" != "$GATE_B_CHECKED_OUT_SHA" ] || \
+             [ "$SCOPE_CHECKED_OUT_SHA" != "$FULL_CHECKED_OUT_SHA" ] || \
+             [ "$SCOPE_CHECKED_OUT_SHA" != "$MYSQL_SCHEMA_CHECKED_OUT_SHA" ] || \
+             [ "$SCOPE_CHECKED_OUT_SHA" != "$KEYRING_SYSTEMD_CHECKED_OUT_SHA" ]; then
+            echo "CERTIFICATION_CHECKOUT_SHA_MISMATCH"
+            FAILED=1
+          fi
+
+          # 4. Identity outputs of all executing jobs.
           IDENTITY_OK=1
           for gate in "$GATE_A_IDENTITY" "$GATE_B_IDENTITY" "$FULL_IDENTITY" "$MYSQL_SCHEMA_IDENTITY" "$KEYRING_SYSTEMD_IDENTITY"; do
             [ "$gate" = "$EXPECTED_IDENTITY" ] || IDENTITY_OK=0
           done
-          if [ "$IDENTITY_OK" -ne 1 ]; then
+          if [ "$IDENTITY_OK" -ne 1 ] || [ "$SCOPE_IDENTITY" != "$EXPECTED_IDENTITY" ]; then
             echo "PR_IDENTITY_GATE=FAIL"
             FAILED=1
           else
             echo "PR_IDENTITY_GATE=${EXPECTED_IDENTITY}"
           fi
 
-          # 4. Capability gates must report an explicit activation state. A gate
+          # 5. Capability gates must report an explicit activation state. A gate
           #    that is not yet active on this baseline is reported, never counted
           #    as verification.
           for activation in "$MYSQL_ACTIVATION" "$SYSTEMD_ACTIVATION"; do
@@ -652,10 +720,11 @@ jobs:
             echo "B1_REQUIRED_TESTS_ACTIVE=NO"
           fi
 
-          # 5. A PR must not alter the files that certify it.
+          # 6. A PR must not alter the files that certify it.
           if [ "$CERT_EVENT" = "pull_request" ]; then
-            echo "CI_AUTHORITY_CHANGED_BY_PR=${AUTHORITY_CHANGED_BY_PR:-UNKNOWN}"
-            if [ "${AUTHORITY_CHANGED_BY_PR:-UNKNOWN}" != "NO" ]; then
+            echo "CI_AUTHORITY_CHANGE=${AUTHORITY_CHANGED_BY_PR:-UNKNOWN}"
+            if [ "$SCOPE" = "AUTHORITY" ] || [ "${AUTHORITY_CHANGED_BY_PR:-UNKNOWN}" != "NO" ]; then
+              echo "PR_GATE_AUTHORITY=NOT_INDEPENDENT"
               echo "CI_AUTHORITY_CHANGE_REQUIRES_MANUAL_BOOTSTRAP_REVIEW"
               FAILED=1
             fi

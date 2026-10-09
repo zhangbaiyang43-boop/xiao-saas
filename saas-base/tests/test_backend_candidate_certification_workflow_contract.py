@@ -44,8 +44,8 @@ def test_backend_candidate_certification_normalizes_event_identity_once() -> Non
     assert "github.event.pull_request.head.sha" in text
     assert "PR_BASE_SHA: ${{ github.event_name == 'pull_request'" in text
     assert "github.event.pull_request.base.sha" in text
-    assert text.count("ref: ${{ env.TARGET_REF }}") == 5
-    assert "CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}" in text
+    assert text.count("ref: ${{ env.TARGET_REF }}") == 6
+    assert "CHECKED_OUT_SHA=${SCOPE_CHECKED_OUT_SHA}" in text
     assert "CERTIFICATION_CHECKOUT_SHA_MISMATCH" in text
 
 
@@ -61,7 +61,7 @@ def test_backend_candidate_certification_keeps_all_authoritative_gates() -> None
     assert "python -m pytest tests/ -q -W error::RuntimeWarning" in text
     assert "MySQL 5.7 schema convergence" in text
     assert "Verify Alembic convergence on MySQL 5.7" in text
-    assert "needs: [gate-a, gate-b, full, mysql-schema, keyring-systemd]" in text
+    assert "needs: [scope, gate-a, gate-b, full, mysql-schema, keyring-systemd]" in text
     assert "CANDIDATE_CERTIFIED=YES" in text
     assert "CERTIFICATION_SUMMARY=PASS" in text
     assert "CERTIFICATION_SUMMARY=FAIL" in text
@@ -76,10 +76,10 @@ GIT = shutil.which("git")
 def test_every_authoritative_job_runs_the_identity_gate_and_summary_requires_it() -> None:
     text = _workflow_text()
 
-    assert text.count("name: PR merge-ref identity gate") == 5
-    assert text.count("verify_certification_identity.sh") == 5
-    assert text.count("pr_identity_gate: ${{ steps.pr_identity.outputs.result }}") == 5
-    for job in ("gate-a", "gate-b", "full", "mysql-schema", "keyring-systemd"):
+    assert text.count("name: PR merge-ref identity gate") == 6
+    assert text.count("verify_certification_identity.sh") == 6
+    assert text.count("pr_identity_gate: ${{ steps.pr_identity.outputs.result }}") == 6
+    for job in ("scope", "gate-a", "gate-b", "full", "mysql-schema", "keyring-systemd"):
         assert f"needs.{job}.outputs.pr_identity_gate" in text
     assert "EXPECTED_IDENTITY=PASS" in text
     assert "EXPECTED_IDENTITY=NOT_APPLICABLE" in text
@@ -283,6 +283,9 @@ def _summary_env(event: str = "pull_request", **overrides: str) -> dict:
         "TARGET_REF": "refs/pull/1/merge" if is_pr else SHA,
         "PR_HEAD_SHA": "b" * 40 if is_pr else "",
         "PR_BASE_SHA": "c" * 40 if is_pr else "",
+        "SCOPE_RESULT": "success",
+        "SCOPE": "BACKEND",
+        "SCOPE_CHECKED_OUT_SHA": SHA,
         "GATE_A_RESULT": "success",
         "GATE_B_RESULT": "success",
         "FULL_RESULT": "success",
@@ -298,7 +301,7 @@ def _summary_env(event: str = "pull_request", **overrides: str) -> dict:
         "AUTHORITY_CHANGED_BY_PR": "NO" if is_pr else "",
     }
     identity = "PASS" if is_pr else "NOT_APPLICABLE"
-    for job in ("GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
+    for job in ("SCOPE", "GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
         env[f"{job}_IDENTITY"] = identity
     env.update(overrides)
     return env
@@ -337,14 +340,14 @@ class TestCertificationSummaryFailsClosed:
         assert _run_summary(KEYRING_SYSTEMD_RESULT="failure").returncode == 1
 
     def test_checkout_identity_mismatch_in_any_job_fails(self):
-        for job in ("GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
+        for job in ("SCOPE", "GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
             result = _run_summary(**{f"{job}_CHECKED_OUT_SHA": "d" * 40})
             assert result.returncode == 1, job
             assert "CERTIFICATION_CHECKOUT_SHA_MISMATCH" in result.stdout
         assert _run_summary(GATE_A_CHECKED_OUT_SHA="").returncode == 1
 
     def test_identity_gate_output_must_match_the_event_in_every_job(self):
-        for job in ("GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
+        for job in ("SCOPE", "GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
             for value in ("FAIL", "", "NOT_APPLICABLE"):
                 result = _run_summary(**{f"{job}_IDENTITY": value})
                 assert result.returncode == 1, (job, value)
@@ -510,6 +513,324 @@ def test_authority_scripts_always_come_from_the_infra_checkout_never_the_candida
 
     assert "${{ github.workspace }}/.github/scripts" not in text
     assert "bash .github/scripts" not in text
-    assert text.count("name: Checkout CI infra ref") == 5
+    assert text.count("name: Checkout CI infra ref") == 6
     assert text.count("infra/.github/scripts/") >= 7
     assert "bash infra/.github/scripts/verify_keyring_systemd.sh saas-base" in text
+
+
+# ---------------------------------------------------------------------------
+# Trigger / applicability matrix (P1) and authority protected paths (P2)
+# ---------------------------------------------------------------------------
+
+CLASSIFY_SCRIPT = REPO_ROOT / ".github" / "scripts" / "classify_certification_scope.sh"
+KEYRING_SYSTEMD_SCRIPT = REPO_ROOT / ".github" / "scripts" / "verify_keyring_systemd.sh"
+
+
+def test_pull_request_trigger_has_no_paths_filter() -> None:
+    text = _workflow_text()
+    start = text.index("on:\n  pull_request:\n")
+    block = text[start: text.index("  workflow_dispatch:", start)]
+
+    assert "paths" not in block
+    assert "branches: [main]" in block
+    assert "types: [opened, synchronize, reopened]" in block
+
+
+def test_every_authoritative_job_depends_on_the_scope_verdict() -> None:
+    text = _workflow_text()
+
+    for job in ("gate-a", "gate-b", "full", "mysql-schema", "keyring-systemd"):
+        section = text[text.index(f"\n  {job}:\n"):]
+        header = section[: section.index("    steps:")]
+        assert "needs: [scope]" in header, job
+        assert "needs.scope.outputs.scope != 'NOT_APPLICABLE'" in header, job
+    assert "needs: [scope, gate-a, gate-b, full, mysql-schema, keyring-systemd]" in text
+
+
+def test_runner_boundary_is_github_hosted_with_read_only_token_and_no_secrets() -> None:
+    import re
+
+    text = _workflow_text()
+
+    assert set(re.findall(r"^\s*runs-on:\s*(\S+)", text, flags=re.MULTILINE)) == {"ubuntu-latest"}
+    assert "self-hosted" not in text
+    assert "secrets." not in text
+    assert "pull_request_target" not in text
+    section = text[text.index("\n  keyring-systemd:\n"): text.index("\n  certification-summary:\n")]
+    assert "permissions:\n      contents: read" in section
+    for forbidden in ("PRODUCTION", "SSH", "COS_", "MYSQL_PASSWORD", "WXPAY_SECRET", "id-token"):
+        assert forbidden not in section, forbidden
+
+
+@pytest.mark.skipif(not BASH or os.name == "nt", reason="needs POSIX bash")
+def test_root_systemd_harness_refuses_to_run_outside_a_github_hosted_runner() -> None:
+    base = {k: v for k, v in os.environ.items() if k in {"PATH", "HOME"}}
+    for env in (
+        {},
+        {"GITHUB_ACTIONS": "true"},
+        {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted"},
+        {"GITHUB_ACTIONS": "false", "RUNNER_ENVIRONMENT": "github-hosted"},
+    ):
+        result = subprocess.run(
+            [BASH, str(KEYRING_SYSTEMD_SCRIPT), "saas-base"],
+            env={**base, **env},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 1, env
+        assert "KEYRING_SYSTEMD_GATE=REFUSED" in result.stdout, env
+
+
+def _classification_repo(tmp_path: Path, files: dict, *, delete: tuple = (), base_files: dict | None = None) -> str:
+    _git(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "keep.txt").write_text("keep\n")
+    for name, content in (base_files or {}).items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    for name, content in files.items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    for name in delete:
+        (tmp_path / name).unlink()
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-q", "--allow-empty", "-m", "candidate")
+    return base
+
+
+def _classify(cwd: Path, base: str, event: str = "pull_request") -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k not in {"GITHUB_OUTPUT", "PR_BASE_SHA", "CERT_EVENT"}}
+    env.update({"CERT_EVENT": event, "PR_BASE_SHA": base})
+    return subprocess.run([BASH, str(CLASSIFY_SCRIPT)], cwd=cwd, env=env, capture_output=True, text=True)
+
+
+SCOPE_MATRIX = [
+    # (label, changed files, expected scope)
+    ("scripts-only", {".github/scripts/anything.sh": "x\n"}, "AUTHORITY"),
+    ("other-workflow-only", {".github/workflows/other.yml": "name: x\n"}, "AUTHORITY"),
+    ("codeowners-only", {".github/CODEOWNERS": "* @owner\n"}, "AUTHORITY"),
+    ("gate-b-manifest-only", {"saas-base/ci/backend-gate-b.txt": "tests/a.py\n"}, "AUTHORITY"),
+    ("gate-runner-only", {"saas-base/scripts/ci_backend_gate_runner.py": "x = 1\n"}, "AUTHORITY"),
+    ("contract-test-only", {"saas-base/tests/test_backend_candidate_certification_workflow_contract.py": "x = 1\n"}, "AUTHORITY"),
+    ("pytest-config", {"saas-base/pytest.ini": "[pytest]\n"}, "AUTHORITY"),
+    ("conftest", {"saas-base/tests/conftest.py": "x = 1\n"}, "AUTHORITY"),
+    ("authority-plus-docs", {".github/scripts/a.sh": "x\n", "docs/a.md": "x\n"}, "AUTHORITY"),
+    ("backend-code-only", {"saas-base/app/services/pay.py": "x = 1\n"}, "BACKEND"),
+    ("backend-test-only", {"saas-base/tests/test_x.py": "x = 1\n"}, "BACKEND"),
+    ("alembic-only", {"saas-base/alembic/versions/20261009_0001_x.py": "x = 1\n"}, "BACKEND"),
+    ("docs-plus-backend", {"docs/a.md": "x\n", "saas-base/app/a.py": "x = 1\n"}, "BACKEND"),
+    ("unknown-root-file", {"Makefile": "all:\n"}, "BACKEND"),
+    ("md-inside-saas-base", {"saas-base/README.md": "x\n"}, "NOT_APPLICABLE"),
+    ("docs-only", {"docs/guide.md": "x\n"}, "NOT_APPLICABLE"),
+    ("root-markdown-only", {"PROJECT_INDEX.md": "x\n"}, "NOT_APPLICABLE"),
+    ("admin-h5-only", {"admin-h5/src/a.vue": "x\n"}, "NOT_APPLICABLE"),
+    ("mini-client-only", {"member-mini-client/src/a.vue": "x\n"}, "NOT_APPLICABLE"),
+    # names that only look protected / unrelated
+    ("lookalike-dot-github", {".githubx/scripts/a.sh": "x\n"}, "BACKEND"),
+    ("lookalike-ci-dir", {"saas-base/ci-extra/a.txt": "x\n"}, "BACKEND"),
+    ("lookalike-docs", {"docs-evil/a.py": "x\n"}, "BACKEND"),
+    ("docs-named-like-script", {"docs/.github/scripts/a.md": "x\n"}, "NOT_APPLICABLE"),
+    # awkward but legitimate names are single, exact paths
+    ("chinese-docs-name", {"docs/说明 文档.md": "x\n"}, "NOT_APPLICABLE"),
+    ("chinese-backend-name", {"saas-base/app/服务 模块.py": "x = 1\n"}, "BACKEND"),
+    ("chinese-authority-name", {".github/scripts/脚本 一.sh": "x\n"}, "AUTHORITY"),
+    ("space-in-authority-name", {".github/scripts/a b.sh": "x\n"}, "AUTHORITY"),
+    ("quote-in-backend-name", {'saas-base/app/a"b.py': "x = 1\n"}, "BACKEND"),
+]
+
+
+@pytest.mark.skipif(not BASH or not GIT or os.name == "nt", reason="needs POSIX bash and git")
+class TestScopeClassificationMatrix:
+    @pytest.mark.parametrize("label,files,expected", SCOPE_MATRIX, ids=[row[0] for row in SCOPE_MATRIX])
+    def test_scope_is_decided_from_the_real_file_diff(self, tmp_path, label, files, expected):
+        base = _classification_repo(tmp_path, files)
+        result = _classify(tmp_path, base)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"CERT_SCOPE={expected}" in result.stdout
+        if expected == "AUTHORITY":
+            assert "CI_AUTHORITY_CHANGE=YES" in result.stdout
+            assert "PR_GATE_AUTHORITY=NOT_INDEPENDENT" in result.stdout
+        else:
+            assert "CI_AUTHORITY_CHANGE=NO" in result.stdout
+
+    def test_authority_change_in_an_earlier_commit_of_the_pr_is_still_detected(self, tmp_path):
+        base = _classification_repo(tmp_path, {".github/scripts/early.sh": "x\n"})
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "late.md").write_text("late\n")
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-q", "-m", "last commit is harmless docs")
+        result = _classify(tmp_path, base)
+        assert "CERT_SCOPE=AUTHORITY" in result.stdout
+
+    def test_authority_change_reverted_inside_the_pr_leaves_an_empty_diff_treated_as_backend(self, tmp_path):
+        base = _classification_repo(tmp_path, {".github/scripts/x.sh": "x\n"})
+        (tmp_path / ".github" / "scripts" / "x.sh").unlink()
+        _git(tmp_path, "add", "-A")
+        _git(tmp_path, "commit", "-q", "-m", "revert")
+        result = _classify(tmp_path, base)
+        assert result.returncode == 0
+        assert "CERT_SCOPE=BACKEND" in result.stdout
+
+    def test_deleting_or_renaming_a_protected_file_is_an_authority_change(self, tmp_path):
+        protected = ".github/scripts/verify_certification_identity.sh"
+        base = _classification_repo(tmp_path, {}, base_files={protected: "x\n"}, delete=(protected,))
+        assert "CERT_SCOPE=AUTHORITY" in _classify(tmp_path, base).stdout
+
+    def test_moving_a_protected_file_out_of_the_protected_tree_is_detected(self, tmp_path):
+        protected = ".github/scripts/verify_certification_identity.sh"
+        base = _classification_repo(tmp_path, {"docs/moved.md": "x\n"}, base_files={protected: "x\n"}, delete=(protected,))
+        assert "CERT_SCOPE=AUTHORITY" in _classify(tmp_path, base).stdout
+
+    def test_path_containing_a_newline_is_one_exact_path_not_two(self, tmp_path):
+        # "docs/note<LF>saas-base/app/x.py" is a single docs path; a newline-splitting
+        # parser would see a second, backend-looking line.
+        base = _classification_repo(tmp_path, {"docs/note\nsaas-base/app/x.md": "x\n"})
+        assert "CERT_SCOPE=NOT_APPLICABLE" in _classify(tmp_path, base).stdout
+        # ... and a protected-looking second line must not be invented either.
+        other = tmp_path / "second"
+        other.mkdir()
+        base2 = _classification_repo(other, {"docs/n\n.github/scripts/a.md": "x\n"})
+        assert "CERT_SCOPE=NOT_APPLICABLE" in _classify(other, base2).stdout
+
+    def test_authority_path_with_a_newline_in_the_name_is_still_authority(self, tmp_path):
+        base = _classification_repo(tmp_path, {".github/scripts/a\nb.sh": "x\n"})
+        assert "CERT_SCOPE=AUTHORITY" in _classify(tmp_path, base).stdout
+
+    def test_empty_diff_is_backend_never_not_applicable(self, tmp_path):
+        base = _classification_repo(tmp_path, {})
+        result = _classify(tmp_path, base)
+        assert result.returncode == 0
+        assert "CERT_SCOPE=BACKEND" in result.stdout
+
+    def test_invalid_inputs_fail_closed(self, tmp_path):
+        base = _classification_repo(tmp_path, {"docs/a.md": "x\n"})
+        for bad in ("", "nonsense", "f" * 40, base.upper()):
+            result = _classify(tmp_path, bad)
+            assert result.returncode == 1, bad
+            assert "CERT_SCOPE=FAIL" in result.stdout
+        assert _classify(tmp_path, base, event="push").returncode == 1
+
+    def test_dispatch_always_runs_the_full_set(self, tmp_path):
+        base = _classification_repo(tmp_path, {"docs/a.md": "x\n"})
+        result = _classify(tmp_path, base, event="workflow_dispatch")
+        assert result.returncode == 0
+        assert "CERT_SCOPE=BACKEND" in result.stdout
+        assert "CI_AUTHORITY_CHANGE=NOT_EVALUATED" in result.stdout
+
+    def test_scope_is_emitted_to_github_output(self, tmp_path):
+        base = _classification_repo(tmp_path, {".github/scripts/a.sh": "x\n"})
+        out = tmp_path.parent / (tmp_path.name + ".out")
+        env = {k: v for k, v in os.environ.items()}
+        env.update({"CERT_EVENT": "pull_request", "PR_BASE_SHA": base, "GITHUB_OUTPUT": str(out)})
+        subprocess.run([BASH, str(CLASSIFY_SCRIPT)], cwd=tmp_path, env=env, capture_output=True, text=True)
+        assert out.read_text().split() == ["scope=AUTHORITY", "authority_changed=YES"]
+
+
+@pytest.mark.skipif(not BASH or not GIT or os.name == "nt", reason="needs POSIX bash and git")
+class TestActivationPathHandling:
+    def test_chinese_alembic_migration_name_is_detected(self, tmp_path):
+        base = _activation_repo(tmp_path, base_files={}, candidate_files={"saas-base/alembic/versions/20261009_0002_加密.py": "x = 1\n"})
+        result = _run_activation(tmp_path, "mysql", base)
+        assert result.returncode == 1
+        assert "REQUIRED_TEST_MISSING" in result.stdout
+
+    def test_alembic_migration_with_spaces_and_newlines_is_detected(self, tmp_path):
+        for name in ("a b.py", "a\nb.py"):
+            repo = tmp_path / ("r" + str(abs(hash(name))))
+            repo.mkdir()
+            base = _activation_repo(repo, base_files={}, candidate_files={f"saas-base/alembic/versions/{name}": "x = 1\n"})
+            assert _run_activation(repo, "mysql", base).returncode == 1, repr(name)
+
+    def test_lookalike_paths_do_not_trigger(self, tmp_path):
+        for name in (
+            "saas-base/alembic/versions_extra/a.py",
+            "saas-base/alembic/other/a.py",
+            "docs/saas-base/alembic/versions/a.py",
+            "saas-base/tests/sub/test_x_schema_mysql.py",
+            "saas-base/app/core/wxpay_secret_crypto.py.bak",
+        ):
+            repo = tmp_path / ("r" + str(abs(hash(name))))
+            repo.mkdir()
+            base = _activation_repo(repo, base_files={}, candidate_files={name: "x = 1\n"})
+            for capability in ("mysql", "systemd"):
+                result = _run_activation(repo, capability, base)
+                if "sub/test_x_schema_mysql" in name and capability == "mysql":
+                    continue  # nested test file: present, so ACTIVE (never silently skipped)
+                assert f"ACTIVATION_{capability}=BASELINE_NOT_ACTIVE" in result.stdout, (name, capability, result.stdout)
+
+    def test_newline_name_cannot_forge_a_trigger_line(self, tmp_path):
+        base = _activation_repo(tmp_path, base_files={}, candidate_files={"docs/x\nsaas-base/alembic/versions/forged.py": "x = 1\n"})
+        assert "ACTIVATION_mysql=BASELINE_NOT_ACTIVE" in _run_activation(tmp_path, "mysql", base).stdout
+
+    def test_git_failure_is_a_failure_not_a_skip(self, tmp_path):
+        _activation_repo(tmp_path, base_files={}, candidate_files={"docs/a.md": "x\n"})
+        result = _run_activation(tmp_path, "mysql", "a" * 40)
+        assert result.returncode == 1
+        assert "ACTIVATION_BASE_COMMIT_UNAVAILABLE" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Summary behaviour for scope verdicts
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not BASH or os.name == "nt", reason="needs POSIX bash")
+class TestSummaryScopeVerdicts:
+    NOT_APPLICABLE = {
+        "SCOPE": "NOT_APPLICABLE",
+        "GATE_A_RESULT": "skipped",
+        "GATE_B_RESULT": "skipped",
+        "FULL_RESULT": "skipped",
+        "MYSQL_SCHEMA_RESULT": "skipped",
+        "KEYRING_SYSTEMD_RESULT": "skipped",
+        "MYSQL_ACTIVATION": "",
+        "SYSTEMD_ACTIVATION": "",
+    }
+
+    def test_docs_only_pull_request_gets_an_explicit_compliant_summary(self):
+        overrides = {**self.NOT_APPLICABLE}
+        for job in ("GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
+            overrides[f"{job}_IDENTITY"] = ""
+            overrides[f"{job}_CHECKED_OUT_SHA"] = ""
+        result = _run_summary(**overrides)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "CERT_SCOPE=NOT_APPLICABLE" in result.stdout
+        assert "CANDIDATE_CERTIFIED=NOT_APPLICABLE" in result.stdout
+        assert "B1_REQUIRED_TESTS_ACTIVE=NO" in result.stdout
+        assert "CANDIDATE_CERTIFIED=YES" not in result.stdout
+
+    def test_not_applicable_requires_every_authoritative_job_skipped(self):
+        for job in ("GATE_A", "GATE_B", "FULL", "MYSQL_SCHEMA", "KEYRING_SYSTEMD"):
+            for state in ("success", "failure", ""):
+                overrides = {**self.NOT_APPLICABLE, f"{job}_RESULT": state}
+                assert _run_summary(**overrides).returncode == 1, (job, state)
+
+    def test_not_applicable_is_impossible_for_dispatch_or_without_a_clean_scope_job(self):
+        assert _run_summary("workflow_dispatch", **self.NOT_APPLICABLE).returncode == 1
+        for state in ("failure", "skipped", "cancelled", ""):
+            assert _run_summary(**{**self.NOT_APPLICABLE, "SCOPE_RESULT": state}).returncode == 1, state
+
+    def test_scope_identity_failure_blocks_even_not_applicable(self):
+        assert _run_summary(**{**self.NOT_APPLICABLE, "SCOPE_IDENTITY": "FAIL"}).returncode == 1
+
+    def test_unknown_or_missing_scope_fails(self):
+        for value in ("", "FAIL", "SKIPPED", "backend"):
+            assert _run_summary(SCOPE=value).returncode == 1, value
+
+    def test_authority_scope_fails_even_when_every_job_is_green(self):
+        result = _run_summary(SCOPE="AUTHORITY", AUTHORITY_CHANGED_BY_PR="YES")
+        assert result.returncode == 1
+        assert "PR_GATE_AUTHORITY=NOT_INDEPENDENT" in result.stdout
+        assert "CI_AUTHORITY_CHANGE_REQUIRES_MANUAL_BOOTSTRAP_REVIEW" in result.stdout
+        assert _run_summary(SCOPE="AUTHORITY", AUTHORITY_CHANGED_BY_PR="NO").returncode == 1
+
+    def test_backend_scope_never_gets_the_not_applicable_exemption(self):
+        result = _run_summary(
+            GATE_A_RESULT="skipped", GATE_B_RESULT="skipped", FULL_RESULT="skipped",
+            MYSQL_SCHEMA_RESULT="skipped", KEYRING_SYSTEMD_RESULT="skipped",
+        )
+        assert result.returncode == 1
