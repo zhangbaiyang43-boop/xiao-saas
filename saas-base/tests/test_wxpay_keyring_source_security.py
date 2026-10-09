@@ -138,7 +138,8 @@ class KeyringFileSecurityTest(KeyringBase):
     def _credentials_layout(self, unit: str = "u.service", parent: Path | None = None) -> Path:
         unit_dir = (parent or self.directory / "credentials") / unit
         unit_dir.mkdir(parents=True)
-        return self.write(keyring_payload(), mode=0o400, path=unit_dir / "key")
+        # systemd delivers 0440 (group bit = ACL mask); only this mode depends on the layout.
+        return self.write(keyring_payload(), mode=0o440, path=unit_dir / "key")
 
     def _credentials_policy(self) -> "crypto.KeyringSourcePolicy":
         # Fixture stand-in for "root-owned": the test user's uid. The credentials
@@ -197,7 +198,7 @@ class KeyringFileSecurityTest(KeyringBase):
         key = self._credentials_layout()
         nested_dir = key.parent / "nested"
         nested_dir.mkdir()
-        nested = self.write(keyring_payload(), path=nested_dir / "key")
+        nested = self.write(keyring_payload(), mode=0o440, path=nested_dir / "key")
         policy = self._credentials_policy()
         with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(nested_dir)}):
             self.assertEqual(self.reason(load_keyring, nested, policy), "WXPAY_KEYRING_PERMISSION_DENIED")
