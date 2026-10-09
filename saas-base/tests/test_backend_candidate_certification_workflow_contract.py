@@ -39,7 +39,7 @@ def test_backend_candidate_certification_normalizes_event_identity_once() -> Non
     assert "github.event.pull_request.head.sha" in text
     assert "PR_BASE_SHA: ${{ github.event_name == 'pull_request'" in text
     assert "github.event.pull_request.base.sha" in text
-    assert text.count("ref: ${{ env.TARGET_REF }}") == 3
+    assert text.count("ref: ${{ env.TARGET_REF }}") == 4
     assert "CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}" in text
     assert "CERTIFICATION_CHECKOUT_SHA_MISMATCH" in text
 
@@ -54,5 +54,7 @@ def test_backend_candidate_certification_keeps_all_authoritative_gates() -> None
     assert "Backend Full (serial, authoritative -- same semantics as backend-full.yml)" in text
     assert "python -m pytest tests/ --collect-only -q" in text
     assert "python -m pytest tests/ -q -W error::RuntimeWarning" in text
-    assert "needs: [gate-a, gate-b, full]" in text
+    assert "MySQL 5.7 schema convergence" in text
+    assert "Verify Alembic convergence on MySQL 5.7" in text
+    assert "needs: [gate-a, gate-b, full, mysql-schema]" in text
     assert "CANDIDATE_CERTIFIED=YES" in text
