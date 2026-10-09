@@ -1,7 +1,10 @@
 import json
 import inspect
+import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.v1 import super_admin
 from app.config import settings
+from app.core import wxpay_secret_crypto
 from app.core.database import get_db
 from app.main import app
 from app.models.base import Base
@@ -42,16 +46,18 @@ def _public_key_pem() -> str:
 
 
 def _valid_fixture(*, public_key_mode: bool = False):
-    encryption_key = Fernet.generate_key().decode()
-    fernet = Fernet(encryption_key.encode())
     tenant = SimpleNamespace(
         tenant_id=TENANT_ID,
         payment_mode="prepay",
         wx_pay_enabled=True,
         wx_mchid="1234567890",
-        wx_api_key_v3=fernet.encrypt(b"a" * 32).decode(),
+        wx_api_key_v3=wxpay_secret_crypto.encrypt_secret(
+            "a" * 32, wxpay_secret_crypto.SecretField.API_V3_KEY
+        ),
         wx_cert_serial="A" * 40,
-        wx_private_key=fernet.encrypt(_private_key_pem().encode()).decode(),
+        wx_private_key=wxpay_secret_crypto.encrypt_secret(
+            _private_key_pem(), wxpay_secret_crypto.SecretField.PRIVATE_KEY
+        ),
         wx_public_key_id="PUB_KEY_ID_" + "B" * 40 if public_key_mode else None,
         wx_public_key=_public_key_pem() if public_key_mode else None,
         wx_verify_mode="public_key",
@@ -62,12 +68,54 @@ def _valid_fixture(*, public_key_mode: bool = False):
         WECHAT_APP_ID="wx1234567890abcdef",
         WECHAT_APP_SECRET="app-secret-present",
         H5_ORDER_BASE_URL="https://saas.example.com",
-        SECRET_ENCRYPTION_KEY=encryption_key,
     )
     return tenant, global_config
 
 
 class PaymentReadinessEvaluatorTest(unittest.TestCase):
+    def setUp(self):
+        self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
+        self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
+        self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        self.original_policy = wxpay_secret_crypto.KEYRING_SOURCE_POLICY
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = wxpay_secret_crypto.KeyringSourcePolicy(
+            extra_trusted_uids=frozenset({getattr(os, "geteuid", lambda: 0)()}),
+            verify_ancestors=False,
+        )
+        self.directory = tempfile.TemporaryDirectory()
+        self.key = Fernet.generate_key()
+        path = Path(self.directory.name) / "wxpay-keyring.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "formatVersion": 1,
+                    "activeKeyId": "wxpay-readiness-01",
+                    "keys": [
+                        {
+                            "keyId": "wxpay-readiness-01",
+                            "algorithm": "fernet",
+                            "usage": "encrypt-decrypt",
+                            "key": self.key.decode(),
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.chmod(path, 0o600)
+        settings.WXPAY_SECRET_KEYRING_PATH = str(path)
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = True
+        wxpay_secret_crypto.get_keyring.cache_clear()
+
+    def tearDown(self):
+        settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = self.original_policy
+        wxpay_secret_crypto.get_keyring.cache_clear()
+        self.directory.cleanup()
+
     def evaluate(self, tenant=None, global_config=None):
         from app.services.payment_readiness_service import evaluate_payment_readiness
 
@@ -136,7 +184,6 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
             ("WECHAT_APP_ID", "GLOBAL_APP_ID"),
             ("WECHAT_APP_SECRET", "GLOBAL_APP_SECRET"),
             ("H5_ORDER_BASE_URL", "GLOBAL_CALLBACK_URL"),
-            ("SECRET_ENCRYPTION_KEY", "GLOBAL_SECRET_ENCRYPTION"),
         )
         for attribute, code in cases:
             with self.subTest(attribute=attribute):
@@ -145,6 +192,13 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
                 result = self.evaluate(tenant, config)
                 self.assertEqual(result["online_payment"]["readiness_state"], "INCOMPLETE")
                 self.assertEqual(self.item(result, code)["status"], "MISSING")
+
+        tenant, config = _valid_fixture()
+        settings.WXPAY_SECRET_KEYRING_PATH = str(Path(self.directory.name) / "missing.json")
+        wxpay_secret_crypto.get_keyring.cache_clear()
+        result = self.evaluate(tenant, config)
+        self.assertEqual(result["online_payment"]["readiness_state"], "INCOMPLETE")
+        self.assertEqual(self.item(result, "GLOBAL_SECRET_ENCRYPTION")["status"], "MISSING")
 
     def test_invalid_https_url_is_rejected_locally(self):
         for invalid_url in (
@@ -167,10 +221,16 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
         self.assertEqual(self.item(result, "GLOBAL_APP_ID")["status"], "CONFIGURED")
         self.assertEqual(result["online_payment"]["readiness_state"], "UNKNOWN")
 
-    def test_plaintext_compatibility_fallback_is_not_accepted(self):
+    def test_plaintext_compatibility_is_static_unknown_until_strict_cutover(self):
         tenant, config = _valid_fixture()
         tenant.wx_api_key_v3 = "p" * 32
         tenant.wx_private_key = _private_key_pem()
+        result = self.evaluate(tenant, config)
+        self.assertEqual(result["online_payment"]["readiness_state"], "UNKNOWN")
+        self.assertEqual(self.item(result, "WX_API_KEY_V3")["status"], "CONFIGURED")
+        self.assertEqual(self.item(result, "WX_PRIVATE_KEY")["status"], "CONFIGURED")
+
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = False
         result = self.evaluate(tenant, config)
         self.assertEqual(result["online_payment"]["readiness_state"], "INVALID")
         self.assertEqual(self.item(result, "WX_API_KEY_V3")["reason_code"], "SECRET_DECRYPT_FAILED")
@@ -217,7 +277,7 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
             tenant.wx_private_key,
             tenant.wx_public_key,
             config.WECHAT_APP_SECRET,
-            config.SECRET_ENCRYPTION_KEY,
+            self.key.decode(),
         ):
             self.assertNotIn(secret, payload)
 

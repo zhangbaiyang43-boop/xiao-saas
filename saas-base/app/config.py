@@ -121,8 +121,16 @@ class Settings(BaseSettings):
     SUPER_ADMIN_PASSWORD: str = ""
     SUPER_ADMIN_TOTP_SECRET: str = ""
     # 商户微信支付私钥/APIv3密钥落库前的应用层加密密钥（Fernet）。
-    # 用 scripts/generate_encryption_key.py 生成一把随机 key。不配置时不加密，仅用于本地开发；生产环境必须配置。
+    # Phase B1 后仅用于识别旧部署配置，不再授权生成 raw Fernet 新写入。
     SECRET_ENCRYPTION_KEY: str = ""
+    # Root-owned local runtime keyring (or a systemd LoadCredential equivalent).
+    WXPAY_SECRET_KEYRING_PATH: str = "/run/secrets/saas-base/wxpay-keyring.json"
+    # Deployment compatibility gate: false rejects secret writes; it never falls
+    # back to plaintext or raw Fernet. Enabling requires a separately authorized
+    # all-process B1 reader proof.
+    WXPAY_ENVELOPE_WRITE_ENABLED: bool = False
+    # Compatibility reader only. B5 changes this to false after inventory=0.
+    WXPAY_LEGACY_PLAINTEXT_READ_ENABLED: bool = True
 
     WEWORK_CORP_ID: str = ""
     WEWORK_AGENT_ID: str = ""

@@ -88,6 +88,23 @@ async def _mysql_column_exists(conn, table_name: str, column_name: str) -> bool:
     return int(result.scalar() or 0) > 0
 
 
+async def _mysql_column_data_type(conn, table_name: str, column_name: str) -> str | None:
+    result = await conn.execute(
+        text(
+            """
+            SELECT DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table_name
+              AND COLUMN_NAME = :column_name
+            """
+        ),
+        {"table_name": table_name, "column_name": column_name},
+    )
+    value = result.scalar()
+    return str(value).lower() if value else None
+
+
 async def _sqlite_column_exists(conn, table_name: str, column_name: str) -> bool:
     result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
     return any(str(row[1]) == column_name for row in result.fetchall())
@@ -102,7 +119,7 @@ async def ensure_tenant_schema(conn) -> None:
         ("wx_mchid", "VARCHAR(64) NULL"),
         ("wx_api_key_v3", "VARCHAR(256) NULL"),
         ("wx_cert_serial", "VARCHAR(128) NULL"),
-        ("wx_private_key", "VARCHAR(4096) NULL"),
+        ("wx_private_key", "TEXT NULL"),
         ("receiver_name", "VARCHAR(128) NULL"),
         ("receiver_type", "VARCHAR(32) NULL"),
         ("receiver_verified", "BOOLEAN NOT NULL DEFAULT 0"),
@@ -114,7 +131,16 @@ async def ensure_tenant_schema(conn) -> None:
 
     if dialect in {"mysql", "mariadb"}:
         for column_name, definition in tenant_columns:
-            if await _mysql_column_exists(conn, "tenant", column_name):
+            exists = await _mysql_column_exists(conn, "tenant", column_name)
+            if exists and column_name == "wx_private_key":
+                data_type = await _mysql_column_data_type(conn, "tenant", column_name)
+                if data_type not in {"text", "mediumtext", "longtext"}:
+                    logger.warning("Repairing tenant.wx_private_key storage capacity")
+                    await conn.execute(
+                        text("ALTER TABLE `tenant` MODIFY COLUMN `wx_private_key` TEXT NULL")
+                    )
+                continue
+            if exists:
                 continue
             logger.warning("Repairing tenant: adding missing %s column", column_name)
             await conn.execute(text(f"ALTER TABLE `tenant` ADD COLUMN `{column_name}` {definition}"))
