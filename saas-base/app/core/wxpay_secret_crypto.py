@@ -159,6 +159,20 @@ def get_keyring() -> KeyringSnapshot:
     return load_keyring(path)
 
 
+def initialize_keyring() -> str:
+    """Prime and validate the immutable process snapshot without blocking startup.
+
+    A missing/invalid keyring is an expected compatibility state in B1: legacy
+    plaintext reads remain available, while envelope reads and every secret
+    write fail closed. Only the sanitized state code is returned.
+    """
+    try:
+        get_keyring()
+        return "CONFIGURED"
+    except SecretEncryptionUnavailable as exc:
+        return exc.reason_code
+
+
 def _normalize_field(field: SecretField | str) -> SecretField:
     try:
         return field if isinstance(field, SecretField) else SecretField(field)
