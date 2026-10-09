@@ -490,6 +490,14 @@ class TestCapabilityActivation:
         assert result.returncode == 0
         assert "ACTIVATION_systemd=ACTIVE" in result.stdout
 
+    def test_adding_only_the_harness_script_does_not_make_the_systemd_gate_required(self, tmp_path):
+        base = _activation_repo(
+            tmp_path, base_files={}, candidate_files={".github/scripts/verify_keyring_systemd.sh": "#!/bin/sh"}
+        )
+        result = _run_activation(tmp_path, "systemd", base)
+        assert result.returncode == 0, result.stdout
+        assert "ACTIVATION_systemd=BASELINE_NOT_ACTIVE" in result.stdout
+
     def test_invalid_or_unknown_inputs_fail(self, tmp_path):
         base = _activation_repo(tmp_path, base_files={}, candidate_files={"docs.md": "x\n"})
         assert _run_activation(tmp_path, "mysql", "").returncode == 1

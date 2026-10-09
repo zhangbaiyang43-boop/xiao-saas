@@ -37,7 +37,7 @@ case "$capability" in
     present="$(git ls-files 'saas-base/tests/test_*_schema_mysql.py')"
     ;;
   systemd)
-    trigger='^saas-base/app/core/wxpay_secret_crypto\.py$|^\.github/scripts/verify_keyring_systemd\.sh$'
+    trigger='^saas-base/app/core/wxpay_secret_crypto\.py$'
     present="$(git ls-files 'saas-base/app/core/wxpay_secret_crypto.py')"
     ;;
   *)
