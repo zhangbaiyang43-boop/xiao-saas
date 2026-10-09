@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
@@ -20,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.v1 import super_admin
 from app.config import settings
 from app.core import crypto
+from app.core import wxpay_secret_crypto
 from app.core.database import get_db
 from app.core.rate_limiter import limiter
 from app.main import app
@@ -44,47 +48,91 @@ def _private_key_pem() -> str:
 PRIVATE_KEY_PEM = _private_key_pem()
 
 
+def _write_keyring(directory: str, key: bytes | None = None) -> str:
+    path = Path(directory) / "wxpay-keyring.json"
+    path.write_text(
+        json.dumps(
+            {
+                "formatVersion": 1,
+                "activeKeyId": "wxpay-test-01",
+                "keys": [
+                    {
+                        "keyId": "wxpay-test-01",
+                        "algorithm": "fernet",
+                        "usage": "encrypt-decrypt",
+                        "key": (key or Fernet.generate_key()).decode(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(path, 0o600)
+    return str(path)
+
+
 class StrictSecretEncryptionTest(unittest.TestCase):
     def setUp(self):
-        self.original_key = settings.SECRET_ENCRYPTION_KEY
-        crypto._get_fernet.cache_clear()
+        self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
+        self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
+        self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = True
+        self.directory = tempfile.TemporaryDirectory()
+        wxpay_secret_crypto.get_keyring.cache_clear()
 
     def tearDown(self):
-        settings.SECRET_ENCRYPTION_KEY = self.original_key
-        crypto._get_fernet.cache_clear()
+        settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.get_keyring.cache_clear()
+        self.directory.cleanup()
 
     def test_missing_key_denies_strict_secret_write_but_legacy_read_stays_compatible(self):
-        settings.SECRET_ENCRYPTION_KEY = ""
+        settings.WXPAY_SECRET_KEYRING_PATH = str(Path(self.directory.name) / "missing.json")
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
         with self.assertRaises(crypto.SecretEncryptionUnavailable):
-            crypto.encrypt_secret_strict(API_V3_KEY)
-        self.assertEqual(crypto.decrypt_secret(API_V3_KEY), API_V3_KEY)
+            crypto.encrypt_secret_strict(API_V3_KEY, crypto.SecretField.API_V3_KEY)
+        self.assertEqual(
+            crypto.decrypt_secret(API_V3_KEY, crypto.SecretField.API_V3_KEY),
+            API_V3_KEY,
+        )
 
     def test_invalid_key_denies_strict_secret_write_without_exposing_key(self):
-        settings.SECRET_ENCRYPTION_KEY = "not-a-fernet-key"
+        settings.WXPAY_SECRET_KEYRING_PATH = _write_keyring(self.directory.name, b"not-a-fernet-key")
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
+        wxpay_secret_crypto.get_keyring.cache_clear()
         with self.assertRaises(crypto.SecretEncryptionUnavailable) as caught:
-            crypto.encrypt_secret_strict(API_V3_KEY)
+            crypto.encrypt_secret_strict(API_V3_KEY, crypto.SecretField.API_V3_KEY)
         self.assertNotIn("not-a-fernet-key", str(caught.exception))
 
     def test_valid_key_produces_decryptable_fernet_ciphertext(self):
-        settings.SECRET_ENCRYPTION_KEY = Fernet.generate_key().decode()
-        encrypted = crypto.encrypt_secret_strict(API_V3_KEY)
-        self.assertTrue(encrypted.startswith("gAAAAA"))
-        self.assertEqual(crypto.decrypt_secret(encrypted), API_V3_KEY)
+        settings.WXPAY_SECRET_KEYRING_PATH = _write_keyring(self.directory.name)
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
+        wxpay_secret_crypto.get_keyring.cache_clear()
+        encrypted = crypto.encrypt_secret_strict(API_V3_KEY, crypto.SecretField.API_V3_KEY)
+        self.assertTrue(encrypted.startswith("enc:v1:wxpay-test-01:gAAAAA"))
+        self.assertEqual(crypto.decrypt_secret(encrypted, crypto.SecretField.API_V3_KEY), API_V3_KEY)
 
     def test_strict_writer_is_not_an_alias_for_the_legacy_permissive_writer(self):
         source = inspect.getsource(crypto.encrypt_secret_strict)
-        self.assertNotIn("encrypt_secret(", source)
+        self.assertIn("field is None", source)
+        self.assertNotIn("Fernet(", source)
 
 
 class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.original_key = settings.SECRET_ENCRYPTION_KEY
+        self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
+        self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
+        self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
         self.original_totp = settings.SUPER_ADMIN_TOTP_SECRET
         self.original_password = settings.SUPER_ADMIN_PASSWORD
-        settings.SECRET_ENCRYPTION_KEY = ""
+        self.keyring_directory = tempfile.TemporaryDirectory()
+        settings.WXPAY_SECRET_KEYRING_PATH = str(Path(self.keyring_directory.name) / "missing.json")
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = False
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = True
         settings.SUPER_ADMIN_TOTP_SECRET = TOTP_SECRET
         settings.SUPER_ADMIN_PASSWORD = "test-only-super-password"
-        crypto._get_fernet.cache_clear()
+        wxpay_secret_crypto.get_keyring.cache_clear()
         reset = getattr(limiter, "reset", None)
         if callable(reset):
             reset()
@@ -113,10 +161,13 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides.clear()
         await self.db.close()
         await self.engine.dispose()
-        settings.SECRET_ENCRYPTION_KEY = self.original_key
+        settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
+        settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
         settings.SUPER_ADMIN_TOTP_SECRET = self.original_totp
         settings.SUPER_ADMIN_PASSWORD = self.original_password
-        crypto._get_fernet.cache_clear()
+        wxpay_secret_crypto.get_keyring.cache_clear()
+        self.keyring_directory.cleanup()
 
     def headers(self, token_type: str = "super_admin") -> dict[str, str]:
         token = jwt.encode(
@@ -214,8 +265,9 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_valid_secret_change_encrypts_and_atomically_invalidates_and_pauses(self):
         await self.create_tenant()
-        settings.SECRET_ENCRYPTION_KEY = Fernet.generate_key().decode()
-        crypto._get_fernet.cache_clear()
+        settings.WXPAY_SECRET_KEYRING_PATH = _write_keyring(self.keyring_directory.name)
+        settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
+        wxpay_secret_crypto.get_keyring.cache_clear()
         response = await self.client.patch(
             f"/api/super/merchants/{TENANT_ID}/wxpay",
             headers=self.headers(),
@@ -224,7 +276,10 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         tenant = await self.fresh_tenant()
         self.assertNotEqual(tenant.wx_api_key_v3, API_V3_KEY)
-        self.assertEqual(crypto.decrypt_secret(tenant.wx_api_key_v3), API_V3_KEY)
+        self.assertEqual(
+            crypto.decrypt_secret(tenant.wx_api_key_v3, crypto.SecretField.API_V3_KEY),
+            API_V3_KEY,
+        )
         self.assertFalse(tenant.receiver_verified)
         self.assertIsNone(tenant.verified_time)
         self.assertFalse(tenant.wx_pay_enabled)

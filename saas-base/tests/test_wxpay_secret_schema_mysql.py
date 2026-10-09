@@ -75,7 +75,7 @@ class WxPaySecretSchemaMySqlTest(unittest.IsolatedAsyncioTestCase):
                 await connection.execute(
                     text(
                         "INSERT INTO tenant "
-                        "(tenant_id,name,password_hash,status,is_open,payment_mode,wx_pay_enabled," 
+                        "(tenant_id,name,password_hash,status,is_open,payment_mode,wx_pay_enabled,"
                         "receiver_verified,payment_locked,created_at,updated_at,wx_private_key) "
                         "VALUES ('schema-gate','Schema Gate','x',1,1,'prepay',0,0,1,NOW(),NOW(),:value)"
                     ),

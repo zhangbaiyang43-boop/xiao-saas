@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, DateTime, Boolean
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime
 from app.utils.id_generator import generate_snowflake_id
@@ -23,7 +23,7 @@ class Tenant(Base):
     wx_mchid = Column(String(64), nullable=True)         # 商家自己的微信支付商户号
     wx_api_key_v3 = Column(String(256), nullable=True)   # 商家 APIv3 密钥
     wx_cert_serial = Column(String(128), nullable=True)  # 商家证书序列号
-    wx_private_key = Column(String(4096), nullable=True) # 商家私钥 PEM
+    wx_private_key = Column(Text, nullable=True)         # 加密后的商家私钥信封
     wx_public_key_id = Column(String(128), nullable=True) # 微信支付公钥ID
     wx_public_key = Column(String(4096), nullable=True)   # 微信支付公钥（加密存储）
     wx_verify_mode = Column(String(32), default="public_key") # public_key | platform_certificate

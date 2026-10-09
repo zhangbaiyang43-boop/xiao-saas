@@ -10,10 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import settings
-from app.core.crypto import (
+from app.core.wxpay_secret_crypto import (
+    SecretDecryptionError,
     SecretEncryptionUnavailable,
+    SecretField,
     decrypt_secret,
-    encrypt_secret_strict,
+    encrypt_secret,
+    validate_plaintext,
 )
 from app.core.database import get_db
 from app.core.logger import logger
@@ -290,8 +293,11 @@ def _validate_wxpay_client(tenant: Tenant) -> tuple[bool, str]:
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.backends import default_backend
 
-    api_key_v3 = decrypt_secret(tenant.wx_api_key_v3)
-    private_key_pem = decrypt_secret(tenant.wx_private_key)
+    try:
+        api_key_v3 = decrypt_secret(tenant.wx_api_key_v3, SecretField.API_V3_KEY)
+        private_key_pem = decrypt_secret(tenant.wx_private_key, SecretField.PRIVATE_KEY)
+    except SecretDecryptionError:
+        return False, "WXPAY_CONFIG_SECRET_UNAVAILABLE"
 
     if not tenant.wx_mchid:
         return False, "WXPAY_CONFIG_MCHID_REQUIRED"
@@ -555,15 +561,25 @@ async def config_merchant_wxpay(
     fields_set = set(data.model_fields_set)
     config_fields = fields_set - {"totp_code", "reason", "confirmed"}
     secret_fields = {"wx_api_key_v3", "wx_private_key"}
+    secret_field_types = {
+        "wx_api_key_v3": SecretField.API_V3_KEY,
+        "wx_private_key": SecretField.PRIVATE_KEY,
+    }
     for field in secret_fields & config_fields:
         value = getattr(data, field)
         if value is None or not value.strip():
             return _wxpay_error(request, 400, "WXPAY_SECRET_CLEAR_NOT_ALLOWED", "敏感凭证不能通过空值清除")
+        if not validate_plaintext(value.strip(), secret_field_types[field]):
+            reason_code = "WXPAY_CONFIG_API_KEY_INVALID" if field == "wx_api_key_v3" else "WXPAY_CONFIG_PRIVATE_KEY_INVALID"
+            return _wxpay_error(request, 400, reason_code, "支付密钥格式无效")
 
     encrypted_secrets: dict[str, str] = {}
     try:
         for field in secret_fields & config_fields:
-            encrypted_secrets[field] = encrypt_secret_strict(getattr(data, field).strip())
+            encrypted_secrets[field] = encrypt_secret(
+                getattr(data, field).strip(),
+                secret_field_types[field],
+            )
     except SecretEncryptionUnavailable:
         return _wxpay_error(
             request,
@@ -571,7 +587,7 @@ async def config_merchant_wxpay(
             "WXPAY_SECRET_ENCRYPTION_UNAVAILABLE",
             "支付密钥安全存储暂不可用，未保存任何修改",
         )
-    if len(encrypted_secrets.get("wx_api_key_v3", "")) > 256 or len(encrypted_secrets.get("wx_private_key", "")) > 4096:
+    if len(encrypted_secrets.get("wx_api_key_v3", "")) > 256 or len(encrypted_secrets.get("wx_private_key", "")) > 65535:
         return _wxpay_error(request, 400, "WXPAY_SECRET_TOO_LONG", "密钥内容过长，请联系技术支持处理")
 
     result = await db.execute(select(Tenant).where(Tenant.tenant_id == tenant_id).with_for_update())
@@ -658,7 +674,11 @@ async def config_merchant_wxpay(
 
     for field, encrypted_value in encrypted_secrets.items():
         clear_value = getattr(data, field).strip()
-        if decrypt_secret(getattr(tenant, field)) != clear_value:
+        try:
+            current_clear_value = decrypt_secret(getattr(tenant, field), secret_field_types[field])
+        except SecretDecryptionError:
+            current_clear_value = None
+        if current_clear_value != clear_value:
             setattr(tenant, field, encrypted_value)
             changed_fields.append(field)
             credential_changed = True

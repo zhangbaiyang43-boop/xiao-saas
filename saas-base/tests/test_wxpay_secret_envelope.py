@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
@@ -25,6 +27,7 @@ from app.core.wxpay_secret_crypto import (
     get_keyring,
     load_keyring,
 )
+from app.services.wxpay_service import WxPayService
 
 
 API_KEY = "a" * 32
@@ -108,6 +111,39 @@ class EnvelopeContractTest(unittest.TestCase):
                 encrypted = encrypt_secret(value, field)
                 self.assertTrue(encrypted.startswith("enc:v1:wxpay-2026-01:gAAAA"))
                 self.assertEqual(decrypt_secret(encrypted, field), value)
+
+    def test_same_secret_has_isolated_randomized_ciphertexts(self):
+        tenant_a = encrypt_secret(API_KEY, SecretField.API_V3_KEY)
+        tenant_b = encrypt_secret(API_KEY, SecretField.API_V3_KEY)
+        self.assertNotEqual(tenant_a, tenant_b)
+        self.assertEqual(decrypt_secret(tenant_a, SecretField.API_V3_KEY), API_KEY)
+        self.assertEqual(decrypt_secret(tenant_b, SecretField.API_V3_KEY), API_KEY)
+
+    def test_payment_runtime_decrypts_before_sdk_and_rejects_corruption(self):
+        tenant = SimpleNamespace(
+            tenant_id="tenant-a",
+            wx_pay_enabled=True,
+            wx_mchid="1234567890",
+            wx_api_key_v3=encrypt_secret(API_KEY, SecretField.API_V3_KEY),
+            wx_cert_serial="A" * 40,
+            wx_private_key=encrypt_secret(PRIVATE_KEY, SecretField.PRIVATE_KEY),
+            wx_public_key_id=None,
+            wx_public_key=None,
+        )
+        client = object()
+        with patch("app.services.wxpay_service._build_client", return_value=client) as build:
+            service = WxPayService(tenant)
+        self.assertTrue(service.enabled)
+        self.assertEqual(build.call_args.kwargs["api_key_v3"], API_KEY)
+        self.assertEqual(build.call_args.kwargs["private_key_pem"], PRIVATE_KEY)
+
+        tenant.wx_api_key_v3 = tenant.wx_api_key_v3[:-1] + (
+            "A" if tenant.wx_api_key_v3[-1] != "A" else "B"
+        )
+        with patch("app.services.wxpay_service._build_client") as build:
+            service = WxPayService(tenant)
+        self.assertFalse(service.enabled)
+        build.assert_not_called()
 
     def test_envelope_parser_rejects_unknown_version_invalid_id_and_extra_fields(self):
         invalid_values = (
@@ -250,6 +286,12 @@ class EnvelopeContractTest(unittest.TestCase):
         self.assertGreater(envelope_length_for_plaintext(3072), 4096)
         self.assertLessEqual(envelope_length_for_plaintext(MAX_PRIVATE_KEY_PLAINTEXT_BYTES), 65535)
         self.assertGreater(envelope_length_for_plaintext(MAX_PRIVATE_KEY_PLAINTEXT_BYTES + 1), 65535)
+
+        large_pem = private_key_pem(4096)
+        large_envelope = encrypt_secret(large_pem, SecretField.PRIVATE_KEY)
+        self.assertGreater(len(large_envelope), 4096)
+        self.assertLessEqual(len(large_envelope), 65535)
+        self.assertEqual(decrypt_secret(large_envelope, SecretField.PRIVATE_KEY), large_pem)
 
 
 if __name__ == "__main__":
