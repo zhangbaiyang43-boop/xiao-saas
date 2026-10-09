@@ -7,7 +7,7 @@ const dialog = readFileSync(new URL('../src/components/super/SuperStepUpDialog.v
 function extractFunction(source, name) {
   const marker = `function ${name}(`
   const start = source.indexOf(marker)
-  assert.notEqual(start, -1, `${name} must exist in production component code`)
+  if (start === -1) return null
   const bodyStart = source.indexOf('{', start)
   let depth = 0
   for (let index = bodyStart; index < source.length; index += 1) {
@@ -22,6 +22,17 @@ function extractFunction(source, name) {
 
 const clearStepUpSensitiveState = extractFunction(dialog, 'clearSensitiveState')
 const clearPayConfigSecrets = extractFunction(superAdmin, 'clearPayConfigSecrets')
+const isPayConfigSessionCurrent = extractFunction(superAdmin, 'isPayConfigSessionCurrent')
+
+assert.deepEqual(
+  [
+    !clearStepUpSensitiveState && 'clearSensitiveState',
+    !clearPayConfigSecrets && 'clearPayConfigSecrets',
+    !isPayConfigSessionCurrent && 'isPayConfigSessionCurrent',
+  ].filter(Boolean),
+  [],
+  'production components must implement immediate secret cleanup and stale-session isolation',
+)
 
 const stepUpState = {
   totpCode: 'synthetic-totp',
@@ -48,6 +59,11 @@ assert.equal(payConfigState.wx_api_key_v3, '', 'closing payment config must clea
 assert.equal(payConfigState.wx_private_key, '', 'closing payment config must clear private key state')
 assert.equal(payConfigState.receiver_name, 'Synthetic Merchant', 'non-secret form state must remain compatible')
 
+const requestContext = { sessionId: 7, tenantId: 'merchant-a' }
+assert.equal(isPayConfigSessionCurrent(requestContext, 7, 'merchant-a'), true, 'current response may update its own form')
+assert.equal(isPayConfigSessionCurrent(requestContext, 8, 'merchant-a'), false, 'closed/reopened session must reject an old response')
+assert.equal(isPayConfigSessionCurrent(requestContext, 7, 'merchant-b'), false, 'merchant B must reject merchant A response')
+
 assert.match(superAdmin, /SuperStepUpDialog/)
 assert.match(superAdmin, /WXPAY_SECRET_COPY_DISABLED/)
 assert.match(superAdmin, /跨商户复制已停用/)
@@ -67,7 +83,7 @@ assert.match(dialog, /紧急暂停/)
 assert.match(dialog, /type="password"/)
 assert.match(dialog, /390px/)
 assert.doesNotMatch(dialog, /localStorage|sessionStorage/)
-assert.match(dialog, /if \(!open\) clearSensitiveState\(\)/)
+assert.match(dialog, /if \(!open\)\s*\{\s*clearSensitiveState\(\)/)
 assert.match(dialog, /onBeforeUnmount\(clearSensitiveState\)/)
 assert.match(dialog, /function handleCancel\(\)[\s\S]*clearSensitiveState\(\)[\s\S]*emit\('cancel'\)/)
 
@@ -75,5 +91,7 @@ assert.match(superAdmin, /function closePayConfig\(\)[\s\S]*clearPayConfigSecret
 assert.match(superAdmin, /onBeforeUnmount\([\s\S]*clearPayConfigSecrets\(\)/)
 assert.match(superAdmin, /payConfigSessionId/)
 assert.match(superAdmin, /isPayConfigSessionCurrent/)
+assert.match(superAdmin, /payload\.wx_api_key_v3 = ''/)
+assert.match(superAdmin, /payload\.wx_private_key = ''/)
 
 console.log('Super WxPay secret hardening UI contracts: passed')
