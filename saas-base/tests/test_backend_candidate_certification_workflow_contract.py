@@ -503,3 +503,13 @@ class TestCapabilityActivation:
         assert _run_activation(tmp_path, "mysql", "").returncode == 1
         assert _run_activation(tmp_path, "mysql", "f" * 40).returncode == 1
         assert _run_activation(tmp_path, "bogus", base).returncode == 1
+
+
+def test_authority_scripts_always_come_from_the_infra_checkout_never_the_candidate() -> None:
+    text = _workflow_text()
+
+    assert "${{ github.workspace }}/.github/scripts" not in text
+    assert "bash .github/scripts" not in text
+    assert text.count("name: Checkout CI infra ref") == 5
+    assert text.count("infra/.github/scripts/") >= 7
+    assert "bash infra/.github/scripts/verify_keyring_systemd.sh saas-base" in text

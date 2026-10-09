@@ -355,10 +355,16 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout CI infra ref (authority scripts)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: infra
+
       - name: PR merge-ref identity gate
         id: pr_identity
         working-directory: ${{ github.workspace }}
-        run: bash "${{ github.workspace }}/.github/scripts/verify_certification_identity.sh"
+        run: bash "${{ github.workspace }}/infra/.github/scripts/verify_certification_identity.sh"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -436,10 +442,16 @@ jobs:
           echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
           test -z "$(git status --porcelain)"
 
+      - name: Checkout CI infra ref (authority scripts)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: infra
+
       - name: PR merge-ref identity gate
         id: pr_identity
         working-directory: ${{ github.workspace }}
-        run: bash "${{ github.workspace }}/.github/scripts/verify_certification_identity.sh"
+        run: bash "${{ github.workspace }}/infra/.github/scripts/verify_certification_identity.sh"
 
       - name: Resolve activation base
         id: activation_base
@@ -455,7 +467,7 @@ jobs:
         id: activation
         env:
           ACTIVATION_BASE_SHA: ${{ steps.activation_base.outputs.sha }}
-        run: bash "${{ github.workspace }}/.github/scripts/resolve_certification_activation.sh" mysql
+        run: bash "${{ github.workspace }}/infra/.github/scripts/resolve_certification_activation.sh" mysql
 
       - name: Set up Python
         if: steps.activation.outputs.result == 'ACTIVE'
@@ -499,10 +511,16 @@ jobs:
           echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
           test -z "$(git status --porcelain)"
 
+      - name: Checkout CI infra ref (authority scripts)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          path: infra
+
       - name: PR merge-ref identity gate
         id: pr_identity
         working-directory: ${{ github.workspace }}
-        run: bash "${{ github.workspace }}/.github/scripts/verify_certification_identity.sh"
+        run: bash "${{ github.workspace }}/infra/.github/scripts/verify_certification_identity.sh"
 
       - name: Resolve activation base
         id: activation_base
@@ -518,7 +536,7 @@ jobs:
         id: activation
         env:
           ACTIVATION_BASE_SHA: ${{ steps.activation_base.outputs.sha }}
-        run: bash "${{ github.workspace }}/.github/scripts/resolve_certification_activation.sh" systemd
+        run: bash "${{ github.workspace }}/infra/.github/scripts/resolve_certification_activation.sh" systemd
 
       - name: Set up Python
         if: steps.activation.outputs.result == 'ACTIVE'
@@ -535,7 +553,7 @@ jobs:
 
       - name: Verify keyring trust policy as root and non-root systemd services
         if: steps.activation.outputs.result == 'ACTIVE'
-        run: bash .github/scripts/verify_keyring_systemd.sh saas-base
+        run: bash infra/.github/scripts/verify_keyring_systemd.sh saas-base
 
   certification-summary:
     name: Certification summary
