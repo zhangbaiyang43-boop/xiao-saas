@@ -233,6 +233,22 @@ class ScopeAndBindingTest(ProductionBase):
             with self.subTest(reason):
                 await self.assert_refused(reason, await self.issue(mutate=mutate, name=f"b{index}.json"))
 
+    async def test_grant_for_another_database_is_refused_as_such_even_when_the_tenant_is_missing_there(self):
+        grant = await self.issue()
+        other = mig.make_engine(f"sqlite+aiosqlite:///{self.dir / 'other.db'}")
+        async with other.begin() as conn:
+            await conn.execute(text("CREATE TABLE tenant (tenant_id VARCHAR(64) PRIMARY KEY, name VARCHAR(100), "
+                                    "wx_api_key_v3 VARCHAR(256), wx_private_key TEXT, updated_at VARCHAR(32))"))
+            await conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        try:
+            with self.assertRaises(authority.AuthorityRefused) as caught:
+                await mig.run_production(
+                    other, grant_path=str(grant), pubkey_path=str(self.pubkey), ledger_path=str(self.ledger),
+                    tenant_ids=["t1"], repo_root="repo", service_env_path=str(self.svc_env), env=self.env)
+            self.assertEqual(caught.exception.reason, "DB_FINGERPRINT_MISMATCH")
+        finally:
+            await other.dispose()
+
     async def test_dirty_worktree_and_stale_backup_and_keyring_and_service_flag(self):
         grant = await self.issue()
         dirty = mig.ProductionEnv(now_fn=self.env.now_fn, host_fn=self.env.host_fn, git_fn=lambda _r: ("a" * 40, False), trusted_uids=self.env.trusted_uids)

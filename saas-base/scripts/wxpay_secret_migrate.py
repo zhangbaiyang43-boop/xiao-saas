@@ -527,6 +527,9 @@ async def run_production(
     if authority.Ledger(ledger_path, env.trusted_uids).already_used(grant["grant_id"]):
         raise authority.AuthorityRefused("GRANT_REUSED")  # report reuse before any state-dependent check
     authority.check_scope(grant, cli_tenant_ids=tenant_ids, cli_fields=cli_fields)  # no DB / host access yet
+    # A grant pointed at the wrong database must be reported as exactly that, before any tenant lookup.
+    if await db_fingerprint(engine) != grant["db_fingerprint"]:
+        raise authority.AuthorityRefused("DB_FINGERPRINT_MISMATCH")
     facts, _formats = await compute_plan(
         engine, grant["tenant_id"], grant["fields"], env, repo_root, grant["backup_path"], service_env_path,
     )
