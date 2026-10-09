@@ -358,11 +358,62 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  mysql-schema:
+    name: MySQL 5.7 schema convergence
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      checked_out_sha: ${{ steps.identity.outputs.checked_out_sha }}
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      REDIS_ENABLED: 'false'
+      JWT_SECRET_KEY: 'ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef'
+      WXPAY_SCHEMA_TEST_DATABASE_URL: 'mysql+asyncmy://root:root@127.0.0.1:3306/mysql?charset=utf8mb4'
+    steps:
+      - name: Checkout target ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_REF }}
+
+      - name: Identity proof
+        id: identity
+        run: |
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "CHECKED_OUT_SHA=${CHECKED_OUT_SHA}"
+          echo "checked_out_sha=${CHECKED_OUT_SHA}" >> "$GITHUB_OUTPUT"
+          test -z "$(git status --porcelain)"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: saas-base/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: saas-base
+        run: pip install -r requirements-dev.txt
+
+      - name: Verify Alembic convergence on MySQL 5.7
+        working-directory: saas-base
+        run: python -m pytest tests/test_wxpay_secret_schema_mysql.py -q -W error::RuntimeWarning
+
   certification-summary:
     name: Certification summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [gate-a, gate-b, full]
+    needs: [gate-a, gate-b, full, mysql-schema]
     if: always()
     steps:
       - name: Report candidate certification status
@@ -370,9 +421,11 @@ jobs:
           GATE_A_RESULT: ${{ needs.gate-a.result }}
           GATE_B_RESULT: ${{ needs.gate-b.result }}
           FULL_RESULT: ${{ needs.full.result }}
+          MYSQL_SCHEMA_RESULT: ${{ needs.mysql-schema.result }}
           GATE_A_CHECKED_OUT_SHA: ${{ needs.gate-a.outputs.checked_out_sha }}
           GATE_B_CHECKED_OUT_SHA: ${{ needs.gate-b.outputs.checked_out_sha }}
           FULL_CHECKED_OUT_SHA: ${{ needs.full.outputs.checked_out_sha }}
+          MYSQL_SCHEMA_CHECKED_OUT_SHA: ${{ needs.mysql-schema.outputs.checked_out_sha }}
         run: |
           echo "CERT_EVENT=${CERT_EVENT}"
           echo "TARGET_REF=${TARGET_REF}"
@@ -382,16 +435,20 @@ jobs:
           echo "GATE_A_CHECKED_OUT_SHA=${GATE_A_CHECKED_OUT_SHA}"
           echo "GATE_B_CHECKED_OUT_SHA=${GATE_B_CHECKED_OUT_SHA}"
           echo "FULL_CHECKED_OUT_SHA=${FULL_CHECKED_OUT_SHA}"
+          echo "MYSQL_SCHEMA_CHECKED_OUT_SHA=${MYSQL_SCHEMA_CHECKED_OUT_SHA}"
           echo "GATE_A=${GATE_A_RESULT}"
           echo "GATE_B=${GATE_B_RESULT}"
           echo "FULL=${FULL_RESULT}"
+          echo "MYSQL_SCHEMA=${MYSQL_SCHEMA_RESULT}"
           if [ -z "$GATE_A_CHECKED_OUT_SHA" ] || \
              [ "$GATE_A_CHECKED_OUT_SHA" != "$GATE_B_CHECKED_OUT_SHA" ] || \
-             [ "$GATE_A_CHECKED_OUT_SHA" != "$FULL_CHECKED_OUT_SHA" ]; then
+             [ "$GATE_A_CHECKED_OUT_SHA" != "$FULL_CHECKED_OUT_SHA" ] || \
+             [ "$GATE_A_CHECKED_OUT_SHA" != "$MYSQL_SCHEMA_CHECKED_OUT_SHA" ]; then
             echo "CERTIFICATION_CHECKOUT_SHA_MISMATCH"
             exit 1
           fi
-          if [ "$GATE_A_RESULT" = "success" ] && [ "$GATE_B_RESULT" = "success" ] && [ "$FULL_RESULT" = "success" ]; then
+          if [ "$GATE_A_RESULT" = "success" ] && [ "$GATE_B_RESULT" = "success" ] && \
+             [ "$FULL_RESULT" = "success" ] && [ "$MYSQL_SCHEMA_RESULT" = "success" ]; then
             echo "CANDIDATE_CERTIFIED=YES"
           else
             echo "CANDIDATE_CERTIFIED=NO"
