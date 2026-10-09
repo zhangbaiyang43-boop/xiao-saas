@@ -102,9 +102,12 @@ class KeyringSourcePolicy:
     Source A (root-only): a regular file owned by uid 0, mode 0400/0600, whose
     whole directory chain is root-owned and not group/other writable.  A
     non-root service cannot open it, so it is never elevated into reading it.
-    Source B (systemd LoadCredential): a service-owned 0400/0600 copy that sits
-    directly in ``/run/credentials/<unit>`` and in the directory systemd
-    announced through ``CREDENTIALS_DIRECTORY``.  Nothing else is trusted.
+    Source B (systemd LoadCredential): systemd materializes the credential as
+    a root:root file (mode 0440, the group bit being the ACL mask that grants
+    the service user read access) directly in ``/run/credentials/<unit>``,
+    which must be the directory systemd announced via ``CREDENTIALS_DIRECTORY``.
+    Only that layout may carry the extra group-read bit.  Nothing else is
+    trusted; a file owned by the service user is never trusted.
     ``extra_trusted_uids`` / ``verify_ancestors`` exist only so tests can use
     temp directories; production uses the default policy.
     """
@@ -149,7 +152,6 @@ def _read_keyring_bytes(path: str, policy: KeyringSourcePolicy) -> bytes:
     names = [part for part in path.split("/") if part]
     if not names:
         raise _keyring_error("WXPAY_KEYRING_INVALID")
-    euid = os.geteuid()
     cloexec = getattr(os, "O_CLOEXEC", 0)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | nofollow | cloexec
     file_flags = os.O_RDONLY | nofollow | cloexec | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
@@ -166,14 +168,13 @@ def _read_keyring_bytes(path: str, policy: KeyringSourcePolicy) -> bytes:
         try:
             current = os.open("/", directory_flags)
             opened.append(current)
-            for index, name in enumerate(names[:-1]):
+            for name in names[:-1]:
                 current = os.open(name, directory_flags, dir_fd=current)
                 opened.append(current)
                 if not policy.verify_ancestors:
                     continue
                 info = os.fstat(current)
-                is_credentials_dir = in_credentials and index == len(names) - 2
-                allowed = {0} | set(policy.extra_trusted_uids) | ({euid} if is_credentials_dir else set())
+                allowed = {0} | set(policy.extra_trusted_uids)
                 if info.st_uid not in allowed or stat.S_IMODE(info.st_mode) & 0o022:
                     raise _permission_denied()
             fd = os.open(names[-1], file_flags, dir_fd=current)
@@ -184,13 +185,11 @@ def _read_keyring_bytes(path: str, policy: KeyringSourcePolicy) -> bytes:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise _permission_denied()
-        if stat.S_IMODE(info.st_mode) & ~0o600:
+        # systemd credentials are exactly 0400/0440 (group bit = ACL mask); never writable.
+        allowed_mode = 0o440 if in_credentials else 0o600
+        if stat.S_IMODE(info.st_mode) & ~allowed_mode:
             raise _permission_denied()
-        owner_ok = (
-            info.st_uid == 0
-            or info.st_uid in policy.extra_trusted_uids
-            or (in_credentials and info.st_uid == euid)
-        )
+        owner_ok = info.st_uid == 0 or info.st_uid in policy.extra_trusted_uids
         if not owner_ok:
             raise _permission_denied()
         if info.st_size > MAX_KEYRING_BYTES:

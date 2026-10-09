@@ -59,7 +59,7 @@ scenario() { # scenario <label> <expected RESULT> <keyring path> [extra systemd-
   local unit="wxpay-keyring-gate-$N"
   local out
   out="$(sudo systemd-run --quiet --wait --pipe --collect --unit="$unit" \
-    -p WorkingDirectory="$WORK/code" \
+    -p PrivateTmp=yes -p WorkingDirectory=/tmp \
     -E PYTHONPATH="$WORK/code" \
     -E JWT_SECRET_KEY=ci-only-dummy-signing-key-not-a-real-secret-0123456789abcdef \
     -E REDIS_ENABLED=false \
