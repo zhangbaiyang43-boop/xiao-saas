@@ -158,7 +158,7 @@ def _evaluate_secret(
     try:
         decrypt_secret(str(encrypted), field)
     except SecretDecryptionError as exc:
-        unavailable = exc.reason_code in {"WXPAY_KEYRING_MISSING", "WXPAY_KEYRING_INVALID"}
+        unavailable = exc.reason_code.startswith("WXPAY_KEYRING_")
         return _item(
             code,
             label,

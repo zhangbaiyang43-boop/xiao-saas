@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.config import settings
+from app.core import wxpay_secret_crypto
 from app.core.wxpay_secret_crypto import (
     MAX_PRIVATE_KEY_PLAINTEXT_BYTES,
     SecretDecryptionError,
@@ -90,6 +91,11 @@ class EnvelopeContractTest(unittest.TestCase):
         self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
         self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
         self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        self.original_policy = wxpay_secret_crypto.KEYRING_SOURCE_POLICY
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = wxpay_secret_crypto.KeyringSourcePolicy(
+            extra_trusted_uids=frozenset({getattr(os, "geteuid", lambda: 0)()}),
+            verify_ancestors=False,
+        )
         self.keyring = SyntheticKeyring()
         settings.WXPAY_SECRET_KEYRING_PATH = str(self.keyring.path)
         settings.WXPAY_ENVELOPE_WRITE_ENABLED = True
@@ -100,6 +106,7 @@ class EnvelopeContractTest(unittest.TestCase):
         settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
         settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
         settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = self.original_policy
         get_keyring.cache_clear()
         self.keyring.close()
 

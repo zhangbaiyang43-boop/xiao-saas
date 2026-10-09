@@ -77,6 +77,11 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
         self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
         self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
         self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        self.original_policy = wxpay_secret_crypto.KEYRING_SOURCE_POLICY
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = wxpay_secret_crypto.KeyringSourcePolicy(
+            extra_trusted_uids=frozenset({getattr(os, "geteuid", lambda: 0)()}),
+            verify_ancestors=False,
+        )
         self.directory = tempfile.TemporaryDirectory()
         self.key = Fernet.generate_key()
         path = Path(self.directory.name) / "wxpay-keyring.json"
@@ -107,6 +112,7 @@ class PaymentReadinessEvaluatorTest(unittest.TestCase):
         settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
         settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
         settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = self.original_policy
         wxpay_secret_crypto.get_keyring.cache_clear()
         self.directory.cleanup()
 

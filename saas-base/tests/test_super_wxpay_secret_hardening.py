@@ -76,6 +76,11 @@ class StrictSecretEncryptionTest(unittest.TestCase):
         self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
         self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
         self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        self.original_policy = wxpay_secret_crypto.KEYRING_SOURCE_POLICY
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = wxpay_secret_crypto.KeyringSourcePolicy(
+            extra_trusted_uids=frozenset({getattr(os, "geteuid", lambda: 0)()}),
+            verify_ancestors=False,
+        )
         settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = True
         self.directory = tempfile.TemporaryDirectory()
         wxpay_secret_crypto.get_keyring.cache_clear()
@@ -84,6 +89,7 @@ class StrictSecretEncryptionTest(unittest.TestCase):
         settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
         settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
         settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = self.original_policy
         wxpay_secret_crypto.get_keyring.cache_clear()
         self.directory.cleanup()
 
@@ -124,6 +130,11 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
         self.original_path = settings.WXPAY_SECRET_KEYRING_PATH
         self.original_write = settings.WXPAY_ENVELOPE_WRITE_ENABLED
         self.original_legacy = settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED
+        self.original_policy = wxpay_secret_crypto.KEYRING_SOURCE_POLICY
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = wxpay_secret_crypto.KeyringSourcePolicy(
+            extra_trusted_uids=frozenset({getattr(os, "geteuid", lambda: 0)()}),
+            verify_ancestors=False,
+        )
         self.original_totp = settings.SUPER_ADMIN_TOTP_SECRET
         self.original_password = settings.SUPER_ADMIN_PASSWORD
         self.keyring_directory = tempfile.TemporaryDirectory()
@@ -164,6 +175,7 @@ class SuperWxPayHardeningApiTest(unittest.IsolatedAsyncioTestCase):
         settings.WXPAY_SECRET_KEYRING_PATH = self.original_path
         settings.WXPAY_ENVELOPE_WRITE_ENABLED = self.original_write
         settings.WXPAY_LEGACY_PLAINTEXT_READ_ENABLED = self.original_legacy
+        wxpay_secret_crypto.KEYRING_SOURCE_POLICY = self.original_policy
         settings.SUPER_ADMIN_TOTP_SECRET = self.original_totp
         settings.SUPER_ADMIN_PASSWORD = self.original_password
         wxpay_secret_crypto.get_keyring.cache_clear()

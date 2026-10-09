@@ -6,13 +6,14 @@ or secret fingerprints in an exception.
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import stat
+import threading
 from dataclasses import dataclass
 from enum import Enum
-from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -94,30 +95,139 @@ def _validate_key_id(value: object) -> str:
     return value
 
 
-def _validate_file_security(path: Path) -> None:
-    try:
-        metadata = path.stat()
-    except OSError as exc:
-        raise SecretEncryptionUnavailable("WXPAY_KEYRING_MISSING") from exc
-    if not stat.S_ISREG(metadata.st_mode) or path.is_symlink():
-        raise _configuration_error()
-    if stat.S_IMODE(metadata.st_mode) & 0o077:
-        raise _configuration_error()
-    if hasattr(os, "geteuid") and metadata.st_uid not in {0, os.geteuid()}:
-        raise _configuration_error()
+@dataclass(frozen=True)
+class KeyringSourcePolicy:
+    """Which keyring files this process may trust.
+
+    Source A (root-only): a regular file owned by uid 0, mode 0400/0600, whose
+    whole directory chain is root-owned and not group/other writable.  A
+    non-root service cannot open it, so it is never elevated into reading it.
+    Source B (systemd LoadCredential): a service-owned 0400/0600 copy that sits
+    directly in ``/run/credentials/<unit>`` and in the directory systemd
+    announced through ``CREDENTIALS_DIRECTORY``.  Nothing else is trusted.
+    ``extra_trusted_uids`` / ``verify_ancestors`` exist only so tests can use
+    temp directories; production uses the default policy.
+    """
+
+    credentials_root: str = "/run/credentials"
+    extra_trusted_uids: frozenset = frozenset()
+    verify_ancestors: bool = True
 
 
-def load_keyring(path: str | Path) -> KeyringSnapshot:
-    keyring_path = Path(path)
-    _validate_file_security(keyring_path)
+KEYRING_SOURCE_POLICY = KeyringSourcePolicy()
+MAX_KEYRING_BYTES = 65536
+_READ_CHUNK = 16384
+
+
+def _keyring_error(reason_code: str) -> SecretEncryptionUnavailable:
+    return SecretEncryptionUnavailable(reason_code)
+
+
+def _permission_denied() -> SecretEncryptionUnavailable:
+    return _keyring_error("WXPAY_KEYRING_PERMISSION_DENIED")
+
+
+def _open_error(exc: OSError) -> SecretEncryptionUnavailable:
+    if exc.errno == errno.ENOENT:
+        return _keyring_error("WXPAY_KEYRING_MISSING")
+    # EACCES/EPERM, and ELOOP/ENOTDIR from O_NOFOLLOW/O_DIRECTORY (symlinks).
+    return _permission_denied()
+
+
+def _read_keyring_bytes(path: str, policy: KeyringSourcePolicy) -> bytes:
+    """Open the keyring without following links and validate it by descriptor.
+
+    Every path component is opened relative to its parent descriptor with
+    O_NOFOLLOW, and type/owner/mode/size come from fstat() of the very
+    descriptor that is then read, so there is no check-then-open gap.
+    """
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None or not hasattr(os, "geteuid") or os.open not in os.supports_dir_fd:
+        raise _permission_denied()
+    if not path.startswith("/") or any(part in {".", ".."} for part in path.split("/")):
+        raise _keyring_error("WXPAY_KEYRING_INVALID")
+    names = [part for part in path.split("/") if part]
+    if not names:
+        raise _keyring_error("WXPAY_KEYRING_INVALID")
+    euid = os.geteuid()
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | nofollow | cloexec
+    file_flags = os.O_RDONLY | nofollow | cloexec | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+
+    credentials_names = [part for part in policy.credentials_root.split("/") if part]
+    in_credentials = (
+        len(names) == len(credentials_names) + 2 and names[: len(credentials_names)] == credentials_names
+    )
+    if in_credentials and os.environ.get("CREDENTIALS_DIRECTORY") != "/" + "/".join(names[:-1]):
+        in_credentials = False
+
+    opened: list[int] = []
     try:
-        if keyring_path.stat().st_size > 65536:
-            raise _configuration_error()
-        payload = json.loads(keyring_path.read_text(encoding="utf-8"))
-    except SecretEncryptionUnavailable:
-        raise
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise _configuration_error() from exc
+        try:
+            current = os.open("/", directory_flags)
+            opened.append(current)
+            for index, name in enumerate(names[:-1]):
+                current = os.open(name, directory_flags, dir_fd=current)
+                opened.append(current)
+                if not policy.verify_ancestors:
+                    continue
+                info = os.fstat(current)
+                is_credentials_dir = in_credentials and index == len(names) - 2
+                allowed = {0} | set(policy.extra_trusted_uids) | ({euid} if is_credentials_dir else set())
+                if info.st_uid not in allowed or stat.S_IMODE(info.st_mode) & 0o022:
+                    raise _permission_denied()
+            fd = os.open(names[-1], file_flags, dir_fd=current)
+            opened.append(fd)
+        except OSError as exc:
+            raise _open_error(exc) from exc
+
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise _permission_denied()
+        if stat.S_IMODE(info.st_mode) & ~0o600:
+            raise _permission_denied()
+        owner_ok = (
+            info.st_uid == 0
+            or info.st_uid in policy.extra_trusted_uids
+            or (in_credentials and info.st_uid == euid)
+        )
+        if not owner_ok:
+            raise _permission_denied()
+        if info.st_size > MAX_KEYRING_BYTES:
+            raise _keyring_error("WXPAY_KEYRING_INVALID")
+
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            while True:
+                chunk = os.read(fd, _READ_CHUNK)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_KEYRING_BYTES:
+                    raise _keyring_error("WXPAY_KEYRING_INVALID")
+                chunks.append(chunk)
+            after = os.fstat(fd)
+        except OSError as exc:
+            raise _open_error(exc) from exc
+        stable = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_uid, info.st_mode)
+        if stable != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_uid, after.st_mode):
+            raise _keyring_error("WXPAY_KEYRING_INVALID")
+        return b"".join(chunks)
+    finally:
+        for descriptor in opened:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def load_keyring(path: str | Path, policy: KeyringSourcePolicy | None = None) -> KeyringSnapshot:
+    raw = _read_keyring_bytes(str(path), policy or KEYRING_SOURCE_POLICY)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise _keyring_error("WXPAY_KEYRING_INVALID_JSON") from exc
 
     if not isinstance(payload, dict) or set(payload) != KEYRING_ROOT_FIELDS:
         raise _configuration_error()
@@ -144,19 +254,61 @@ def load_keyring(path: str | Path) -> KeyringSnapshot:
         active_usage_count += int(usage == "encrypt-decrypt")
         parsed[key_id] = KeyringKey(key_id=key_id, usage=usage, fernet=fernet)
 
-    if active_usage_count != 1 or active_key_id not in parsed:
-        raise _configuration_error()
-    if parsed[active_key_id].usage != "encrypt-decrypt":
-        raise _configuration_error()
+    if active_usage_count != 1 or active_key_id not in parsed or parsed[active_key_id].usage != "encrypt-decrypt":
+        raise _keyring_error("WXPAY_KEYRING_ACTIVE_KEY_INVALID")
     return KeyringSnapshot(active_key_id=active_key_id, keys=MappingProxyType(parsed))
 
 
-@lru_cache(maxsize=1)
-def get_keyring() -> KeyringSnapshot:
+@dataclass(frozen=True)
+class _KeyringOutcome:
+    snapshot: KeyringSnapshot | None
+    reason_code: str
+
+
+_keyring_lock = threading.Lock()
+_keyring_outcome: _KeyringOutcome | None = None
+
+
+def _load_outcome() -> _KeyringOutcome:
     path = str(getattr(settings, "WXPAY_SECRET_KEYRING_PATH", "") or "").strip()
     if not path:
-        raise SecretEncryptionUnavailable("WXPAY_KEYRING_MISSING")
-    return load_keyring(path)
+        return _KeyringOutcome(None, "WXPAY_KEYRING_MISSING")
+    try:
+        return _KeyringOutcome(load_keyring(path), "CONFIGURED")
+    except SecretEncryptionUnavailable as exc:
+        return _KeyringOutcome(None, exc.reason_code)
+    except Exception:  # noqa: BLE001 - any unexpected failure is a sticky, sanitized failure
+        return _KeyringOutcome(None, "WXPAY_KEYRING_INVALID")
+
+
+def get_keyring() -> KeyringSnapshot:
+    """Return this process's one-shot keyring outcome.
+
+    The first call (serialized by a lock) loads the file exactly once.  Success
+    and failure are both sticky: a failed process never re-reads the disk, so a
+    replaced file cannot silently flip it to success.  Repair the file and
+    restart the process.
+    """
+    global _keyring_outcome
+    outcome = _keyring_outcome
+    if outcome is None:
+        with _keyring_lock:
+            if _keyring_outcome is None:
+                _keyring_outcome = _load_outcome()
+            outcome = _keyring_outcome
+    if outcome.snapshot is None:
+        raise SecretEncryptionUnavailable(outcome.reason_code)
+    return outcome.snapshot
+
+
+def _reset_keyring_for_tests() -> None:
+    global _keyring_outcome
+    with _keyring_lock:
+        _keyring_outcome = None
+
+
+# Kept under the old lru_cache name so existing test fixtures keep working.
+get_keyring.cache_clear = _reset_keyring_for_tests  # type: ignore[attr-defined]
 
 
 def initialize_keyring() -> str:
