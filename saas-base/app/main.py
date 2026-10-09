@@ -54,6 +54,7 @@ from app.core.logger import log_coupon_transition, log_order_status_changed, log
 from app.core.rate_limiter import RateLimitExceeded, limiter, tenant_limiter
 from app.core.response import RespVo, success_response
 from app.core.schema_compat import ensure_bigint_ids, ensure_coupon_template_description, ensure_distribution_schema, ensure_queue_ticket_schema, ensure_tenant_schema
+from app.core.wxpay_secret_crypto import initialize_keyring
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.logging_middleware import LoggingMiddleware
 from app.middleware.tenant_middleware import TenantMiddleware
@@ -531,6 +532,8 @@ async def _coupon_expiry_reminder_loop():
 @app.on_event("startup")
 async def startup():
     global _print_recovery_task
+    keyring_status = initialize_keyring()
+    logger.info("wxpay secret keyring startup status=%s", keyring_status)
     # 排队票 openid/customer_id 等补列：生产常关 AUTO_CREATE_TABLES，但仍需幂等补齐，
     # 否则顾客自助取号 INSERT 会因 Unknown column 连续失败。
     async with async_engine.begin() as conn:

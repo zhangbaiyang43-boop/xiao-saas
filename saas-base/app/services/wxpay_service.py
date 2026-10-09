@@ -9,7 +9,7 @@ import time
 from typing import Optional
 
 from app.config import settings
-from app.core.crypto import decrypt_secret
+from app.core.wxpay_secret_crypto import SecretDecryptionError, SecretField, decrypt_secret
 from app.core.logger import logger
 
 PROVIDER_REFUND_SUCCESS = "SUCCESS"
@@ -117,11 +117,21 @@ class WxPayService:
             and getattr(tenant, "wx_cert_serial", None)
             and getattr(tenant, "wx_private_key", None)
         ):
+            try:
+                api_key_v3 = decrypt_secret(tenant.wx_api_key_v3, SecretField.API_V3_KEY)
+                private_key_pem = decrypt_secret(tenant.wx_private_key, SecretField.PRIVATE_KEY)
+            except SecretDecryptionError as exc:
+                logger.error(
+                    "微信支付凭证不可用 code=%s tenant_id=%s",
+                    exc.reason_code,
+                    getattr(tenant, "tenant_id", "unknown"),
+                )
+                return
             self._client = _build_client(
                 mchid=tenant.wx_mchid,
-                api_key_v3=decrypt_secret(tenant.wx_api_key_v3),
+                api_key_v3=api_key_v3,
                 cert_serial=tenant.wx_cert_serial,
-                private_key_pem=decrypt_secret(tenant.wx_private_key),
+                private_key_pem=private_key_pem,
                 public_key_id=getattr(tenant, "wx_public_key_id", None),
                 public_key_pem=getattr(tenant, "wx_public_key", None),
                 timeout=timeout,

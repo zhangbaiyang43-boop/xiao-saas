@@ -1,8 +1,9 @@
 """Pure, local-only customer WeChat collection readiness evaluation.
 
 This module deliberately does not import or initialize ``WxPayService``.  It
-never calls WeChat, writes tenant state, or treats the legacy plaintext
-compatibility fallback as proof that a stored secret is valid.
+never calls WeChat or writes tenant state. Secret classification, decryption,
+and field validation are shared with the payment runtime; static validity is
+still reported as ``UNKNOWN`` rather than live-provider readiness.
 """
 from __future__ import annotations
 
@@ -10,9 +11,16 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+
+from app.core.wxpay_secret_crypto import (
+    SecretDecryptionError,
+    SecretEncryptionUnavailable,
+    SecretField,
+    decrypt_secret,
+    get_keyring,
+)
 
 
 READINESS_DISABLED = "DISABLED"
@@ -107,46 +115,27 @@ def _timing(tenant: Any) -> dict[str, Any]:
     }
 
 
-def _strict_fernet(global_config: Any) -> tuple[Fernet | None, dict[str, Any]]:
-    raw_key = str(_value(global_config, "SECRET_ENCRYPTION_KEY", "") or "").strip()
-    if not raw_key:
-        return None, _item(
-            "GLOBAL_SECRET_ENCRYPTION",
-            "服务端密钥加密能力",
-            CHECK_MISSING,
-            blocking=True,
-            reason_code="SECRET_ENCRYPTION_KEY_MISSING",
-            remediation="在服务器 Secret 管理中配置有效的 Fernet 加密密钥",
-        )
+def _keyring_readiness() -> dict[str, Any]:
     try:
-        return Fernet(raw_key.encode()), _item(
+        get_keyring()
+    except SecretEncryptionUnavailable as exc:
+        missing = exc.reason_code == "WXPAY_KEYRING_MISSING"
+        return _item(
             "GLOBAL_SECRET_ENCRYPTION",
             "服务端密钥加密能力",
-            CHECK_CONFIGURED,
+            CHECK_MISSING if missing else CHECK_INVALID,
             blocking=True,
-            reason_code="CONFIGURED",
-            remediation="无需处理",
+            reason_code="WXPAY_KEYRING_MISSING" if missing else "WXPAY_KEYRING_INVALID",
+            remediation="由安全管理员配置并验证运行时支付密钥 Keyring",
         )
-    except (TypeError, ValueError):
-        return None, _item(
-            "GLOBAL_SECRET_ENCRYPTION",
-            "服务端密钥加密能力",
-            CHECK_INVALID,
-            blocking=True,
-            reason_code="SECRET_ENCRYPTION_KEY_INVALID",
-            remediation="由安全管理员修复服务器 Fernet 加密密钥配置",
-        )
-
-
-def _strict_decrypt(fernet: Fernet | None, encrypted: Any) -> tuple[str | None, str | None]:
-    if not _present(encrypted):
-        return None, "MISSING"
-    if fernet is None:
-        return None, "SECRET_VALIDATION_UNAVAILABLE"
-    try:
-        return fernet.decrypt(str(encrypted).encode()).decode(), None
-    except (InvalidToken, UnicodeDecodeError, ValueError, TypeError):
-        return None, "SECRET_DECRYPT_FAILED"
+    return _item(
+        "GLOBAL_SECRET_ENCRYPTION",
+        "服务端密钥加密能力",
+        CHECK_CONFIGURED,
+        blocking=True,
+        reason_code="CONFIGURED",
+        remediation="无需处理",
+    )
 
 
 def _evaluate_secret(
@@ -154,13 +143,10 @@ def _evaluate_secret(
     code: str,
     label: str,
     encrypted: Any,
-    fernet: Fernet | None,
-    validator,
-    invalid_reason: str,
+    field: SecretField,
     remediation: str,
 ) -> dict[str, Any]:
-    plaintext, error = _strict_decrypt(fernet, encrypted)
-    if error == "MISSING":
+    if not _present(encrypted):
         return _item(
             code,
             label,
@@ -169,44 +155,26 @@ def _evaluate_secret(
             reason_code=f"{code}_MISSING",
             remediation=remediation,
         )
-    if error == "SECRET_VALIDATION_UNAVAILABLE":
+    try:
+        decrypt_secret(str(encrypted), field)
+    except SecretDecryptionError as exc:
+        unavailable = exc.reason_code.startswith("WXPAY_KEYRING_")
         return _item(
             code,
             label,
-            CHECK_UNKNOWN,
+            CHECK_UNKNOWN if unavailable else CHECK_INVALID,
             blocking=True,
-            reason_code=error,
-            remediation="先修复服务端密钥加密能力，再重新检查",
-        )
-    if error:
-        return _item(
-            code,
-            label,
-            CHECK_INVALID,
-            blocking=True,
-            reason_code=error,
+            reason_code="SECRET_VALIDATION_UNAVAILABLE" if unavailable else "SECRET_DECRYPT_FAILED",
             remediation=remediation,
         )
-    try:
-        valid = bool(validator(plaintext))
-    except Exception:
-        valid = False
     return _item(
         code,
         label,
-        CHECK_CONFIGURED if valid else CHECK_INVALID,
+        CHECK_CONFIGURED,
         blocking=True,
-        reason_code="CONFIGURED" if valid else invalid_reason,
-        remediation="无需处理" if valid else remediation,
+        reason_code="CONFIGURED",
+        remediation="无需处理",
     )
-
-
-def _pem_private_key_valid(value: str) -> bool:
-    key = serialization.load_pem_private_key(
-        value.replace("\\n", "\n").encode(),
-        password=None,
-    )
-    return isinstance(key, rsa.RSAPrivateKey)
 
 
 def _pem_public_key_valid(value: str) -> bool:
@@ -283,16 +251,14 @@ def _evaluate_payment_readiness(tenant: Any, global_config: Any) -> dict[str, An
         )
     checklist.append(mchid_item)
 
-    fernet, encryption_item = _strict_fernet(global_config)
+    encryption_item = _keyring_readiness()
     checklist.extend(
         (
             _evaluate_secret(
                 code="WX_API_KEY_V3",
                 label="APIv3 密钥",
                 encrypted=_value(tenant, "wx_api_key_v3"),
-                fernet=fernet,
-                validator=lambda value: len(value.encode()) == 32,
-                invalid_reason="WX_API_KEY_V3_INVALID",
+                field=SecretField.API_V3_KEY,
                 remediation="通过受限安全流程重新配置 32 字节 APIv3 密钥",
             ),
             _configured_or_missing(
@@ -305,9 +271,7 @@ def _evaluate_payment_readiness(tenant: Any, global_config: Any) -> dict[str, An
                 code="WX_PRIVATE_KEY",
                 label="商户 API 私钥",
                 encrypted=_value(tenant, "wx_private_key"),
-                fernet=fernet,
-                validator=_pem_private_key_valid,
-                invalid_reason="WX_PRIVATE_KEY_INVALID",
+                field=SecretField.PRIVATE_KEY,
                 remediation="通过受限安全流程重新配置可解析的商户 RSA 私钥",
             ),
         )
