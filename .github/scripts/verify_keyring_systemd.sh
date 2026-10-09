@@ -69,6 +69,7 @@ scenario() { # scenario <label> <expected RESULT> <keyring path> [extra systemd-
   else
     echo "FAIL  ${label}: expected ${expected}"
     printf '%s\n' "$out" | sed 's/^/      /'
+    namei -lv "${keyring_path//@UNIT@/$unit}" 2>&1 | sed 's/^/      namei: /'
     FAILED=1
   fi
 }

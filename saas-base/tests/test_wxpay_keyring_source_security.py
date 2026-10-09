@@ -135,13 +135,50 @@ class KeyringFileSecurityTest(KeyringBase):
         strict = crypto.KeyringSourcePolicy(verify_ancestors=False)
         self.assertEqual(self.reason(load_keyring, self.path, strict), "WXPAY_KEYRING_PERMISSION_DENIED")
 
+    def _credentials_layout(self, unit: str = "u.service", parent: Path | None = None) -> Path:
+        unit_dir = (parent or self.directory / "credentials") / unit
+        unit_dir.mkdir(parents=True)
+        return self.write(keyring_payload(), path=unit_dir / "key")
+
     def test_service_owned_file_outside_systemd_credentials_is_not_trusted(self):
         if EUID == 0:
             self.skipTest("running as root; owner uid 0 is the trusted source")
         self.write(keyring_payload())
+        strict = crypto.KeyringSourcePolicy(verify_ancestors=False)  # real /run/credentials root
         with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(self.directory)}):
-            strict = crypto.KeyringSourcePolicy(credentials_root=str(self.directory.parent), verify_ancestors=False)
             self.assertEqual(self.reason(load_keyring, self.path, strict), "WXPAY_KEYRING_PERMISSION_DENIED")
+
+    def test_service_owned_credential_layout_requires_matching_credentials_directory(self):
+        if EUID == 0:
+            self.skipTest("running as root; owner uid 0 is the trusted source")
+        key = self._credentials_layout()
+        policy = crypto.KeyringSourcePolicy(credentials_root=str(self.directory / "credentials"), verify_ancestors=False)
+        with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(key.parent)}):
+            self.assertEqual(load_keyring(key, policy).active_key_id, "wxpay-2026-01")
+        with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(self.directory / "elsewhere")}):
+            self.assertEqual(self.reason(load_keyring, key, policy), "WXPAY_KEYRING_PERMISSION_DENIED")
+        with patch.dict(os.environ, clear=False):
+            os.environ.pop("CREDENTIALS_DIRECTORY", None)
+            self.assertEqual(self.reason(load_keyring, key, policy), "WXPAY_KEYRING_PERMISSION_DENIED")
+
+    def test_credentials_root_is_matched_by_path_component_not_string_prefix(self):
+        if EUID == 0:
+            self.skipTest("running as root; owner uid 0 is the trusted source")
+        lookalike = self._credentials_layout(parent=self.directory / "credentials-evil")
+        policy = crypto.KeyringSourcePolicy(credentials_root=str(self.directory / "credentials"), verify_ancestors=False)
+        with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(lookalike.parent)}):
+            self.assertEqual(self.reason(load_keyring, lookalike, policy), "WXPAY_KEYRING_PERMISSION_DENIED")
+
+    def test_credential_file_must_sit_directly_in_the_unit_directory(self):
+        if EUID == 0:
+            self.skipTest("running as root; owner uid 0 is the trusted source")
+        key = self._credentials_layout()
+        nested_dir = key.parent / "nested"
+        nested_dir.mkdir()
+        nested = self.write(keyring_payload(), path=nested_dir / "key")
+        policy = crypto.KeyringSourcePolicy(credentials_root=str(self.directory / "credentials"), verify_ancestors=False)
+        with patch.dict(os.environ, {"CREDENTIALS_DIRECTORY": str(nested_dir)}):
+            self.assertEqual(self.reason(load_keyring, nested, policy), "WXPAY_KEYRING_PERMISSION_DENIED")
 
     def test_group_or_other_writable_ancestor_is_rejected_by_default_policy(self):
         open_dir = self.directory / "open"
